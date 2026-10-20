@@ -1,0 +1,45 @@
+@echo off
+REM Optional self-host upload example.
+REM Copy this file to deploy-upload.bat and set KEY, TARGET, and REMOTE_PATH.
+REM deploy-upload.bat is gitignored so local key paths and hosts stay private.
+setlocal
+
+cd /d "%~dp0"
+if not exist deploy (
+    echo deploy folder not found. Run build-deploy.bat first.
+    exit /b 1
+)
+
+REM Examples only — replace with your own values:
+REM   KEY=-i C:\path\to\your_ssh_key
+REM   TARGET=user@your-host.example
+REM   REMOTE_PATH=/path/on/server/fitbaus-trainer
+set "KEY=-i C:\path\to\your_ssh_key"
+set "TARGET=user@your-host.example"
+set "REMOTE_PATH=/path/on/server/fitbaus-trainer"
+set "SSH_OPTS=-o PreferredAuthentications=publickey -o PasswordAuthentication=no"
+
+REM Try SCP first
+scp %SSH_OPTS% %KEY% -r deploy\* %TARGET%:%REMOTE_PATH%/
+if %errorlevel% equ 0 goto :upload_done
+
+REM Some hosts reject SCP subsystem requests; fall back to SFTP.
+echo SCP failed, trying SFTP...
+set "SFTP_SCRIPT=%TEMP%\fitbaus-trainer-deploy-sftp-%RANDOM%.txt"
+(
+  echo lcd deploy
+  echo cd %REMOTE_PATH%
+  echo put -r .
+  echo quit
+) > "%SFTP_SCRIPT%"
+sftp %SSH_OPTS% %KEY% -b "%SFTP_SCRIPT%" %TARGET%
+set "SFTP_ERR=%errorlevel%"
+del "%SFTP_SCRIPT%" 2>nul
+if %SFTP_ERR% neq 0 (
+  echo Upload failed.
+  exit /b 1
+)
+
+:upload_done
+echo Upload done.
+endlocal

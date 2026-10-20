@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>FitBaus Trainer</title>
+<meta name="theme-color" content="#0c0c0c">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FitBaus Trainer">
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="logo.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="styles.css">
+
+<!-- Open Graph / Facebook / LinkedIn / WhatsApp -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content="FitBaus Trainer" />
+<meta property="og:description" content="Heart-rate based workout trainer with zones, SISU device sync, and PWA install. Train with purpose." />
+<meta property="og:image" content="https://sisu.markrai.com/logo.png" />
+<meta property="og:image:width" content="512" />
+<meta property="og:image:height" content="512" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:url" content="https://sisu.markrai.com/" />
+<meta property="og:site_name" content="FitBaus Trainer" />
+<meta property="og:locale" content="en_US" />
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="FitBaus Trainer" />
+<meta name="twitter:description" content="Heart-rate based workout trainer with zones, SISU sync, and PWA install." />
+<meta name="twitter:image" content="https://sisu.markrai.com/logo.png" />
+</head>
+
+<body>
+
+<div id="downregulationContainer" style="display: none; position: fixed; inset: 0; z-index: 5; background: #05060a; pointer-events: auto;">
+  <canvas id="downregulationCanvas" style="display: block; width: 100%; height: 100%;"></canvas>
+  <div id="downregulationHrDisplay" class="downregulation-hr-display" aria-live="polite"></div>
+</div>
+
+<div class="hamburger" onclick="openModal()">☰</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal" style="max-width: 500px;">
+    <div class="close-btn" onclick="closeModal()">✕</div>
+    <div class="modal-title">Settings</div>
+    <div id="appVersion" class="app-version"></div>
+    
+    <!-- Tab buttons -->
+    <div class="tab-buttons">
+      <button class="tab-button active" onclick="switchTab('personal')">Profile</button>
+      <button class="tab-button" onclick="switchTab('preferences')"><span class="tab-label-long">Preferences</span><span class="tab-label-short">Prefs</span></button>
+      <button class="tab-button" onclick="switchTab('equipment')"><span class="tab-label-long">Equipment</span><span class="tab-label-short">Equip</span></button>
+      <button class="tab-button" onclick="switchTab('workouts')">Workouts</button>
+      <button class="tab-button" onclick="switchTab('sisu')">Sync</button>
+      <button class="tab-button" id="installTabButton" onclick="switchTab('install')">Install</button>
+    </div>
+    
+    <!-- Profile Tab -->
+    <div id="personalTab" class="tab-content active">
+      <div class="modal-section profile-card" aria-labelledby="athleteDetailsTitle">
+        <div class="profile-section-heading">
+          <div id="athleteDetailsTitle" class="modal-section-title">Athlete details</div>
+          <span class="profile-origin">You entered</span>
+        </div>
+        <div class="profile-helper">Age and weight are used for the VO₂ Max Estimation workout. Height and sex are stored but do not currently affect training.</div>
+        <div class="modal-field">
+          <label class="modal-label" for="age">Age</label>
+          <input id="age" class="modal-input" type="number" placeholder="years">
+        </div>
+
+        <div class="modal-field">
+          <label class="modal-label" for="weight">Weight</label>
+          <input id="weight" class="modal-input" type="number" placeholder="lbs">
+        </div>
+
+        <div class="modal-field">
+          <label class="modal-label" for="height">Height</label>
+          <div style="display: flex; gap: 8px; flex: 1;">
+            <select id="heightFeet" class="modal-input" style="flex: 1;">
+              <option value="">ft</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+            </select>
+            <select id="heightInches" class="modal-input" style="flex: 1;">
+              <option value="">in</option>
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-field">
+          <label class="modal-label" for="sex">Sex</label>
+          <select id="sex" class="modal-input">
+            <option value="">Select</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="modal-section profile-card" aria-labelledby="selfReportedFitnessTitle">
+        <div class="profile-section-heading">
+          <div id="selfReportedFitnessTitle" class="modal-section-title">Self-reported fitness</div>
+          <span class="profile-origin">You entered</span>
+        </div>
+        <div class="modal-field">
+          <label class="modal-label" for="vo2">Entered VO₂ max</label>
+          <input id="vo2" class="modal-input" type="number" placeholder="ml/kg/min (optional)">
+        </div>
+        <div class="profile-helper">Optional value supplied by you. It is separate from a FitBaus assessment.</div>
+      </div>
+
+      <button class="button" onclick="saveProfile()">Save Profile</button>
+
+      <div class="modal-section profile-card profile-readonly-card" aria-labelledby="fitbausAssessmentsTitle">
+        <div class="profile-section-heading">
+          <div id="fitbausAssessmentsTitle" class="modal-section-title">FitBaus assessments</div>
+          <span class="profile-origin profile-origin-assessed">FitBaus assessment</span>
+        </div>
+        <div id="fitnessAssessmentEmpty" class="profile-empty">
+          <strong>No FitBaus VO₂ assessment yet.</strong>
+          <span>Complete the VO₂ Max Estimation workout to establish this measurement.</span>
+        </div>
+        <dl id="fitnessAssessmentContent" class="profile-metrics" hidden>
+          <div class="profile-metric-row">
+            <dt>Assessed VO₂ max</dt>
+            <dd id="assessedVo2"></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Assessed</dt>
+            <dd id="fitnessAssessedAt"></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Evidence</dt>
+            <dd id="fitnessAssessmentEvidence"></dd>
+          </div>
+          <div id="predictedMaxPowerRow" class="profile-metric-row" hidden>
+            <dt>Predicted max power</dt>
+            <dd id="predictedMaxPower"></dd>
+          </div>
+          <div id="fitnessCalibrationRow" class="profile-metric-row profile-metric-row-stacked" hidden>
+            <dt>HR-workload calibration</dt>
+            <dd id="fitnessCalibration"></dd>
+          </div>
+        </dl>
+        <div class="profile-helper">Assessment power is estimated from the protocol; it is not a directly measured maximum.</div>
+      </div>
+
+      <div class="modal-section profile-card profile-readonly-card" aria-labelledby="trainingObservationsTitle">
+        <div class="profile-section-heading">
+          <div id="trainingObservationsTitle" class="modal-section-title">Training observations</div>
+          <span class="profile-origin profile-origin-observed">Workout observation</span>
+        </div>
+        <div id="trainingObservationEmpty" class="profile-empty">
+          <strong>No stable aerobic trend yet.</strong>
+          <span>FitBaus will summarize consistent heart-rate and cycling-power evidence from eligible workouts.</span>
+        </div>
+        <dl id="trainingObservationContent" class="profile-metrics" hidden>
+          <div class="profile-metric-row">
+            <dt>Workout context</dt>
+            <dd id="trainingObservationContext"></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Observed workload</dt>
+            <dd id="trainingObservationWorkload"></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Trend</dt>
+            <dd id="trainingObservationTrend"></dd>
+          </div>
+          <div class="profile-metric-row profile-metric-row-stacked">
+            <dt>Evidence</dt>
+            <dd id="trainingObservationEvidence"></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Last observed</dt>
+            <dd id="trainingObservationAt"></dd>
+          </div>
+        </dl>
+        <div class="profile-helper profile-informational">Informational only. Not currently used to change workout targets.</div>
+      </div>
+
+      <div class="modal-section profile-card profile-readonly-card personalization-card" aria-labelledby="workoutPersonalizationTitle">
+        <div class="profile-section-heading">
+          <div id="workoutPersonalizationTitle" class="modal-section-title">Workout personalization</div>
+          <span class="profile-origin">Research validation</span>
+        </div>
+        <div class="profile-empty personalization-status-copy">
+          <strong id="personalizationStatusTitle"></strong>
+          <span id="personalizationStatusBody"></span>
+        </div>
+        <dl id="personalizationEvidence" class="profile-metrics" hidden>
+          <div class="profile-metric-row profile-metric-row-stacked">
+            <dt>Source</dt>
+            <dd><span id="personalizationSource"></span><br><span id="personalizationAssessedAt" class="profile-metric-note"></span></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Workload calibration</dt>
+            <dd id="personalizationCalibration"></dd>
+          </div>
+        </dl>
+        <dl class="profile-metrics personalization-activation">
+          <div class="profile-metric-row">
+            <dt>Workout personalization</dt>
+            <dd id="personalizationActivation">Inactive</dd>
+          </div>
+        </dl>
+        <div class="profile-helper profile-informational">Personalized workout control is not active.</div>
+      </div>
+    </div>
+    
+    <!-- Preferences Tab -->
+    <div id="preferencesTab" class="tab-content">
+      <div class="modal-section">
+        <div class="modal-field modal-field-toggle">
+          <label class="modal-label" for="showSecondsCountdown">Show seconds countdown for entire workout</label>
+          <input type="checkbox" id="showSecondsCountdown" class="preference-toggle" onchange="savePreferenceShowSeconds(this.checked)">
+        </div>
+        <div class="modal-field modal-field-toggle">
+          <label class="modal-label" for="voicePromptsEnabled">Voice prompts</label>
+          <input type="checkbox" id="voicePromptsEnabled" class="preference-toggle" onchange="savePreferenceVoicePrompts(this.checked)">
+        </div>
+      </div>
+    </div>
+
+    <div id="equipmentTab" class="tab-content">
+      <div class="modal-section">
+        <div class="modal-section-title">Bike</div>
+        <div class="modal-field">
+          <label class="modal-label" for="bikeMachineSelect">Machine</label>
+          <select id="bikeMachineSelect" class="modal-input" onchange="saveBikeEquipmentSelection(this.value)">
+            <option value="">No machine</option>
+          </select>
+        </div>
+        <div class="modal-field">
+          <label class="modal-label" for="bikeBridgeUrl">Bike bridge URL</label>
+          <input id="bikeBridgeUrl" class="modal-input" type="url" inputmode="url" autocomplete="off" placeholder="http://192.168.1.10:8765" onchange="saveBikeBridgeUrl(this.value)">
+        </div>
+        <div class="modal-field modal-field-toggle">
+          <label class="modal-label" for="bikeBridgeAutomaticControl">Automatic resistance control</label>
+          <input type="checkbox" id="bikeBridgeAutomaticControl" class="preference-toggle" onchange="saveBikeBridgeAutomaticControl(this.checked)">
+        </div>
+        <div class="modal-field modal-field-column">
+          <label class="modal-label" for="bikeBridgeBrightness">Console brightness</label>
+          <div class="bike-bridge-brightness">
+            <input type="range" id="bikeBridgeBrightness" min="0" max="100" step="1" value="80" aria-valuemin="0" aria-valuemax="100" aria-valuenow="80"
+              oninput="updateBikeBridgeBrightnessLabel(this.value)"
+              onchange="saveBikeBridgeBrightness(this.value)">
+            <span id="bikeBridgeBrightnessValue" class="bike-bridge-brightness-value">80</span>
+          </div>
+        </div>
+        <div id="bikeBridgeStatus" class="bike-bridge-status label" style="opacity: 0.85;"></div>
+      </div>
+      <div id="learnedGuidanceSection" class="modal-section" hidden>
+        <div class="modal-section-title">Learned guidance</div>
+        <div id="learnedGuidanceList" class="learned-guidance-list"></div>
+        <div class="label" style="opacity: 0.7; margin: 10px 0 12px;">Based on completed workouts</div>
+        <button type="button" class="button secondary" onclick="promptResetLearnedGuidance()">Reset learned guidance</button>
+      </div>
+      <div id="hrDynamicsSection" class="modal-section" hidden>
+        <div class="modal-section-title">HR response</div>
+        <div id="hrDynamicsList" class="learned-guidance-list"></div>
+        <div class="label" style="opacity: 0.7; margin: 10px 0 12px;">Observed from recorded workouts. These values do not change live guidance yet.</div>
+        <button type="button" class="button secondary" onclick="promptResetHrDynamics()">Reset HR response data</button>
+      </div>
+      <div id="shadowPredictionSection" class="modal-section" hidden>
+        <div class="modal-section-title">Shadow resistance prediction</div>
+        <div id="shadowPredictionList" class="learned-guidance-list"></div>
+        <div class="label" style="opacity: 0.7; margin: 10px 0 12px;">Diagnostic only. These predictions never change live resistance.</div>
+        <button type="button" class="button secondary" onclick="promptResetShadowPredictions()">Reset shadow prediction data</button>
+      </div>
+      <div id="machineDiagnosticsSection" class="modal-section">
+        <div class="modal-section-title">Machine diagnostics</div>
+        <div class="label" style="opacity: 0.7; margin: 10px 0 12px;">Export the local machine-learning state used for equipment guidance.</div>
+        <button type="button" class="button secondary" onclick="exportMachineDiagnostics()">Export diagnostics</button>
+      </div>
+      <details id="performedLoadDiagnosticsSection" class="modal-section developer-diagnostics">
+        <summary>
+          <span>Performed-load diagnostics</span>
+          <span class="developer-diagnostics-badge">Developer</span>
+        </summary>
+        <div class="developer-diagnostics-body">
+          <p class="developer-diagnostics-note"><strong>Recommendation is intent. Observation is evidence of what physically happened.</strong> These figures describe variation; they are not workout grades and did not control the session.</p>
+          <div id="performedLoadDiagnosticsContent" aria-live="polite">
+            <div class="personalization-diagnostics-empty"><span>Open Equipment settings to load ordinary bike workout evidence.</span></div>
+          </div>
+        </div>
+      </details>
+      <details id="personalizationDiagnosticsSection" class="modal-section developer-diagnostics">
+        <summary>
+          <span>Personalization diagnostics</span>
+          <span class="developer-diagnostics-badge">Developer</span>
+        </summary>
+        <div class="developer-diagnostics-body">
+          <p class="developer-diagnostics-note"><strong>Candidate watts are experimental predictions calculated after your formal assessment. They did not control the workout.</strong></p>
+          <p class="developer-diagnostics-note">Active prescription remains the legacy heart-rate band. Shadow candidate watts estimate athlete-relative workload for that region and have no live authority. Bike threshold work is the primary validated evidence path.</p>
+          <p class="developer-diagnostics-note">Observed in-band watts represent settled workload while heart rate was within the legacy target range. The threshold transfer series reports session-level error under that controller; it is not an authorization score.</p>
+          <div class="personalization-diagnostics-actions">
+            <button id="exportPersonalizationDiagnosticsButton" type="button" class="button secondary" onclick="exportPersonalizationDiagnostics()" disabled>Export all personalization evidence</button>
+            <button type="button" class="button secondary" onclick="resetPersonalizationDiagnosticsFilters()">Clear filters</button>
+          </div>
+          <div id="personalizationDiagnosticsContent" aria-live="polite">
+            <div class="personalization-diagnostics-empty"><span>Open Equipment settings to load trusted workout history.</span></div>
+          </div>
+        </div>
+      </details>
+    </div>
+    
+    <!-- Workouts Tab -->
+    <div id="workoutsTab" class="tab-content">
+      <div id="workoutSummaryList" class="workout-summary-list">
+        <div class="label" style="text-align: center; margin-bottom: 16px;">Loading workouts...</div>
+      </div>
+    </div>
+    
+    <!-- Sync Tab -->
+    <div id="sisuTab" class="tab-content">
+      <div id="sisuSyncContent" class="sisu-sync-content">
+        <div class="modal-section">
+          <div id="hrMonitorLabelRow" class="label" style="text-align: center; margin-bottom: 16px; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;">
+            <span id="hrMonitorLabel" style="opacity: 0.7;">Heart Rate Monitor</span>
+            <span id="hrMonitorBattery" style="opacity: 0.8; font-variant-numeric: tabular-nums;"></span>
+          </div>
+          <button class="button" id="connectHrButton" onclick="connectHr()">Connect HR Strap</button>
+        </div>
+        <div class="modal-section" style="margin-top: 24px;">
+          <div class="label" style="text-align: center; opacity: 0.7; margin-bottom: 20px;">
+            Connect to SISU to sync workouts.
+          </div>
+          <div class="modal-field">
+            <label class="modal-label" for="sisuProtocol">Protocol</label>
+            <select id="sisuProtocol" class="modal-input">
+              <option value="https">HTTPS</option>
+              <option value="http">HTTP</option>
+            </select>
+          </div>
+          <div class="modal-field">
+            <label class="modal-label" for="sisuHost">SISU Host</label>
+            <input id="sisuHost" class="modal-input" type="text" placeholder="sisu.example.com">
+          </div>
+          <div class="modal-field">
+            <label class="modal-label" for="sisuPort">Port</label>
+            <input id="sisuPort" class="modal-input" type="number" placeholder="443">
+          </div>
+          <div id="sisuStatus" class="label" style="text-align: center; margin-bottom: 16px;">Not connected</div>
+          <div id="sisuConnectionInfo" class="label" style="text-align: center; opacity: 0.7; margin-bottom: 16px; display: none;"></div>
+          <button class="button" id="sisuConnectButton" onclick="connectSISU()">Connect to SISU</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Install Tab -->
+    <div id="installTab" class="tab-content">
+      <div id="installContent" class="install-content">
+        <div class="label" style="text-align: center; margin-bottom: 16px;">Install App</div>
+        <div id="installNotInstalledState" class="modal-section">
+          <div class="label" style="text-align: center; opacity: 0.7; margin-bottom: 20px;">
+            Install this app on your device for a better experience and offline access.
+          </div>
+          <div id="installButtonContainer"></div>
+        </div>
+        <div id="installInstalledState" class="modal-section install-installed-state" style="display: none;">
+          <div class="install-checkmark" aria-hidden="true">✓</div>
+          <div class="label" style="text-align: center; opacity: 0.9;">App is already installed</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="activitySelectModalBg">
+  <div class="modal">
+    <div class="close-btn" onclick="closeActivitySelectModal()">×</div>
+    <div class="modal-title">Choose activity</div>
+    <div id="activitySelectOptions" class="activity-select-options"></div>
+  </div>
+</div>
+
+<div class="modal-bg" id="cancelModalBg">
+  <div class="modal">
+    <div class="close-btn" onclick="closeCancelModal()">×</div>
+    <div class="modal-title" id="cancelModalTitle">End workout?</div>
+    <div class="label" id="cancelModalBody" style="text-align:center;">You can cool down first, end and save now, or keep going.</div>
+    <div class="modal-actions modal-actions-stack">
+      <button class="button" id="earlyCooldownButton" onclick="confirmEarlyCooldownWorkout()">Cooldown</button>
+      <button class="button" id="vo2LimitReachedButton" onclick="confirmVo2LimitReached()" style="display: none;">Reached my limit</button>
+      <button class="button" id="endWorkoutConfirmButton" onclick="confirmCancelWorkout()">Yes, end and save</button>
+      <button class="button secondary" onclick="closeCancelModal()">Keep going</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="vo2AssessmentModalBg">
+  <div class="modal">
+    <div class="close-btn" onclick="closeVo2AssessmentModal()">×</div>
+    <div class="modal-title" id="vo2AssessmentTitle">VO₂ Max Estimate</div>
+    <div id="vo2AssessmentValue" class="vo2-assessment-value"></div>
+    <div id="vo2AssessmentBody" class="label" style="text-align:center;"></div>
+    <div id="vo2AssessmentDetail" class="label" style="text-align:center; margin-top: 8px;"></div>
+    <div id="vo2AssessmentStages"></div>
+    <div class="modal-actions">
+      <button class="button" onclick="closeVo2AssessmentModal()">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="workoutSummaryModalBg">
+  <div class="modal" style="max-width: 90%; max-height: 90vh; overflow-y: auto;">
+    <div class="close-btn" onclick="closeWorkoutSummaryModal()">✕</div>
+    <div class="modal-title">Workout Summary</div>
+    <div id="workoutSummaryVo2" class="vo2-summary-block" style="display: none; margin-top: 12px;"></div>
+    <div id="workoutSummaryContent" style="margin-top: 20px;">
+      <pre id="workoutSummaryJson" style="background: #232323; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; white-space: pre-wrap; word-wrap: break-word;"></pre>
+    </div>
+    <div class="modal-actions">
+      <button class="button" onclick="downloadWorkoutSummaryJson()">Download JSON</button>
+      <button class="button secondary" onclick="closeWorkoutSummaryModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="deleteWorkoutModalBg">
+  <div class="modal">
+    <div class="close-btn" onclick="closeDeleteWorkoutModal()">×</div>
+    <div class="modal-title">Delete Workout</div>
+    <div class="label" style="text-align:center;">Are you sure you want to delete this workout? This action cannot be undone.</div>
+    <div class="modal-actions">
+      <button class="button" onclick="confirmDeleteWorkout()">Yes, delete it</button>
+      <button class="button secondary" onclick="closeDeleteWorkoutModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="resetLearnedModalBg" style="z-index: 31;">
+  <div class="modal">
+    <div class="close-btn" onclick="closeResetLearnedModal()">×</div>
+    <div class="modal-title">Reset learned guidance?</div>
+    <div class="label" style="text-align:center;">This removes learned starting resistance for ProForm SMART Power 10.0. Workout history, equipment selection, and calibration are not changed.</div>
+    <div class="modal-actions">
+      <button class="button" onclick="confirmResetLearnedGuidance()">Reset</button>
+      <button class="button secondary" onclick="closeResetLearnedModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="resetHrDynamicsModalBg" style="z-index: 31;">
+  <div class="modal">
+    <div class="close-btn" onclick="closeResetHrDynamicsModal()">×</div>
+    <div class="modal-title">Reset HR response data?</div>
+    <div class="label" style="text-align:center;">This removes observed heart-rate response data for ProForm SMART Power 10.0. Learned starting resistance, shadow predictions, workout history, equipment selection, and calibration are not changed.</div>
+    <div class="modal-actions">
+      <button class="button" onclick="confirmResetHrDynamics()">Reset</button>
+      <button class="button secondary" onclick="closeResetHrDynamicsModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="resetShadowPredictionsModalBg" style="z-index: 31;">
+  <div class="modal">
+    <div class="close-btn" onclick="closeResetShadowPredictionsModal()">×</div>
+    <div class="modal-title">Reset shadow prediction data?</div>
+    <div class="label" style="text-align:center;">This removes shadow resistance-prediction diagnostics for ProForm SMART Power 10.0. Learned starting resistance, HR response data, workout history, equipment selection, and calibration are not changed.</div>
+    <div class="modal-actions">
+      <button class="button" onclick="confirmResetShadowPredictions()">Reset</button>
+      <button class="button secondary" onclick="closeResetShadowPredictionsModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+<div class="section workout-main-section" id="workoutMainSection" style="position: relative; z-index: 10;">
+  <div class="workout-day-row" style="position: relative;">
+    <select id="workoutDaySelect" class="workout-day-select" aria-label="Select workout day"></select>
+  </div>
+
+  <div id="workoutMainContent">
+  <div id="startButtonRow" class="start-button-row">
+    <button class="button" id="startButton" onclick="startWorkout()">Start Workout</button>
+    <button class="button button-cancel-workout" id="cancelWorkoutButton" onclick="openCancelModal()" style="display: none;">Cancel</button>
+  </div>
+
+  <div id="phaseDisplay" class="phase-box"></div>
+
+  <div id="assessmentWorkloadAdvice" class="assessment-workload-advice" aria-live="polite" hidden></div>
+
+  <section id="machineGuidance" class="machine-guidance" aria-live="polite" hidden>
+    <div id="machineGuidanceName" class="machine-guidance-name"></div>
+    <div class="machine-guidance-values">
+      <div class="machine-guidance-value">
+        <div class="machine-guidance-label">Resistance</div>
+        <div id="machineGuidanceResistance" class="machine-guidance-number machine-guidance-resistance"></div>
+      </div>
+      <div class="machine-guidance-value">
+        <div class="machine-guidance-label">Cadence</div>
+        <div id="machineGuidanceCadence" class="machine-guidance-number machine-guidance-rpm"></div>
+      </div>
+    </div>
+    <div id="machineGuidanceWatts" class="machine-guidance-watts machine-guidance-power" hidden></div>
+    <div id="machineGuidanceBikeLive" class="machine-guidance-bike-live" hidden></div>
+  </section>
+
+  <div class="ring-wrapper" style="position: relative;">
+    <div class="ring-container">
+      <svg class="ring" viewBox="0 0 120 120">
+        <circle class="ring-bg" cx="60" cy="60" r="54"></circle>
+        <circle class="ring-progress" id="ringProgress" cx="60" cy="60" r="54"></circle>
+      </svg>
+      <div class="ring-center" id="ringCenter">
+        <div id="ringCenterText"></div>
+        <div class="ring-center-label" id="ringCenterLabel">total remaining</div>
+      </div>
+    </div>
+
+    <div id="heartContainer" class="heart-container">
+      <img id="heartIcon" src="heart.png" alt="">
+      <div id="hrNow" class="hr-now"></div>
+      <div id="hrvDisplay" class="hrv-display" aria-hidden="true">
+        <div id="hrvPrimary">HRV —</div>
+        <div id="hrvSecondary"></div>
+      </div>
+      <div id="hrTarget" class="hr-target"></div>
+    </div>
+    <img id="activityIcon" src="" alt="" style="display: none;">
+  </div>
+  </div>
+</div>
+
+<div id="workoutBlocks" class="work-blocks"></div>
+
+</div>
+
+<script type="module" src="./dist/main.js"></script>
+
+<script>
+  (function() {
+    var ua = navigator.userAgent || '';
+    var isFacebookInApp = /FBAN|FBAV|Instagram/i.test(ua);
+    if (isFacebookInApp) {
+      var url = window.location.href;
+      window.openInExternalBrowser = function() {
+        var isAndroid = /Android/i.test(ua);
+        var isIOS = /iPhone|iPad|iPod/i.test(ua);
+        if (isAndroid) {
+          var fallback = encodeURIComponent(url);
+          var intentPath = url.replace(/^https?:\/\//i, '');
+          var intentUrl = 'intent://' + intentPath + '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' + fallback + ';end';
+          window.location.href = intentUrl;
+        } else if (isIOS) {
+          var safariUrl = 'x-safari-https://' + url.replace(/^https?:\/\//i, '');
+          window.location.href = safariUrl;
+        } else {
+          window.open(url, '_blank');
+        }
+      };
+      document.body.innerHTML = ''
+        + '<main role="main" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;background:#16161a;color:#e8e8e8;font-family:system-ui,-apple-system,sans-serif;text-align:center;">'
+        + '<h1 style="margin:0 0 16px;font-size:1.5rem;font-weight:600;">Open in Browser</h1>'
+        + '<p style="margin:0 0 24px;max-width:320px;font-size:0.95rem;line-height:1.5;">This app uses WebAssembly and Web Audio that Facebook\'s in-app browser doesn\'t support.</p>'
+        + '<button type="button" onclick="window.openInExternalBrowser()" style="padding:12px 24px;font-size:1rem;font-weight:600;color:#16161a;background:#00f5d4;border:none;border-radius:8px;cursor:pointer;">Open in Browser</button>'
+        + '<p style="margin:24px 0 0;font-size:0.8rem;color:#888;">If nothing happens, use the menu (⋯) and choose "Open in browser" or "Open in Chrome".</p>'
+        + '</main>';
+    }
+  })();
+</script>
+</body>
+</html>

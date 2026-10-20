@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Application-wide cleartext is allowed so trusted-LAN HTTP (FitBaus Bike Bridge) can connect. SISU ingest still rejects http:// in application code. This XML does not restrict cleartext to a specific host. -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

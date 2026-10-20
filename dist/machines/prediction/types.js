@@ -1,0 +1,9 @@
+export const SHADOW_PREDICTION_STORAGE_KEY = "fitbaus_trainer_shadow_resistance_predictions";
+export const SHADOW_PREDICTION_STORE_VERSION = 1;
+export const SHADOW_PREDICTION_LIMIT = 20;
+export const MIN_SHADOW_DOSE_SAMPLES = 5;
+export const MAX_SHADOW_DOSE_MAD_BPM = 5;
+export const MIN_SHADOW_DIRECTION_CONSISTENCY = 0.7;
+export const MAX_SHADOW_SUGGESTED_LEVELS = 3;
+export const MIN_SHADOW_RESISTANCE = 1;
+export const MAX_SHADOW_RESISTANCE = 15;

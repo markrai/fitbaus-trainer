@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>6</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Fitbaus.BikeBridge.Core</RootNamespace>
+    <AssemblyName>Fitbaus.BikeBridge.Core</AssemblyName>
+  </PropertyGroup>
+</Project>

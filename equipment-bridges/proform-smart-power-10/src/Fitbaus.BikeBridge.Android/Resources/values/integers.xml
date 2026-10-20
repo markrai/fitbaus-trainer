@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Wolf GPS Basement merges @integer/google_play_services_version. XA 13.2.2 cannot extract the old GPS package resources (XA0121). Phase 1 does not initialize Play Services. -->
+  <integer name="google_play_services_version">11020000</integer>
+</resources>

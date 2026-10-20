@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{B7C1A4E2-0F3A-4D5B-9C8E-1A2B3C4D5E6F}</ProjectGuid>
+    <ProjectTypeGuids>{EFBA0AD7-5A72-4C68-AF49-83D382785DCF};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Fitbaus.BikeBridge.AndroidApp</RootNamespace>
+    <AssemblyName>Fitbaus.BikeBridge.Android</AssemblyName>
+    <TargetFrameworkIdentifier>MonoAndroid</TargetFrameworkIdentifier>
+    <!-- v7.0 compiles against Android 7.0 / API 24. minSdkVersion=22 is independent.
+         Android SDK Platform 24 must be installed for this TargetFrameworkVersion. -->
+    <TargetFrameworkVersion>v7.0</TargetFrameworkVersion>
+    <AndroidApplication>True</AndroidApplication>
+    <AndroidResgenFile>Resources\Resource.designer.cs</AndroidResgenFile>
+    <AndroidManifest>Properties\AndroidManifest.xml</AndroidManifest>
+    <MonoAndroidResourcePrefix>Resources</MonoAndroidResourcePrefix>
+    <MonoAndroidAssetsPrefix>Assets</MonoAndroidAssetsPrefix>
+    <AndroidUseLatestPlatformSdk>false</AndroidUseLatestPlatformSdk>
+    <AndroidSupportedAbis>x86</AndroidSupportedAbis>
+    <AndroidUseSharedRuntime>false</AndroidUseSharedRuntime>
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <LangVersion>6</LangVersion>
+    <GenerateSerializationAssemblies>Off</GenerateSerializationAssemblies>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;__ANDROID__;__ANDROID_22__</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <!-- Full: unused Wolf UI/GPS Java.Lang.Object types must be stripped or javac needs GPS/Support JARs XA 13.2.2 cannot extract (XA0121). -->
+    <AndroidLinkMode>Full</AndroidLinkMode>
+    <!-- Skip linking the app assembly so Application.n_onCreate JNI stays registered on API 22. -->
+    <AndroidLinkSkip>Fitbaus.BikeBridge.Android</AndroidLinkSkip>
+    <AndroidSupportedAbis>x86</AndroidSupportedAbis>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>__ANDROID__;__ANDROID_22__</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <AndroidManagedSymbols>true</AndroidManagedSymbols>
+    <AndroidUseSharedRuntime>false</AndroidUseSharedRuntime>
+    <AndroidLinkMode>SdkOnly</AndroidLinkMode>
+    <AndroidSupportedAbis>x86</AndroidSupportedAbis>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Mono.Android" />
+    <Reference Include="Mono.Android.Export">
+      <HintPath>$(MSBuildExtensionsPath)\..\Common7\IDE\ReferenceAssemblies\Microsoft\Framework\MonoAndroid\v4.4\Mono.Android.Export.dll</HintPath>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+    <Reference Include="Shire.Core">
+      <HintPath>$(ShireRuntimeDir)\Shire.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Shire.Android">
+      <HintPath>$(ShireRuntimeDir)\Shire.Android.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="MvvmCross.Platform">
+      <HintPath>$(ShireRuntimeDir)\MvvmCross.Platform.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Reactive.Interfaces">
+      <HintPath>$(ShireRuntimeDir)\System.Reactive.Interfaces.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Reactive.Core">
+      <HintPath>$(ShireRuntimeDir)\System.Reactive.Core.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Reactive.Linq">
+      <HintPath>$(ShireRuntimeDir)\System.Reactive.Linq.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System.Reactive.PlatformServices">
+      <HintPath>$(ShireRuntimeDir)\System.Reactive.PlatformServices.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="MoreLinq.Portable">
+      <HintPath>$(ShireRuntimeDir)\MoreLinq.Portable.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="BridgeApplication.cs" />
+    <Compile Include="BridgeRuntime.cs" />
+    <Compile Include="MainActivity.cs" />
+    <Compile Include="BridgeControlPolicy.cs" />
+    <Compile Include="ShireRuntimeHost.cs" />
+    <!-- Explicit Core list: do not use *.cs. Unrelated host files must not enter the XA Full-link graph. -->
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BikeUsbIds.cs">
+      <Link>Shared\BikeUsbIds.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BikeTelemetrySnapshot.cs">
+      <Link>Shared\BikeTelemetrySnapshot.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BikeTelemetryStore.cs">
+      <Link>Shared\BikeTelemetryStore.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BridgeInfo.cs">
+      <Link>Shared\BridgeInfo.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BridgeStatus.cs">
+      <Link>Shared\BridgeStatus.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BridgeStateMapper.cs">
+      <Link>Shared\BridgeStateMapper.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BridgeUiState.cs">
+      <Link>Shared\BridgeUiState.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\Diagnostics.cs">
+      <Link>Shared\Diagnostics.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\ITelemetryHttpServer.cs">
+      <Link>Shared\ITelemetryHttpServer.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\LanEndpointDisplay.cs">
+      <Link>Shared\LanEndpointDisplay.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\IResistanceRequestHandler.cs">
+      <Link>Shared\IResistanceRequestHandler.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\MachineInfo.cs">
+      <Link>Shared\MachineInfo.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\ResistanceLimits.cs">
+      <Link>Shared\ResistanceLimits.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\HeartRateStore.cs">
+      <Link>Shared\HeartRateStore.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\HeartRateFreshness.cs">
+      <Link>Shared\HeartRateFreshness.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\HeartRateLimits.cs">
+      <Link>Shared\HeartRateLimits.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BrightnessLimits.cs">
+      <Link>Shared\BrightnessLimits.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\BrightnessStore.cs">
+      <Link>Shared\BrightnessStore.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\ResistanceCommandStore.cs">
+      <Link>Shared\ResistanceCommandStore.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\ResistanceCommandCoordinator.cs">
+      <Link>Shared\ResistanceCommandCoordinator.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\ResistanceRequestParser.cs">
+      <Link>Shared\ResistanceRequestParser.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\TelemetryDisplay.cs">
+      <Link>Shared\TelemetryDisplay.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\TelemetryFreshness.cs">
+      <Link>Shared\TelemetryFreshness.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\TelemetryHttpContract.cs">
+      <Link>Shared\TelemetryHttpContract.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\TelemetryHttpResponder.cs">
+      <Link>Shared\TelemetryHttpResponder.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\TelemetryHttpServer.cs">
+      <Link>Shared\TelemetryHttpServer.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\TelemetryListenOptions.cs">
+      <Link>Shared\TelemetryListenOptions.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\TelemetryThrottle.cs">
+      <Link>Shared\TelemetryThrottle.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\UsbProbeResult.cs">
+      <Link>Shared\UsbProbeResult.cs</Link>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Properties\AndroidManifest.xml" />
+    <AndroidResource Include="Resources\values\strings.xml" />
+    <AndroidResource Include="Resources\values\integers.xml" />
+    <LinkDescription Include="LinkerPleaseInclude.xml" />
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath)\Xamarin\Android\Xamarin.Android.CSharp.targets" Condition="Exists('$(MSBuildExtensionsPath)\Xamarin\Android\Xamarin.Android.CSharp.targets')" />
+</Project>

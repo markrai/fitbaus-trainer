@@ -1,0 +1,1056 @@
+body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 0; background: #0c0c0c; color: #fff; }
+.container { padding: 20px; max-width: 500px; margin: auto; }
+html.capacitor-native .container { padding-top: calc(20px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); padding-right: calc(20px + var(--safe-area-inset-right, env(safe-area-inset-right, 0px))); padding-bottom: calc(20px + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); padding-left: calc(20px + var(--safe-area-inset-left, env(safe-area-inset-left, 0px))); }
+html.capacitor-native .hamburger { top: calc(10px + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); right: calc(12px + var(--safe-area-inset-right, env(safe-area-inset-right, 0px))); }
+html.capacitor-native .modal-bg { box-sizing: border-box; padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); padding-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px)); padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)); padding-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px)); }
+h1 { font-size: 1.8rem; text-align: center; margin: 16px 0 18px; }
+
+.section { background: #1a1a1a; padding: 16px; border-radius: 14px; margin-bottom: 16px; position: relative; }
+.label { font-size: 0.9rem; opacity: .7; }
+.input { width: 100%; padding: 12px; border-radius: 10px; border: none; margin-top: 8px; font-size: 1rem; box-sizing: border-box; }
+.button { width: 100%; padding: 14px; background: #3d7cff; color: #fff; border: none; border-radius: 12px; margin-top: 14px; font-size: 1rem; font-weight: 600; }
+.button.hr-connected { background: #dc2626; }
+.button.hr-connected:hover { background: #b91c1c; }
+
+.start-button-row { display: flex; align-items: stretch; gap: 10px; margin-top: 14px; }
+.start-button-row .button { margin-top: 0; flex: 1; min-width: 0; box-sizing: border-box; }
+.start-button-row .button-cancel-workout { flex: 0 0 auto; width: auto; padding: 14px 16px; font-size: 1rem; background: #444; box-sizing: border-box; height: 100%; min-height: 0; }
+.start-button-row .button-cancel-workout:hover { background: #555; }
+
+.metric { font-size: 1rem; margin-top: 6px; text-align: center; }
+.workout-day-row { margin-top: 6px; }
+.workout-day-select { width: 100%; max-width: 100%; font-size: 1rem; padding: 8px 12px; border-radius: 10px; border: 1px solid #333; background: #232323; color: #fff; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; box-sizing: border-box; }
+.workout-day-select:focus { outline: none; border-color: #3d7cff; }
+.phase-box { display: flex; justify-content: space-between; align-items: center; font-size: 1.5rem; padding: 14px; background: #232323; border-radius: 12px; margin-top: 18px; }
+.phase-box .phase-name { flex: 1; text-align: left; }
+.phase-box .phase-time { flex: 0 0 auto; text-align: right; font-weight: 600; }
+.assessment-workload-advice { margin-top: 9px; color: rgba(255,255,255,0.68); font-size: 0.78rem; line-height: 1.35; text-align: center; font-variant-numeric: tabular-nums; }
+.machine-guidance { margin-top: 14px; padding: 14px; border: 1px solid rgba(61,124,255,0.55); border-radius: 12px; background: rgba(61,124,255,0.1); text-align: center; }
+.machine-guidance-name { font-size: 0.8rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.9; }
+.machine-guidance-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+.machine-guidance-value { min-width: 0; }
+.machine-guidance-label { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.68; }
+.machine-guidance-number { margin-top: 3px; font-size: 1.65rem; font-weight: 750; font-variant-numeric: tabular-nums; }
+/* Match FitBaus Bike Bridge RpmColor / ResistanceColor / WattsColor. */
+.machine-guidance-rpm { color: #ff00ff; }
+.machine-guidance-resistance { color: #ff8c00; }
+.machine-guidance-power { color: #0096ff; }
+.machine-guidance-watts { margin-top: 9px; font-size: 0.82rem; opacity: 0.72; }
+.machine-guidance-bike-live { margin-top: 8px; font-size: 0.78rem; opacity: 0.78; font-variant-numeric: tabular-nums; }
+.bike-bridge-status { margin-top: 10px; line-height: 1.45; text-align: left; white-space: pre-line; }
+.bike-bridge-status .machine-guidance-rpm,
+.bike-bridge-status .machine-guidance-resistance,
+.bike-bridge-status .machine-guidance-power { font-weight: 650; }
+.time-left { text-align: center; font-size: 1.1rem; margin-top: 10px; opacity: .9; }
+.work-blocks { text-align: center; margin-top: 8px; font-size: 0.55rem; opacity: .8; }
+.hr-target { text-align: center; font-size: 0.7rem; opacity: .9; }
+.hr-now { 
+  text-align: center; 
+  color: white !important; 
+  font-weight: 600; 
+  font-size: 1.2rem; 
+  pointer-events: none; 
+  z-index: 10;
+}
+.calories { text-align: center; margin-top: 6px; font-size: 0.9rem; opacity: .9; }
+
+.hamburger { position: fixed; top: 10px; right: 12px; font-size: 28px; cursor: pointer; padding: 6px 10px; z-index: 20; }
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 30; }
+.modal { background: #1a1a1a; padding: 24px; border-radius: 14px; width: 90%; max-width: 400px; position: relative; }
+#modalBg .modal { box-sizing: border-box; max-height: calc(100vh - 32px); overflow-y: auto; }
+.modal-title { font-size: 1.4rem; margin-bottom: 20px; text-align: center; font-weight: 600; }
+.close-btn { float: right; cursor: pointer; font-size: 22px; margin-top: -6px; opacity: 0.7; }
+.close-btn:hover { opacity: 1; }
+.app-version { position: absolute; bottom: 12px; right: 12px; font-size: 0.75rem; opacity: 0.5; color: #888; }
+.modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+.modal-actions .button { flex: 1; width: auto; }
+.modal-actions-stack { flex-direction: column; }
+.modal-actions-stack .button { flex: 0 0 auto; width: 100%; margin-top: 0; }
+.activity-select-options { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.activity-select-options .button { width: 100%; }
+.learned-guidance-list { display: flex; flex-direction: column; gap: 8px; }
+.learned-guidance-row { display: flex; justify-content: space-between; gap: 12px; font-size: 0.95rem; }
+.learned-guidance-row span:last-child { font-variant-numeric: tabular-nums; opacity: 0.9; }
+.hr-dynamics-block { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.hr-dynamics-heading { font-size: 0.95rem; }
+.hr-dynamics-subhead { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.4px; opacity: 0.55; margin-top: 4px; }
+.modal-actions .button.secondary { background: #444; }
+.modal-actions .button.secondary:hover { background: #555; }
+.modal-field { margin-bottom: 14px; display: flex; align-items: center; gap: 12px; }
+.modal-label { font-size: 0.9rem; opacity: 0.85; font-weight: 500; min-width: 80px; flex-shrink: 0; }
+.modal-input { flex: 1; padding: 10px 12px; border-radius: 10px; border: 1px solid #333; background: #232323; color: #fff; font-size: 1rem; box-sizing: border-box; }
+.modal-input:focus { outline: none; border-color: #3d7cff; }
+.modal-input::placeholder { opacity: 0.5; }
+.modal-section { margin-bottom: 16px; }
+.modal-section-title { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; opacity: 0.6; margin-bottom: 10px; font-weight: 600; }
+
+/* Settings -> Profile */
+#personalTab { padding-bottom: 18px; }
+.profile-card { margin-top: 16px; padding: 14px; border: 1px solid #333; border-radius: 12px; background: #202020; }
+.profile-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.profile-section-heading .modal-section-title { margin-bottom: 0; }
+.profile-origin { flex-shrink: 0; padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.72); font-size: 0.68rem; line-height: 1.2; }
+.profile-origin-assessed { background: rgba(61,124,255,0.16); color: #9dbbff; }
+.profile-origin-observed { background: rgba(16,185,129,0.14); color: #77deb7; }
+.profile-helper { margin: -2px 0 14px; color: rgba(255,255,255,0.62); font-size: 0.78rem; line-height: 1.4; }
+.profile-card .modal-field:last-of-type { margin-bottom: 0; }
+.profile-card .modal-label { min-width: 118px; }
+.profile-card .modal-input { min-width: 0; }
+.profile-readonly-card { background: #1d1d1d; }
+.profile-empty { display: flex; flex-direction: column; gap: 5px; padding: 11px 12px; border-radius: 9px; background: rgba(255,255,255,0.035); color: rgba(255,255,255,0.65); font-size: 0.82rem; line-height: 1.4; }
+.profile-empty strong { color: rgba(255,255,255,0.9); font-size: 0.88rem; }
+.profile-metrics { margin: 0; }
+.profile-metric-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.profile-metric-row:last-child { border-bottom: 0; }
+.profile-metric-row dt { flex: 0 0 42%; color: rgba(255,255,255,0.62); font-size: 0.78rem; }
+.profile-metric-row dd { margin: 0; color: rgba(255,255,255,0.94); font-size: 0.86rem; font-weight: 550; text-align: right; font-variant-numeric: tabular-nums; }
+.profile-metric-row-stacked { display: block; }
+.profile-metric-row-stacked dd { margin-top: 5px; text-align: left; font-weight: 450; line-height: 1.4; }
+.profile-readonly-card > .profile-helper { margin: 12px 0 0; }
+.profile-informational { color: #9dbbff; }
+.personalization-card { border-left: 3px solid #3d7cff; background: linear-gradient(90deg, rgba(61,124,255,0.09), #202020 42%); }
+.personalization-status-copy { margin-bottom: 12px; }
+.personalization-activation { margin-top: 12px; }
+.profile-metric-note { color: rgba(255,255,255,0.58); font-size: 0.76rem; font-weight: 450; }
+
+/* Settings -> Equipment -> developer-only personalization diagnostics */
+.developer-diagnostics { border: 1px solid #333; border-radius: 12px; background: #1d1d1d; overflow: hidden; }
+.developer-diagnostics > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; padding: 4px 14px; cursor: pointer; font-size: 0.88rem; font-weight: 650; list-style-position: inside; }
+.developer-diagnostics-badge { padding: 3px 7px; border: 1px solid rgba(255,255,255,0.18); border-radius: 999px; color: rgba(255,255,255,0.62); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.developer-diagnostics-body { padding: 4px 14px 16px; min-width: 0; }
+.developer-diagnostics-note { margin: 8px 0; color: rgba(255,255,255,0.72); font-size: 0.78rem; line-height: 1.45; }
+.performed-load-workout { margin: 14px 0 20px; }
+.performed-load-workout h3 { margin: 0 0 6px; font-size: 0.92rem; }
+.performed-load-workout h3 span { color: rgba(255,255,255,0.58); font-weight: 500; font-size: 0.72rem; }
+.performed-load-phase { margin-top: 10px; padding: 10px; border: 1px solid #333; border-radius: 9px; background: #202020; }
+.performed-load-phase h4 { margin: 0 0 4px; font-size: 0.84rem; }
+.performed-load-hr-target { margin: 0 0 8px; color: rgba(255,255,255,0.68); font-size: 0.74rem; }
+.performed-load-phase dl { margin: 0; display: grid; gap: 8px; }
+.performed-load-phase dt { margin-bottom: 4px; color: rgba(255,255,255,0.62); font-size: 0.7rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.performed-load-phase dd { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; }
+.performed-load-phase dd div { display: flex; justify-content: space-between; gap: 8px; font-size: 0.78rem; }
+.performed-load-phase dd span { color: rgba(255,255,255,0.6); }
+.performed-load-phase dd strong { font-variant-numeric: tabular-nums; }
+.personalization-diagnostics-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+.personalization-diagnostics-actions .button { min-height: 44px; width: auto; flex: 1 1 180px; }
+.personalization-filter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.personalization-filter-grid label { display: grid; gap: 5px; min-width: 0; color: rgba(255,255,255,0.68); font-size: 0.72rem; }
+.personalization-filter { min-width: 0; width: 100%; min-height: 44px; font-size: 0.82rem; }
+.personalization-count-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
+.personalization-count-grid > div { display: grid; gap: 3px; padding: 10px; border: 1px solid #333; border-radius: 9px; background: #242424; }
+.personalization-count-grid strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+.personalization-count-grid span { color: rgba(255,255,255,0.62); font-size: 0.69rem; line-height: 1.3; }
+.personalization-cohorts { display: grid; gap: 10px; margin: 14px 0; }
+.personalization-cohort { padding: 11px; border: 1px solid #333; border-radius: 9px; background: #202020; }
+.personalization-longitudinal { margin: 14px 0; }
+.personalization-longitudinal > h4, .personalization-cohort h4, .personalization-evidence-summary h4, .personalization-exclusions h4, .personalization-detail-heading h4 { margin: 0 0 8px; font-size: 0.88rem; }
+.personalization-longitudinal .personalization-table-scroll { margin-top: 10px; }
+.personalization-cohort-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+.personalization-cohort-tags span { padding: 3px 6px; border-radius: 999px; background: rgba(61,124,255,0.12); color: #a9c2ff; font-size: 0.63rem; }
+.personalization-metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.personalization-metric-grid > div { display: grid; gap: 2px; padding: 8px; border-radius: 7px; background: rgba(255,255,255,0.035); min-width: 0; }
+.personalization-metric-grid label, .personalization-metric-grid span { color: rgba(255,255,255,0.58); font-size: 0.64rem; line-height: 1.3; }
+.personalization-metric-grid strong { font-size: 0.82rem; font-variant-numeric: tabular-nums; }
+.personalization-exclusions { margin: 14px 0; }
+.personalization-exclusions > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 2px; border-bottom: 1px solid #303030; font-size: 0.73rem; }
+.personalization-exclusions strong { font-variant-numeric: tabular-nums; }
+.personalization-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid #333; border-radius: 9px; overscroll-behavior-x: contain; }
+.personalization-table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.69rem; }
+.personalization-table th, .personalization-table td { padding: 8px; border-bottom: 1px solid #303030; text-align: left; white-space: nowrap; }
+.personalization-table th { position: sticky; top: 0; background: #292929; color: rgba(255,255,255,0.72); }
+.personalization-detail-button { min-height: 40px; padding: 7px 10px; width: auto; font-size: 0.72rem; }
+.personalization-diagnostic-detail { margin-top: 12px; padding: 12px; border: 1px solid #3d7cff; border-radius: 9px; background: #20242d; }
+.personalization-detail-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.personalization-detail-heading span { color: rgba(255,255,255,0.58); font-size: 0.7rem; }
+.personalization-detail-heading .button { width: auto; min-height: 40px; padding: 7px 10px; }
+.personalization-diagnostic-detail section { margin-top: 14px; }
+.personalization-diagnostic-detail h5 { margin: 0 0 6px; color: #9dbbff; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.personalization-diagnostic-detail dl { margin: 0; }
+.personalization-diagnostic-detail dl > div { display: grid; grid-template-columns: minmax(110px, 0.8fr) minmax(0, 1.2fr); gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.07); font-size: 0.7rem; }
+.personalization-diagnostic-detail dt { color: rgba(255,255,255,0.58); }
+.personalization-diagnostic-detail dd { margin: 0; overflow-wrap: anywhere; }
+.personalization-diagnostics-empty { display: grid; gap: 6px; padding: 18px 8px; color: rgba(255,255,255,0.68); font-size: 0.8rem; line-height: 1.45; text-align: center; }
+.personalization-diagnostics-error { color: #ff8b8b; }
+.workout-item-personalization { display: grid; gap: 2px; flex-basis: 100%; padding-top: 5px; color: #9dbbff; }
+.workout-item-personalization span { color: rgba(255,255,255,0.62); font-size: 0.72rem; }
+
+@media (max-width: 520px) {
+  .personalization-filter-grid, .personalization-metric-grid { grid-template-columns: 1fr; }
+  .developer-diagnostics-body { padding-inline: 10px; }
+  .personalization-diagnostic-detail dl > div { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* Tab styles */
+.tab-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; border-bottom: 1px solid #333; }
+.tab-button { flex: 1 1 70px; padding: 12px; background: transparent; border: none; color: #888; font-size: 1rem; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.2s; }
+.tab-button:hover { color: #fff; }
+.tab-button.active { color: #3d7cff; border-bottom-color: #3d7cff; }
+.tab-content { display: none; min-height: 400px; }
+.tab-content.active { display: block; }
+.tab-label-short { display: none; }
+.tab-label-long { display: inline; }
+
+/* Preference toggle row */
+.modal-field-toggle { align-items: center; }
+.modal-field-toggle .modal-label { margin-bottom: 0; }
+.preference-toggle { width: 20px; height: 20px; accent-color: #3d7cff; cursor: pointer; flex-shrink: 0; }
+.modal-field-column { flex-direction: column; align-items: stretch; gap: 8px; }
+.modal-field-column .modal-label { min-width: 0; }
+.bike-bridge-brightness { display: flex; align-items: center; gap: 12px; }
+.bike-bridge-brightness input[type="range"] { flex: 1; min-width: 0; }
+.bike-bridge-brightness-value { min-width: 2.5rem; text-align: right; opacity: 0.8; font-variant-numeric: tabular-nums; }
+
+/* Workout summary list */
+.workout-summary-list { max-height: 60vh; overflow-y: auto; min-height: 350px; }
+
+/* Sync content */
+.sisu-sync-content { min-height: 350px; }
+
+/* Battery indicator pill (Settings -> Sync): dot, level bar, percentage */
+.battery-pill {
+  --battery-accent: #22c55e;
+  --battery-pct: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.95);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.battery-pill::after {
+  content: "";
+  order: 1;
+  width: 40px;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--battery-accent) calc(var(--battery-pct) * 1%),
+    rgba(255,255,255,0.18) 0
+  );
+  flex-shrink: 0;
+}
+.battery-pill .battery-pill-pct {
+  order: 2;
+}
+.battery-pill[data-battery-state="good"] { --battery-accent: #22c55e; }
+.battery-pill[data-battery-state="med"] { --battery-accent: #f59e0b; }
+.battery-pill[data-battery-state="low"] { --battery-accent: #ef4444; }
+
+/* Install content */
+.install-content { min-height: 350px; }
+.install-installed-state { text-align: center; }
+.install-checkmark { font-size: 2.5rem; color: #22c55e; margin-bottom: 12px; line-height: 1; }
+.workout-item { 
+  background: #232323; 
+  padding: 16px; 
+  border-radius: 10px; 
+  margin-bottom: 12px; 
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: pan-y;
+  --drag-x: 0px;
+  transform: translate3d(var(--drag-x), 0, 0);
+  transition: transform 0.2s ease-out;
+  overflow: hidden;
+}
+.workout-item.dragging {
+  transition: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.workout-item.deleting {
+  pointer-events: none;
+  opacity: 0;
+  filter: blur(1px);
+  --drag-x: -12px;
+  transition: opacity 0.5s ease, filter 0.5s ease, transform 0.35s ease;
+}
+/* Left edge: shows when swiping right → SISU (blue) */
+.swipe-left-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: linear-gradient(to bottom, #3d7cff, #2563eb);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.workout-item[data-drag-direction="right"] .swipe-left-indicator {
+  opacity: 0.6;
+}
+.workout-item[data-swipe-armed="true"][data-drag-direction="right"] .swipe-left-indicator {
+  opacity: 0.9;
+}
+/* Right edge: shows when swiping left → delete (red) */
+.swipe-right-indicator {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  background: linear-gradient(to bottom, #ef4444, #dc2626);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.workout-item[data-drag-direction="left"] .swipe-right-indicator {
+  opacity: 0.6;
+}
+.workout-item[data-swipe-armed="true"][data-drag-direction="left"] .swipe-right-indicator {
+  opacity: 0.9;
+}
+@keyframes swipe-complete-glow {
+  0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.0); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.12); }
+  100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.0); }
+}
+@keyframes swipe-complete-glow-right {
+  0% { box-shadow: 0 0 0 0 rgba(61, 124, 255, 0.0); }
+  50% { box-shadow: 0 0 0 8px rgba(61, 124, 255, 0.12); }
+  100% { box-shadow: 0 0 0 0 rgba(61, 124, 255, 0.0); }
+}
+.workout-item.swipe-complete {
+  animation: swipe-complete-glow 0.35s ease-out;
+}
+.workout-item[data-drag-direction="right"].swipe-complete {
+  animation: swipe-complete-glow-right 0.35s ease-out;
+}
+.workout-item.sending {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Toast notifications */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: #1a1a1a;
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10000;
+  opacity: 0;
+  transition: all 0.3s ease;
+  max-width: 90%;
+  text-align: center;
+  font-size: 0.9rem;
+}
+.toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+.toast-success {
+  border-left: 4px solid #10b981;
+}
+.toast-error {
+  border-left: 4px solid #ef4444;
+}
+.toast-info {
+  border-left: 4px solid #3d7cff;
+}
+.workout-item-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; position: relative; }
+.workout-item-date { font-size: 0.9rem; opacity: 0.7; }
+.workout-item-title { font-size: 1.1rem; font-weight: 600; }
+.workout-item-cancelled { color: #e53935; font-size: 0.7rem; text-transform: lowercase; font-weight: 600; flex-shrink: 0; margin-left: 8px; }
+.workout-item-vo2 { font-weight: 600; opacity: 1; }
+.vo2-assessment-value { font-size: 2rem; text-align: center; font-weight: 600; margin: 8px 0 16px; }
+.vo2-summary-title { font-size: 1rem; font-weight: 600; text-align: center; margin-bottom: 8px; }
+.vo2-summary-block { text-align: center; }
+.vo2-stage-diagnostics { display: grid; gap: 8px; margin-top: 14px; text-align: left; }
+.vo2-stage-diagnostic { border: 1px solid rgba(127, 127, 127, 0.28); border-left: 4px solid #8a8a8a; border-radius: 8px; padding: 9px 10px; }
+.vo2-stage-diagnostic.eligible { border-left-color: #2f9e64; }
+.vo2-stage-diagnostic.ineligible { border-left-color: #c85c4a; }
+.vo2-stage-diagnostic strong, .vo2-stage-diagnostic span { display: block; }
+.vo2-stage-diagnostic span { margin-top: 4px; font-size: 0.82rem; line-height: 1.35; opacity: 0.88; }
+.workout-item-details { font-size: 0.85rem; opacity: 0.8; margin-top: 8px; display: flex; gap: 16px; flex-wrap: wrap; }
+.workout-item-detail { }
+.workout-item-actions { display: flex; gap: 8px; margin-top: 12px; }
+.workout-item-actions .button { margin-top: 0; padding: 10px; font-size: 0.9rem; }
+.workout-item-actions .button.secondary { background: #444; }
+
+.ring-container { position: relative; width: 10.625rem; height: 10.625rem; margin: 1.125rem auto 0.375rem; }
+.ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring-bg { fill: none; stroke: #333; stroke-width: 8; }
+.ring-progress { fill: none; stroke: #3d7cff; stroke-width: 8; stroke-linecap: round; stroke-dasharray: 339.292; stroke-dashoffset: 339.292; transition: stroke-dashoffset 0.25s linear; }
+.ring-center { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1.1rem; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; cursor: pointer; touch-action: manipulation; user-select: none; }
+.ring-center #ringCenterText { pointer-events: none; }
+.ring-center-label { font-size: 0.65rem; text-transform: lowercase; opacity: 0.85; pointer-events: none; }
+
+/* Heart pulsation animation - scale only so heart and HR text stay aligned */
+@keyframes heartPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+/* Icon container for consistent alignment */
+.icon-container {
+  position: absolute;
+  width: 5rem;
+  height: 5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Heart container - anchors heart, BPM, and range together */
+.heart-container {
+  position: absolute;
+  left: calc(50% - 12.5rem);
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 5rem;
+  height: 5rem;
+}
+
+#heartIcon {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: brightness(0) saturate(100%) invert(27%) sepia(100%) saturate(10000%) hue-rotate(0deg);
+  transform-origin: center center;
+  /* Animation (BPM-based duration) is set by JS in updateHeartPulse() */
+}
+
+#activityIcon {
+  position: absolute;
+  left: calc(50% + 12.5rem);
+  top: 50%;
+  width: 5rem;
+  height: 5rem;
+  max-width: 5rem;
+  max-height: 5rem;
+  object-fit: contain;
+  object-position: center;
+  filter: brightness(0) invert(1);
+  transform: translate(-50%, -50%);
+  transform-origin: center center;
+}
+
+/* BPM value - centered within heart icon */
+#hrNow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: white !important;
+  font-weight: 600;
+  font-size: 1.2rem;
+  pointer-events: none;
+  z-index: 10;
+  width: 100%;
+}
+
+/* HRV - compact secondary metric below heart, above target range */
+#hrvDisplay {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  text-align: center;
+  margin-top: 0.2rem;
+  font-size: 0.65rem;
+  line-height: 1.25;
+  opacity: 0.85;
+  white-space: nowrap;
+  z-index: 6;
+  color: inherit;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
+#hrvPrimary {
+  font-weight: 600;
+}
+
+#hrvSecondary {
+  opacity: 0.8;
+  font-size: 0.6rem;
+}
+
+/* HR range - directly below heart icon, anchored to heart container */
+#hrTarget {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  text-align: center;
+  margin-top: 1.85rem;
+  font-size: 0.7rem;
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 5;
+  color: inherit;
+}
+
+/* Mobile portrait - keep the workout stack on-screen on short phones */
+@media (max-width: 768px) and (orientation: portrait) {
+  /* Increase container padding and spacing */
+  .container { 
+    box-sizing: border-box;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding: 8px 20px 12px 20px; 
+    max-width: 100%;
+  }
+  
+  /* Increase section spacing */
+  .section { 
+    padding: 24px 24px 32px 24px; 
+    border-radius: 16px; 
+    margin-bottom: 28px; 
+    min-height: auto;
+  }
+
+  .workout-main-section {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin-bottom: 6px;
+    padding: 14px 16px 2.25rem;
+    justify-content: space-between;
+    gap: clamp(0.25rem, 1.2dvh, 0.75rem);
+  }
+
+  .workout-day-row {
+    margin-top: 0;
+  }
+
+  #workoutMainContent {
+    display: contents;
+  }
+
+  #workoutBlocks {
+    flex: 0 0 auto;
+  }
+  
+  /* Increase text sizes for better readability */
+  .label { font-size: 1rem; }
+  .input { 
+    padding: 14px; 
+    font-size: 1.1rem; 
+    margin-top: 10px; 
+  }
+  .button { 
+    padding: 16px; 
+    font-size: 1.1rem; 
+    margin-top: 18px; 
+    border-radius: 14px;
+  }
+  .workout-main-section .button {
+    padding: 12px;
+    font-size: 1rem;
+  }
+  
+  /* Increase metric and phase box sizes */
+  .metric { 
+    font-size: 1.2rem; 
+    margin-top: 10px; 
+    margin-bottom: 16px;
+  }
+  .phase-box { 
+    font-size: 1.45rem; 
+    padding: 10px 14px; 
+    border-radius: 14px; 
+    margin-top: 0; 
+  }
+  .machine-guidance {
+    margin-top: 0;
+    padding: 8px 10px;
+  }
+  .machine-guidance-values {
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .machine-guidance-number {
+    font-size: 1.35rem;
+  }
+  .machine-guidance-watts {
+    margin-top: 4px;
+  }
+  .work-blocks { 
+    font-size: 0.7rem; 
+    margin-top: 4px; 
+  }
+  
+  /* Keep both buttons aligned (no margin on #startButton) */
+  .start-button-row {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+  .start-button-row .button-cancel-workout {
+    padding: 12px 16px;
+    font-size: 1rem;
+  }
+  
+  .ring-container { 
+    width: clamp(11rem, 28dvh, 13.5rem); 
+    height: clamp(11rem, 28dvh, 13.5rem); 
+    margin: 0 auto; 
+  }
+  .ring-bg { stroke-width: 10; }
+  .ring-progress { stroke-width: 10; }
+  .ring-center { font-size: 1.25rem; }
+  
+  .ring-wrapper {
+    flex: 0 0 auto;
+    padding-bottom: clamp(4.5rem, 11dvh, 6.5rem);
+  }
+  
+  /* Reposition heart container to bottom left of section - aligned baseline */
+  .heart-container {
+    position: absolute !important;
+    left: 1.5rem !important;
+    bottom: 0.25rem !important;
+    top: auto !important;
+    width: 4rem !important;
+    height: 4rem !important;
+    transform: none !important;
+  }
+  
+  #heartIcon {
+    position: relative !important;
+    width: 100% !important;
+    height: 100% !important;
+    transform: none;
+    transform-origin: center center !important;
+    object-fit: contain !important;
+    object-position: center center !important;
+    /* Animation (BPM-based duration) is set by JS in updateHeartPulse() - transform has no !important so keyframes can apply */
+  }
+  
+  /* Reposition activity icon to bottom right of section - aligned baseline */
+  #activityIcon {
+    position: absolute !important;
+    right: 1.5rem !important;
+    bottom: 0.25rem !important;
+    left: auto !important;
+    top: auto !important;
+    width: 4rem !important;
+    height: 4rem !important;
+    max-width: 4rem !important;
+    max-height: 4rem !important;
+    transform: none !important;
+    transform-origin: center bottom !important;
+    object-fit: contain !important;
+    object-position: center bottom !important;
+  }
+  
+  /* HR Now display - centered within heart icon */
+  #hrNow {
+    position: absolute !important;
+    left: 50% !important;
+    top: 50% !important;
+    bottom: auto !important;
+    transform: translate(-50%, -50%) !important;
+    font-size: 1.2rem !important;
+    text-align: center !important;
+    color: white !important;
+    font-weight: 600 !important;
+    pointer-events: none !important;
+    z-index: 10 !important;
+    width: 100% !important;
+  }
+  
+  /* HR target below heart icon - anchored to heart container */
+  #hrvDisplay {
+    position: absolute !important;
+    left: 50% !important;
+    top: 100% !important;
+    transform: translateX(-50%) !important;
+    margin-top: 0.2rem !important;
+    font-size: 0.65rem !important;
+    text-align: center !important;
+    white-space: nowrap !important;
+  }
+
+  #hrTarget {
+    position: absolute !important;
+    left: 50% !important;
+    top: 100% !important;
+    bottom: auto !important;
+    transform: translateX(-50%) !important;
+    font-size: 0.75rem !important;
+    text-align: center !important;
+    margin-top: 1.85rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 200px !important;
+  }
+  
+  
+  /* Optimize modals for mobile */
+  .modal {
+    width: 95%;
+    max-width: 95%;
+    padding: 20px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  
+  .modal-title {
+    font-size: 1.3rem;
+    margin-bottom: 18px;
+  }
+  
+  .tab-button {
+    padding: 14px;
+    font-size: 1rem;
+  }
+  
+  .tab-label-long { display: none; }
+  .tab-label-short { display: inline; }
+  
+  /* Heart pulse animation for mobile - scale only so heart and HR text stay in place */
+  @keyframes heartPulseMobile {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+  }
+
+  @media (max-height: 700px) {
+    .ring-wrapper {
+      padding-bottom: 4.25rem;
+    }
+    .phase-box {
+      font-size: 1.3rem;
+      padding: 8px 12px;
+    }
+    .machine-guidance-number {
+      font-size: 1.2rem;
+    }
+    .heart-container {
+      width: 3.5rem !important;
+      height: 3.5rem !important;
+    }
+    #activityIcon {
+      width: 3.5rem !important;
+      height: 3.5rem !important;
+      max-width: 3.5rem !important;
+      max-height: 3.5rem !important;
+    }
+  }
+}
+
+/* Landscape view - increase everything by 20% */
+@media (orientation: landscape) {
+  body { font-size: 1.2rem; }
+  .container { padding: 24px; max-width: 600px; }
+  h1 { font-size: 2.16rem; margin: 19.2px 0 21.6px; }
+  
+  .section { padding: 19.2px; border-radius: 16.8px; margin-bottom: 19.2px; }
+  .label { font-size: 1.08rem; }
+  .input { padding: 14.4px; border-radius: 12px; margin-top: 9.6px; font-size: 1.2rem; }
+  .button { padding: 16.8px; border-radius: 14.4px; margin-top: 16.8px; font-size: 1.2rem; }
+  .start-button-row .button-cancel-workout { padding: 16.8px 16px; font-size: 1.2rem; }
+  
+  .metric { font-size: 1.2rem; margin-top: 7.2px; }
+  .phase-box { font-size: 1.8rem; padding: 16.8px; border-radius: 14.4px; margin-top: 21.6px; }
+  .time-left { font-size: 1.32rem; margin-top: 12px; }
+  .work-blocks { font-size: 1.14rem; margin-top: 12px; }
+  .hr-target { font-size: 1.08rem; margin-top: 9.6px; }
+  .calories { font-size: 1.08rem; margin-top: 7.2px; }
+  
+  .hamburger { top: 12px; right: 14.4px; font-size: 33.6px; padding: 7.2px 12px; }
+  .modal { padding: 28.8px; border-radius: 16.8px; max-width: 480px; }
+  .modal-title { font-size: 1.68rem; margin-bottom: 24px; }
+  .close-btn { font-size: 26.4px; margin-top: -7.2px; }
+  .modal-actions { gap: 12px; margin-top: 21.6px; }
+  .modal-field { margin-bottom: 16.8px; gap: 14.4px; }
+  .modal-label { font-size: 1.08rem; min-width: 96px; }
+  .modal-input { padding: 12px 14.4px; border-radius: 12px; font-size: 1.2rem; }
+  .modal-section { margin-bottom: 19.2px; }
+  .modal-section-title { font-size: 1.02rem; margin-bottom: 12px; }
+  
+  .ring-container { width: 12.75rem; height: 12.75rem; margin: 1.35rem auto 0.45rem; }
+  .ring-bg { stroke-width: 9.6; }
+  .ring-progress { stroke-width: 9.6; }
+  .ring-center { font-size: 1.32rem; }
+  .heart-container {
+    left: calc(50% - 15rem) !important;
+    width: 6rem !important;
+    height: 6rem !important;
+  }
+  
+  #heartIcon { 
+    width: 100% !important;
+    height: 100% !important;
+  }
+  #activityIcon { 
+    left: calc(50% + 15rem) !important;
+    width: 6rem !important;
+    height: 6rem !important;
+    max-width: 6rem !important;
+    max-height: 6rem !important;
+    object-fit: contain !important;
+    object-position: center !important;
+    transform: translate(-50%, -50%) !important;
+    transform-origin: center center !important;
+  }
+  #hrNow {
+    font-size: 1.44rem !important;
+  }
+}
+
+/* Downregulation: faded HR readout bottom-left (above goo/noise layers so it stays visible) */
+.downregulation-hr-display {
+  position: absolute;
+  bottom: 1rem;
+  left: 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 7;
+}
+
+/* Downregulation: tap-to-stop play icon (white, center, 1s then fade) */
+.downregulation-play-wrap {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  pointer-events: none;
+  z-index: 6;
+  transition: opacity 0.4s ease-out;
+}
+.downregulation-play-wrap--clickable {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.downregulation-play-wrap--fade {
+  opacity: 0;
+}
+.downregulation-play-icon {
+  display: block;
+  width: 0;
+  height: 0;
+  border-left: 4rem solid #fff;
+  border-top: 2.5rem solid transparent;
+  border-bottom: 2.5rem solid transparent;
+  margin-left: 0.5rem;
+}
+.downregulation-play-label {
+  color: #0d9488;
+  font-size: 1rem;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* Downregulation: session hint (fade-in then fade-out after session starts) */
+.downregulation-session-hint {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 6;
+  color: #0d9488;
+  font-size: 1.1rem;
+  font-weight: 500;
+  text-align: center;
+  padding: 1rem;
+}
+
+/* Downregulation: session stats panel (after tap to stop) */
+.downregulation-stats-panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(22rem, calc(100% - 3rem));
+  max-height: calc(100% - 3rem);
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 1.5rem;
+  background: rgba(18, 18, 22, 0.95);
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 7;
+  overflow-y: auto;
+}
+.downregulation-stats-title {
+  margin: 0 0 1rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #fff;
+  text-align: center;
+}
+.downregulation-stats-content {
+  flex: 1;
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.5;
+}
+.downregulation-hr-graph-wrap {
+  width: 100%;
+  height: 120px;
+  margin-bottom: 1rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.25);
+}
+.downregulation-hr-graph {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.downregulation-stats-line {
+  margin: 0.35rem 0;
+}
+.downregulation-stats-done {
+  margin-top: 0.5rem;
+}
+
+/* Downregulation: settings button (bottom right) */
+.downregulation-settings-btn {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 8;
+  width: 44px;
+  height: 44px;
+  padding: 8px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(18, 18, 22, 0.85);
+  color: #0d9488;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.downregulation-settings-btn:hover {
+  background: rgba(28, 28, 34, 0.9);
+}
+.downregulation-settings-btn img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  filter: invert(1);
+  opacity: 0.85;
+}
+
+/* Downregulation: preferences modal */
+.downregulation-prefs-modal-bg {
+  align-items: center;
+  justify-content: center;
+  z-index: 31;
+}
+.downregulation-prefs-modal {
+  max-width: 20rem;
+}
+.downregulation-prefs-modal .tab-content {
+  min-height: 0;
+}
+.downregulation-prefs-tabs.tab-buttons {
+  margin-bottom: 1rem;
+}
+.downregulation-prefs-modal .modal-field-column {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Target HR number input: uses .modal-input; constrain width and style number spinners for dark theme */
+.downregulation-prefs-modal .downregulation-noise-target-hr {
+  max-width: 6rem;
+}
+.downregulation-prefs-modal .downregulation-noise-target-hr::-webkit-outer-spin-button,
+.downregulation-prefs-modal .downregulation-noise-target-hr::-webkit-inner-spin-button {
+  opacity: 0.7;
+  color: #fff;
+}
+.downregulation-style-toggle {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.downregulation-style-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.15s;
+}
+.downregulation-style-option:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.downregulation-style-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.downregulation-style-option:has(input:checked) {
+  background: rgba(255, 255, 255, 0.15);
+}
+.downregulation-style-option span {
+  font-size: 0.9rem;
+}
+.downregulation-goo-credit {
+  margin: 0 0 14px 0;
+  font-size: 0.7rem;
+  opacity: 0.75;
+  text-align: right;
+  color: #e04040;
+}
+.downregulation-particle-size-value {
+  text-align: center;
+}
+
+/* Goo (lava lamp) SVG overlay – full cover, pointer-events none so taps pass through */
+.downregulation-goo-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.downregulation-goo-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Noise (concentric warped circles) canvas overlay – full cover, pointer-events none */
+.downregulation-noise-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.downregulation-noise-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+

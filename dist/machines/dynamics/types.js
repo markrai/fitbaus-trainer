@@ -1,0 +1,16 @@
+export const DYNAMICS_STORAGE_KEY = "fitbaus_trainer_hr_dynamics";
+export const DYNAMICS_STORE_VERSION = 1;
+export const DYNAMICS_SAMPLE_LIMIT = 20;
+export const RECENT_OPPORTUNITY_LIMIT = 20;
+export const RESPONSE_SEARCH_SECONDS = 90;
+export const RESPONSE_ONSET_BPM = 3;
+export const RESPONSE_PERSISTENCE_SECONDS = 3;
+export const SETTLED_WINDOW_SECONDS = 15;
+export const WORK_START_BASELINE_SECONDS = 15;
+export const WORK_START_BASELINE_FALLBACK_SECONDS = 10;
+export const IN_WORK_BASELINE_SECONDS = 10;
+export const ROLLING_ONSET_LOOKBACK_SECONDS = 4;
+export const MAX_ABS_HR_DELTA = 40;
+export const MAX_ABS_HR_PER_LEVEL = 20;
+export const MAX_RESISTANCE_STEP = 2;
+export const MIN_OBSERVABLE_WINDOW_SECONDS = 15;

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FitBaus Trainer</string>
+    <string name="title_activity_main">FitBaus Trainer</string>
+    <string name="package_name">com.markrai.fitbaus.trainer</string>
+    <string name="custom_url_scheme">com.markrai.fitbaus.trainer</string>
+</resources>

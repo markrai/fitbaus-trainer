@@ -1,0 +1,50 @@
+# Build
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+*.userprefs
+
+# Android / Xamarin
+*.apk
+*.ap_
+*.aab
+*.dex
+*.apks
+*.idsig
+*.unaligned
+*.keystore
+*.jks
+local.properties
+Resource.designer.cs.bak
+Resource.designer.cs
+
+# Test / coverage
+TestResults/
+*.trx
+*.coverage
+coverage/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Vendor runtime copies (reconstruct with scripts/copy-shire-runtime.ps1)
+third_party/shire-runtime/*.dll
+third_party/shire-runtime/*.config
+third_party/shire-runtime/*.pdb
+third_party/shire-runtime/*.xml
+third_party/shire-pack-deps/*.dll
+third_party/shire-pack-deps/*.config
+third_party/shire-pack-deps/*.pdb
+third_party/shire-pack-deps/*.xml
+
+# Compile-check output
+artifacts/

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.fitbaus.bikebridge"
+    android:versionCode="1"
+    android:versionName="0.1.0-poc">
+  <uses-sdk android:minSdkVersion="22" android:targetSdkVersion="22" />
+  <uses-feature android:name="android.hardware.usb.host" android:required="true" />
+  <!-- INTERNET is required so the trusted-LAN HTTP listener (TcpListener on :8765) can bind and accept. -->
+  <uses-permission android:name="android.permission.INTERNET" />
+  <application android:label="FitBaus Bike Bridge" android:debuggable="true" />
+</manifest>

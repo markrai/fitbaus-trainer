@@ -1,0 +1,28 @@
+/deploy
+deploy/
+deploy-upload.bat
+/node_modules/
+/www/
+
+# Android generated output and local configuration
+/android/.gradle/
+/android/.idea/
+/android/local.properties
+/android/**/build/
+*.jks
+*.keystore
+
+# iOS generated output and local configuration
+/ios/DerivedData/
+/ios/App/DerivedData/
+/ios/App/xcuserdata/
+/ios/App/App.xcodeproj/xcuserdata/
+*.xcuserstate
+
+# Documentation (prompts / specs for LLMs; optional to track in repo)
+docs/*
+!docs/adaptive-training-architecture-review.md
+!docs/personalization-architecture.md
+
+# Temporary architecture/research audit drafts — never commit
+docs/draft/

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<linker>
+  <!-- MvvmCross 4 constructs IoC types via Activator.CreateInstance.
+       Full linking stripped MvxPropertyInjector..ctor() and crashed on-device
+       before USB. Preserve the IoC namespace, not the rest of MvvmCross/Shire. -->
+  <assembly fullname="MvvmCross.Platform">
+    <namespace fullname="MvvmCross.Platform.IoC" preserve="all" />
+    <type fullname="MvvmCross.Platform.IoC.*" preserve="all" />
+  </assembly>
+  <!-- Rx 2.2.5 PlatformEnlightenmentProvider.Current does Type.GetType +
+       Activator.CreateInstance of CurrentPlatformEnlightenmentProvider.
+       Full linking kept the type but stripped its public default ctor, crashing
+       FitProConsole..ctor before EquipmentConsole.Init. Preserve this assembly's
+       PlatformServices namespace (EnlightenmentProvider, ExceptionServicesImpl,
+       CurrentPlatformEnlightenmentProvider), not all System.Reactive.*. -->
+  <assembly fullname="System.Reactive.PlatformServices">
+    <namespace fullname="System.Reactive.PlatformServices" preserve="all" />
+    <type fullname="System.Reactive.PlatformServices.*" preserve="all" />
+  </assembly>
+  <!-- Shire BitFieldValues ctor reflects DeclaredProperties with [BitFieldPropertyInfo]
+       and SetValue uses PropertyInfo.SetValue. Full linking kept WorkoutMode's getter
+       but stripped its setter, and dropped IdleModeLockout from the property map.
+       Preserve the reflected model type (88 attributed properties), not all of Shire.Core. -->
+  <assembly fullname="Shire.Core">
+    <type fullname="Shire.Core.FitPro.Equipment.Bits.BitFieldValues" preserve="all" />
+    <type fullname="Shire.Core.FitPro.Equipment.Bits.BitFieldPropertyInfo" preserve="all" />
+    <type fullname="Shire.Core.FitPro.Equipment.Bits.BitField" preserve="all" />
+    <type fullname="Shire.Core.FitPro.Equipment.IEquipmentConsole">
+      <method name="SetResistance" />
+    </type>
+    <type fullname="Shire.Core.FitPro.Equipment.EquipmentConsole">
+      <method name="SetResistance" />
+      <method name="SetBasicValues" />
+    </type>
+  </assembly>
+  <!-- Preserve JNI/ACW for the Application and launcher Activity. Full linking
+       can drop n_onCreate registration and crash at process start on API 22. -->
+  <assembly fullname="Fitbaus.BikeBridge.Android">
+    <type fullname="Fitbaus.BikeBridge.AndroidApp.BridgeApplication" preserve="all" />
+    <type fullname="Fitbaus.BikeBridge.AndroidApp.MainActivity" preserve="all" />
+  </assembly>
+</linker>

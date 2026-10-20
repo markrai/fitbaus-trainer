@@ -1,0 +1,44 @@
+{
+  "name": "fitbaus-trainer",
+  "version": "0.10.13",
+  "private": true,
+  "description": "FitBaus Trainer — heart-rate workout trainer with BLE HR, optional bike bridge, and Capacitor Android/iOS shells",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/markrai/fitbaus-trainer.git"
+  },
+  "type": "module",
+  "scripts": {
+    "prebuild": "node scripts/sync-version.cjs",
+    "build": "tsc",
+    "prebuild:native": "node scripts/sync-version.cjs",
+    "build:native": "node scripts/build-native.mjs",
+    "check": "tsc --noEmit",
+    "test": "npm run build && node --test tests/sessionControlMode.test.mjs tests/personalizationDiagnosticsView.test.mjs tests/personalizationScientificAssessment.test.mjs tests/personalizedPrescriptionCharacterization.test.mjs tests/heldWorkloadForwardResponse.test.mjs tests/steadyStateSettledWorkload.test.mjs tests/thresholdRegionSettledWorkload.test.mjs tests/thresholdRegionSettledWorkloadAggregate.test.mjs tests/executionProvenance.test.mjs tests/e4aPolicyV2.test.mjs tests/personalizationCapability.test.mjs tests/personalizedPrescription.test.mjs tests/workoutPrescription.test.mjs tests/fitnessState.test.mjs tests/fitnessRefinement.test.mjs tests/workoutResponse.test.mjs tests/performedLoad.test.mjs tests/machineGuidance.test.mjs tests/machineLearning.test.mjs tests/machineDynamics.test.mjs tests/machineTiming.test.mjs tests/machinePrediction.test.mjs tests/machinePredictionValidation.test.mjs tests/machineDiagnostics.test.mjs tests/machineAudit.test.mjs tests/workoutCooldown.test.mjs tests/hrPauseTiming.test.mjs tests/bikeBridge.test.mjs tests/vo2EvidenceFoundation.test.mjs tests/vo2Protocol.test.mjs tests/vo2Estimator.test.mjs tests/vo2AssessmentView.test.mjs tests/vo2AcquisitionExperiment.test.mjs tests/vo2Adaptive.test.mjs tests/vo2AdaptiveV3Invariants.test.mjs tests/vo2ProtocolV3Start.test.mjs tests/vo2Workload.test.mjs tests/vo2PwaCache.test.mjs tests/vo2BikeTelemetryClock.test.mjs tests/profileDefaults.test.mjs tests/profileFitnessView.test.mjs tests/heartRateMeasurement.test.mjs tests/hrvAccumulator.test.mjs tests/hrvOptionalFieldContinuity.test.mjs tests/hrvDisplay.test.mjs tests/hrvSession.test.mjs tests/bleCharacteristicReady.test.mjs tests/nativeBleConnect.test.mjs",
+    "cap:sync": "npm run build:native && npx cap sync && node scripts/normalize-ios-spm.mjs",
+    "cap:sync:android": "npm run build:native && npx cap sync android",
+    "cap:sync:ios": "npm run build:native && npx cap sync ios && node scripts/normalize-ios-spm.mjs",
+    "android": "npm run cap:sync:android && npx cap open android",
+    "ios": "npm run cap:sync:ios && npx cap open ios",
+    "serve": "npx serve .",
+    "deploy": "build-deploy.bat"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3",
+    "esbuild": "0.28.2",
+    "fake-indexeddb": "^6.0.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@capacitor-community/bluetooth-le": "8.3.0",
+    "@capacitor-community/keep-awake": "8.0.1",
+    "@capacitor-community/text-to-speech": "8.0.2",
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/ios": "8.5.3"
+  }
+}

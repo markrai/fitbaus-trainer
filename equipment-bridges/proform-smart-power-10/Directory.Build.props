@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <!-- Isolated Wolf/standalone compile refs. Do not point this at the full 124-DLL dump:
+         sibling Google Play Services / old Support libraries trigger XA0121 under XA 13.2.2. -->
+    <ShireRuntimeDir Condition="'$(ShireRuntimeDir)' == ''">$(MSBuildThisFileDirectory)third_party\shire-runtime</ShireRuntimeDir>
+    <!-- Full Wolf closure copied into OutDir before APK ResolveAssemblies. Gitignored. -->
+    <ShirePackDir Condition="'$(ShirePackDir)' == ''">$(MSBuildThisFileDirectory)third_party\shire-pack-deps</ShirePackDir>
+    <!-- Optional extra assemblies for pack-deps copy. Set SHIRE_ORIGINAL_DIR or /p:ShireOriginalDir=... -->
+    <ShireOriginalDir Condition="'$(ShireOriginalDir)' == ''">$(SHIRE_ORIGINAL_DIR)</ShireOriginalDir>
+    <FitbausMinSdk>22</FitbausMinSdk>
+    <FitbausTargetAbi>x86</FitbausTargetAbi>
+  </PropertyGroup>
+</Project>

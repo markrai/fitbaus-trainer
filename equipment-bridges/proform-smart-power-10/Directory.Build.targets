@@ -1,0 +1,16 @@
+<Project>
+  <!-- Old GPS/Support assemblies cannot be MSBuild References (XA0121), but ResolveAssemblies
+       still needs them next to copy-local Shire.Android in OutDir. -->
+  <Target Name="CopyShirePackDependencies" BeforeTargets="_ResolveAssemblies" Condition="'$(AndroidApplication)' != '' And $(AndroidApplication)">
+    <ItemGroup>
+      <_ShirePackDll Include="$(ShirePackDir)\*.dll" Condition="Exists('$(ShirePackDir)')" />
+      <_ShirePackDll Include="$(ShireOriginalDir)\System.Net.Http.Primitives.dll" Condition="Exists('$(ShireOriginalDir)\System.Net.Http.Primitives.dll')" />
+      <_ShirePackDll Include="$(ShireOriginalDir)\System.Net.Http.Extensions.dll" Condition="Exists('$(ShireOriginalDir)\System.Net.Http.Extensions.dll')" />
+    </ItemGroup>
+    <Copy
+        Condition="'@(_ShirePackDll)' != ''"
+        SourceFiles="@(_ShirePackDll)"
+        DestinationFolder="$(OutDir)"
+        SkipUnchangedFiles="true" />
+  </Target>
+</Project>
