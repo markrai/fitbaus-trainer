@@ -1,4 +1,4 @@
-import type { WorkoutPhaseKind } from "../types.js";
+import type { WorkoutPhaseKind } from "../contracts/workoutPrescription.js";
 
 export type MachineId = "proform-smart-power-10";
 

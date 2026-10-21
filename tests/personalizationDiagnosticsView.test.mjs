@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 import {
   EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS,
@@ -923,7 +923,12 @@ test("threshold transfer HTML reports error under HR control and does not score 
 
 test("E3 longitudinal analysis and E2 v3 capture no actuation mode and never enable activation", async () => {
   const characterizationSource = await readFile(new URL("../src/personalizedPrescriptionCharacterization.ts", import.meta.url), "utf8");
-  const typesSource = await readFile(new URL("../src/types.ts", import.meta.url), "utf8");
+  // Shared contracts: the types.ts facade plus every module it re-exports from src/contracts/.
+  const contractsDir = new URL("../src/contracts/", import.meta.url);
+  const contractSources = await Promise.all(
+    (await readdir(contractsDir)).filter((name) => name.endsWith(".ts")).map((name) => readFile(new URL(name, contractsDir), "utf8"))
+  );
+  const typesSource = [await readFile(new URL("../src/types.ts", import.meta.url), "utf8"), ...contractSources].join("\n");
   // E2 v3 is the explicit held-workload bump; actuation-mode capture remains out of scope.
   assert.match(characterizationSource, /Closed-loop settling timestamps only/);
   assert.doesNotMatch(characterizationSource, /actuationMode|automaticControlEnabled/);

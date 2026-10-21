@@ -833,12 +833,12 @@ test("E2 v3 has no runtime, control, E1, or FitnessState feedback path", () => {
   };
   walk("../src/");
   assert.deepEqual(writers.sort(), [
+    "../src/contracts/personalizedPrescriptionCharacterization.ts",
     "../src/personalizationDiagnosticsView.ts",
     "../src/personalizationScientificAssessment.ts",
     "../src/personalizedPrescriptionCharacterization.ts",
     "../src/scientificSessionEvidence.ts",
     "../src/steadyStateSettledWorkload.ts",
-    "../src/types.ts",
     "../src/workoutSummary.ts",
   ]);
   const summary = readFileSync(new URL("../src/workoutSummary.ts", import.meta.url), "utf8");
