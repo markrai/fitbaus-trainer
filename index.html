@@ -225,6 +225,18 @@
         </dl>
         <div class="profile-helper profile-informational">Personalized workout control is not active.</div>
       </div>
+
+      <div class="modal-section profile-card" aria-labelledby="legacyImportTitle">
+        <div class="profile-section-heading">
+          <div id="legacyImportTitle" class="modal-section-title">Import legacy Trainer data</div>
+        </div>
+        <div class="profile-helper">Import data exported from the previous Android app identity (Export data for FitBaus Trainer). Import is allowed only into a fresh FitBaus Trainer installation and never merges with existing data.</div>
+        <input type="file" id="legacyImportFile" accept=".json,application/json" hidden onchange="selectLegacyMigrationFile(this)">
+        <button type="button" class="button secondary" onclick="document.getElementById('legacyImportFile').click()">Choose migration file</button>
+        <div id="legacyImportPreview" class="profile-helper" hidden style="margin-top: 10px;"></div>
+        <button type="button" class="button" id="legacyImportConfirmButton" hidden style="margin-top: 10px;" onclick="confirmLegacyMigrationImport()">Confirm import</button>
+        <div id="legacyImportStatus" class="profile-helper" role="status" style="margin-top: 10px;"></div>
+      </div>
     </div>
     
     <!-- Preferences Tab -->

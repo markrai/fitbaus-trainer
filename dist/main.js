@@ -12,6 +12,7 @@ import { registerSisuGlobals } from "./sisuSync.js";
 import "./hrMonitor.js";
 import { registerUiGlobals, updateDisplay } from "./uiControls.js";
 import { registerPwaGlobals } from "./pwaInstall.js";
+import { registerDataMigrationGlobals } from "./dataMigration.js";
 import { getSession, isSessionStale } from "./sessionStore.js";
 import { discardWorkoutSession } from "./workoutLifecycle.js";
 import { applyRuntimeDocumentState } from "./platform/runtime.js";
@@ -97,6 +98,7 @@ async function bootstrap() {
     registerVoiceGlobals();
     registerSisuGlobals();
     registerPwaGlobals();
+    registerDataMigrationGlobals();
     const phaseDisplayEl = document.getElementById("phaseDisplay");
     registerUiGlobals(phaseDisplayEl);
     setVersionOnDom();

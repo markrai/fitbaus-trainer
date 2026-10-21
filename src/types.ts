@@ -661,7 +661,7 @@ export interface FitnessMetric<T> {
 /**
  * Versioned internal identity for the current single local athlete.
  * Body mass and height intentionally retain the profile form's pounds/inches
- * so legacy migration is lossless and idempotent.
+ * so legacy profile migration needs no unit conversion and remains idempotent.
  */
 export interface AthleteProfile {
   schemaVersion: typeof ATHLETE_PROFILE_SCHEMA_VERSION;
