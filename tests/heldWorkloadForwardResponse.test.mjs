@@ -834,8 +834,13 @@ test("E2 v3 has no runtime, control, E1, or FitnessState feedback path", () => {
   walk("../src/");
   assert.deepEqual(writers.sort(), [
     "../src/contracts/personalizedPrescriptionCharacterization.ts",
+    "../src/personalization/scientific/aggregation.ts",
+    "../src/personalization/scientific/assessment.ts",
+    "../src/personalization/scientific/evidence.ts",
+    "../src/personalization/scientific/model.ts",
+    "../src/personalization/scientific/qualification.ts",
+    "../src/personalization/scientific/report.ts",
     "../src/personalizationDiagnosticsView.ts",
-    "../src/personalizationScientificAssessment.ts",
     "../src/personalizedPrescriptionCharacterization.ts",
     "../src/scientificSessionEvidence.ts",
     "../src/steadyStateSettledWorkload.ts",

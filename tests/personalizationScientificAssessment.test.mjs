@@ -159,13 +159,14 @@ test("the pure E4A evaluator has no storage or clock dependency", () => {
     if (priorStorage === undefined) delete globalThis.localStorage;
     else Object.defineProperty(globalThis, "localStorage", { configurable: true, value: priorStorage });
   }
-  const source = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
+  const e4a = e4aSources();
+  const source = e4a.all;
   assert.doesNotMatch(source, /Date\.now/);
   assert.doesNotMatch(source, /new Date\(/);
   assert.doesNotMatch(source, /localStorage/);
   assert.doesNotMatch(source, /indexedDB/);
   assert.doesNotMatch(source, /globalThis/);
-  assert.doesNotMatch(source, /^import /m);
+  assertE4AImportsNothingOutside(e4a);
 });
 
 test("E4A output always carries runtimeAuthority false with no true path", () => {
@@ -174,7 +175,7 @@ test("E4A output always carries runtimeAuthority false with no true path", () =>
     assert.equal(assessment.mode, "scientific_assessment");
     assert.equal(assessment.runtimeAuthority, false);
   }
-  const source = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
+  const source = e4aSources().all;
   assert.match(source, /runtimeAuthority: false/);
   assert.doesNotMatch(source, /runtimeAuthority:\s*true/);
   assert.doesNotMatch(source, /activationEligible/);
@@ -184,8 +185,9 @@ test("E4A output always carries runtimeAuthority false with no true path", () =>
 });
 
 test("E4A has zero imports into control, E1, E2, fitness, or UI, and none import E4A", () => {
-  const e4aSource = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(e4aSource, /from ["']\.\//);
+  const e4a = e4aSources();
+  const e4aSource = e4a.all;
+  assertE4AImportsNothingOutside(e4a);
   assert.doesNotMatch(e4aSource, /personalizedPrescription/);
   assert.doesNotMatch(e4aSource, /workoutPrescription|workoutLogic|fitnessState|fitnessRefinement/);
   assert.doesNotMatch(e4aSource, /machines\/|bikeBridge|uiControls|sisuSync/);
@@ -923,9 +925,15 @@ test("developer diagnostics is the only permitted E4A consumer", () => {
   assert.deepEqual(consumers, ["../src/personalizationDiagnosticsView.ts"]);
   const diagnostics = readFileSync(new URL("../src/personalizationDiagnosticsView.ts", import.meta.url), "utf8");
   assert.match(diagnostics, /from "\.\/personalizationScientificAssessment\.js"/);
+  // The implementation subsystem is reachable only through the facade.
+  const subsystemConsumers = sourceFiles.filter((file) => !file.endsWith("/personalizationScientificAssessment.ts") &&
+    !file.includes("/personalization/scientific/") &&
+    /personalization\/scientific\//.test(readFileSync(new URL(file, import.meta.url), "utf8")));
+  assert.deepEqual(subsystemConsumers, []);
   // One-way: E4A never imports diagnostics (or anything else).
-  const e4a = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(e4a, /personalizationDiagnosticsView/);
+  const e4a = e4aSources();
+  assert.doesNotMatch(e4a.all, /personalizationDiagnosticsView/);
+  assertE4AImportsNothingOutside(e4a);
 });
 
 test("no runtime or control module consumes E4A, directly or through diagnostics", () => {
@@ -1200,3 +1208,24 @@ export const actuation: typeof E4A_SCIENTIFIC_ASSESSMENT_POLICY_V1 = { ...E4A_SC
     .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
   assert.deepEqual(diagnostics, []);
 });
+
+/** E4A sources: the public facade plus every module of its implementation subsystem. */
+function e4aSources() {
+  const dir = new URL("../src/personalization/scientific/", import.meta.url);
+  const modules = readdirSync(dir).filter((file) => file.endsWith(".ts"))
+    .map((file) => ({ file, source: readFileSync(new URL(file, dir), "utf8") }));
+  assert.ok(modules.length >= 5, "E4A subsystem modules found");
+  const facade = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
+  return { facade, modules, all: [facade, ...modules.map((module) => module.source)].join("\n") };
+}
+
+/** E4A imports nothing outside itself: the facade only re-exports its subsystem, which imports only its own modules. */
+function assertE4AImportsNothingOutside({ facade, modules }) {
+  const specifiers = (source) => [...source.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((match) => match[1]);
+  for (const specifier of specifiers(facade)) {
+    assert.match(specifier, /^\.\/personalization\/scientific\/[A-Za-z]+\.js$/, `facade imports ${specifier}`);
+  }
+  for (const { file, source } of modules) {
+    for (const specifier of specifiers(source)) assert.match(specifier, /^\.\/[A-Za-z]+\.js$/, `${file} imports ${specifier}`);
+  }
+}

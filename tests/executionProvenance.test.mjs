@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 
 import {
@@ -822,10 +822,10 @@ test("provenance has no path into prescription, guidance, control, E1, E2, or Fi
   }
   const bridge = readFileSync(new URL("../src/platform/bikeBridgeRuntime.ts", import.meta.url), "utf8");
   assert.doesNotMatch(bridge, forbidden, "the bridge only exposes an observer seam");
-  const e4a = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(e4a, /from ["']\.\//, "E4A imports nothing");
-  assert.match(e4a, /openLoopEvidence: "required_but_unavailable"/);
-  assert.match(e4a, /actuationModeEvidence: "required_but_unavailable"/);
+  const e4a = e4aSources();
+  assertE4AImportsNothingOutside(e4a);
+  assert.match(e4a.all, /openLoopEvidence: "required_but_unavailable"/);
+  assert.match(e4a.all, /actuationModeEvidence: "required_but_unavailable"/);
 });
 
 test("sidecar promotion uses the assessment's frozen athlete, never the currently loaded profile", () => {
@@ -1040,3 +1040,24 @@ test("newly written records always use the canonical phase semantics", () => {
   assert.match(source, /Published WorkoutExecutionProvenance v1 writer compatibility/);
   assert.equal((source.match(/"published_b7fef00"\)/g) ?? []).length, 1, "the published rule is used only by the reader");
 });
+
+/** E4A sources: the public facade plus every module of its implementation subsystem. */
+function e4aSources() {
+  const dir = new URL("../src/personalization/scientific/", import.meta.url);
+  const modules = readdirSync(dir).filter((file) => file.endsWith(".ts"))
+    .map((file) => ({ file, source: readFileSync(new URL(file, dir), "utf8") }));
+  assert.ok(modules.length >= 5, "E4A subsystem modules found");
+  const facade = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
+  return { facade, modules, all: [facade, ...modules.map((module) => module.source)].join("\n") };
+}
+
+/** E4A imports nothing outside itself: the facade only re-exports its subsystem, which imports only its own modules. */
+function assertE4AImportsNothingOutside({ facade, modules }) {
+  const specifiers = (source) => [...source.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((match) => match[1]);
+  for (const specifier of specifiers(facade)) {
+    assert.match(specifier, /^\.\/personalization\/scientific\/[A-Za-z]+\.js$/, `facade imports ${specifier}`);
+  }
+  for (const { file, source } of modules) {
+    for (const specifier of specifiers(source)) assert.match(specifier, /^\.\/[A-Za-z]+\.js$/, `${file} imports ${specifier}`);
+  }
+}

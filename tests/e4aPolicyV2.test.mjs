@@ -213,9 +213,9 @@ test("E4A and the join contain no second held-window algorithm", () => {
   const join = readFileSync(new URL("../src/scientificSessionEvidence.ts", import.meta.url), "utf8");
   assert.match(join, /analyzeHeldWorkloadForwardResponseInternal/);
   assert.doesNotMatch(join, /settlingSeconds|maxObservationGapSec|observedResistance\?\.value|stableObservedResistanceWindows/);
-  const e4a = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(e4a, /from ["']\.\//, "E4A still imports nothing");
-  assert.doesNotMatch(e4a, /settlingSeconds|stableObservedResistanceWindows/);
+  const e4a = e4aSources();
+  assertE4AImportsNothingOutside(e4a);
+  assert.doesNotMatch(e4a.all, /settlingSeconds|stableObservedResistanceWindows/);
 });
 
 // ---------------------------------------------------------------- selector algorithm
@@ -782,3 +782,24 @@ test("no production-v2 scenario reaches eligible, and every valid assessment kee
   assert.ok(reasons([[55, "default_starting_resistance", 8]]).includes("programmatic_selected_evidence"));
   assert.ok(reasons([]).includes("no_app_selector_observed"));
 });
+
+/** E4A sources: the public facade plus every module of its implementation subsystem. */
+function e4aSources() {
+  const dir = new URL("../src/personalization/scientific/", import.meta.url);
+  const modules = readdirSync(dir).filter((file) => file.endsWith(".ts"))
+    .map((file) => ({ file, source: readFileSync(new URL(file, dir), "utf8") }));
+  assert.ok(modules.length >= 5, "E4A subsystem modules found");
+  const facade = readFileSync(new URL("../src/personalizationScientificAssessment.ts", import.meta.url), "utf8");
+  return { facade, modules, all: [facade, ...modules.map((module) => module.source)].join("\n") };
+}
+
+/** E4A imports nothing outside itself: the facade only re-exports its subsystem, which imports only its own modules. */
+function assertE4AImportsNothingOutside({ facade, modules }) {
+  const specifiers = (source) => [...source.matchAll(/(?:from|import)\s*\(?\s*["']([^"']+)["']/g)].map((match) => match[1]);
+  for (const specifier of specifiers(facade)) {
+    assert.match(specifier, /^\.\/personalization\/scientific\/[A-Za-z]+\.js$/, `facade imports ${specifier}`);
+  }
+  for (const { file, source } of modules) {
+    for (const specifier of specifiers(source)) assert.match(specifier, /^\.\/[A-Za-z]+\.js$/, `${file} imports ${specifier}`);
+  }
+}
