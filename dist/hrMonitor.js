@@ -1,6 +1,7 @@
 import { dispatchHeartRateMeasurement } from "./platform/heartRateDispatch.js";
 import { HrvSession } from "./platform/hrvSession.js";
 import { isNativeRuntime } from "./platform/runtime.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 let currentHrDevice = null;
 let currentHrCharacteristic = null;
 const BATTERY_POLL_MS = 2 * 60 * 1000;
@@ -13,7 +14,7 @@ const hrvCallbacks = [];
 const hrvSession = new HrvSession();
 function bleDebugEnabled() {
     try {
-        return localStorage.getItem("bleDebug") === "true";
+        return localStorage.getItem(DURABLE_LOCAL_STORAGE_KEYS.bleDebug) === "true";
     }
     catch {
         return false;

@@ -8,6 +8,7 @@ import {
   type PersonalizedPrescriptionFitnessEvidenceSnapshotV1,
   type WorkoutCalibrationMachineProvenanceV1,
 } from "./types.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 
 /**
  * Sidecar store binding exact promoted formal-calibration instances to the
@@ -15,7 +16,7 @@ import {
  * so FitnessState, E1, and E2 schemas stay unchanged, and it is never deleted
  * with the source assessment summary.
  */
-export const FORMAL_CALIBRATION_MACHINE_PROVENANCE_STORAGE_KEY = "formal_calibration_machine_provenance_v1";
+export const FORMAL_CALIBRATION_MACHINE_PROVENANCE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.formalCalibrationMachineProvenance;
 const MAX_RECORDS = 500;
 const ATHLETE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const MACHINE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;

@@ -1,4 +1,5 @@
-export const SHADOW_PREDICTION_STORAGE_KEY = "fitbaus_trainer_shadow_resistance_predictions";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../../persistence/localStorageKeys.js";
+export const SHADOW_PREDICTION_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.shadowResistancePredictions;
 export const SHADOW_PREDICTION_STORE_VERSION = 1;
 export const SHADOW_PREDICTION_LIMIT = 20;
 export const MIN_SHADOW_DOSE_SAMPLES = 5;

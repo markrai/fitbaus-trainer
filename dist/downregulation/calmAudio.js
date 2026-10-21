@@ -16,7 +16,8 @@
  * - Master gain low (~0.15–0.25) for safe listening (~60–70 dB SPL equivalent).
  */
 import { getSmoothedHR } from "./hrController.js";
-const SOUND_STYLE_STORAGE_KEY = "downregulationSoundStyle";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../persistence/localStorageKeys.js";
+const SOUND_STYLE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.downregulationSoundStyle;
 const SOUND_STYLE_DEFAULT = "binaural";
 let soundStyle = SOUND_STYLE_DEFAULT;
 (function loadSoundStyle() {

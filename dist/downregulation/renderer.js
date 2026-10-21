@@ -9,6 +9,7 @@
 import { getCurrentBpm } from "../hrMonitor.js";
 import { getCoherenceFactor, getSmoothedHR } from "./hrController.js";
 import { getParticleCount, getPositions, getSeeds, initParticleSim, stepParticleSim, } from "./particleSim.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../persistence/localStorageKeys.js";
 // Particle count comes from sim (CPU collision); vertex shader only uses position
 const VERTEX_SOURCE = `#version 300 es
 in vec2 a_position;
@@ -176,11 +177,11 @@ let uParticleSizeScale = null;
 let uPointTexture = null;
 let uResolution = null;
 let pointTexture = null;
-const PARTICLE_SIZE_STORAGE_KEY = "downregulationParticleSizeScale";
+const PARTICLE_SIZE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.downregulationParticleSizeScale;
 const PARTICLE_SIZE_DEFAULT = 1.0;
-const PARTICLE_STYLE_STORAGE_KEY = "downregulationParticleStyle";
+const PARTICLE_STYLE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.downregulationParticleStyle;
 const PARTICLE_STYLE_DEFAULT = "beads";
-const NOISE_ENTROPY_MIN_BPM_KEY = "downregulationNoiseEntropyMinBpm";
+const NOISE_ENTROPY_MIN_BPM_KEY = DURABLE_LOCAL_STORAGE_KEYS.downregulationNoiseEntropyMinBpm;
 const NOISE_ENTROPY_MIN_BPM_DEFAULT = 40;
 const NOISE_ENTROPY_MAX_BPM = 150;
 let particleSizeScale = PARTICLE_SIZE_DEFAULT;

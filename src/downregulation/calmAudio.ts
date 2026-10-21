@@ -17,9 +17,10 @@
  */
 
 import { getSmoothedHR } from "./hrController.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../persistence/localStorageKeys.js";
 
 export type SoundStyle = "binaural" | "whale" | "none";
-const SOUND_STYLE_STORAGE_KEY = "downregulationSoundStyle";
+const SOUND_STYLE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.downregulationSoundStyle;
 const SOUND_STYLE_DEFAULT: SoundStyle = "binaural";
 
 let soundStyle: SoundStyle = SOUND_STYLE_DEFAULT;

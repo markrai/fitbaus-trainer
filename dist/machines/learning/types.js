@@ -1,4 +1,5 @@
-export const LEARNING_STORAGE_KEY = "fitbaus_trainer_machine_learning";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../../persistence/localStorageKeys.js";
+export const LEARNING_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.machineLearning;
 export const LEARNING_STORE_VERSION = 1;
 export function workDurationClass(durationSeconds) {
     if (durationSeconds <= 75)

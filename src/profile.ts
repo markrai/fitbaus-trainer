@@ -16,6 +16,7 @@ import {
   type Vo2ProfileInputs,
 } from "./vo2Estimator.js";
 import { generateUUID } from "./utils/uuid.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 
 /** Unset physiological fields. Placeholders must not become VO2 estimator inputs. */
 export const BLANK_PROFILE: Profile = {
@@ -28,9 +29,9 @@ export const BLANK_PROFILE: Profile = {
 
 /** Profile weight is entered and retained in pounds. Estimator snapshots kilograms. */
 export const PROFILE_WEIGHT_LBS_TO_KG = 0.45359237;
-export const ATHLETE_PROFILE_STORAGE_KEY = "athlete_profile_v1";
-export const ATHLETE_IDENTITY_STORAGE_KEY = "athlete_identity_v1";
-export const LEGACY_PROFILE_STORAGE_KEY = "profile";
+export const ATHLETE_PROFILE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.athleteProfile;
+export const ATHLETE_IDENTITY_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.athleteIdentity;
+export const LEGACY_PROFILE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.legacyProfileMirror;
 
 const HEIGHT_INCHES_MIN = 24;
 const HEIGHT_INCHES_MAX = 108;

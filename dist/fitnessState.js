@@ -1,6 +1,7 @@
 import { ATHLETE_PROFILE_SCHEMA_VERSION, ATHLETE_PROFILE_SCHEMA_VERSION_V1, FITNESS_STATE_SCHEMA_VERSION_V1, FITNESS_STATE_SCHEMA_VERSION_V2, FITNESS_STATE_SCHEMA_VERSION_V3, LEGACY_VO2_PROTOCOL_ID, LEGACY_VO2_PROTOCOL_VERSION, VO2_ASSESSMENT_SCHEMA_VERSION_V1, VO2_ASSESSMENT_SCHEMA_VERSION_V2, VO2_EVIDENCE_SCHEMA_VERSION_V1, VO2_EVIDENCE_SCHEMA_VERSION_V2, VO2_PROTOCOL_ID, VO2_PROTOCOL_VERSION, VO2_PROTOCOL_VERSION_V3, } from "./types.js";
 import { loadAthleteProfile, parseAthleteProfile, } from "./profile.js";
 import { LEGACY_VO2_ESTIMATOR_ID, LEGACY_VO2_ESTIMATOR_VERSION, VO2_ESTIMATOR_ID, VO2_ESTIMATOR_VERSION, } from "./vo2Estimator.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 /**
  * FitnessState persistence and readers. FitnessState is an umbrella athlete
  * store: formal assessment metrics (E1 evidence) and Phase D passive
@@ -8,7 +9,7 @@ import { LEGACY_VO2_ESTIMATOR_ID, LEGACY_VO2_ESTIMATOR_VERSION, VO2_ESTIMATOR_ID
  * prescription authority — check each metric's source / eligibleForPrescription.
  * See docs/personalization-architecture.md.
  */
-export const FITNESS_STATE_STORAGE_KEY = "fitness_state_v1";
+export const FITNESS_STATE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.fitnessState;
 const MAX_V1_EVIDENCE_SESSION_IDS = 1000;
 const MAX_V2_RECENT_EVIDENCE_SESSION_IDS = 16;
 const MAX_CALIBRATION_POINTS = 20;

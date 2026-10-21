@@ -1,8 +1,9 @@
 import type { Activity } from "../types.js";
 import { getMachineDefinition, isMachineId } from "./registry.js";
 import type { EquipmentSelection, MachineDefinition, MachineId } from "./types.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../persistence/localStorageKeys.js";
 
-export const EQUIPMENT_STORAGE_KEY = "fitbaus_trainer_equipment_selection";
+export const EQUIPMENT_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.equipmentSelection;
 
 export interface EquipmentStorage {
   getItem(key: string): string | null;

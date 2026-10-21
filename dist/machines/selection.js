@@ -1,5 +1,6 @@
 import { getMachineDefinition, isMachineId } from "./registry.js";
-export const EQUIPMENT_STORAGE_KEY = "fitbaus_trainer_equipment_selection";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../persistence/localStorageKeys.js";
+export const EQUIPMENT_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.equipmentSelection;
 function storageOrBrowser(storage) {
     return storage !== null && storage !== void 0 ? storage : localStorage;
 }

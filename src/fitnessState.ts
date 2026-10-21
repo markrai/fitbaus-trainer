@@ -38,6 +38,7 @@ import {
   VO2_ESTIMATOR_ID,
   VO2_ESTIMATOR_VERSION,
 } from "./vo2Estimator.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 
 /**
  * FitnessState persistence and readers. FitnessState is an umbrella athlete
@@ -46,7 +47,7 @@ import {
  * prescription authority — check each metric's source / eligibleForPrescription.
  * See docs/personalization-architecture.md.
  */
-export const FITNESS_STATE_STORAGE_KEY = "fitness_state_v1";
+export const FITNESS_STATE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.fitnessState;
 const MAX_V1_EVIDENCE_SESSION_IDS = 1000;
 const MAX_V2_RECENT_EVIDENCE_SESSION_IDS = 16;
 const MAX_CALIBRATION_POINTS = 20;

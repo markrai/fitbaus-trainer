@@ -1,4 +1,6 @@
-export const BIKE_BRIDGE_STORAGE_KEY = "fitbaus_trainer_bike_bridge";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../persistence/localStorageKeys.js";
+
+export const BIKE_BRIDGE_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.bikeBridge;
 export const DEFAULT_CONSOLE_BRIGHTNESS = 80;
 export const CONSOLE_BRIGHTNESS_MIN = 0;
 export const CONSOLE_BRIGHTNESS_MAX = 100;

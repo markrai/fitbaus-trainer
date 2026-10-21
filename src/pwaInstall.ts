@@ -1,5 +1,6 @@
 import { APP_VERSION } from "./version.js";
 import { isNativeRuntime } from "./platform/runtime.js";
+import { EPHEMERAL_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 
 let serviceWorkerRegistration: ServiceWorkerRegistration | null = null;
 let updateAvailable = false;
@@ -149,7 +150,7 @@ function showInstallPrompt() {
       if (e.key === "Escape" || e.keyCode === 27) closeInstallPrompt();
     };
     document.addEventListener("keydown", installPromptEscHandler);
-    localStorage.setItem("installPromptShown", Date.now().toString());
+    localStorage.setItem(EPHEMERAL_LOCAL_STORAGE_KEYS.installPromptShown, Date.now().toString());
   }
 }
 
@@ -171,7 +172,7 @@ function installPWAFromPrompt() {
 }
 
 function shouldShowInstallPrompt() {
-  const lastShown = localStorage.getItem("installPromptShown");
+  const lastShown = localStorage.getItem(EPHEMERAL_LOCAL_STORAGE_KEYS.installPromptShown);
   if (!lastShown) return true;
   const lastShownTime = parseInt(lastShown);
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
@@ -186,7 +187,7 @@ function registerServiceWorker() {
     window.location.hostname === "localhost" ||
     window.location.hostname === "127.0.0.1" ||
     window.location.hostname === "[::1]";
-  if (isLocalhost && localStorage.getItem("enableServiceWorkerDev") !== "true") {
+  if (isLocalhost && localStorage.getItem(EPHEMERAL_LOCAL_STORAGE_KEYS.enableServiceWorkerDev) !== "true") {
     console.log("Skipping Service Worker registration on localhost (set enableServiceWorkerDev=true to enable).");
     return;
   }

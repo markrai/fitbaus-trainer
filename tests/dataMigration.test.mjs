@@ -562,3 +562,183 @@ test("nonempty IndexedDB destination fails closed without merging", async () => 
   assert.equal(blocked.status, "DESTINATION_NOT_EMPTY");
   assert.equal((await readDestStore(factory, "workouts")).length, 3);
 });
+
+test("public facade still exposes the dataMigration runtime API", async () => {
+  const facade = await import("../dist/dataMigration.js");
+  const expected = {
+    function: [
+      "assertMigrationBundleImportable",
+      "assertMigrationJsonLossless",
+      "browserMigrationLocalStorage",
+      "buildMigrationBundle",
+      "canonicalStringify",
+      "classifyLegacyLocalStorageKey",
+      "countUndefinedProperties",
+      "deriveStoreKey",
+      "destinationKeyForLegacyKey",
+      "getUnreviewedSourceState",
+      "importMigrationBundle",
+      "inspectDestinationLocalState",
+      "isMigrationBundleImportable",
+      "parseMigrationBundleJson",
+      "registerDataMigrationGlobals",
+      "sha256Hex",
+      "sortStoreEntries",
+      "summarizeMigrationBundle",
+      "validateMigrationBundleStructure",
+      "verifyDestinationAgainstBundle",
+      "verifyMigrationBundleIntegrity",
+      "MigrationError",
+    ],
+    string: [
+      "DESTINATION_DB_NAME",
+      "LEGACY_DB_NAME",
+      "LEGACY_PACKAGE_ID",
+      "MIGRATION_FORMAT",
+      "MIGRATION_RECEIPT_KEY",
+    ],
+    number: ["DESTINATION_DB_VERSION", "MIGRATION_SCHEMA_VERSION"],
+    object: ["LEGACY_KEY_RENAMES", "MIGRATION_STORE_NAMES", "TRANSIENT_KEY_PREFIXES", "UNCHANGED_DURABLE_KEYS"],
+  };
+  for (const [type, names] of Object.entries(expected)) {
+    for (const name of names) assert.equal(typeof facade[name], type, name);
+  }
+});
+
+/** Fake IndexedDB whose readonly transaction completes in the same task as its last request success. */
+function eagerCompletionDb({ failTransaction = false } = {}) {
+  return {
+    objectStoreNames: { contains: () => true },
+    transaction() {
+      const tx = { oncomplete: null, onerror: null, onabort: null, error: null };
+      let pending = 2;
+      const finish = () => {
+        if (--pending > 0) return;
+        if (failTransaction) {
+          tx.error = new Error("readonly transaction failed");
+          tx.onabort?.();
+        } else {
+          tx.oncomplete?.();
+        }
+      };
+      const request = (result) => {
+        const req = { result: undefined, error: null, onsuccess: null, onerror: null };
+        setTimeout(() => {
+          req.result = result;
+          req.onsuccess?.();
+          finish();
+        }, 0);
+        return req;
+      };
+      tx.objectStore = () => ({ getAll: () => request([{ session_id: "w1" }]), getAllKeys: () => request(["w1"]) });
+      return tx;
+    },
+  };
+}
+
+async function withinTimeout(promise, ms, message) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => (timer = setTimeout(() => reject(new Error(message)), ms)))]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+test("readonly store reads observe transaction completion even when it fires with the last request", async () => {
+  const { readAllDestinationStores } = await import("../dist/migration/destination.js");
+  const stores = await withinTimeout(readAllDestinationStores(eagerCompletionDb()), 1000, "transaction completion was missed");
+  assert.deepEqual(stores.workouts, [{ key: "w1", value: { session_id: "w1" } }]);
+});
+
+test("readonly transaction failure propagates instead of reading as success", async () => {
+  const { readAllDestinationStores } = await import("../dist/migration/destination.js");
+  await assert.rejects(
+    withinTimeout(readAllDestinationStores(eagerCompletionDb({ failTransaction: true })), 1000, "timed out"),
+    /readonly transaction failed/
+  );
+});
+
+test("migration ordering is code-unit order, not locale collation", async () => {
+  const { compareCanonicalText } = await import("../dist/migration/serialization.js");
+  const { sortStoreEntries } = await import("../dist/dataMigration.js");
+  // Pairs where locale collation and code-unit order disagree.
+  for (const [first, second] of [
+    ['["w1",10]', '["w1",1]'],
+    ["Zeta", "alpha"],
+    ["aB", "a_b"],
+    ["f", "é"],
+  ]) {
+    assert.ok(compareCanonicalText(first, second) < 0, `${first} < ${second}`);
+    assert.ok(compareCanonicalText(second, first) > 0, `${second} > ${first}`);
+  }
+  assert.equal(compareCanonicalText("same", "same"), 0);
+  const sorted = sortStoreEntries([1, 10, 2, 100, 1.5].map((t) => ({ key: ["w1", t], value: {} })));
+  // Code units: "." < "0" < "]", so ["w1",1.5] < ["w1",100] < ["w1",10] < ["w1",1].
+  assert.deepEqual(sorted.map((e) => e.key[1]), [1.5, 100, 10, 1, 2]);
+});
+
+test("bundle build, validation and import never consult localeCompare; same input gives same digest", async () => {
+  const hr = [1, 2, 10, 100].map((t) => ({ session_id: "w1", timestamp_sec: t, bpm: 100 }));
+  const input = (rows, local) => ({
+    exportedAt: "2026-01-01T00:00:00.000Z",
+    storeRows: { hr_samples: rows },
+    localEntries: local,
+  });
+  const local = [
+    { key: "fitness_state_v1", value: "{}" },
+    { key: "sisu_trainer_bike_bridge", value: "{}" },
+    { key: "start_2026-01-01", value: "1" },
+  ];
+  const original = String.prototype.localeCompare;
+  String.prototype.localeCompare = () => {
+    throw new Error("localeCompare must not be used by migration");
+  };
+  try {
+    const a = await buildMigrationBundle(input(hr, local));
+    const b = await buildMigrationBundle(input([...hr].reverse(), [...local].reverse()));
+    assert.equal(a.manifest.bundle_digest, b.manifest.bundle_digest);
+    assert.equal(JSON.stringify(a), JSON.stringify(b));
+    const parsed = parseMigrationBundleJson(JSON.stringify(a));
+    await verifyMigrationBundleIntegrity(parsed);
+    const storage = new MemoryStorage();
+    const factory = new IDBFactory();
+    assert.equal((await importMigrationBundle(parsed, { storage, indexedDBFactory: factory })).status, "IMPORTED_VERIFIED");
+    assert.equal((await importMigrationBundle(parsed, { storage, indexedDBFactory: factory })).status, "ALREADY_IMPORTED");
+  } finally {
+    String.prototype.localeCompare = original;
+  }
+});
+
+test("bundles exported in legacy localeCompare order stay valid and re-import as ALREADY_IMPORTED", async () => {
+  const { sha256Hex, canonicalStringify } = await import("../dist/dataMigration.js");
+  const bundle = await buildMigrationBundle({
+    exportedAt: "2026-01-01T00:00:00.000Z",
+    storeRows: {
+      hr_samples: [1, 2, 10, 100, 1.5].map((t) => ({ session_id: "w1", timestamp_sec: t, bpm: 100 })),
+      ordinary_bike_telemetry: [1, 10, 2].map((t) => ({ session_id: "w1", active_sec: t, athlete_id: "a", observed_at: "o", sample: {} })),
+    },
+    localEntries: [{ key: "fitness_state_v1", value: "{}" }],
+  });
+  // Re-create exactly what the pre-R2.1 exporter produced: entries in localeCompare order, digests over that order.
+  const legacyOrder = (entries) =>
+    [...entries].sort((x, y) => canonicalStringify(x.key).localeCompare(canonicalStringify(y.key)));
+  const stores = bundle.indexeddb.stores;
+  for (const name of Object.keys(stores)) stores[name] = legacyOrder(stores[name]);
+  assert.notDeepEqual(stores.hr_samples.map((e) => e.key[1]), [1.5, 100, 10, 1, 2], "fixture must exercise a differing order");
+  for (const name of Object.keys(stores)) bundle.manifest.store_digests[name] = await sha256Hex(canonicalStringify(stores[name]));
+  bundle.manifest.section_digests.indexeddb = await sha256Hex(canonicalStringify(stores));
+  const { manifest, ...rest } = bundle;
+  manifest.bundle_digest = await sha256Hex(
+    canonicalStringify({ ...rest, section_digests: manifest.section_digests, store_digests: manifest.store_digests })
+  );
+
+  const parsed = parseMigrationBundleJson(JSON.stringify(bundle));
+  await verifyMigrationBundleIntegrity(parsed);
+  const storage = new MemoryStorage();
+  const factory = new IDBFactory();
+  const first = await importMigrationBundle(parsed, { storage, indexedDBFactory: factory });
+  assert.equal(first.status, "IMPORTED_VERIFIED");
+  assert.equal(first.verification.status, "VERIFIED_MATCH");
+  assert.equal((await importMigrationBundle(parsed, { storage, indexedDBFactory: factory })).status, "ALREADY_IMPORTED");
+});

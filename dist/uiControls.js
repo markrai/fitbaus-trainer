@@ -28,6 +28,7 @@ import { PERFORMED_LOAD_DIAGNOSTICS_RECENT_LIMIT, buildPerformedLoadWorkoutView,
 import { performedLoadDiagnosticsHtml } from "./performedLoadDiagnosticsView.js";
 import { ACTIVITY_LABELS, getActiveWorkoutActivity } from "./workoutActivity.js";
 import { findResolvedPhaseTarget, formatResolvedHeartRateTarget, machineHeartRateTargetFromResolved, resolveWorkoutPrescription, } from "./workoutPrescription.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 let selectedDay = null;
 let liveBpm = null;
 let lastBpmUpdateTime = null;
@@ -1073,10 +1074,10 @@ function switchTab(tabName) {
     }
 }
 function getShowSecondsCountdown() {
-    return localStorage.getItem("showSecondsCountdown") === "true";
+    return localStorage.getItem(DURABLE_LOCAL_STORAGE_KEYS.showSecondsCountdown) === "true";
 }
 function getVoicePromptsEnabled() {
-    return localStorage.getItem("voicePromptsEnabled") !== "false";
+    return localStorage.getItem(DURABLE_LOCAL_STORAGE_KEYS.voicePromptsEnabled) !== "false";
 }
 function loadPreferences() {
     const cb = document.getElementById("showSecondsCountdown");
@@ -1087,10 +1088,10 @@ function loadPreferences() {
         voiceCb.checked = getVoicePromptsEnabled();
 }
 function savePreferenceShowSeconds(checked) {
-    localStorage.setItem("showSecondsCountdown", checked ? "true" : "false");
+    localStorage.setItem(DURABLE_LOCAL_STORAGE_KEYS.showSecondsCountdown, checked ? "true" : "false");
 }
 function savePreferenceVoicePrompts(checked) {
-    localStorage.setItem("voicePromptsEnabled", checked ? "true" : "false");
+    localStorage.setItem(DURABLE_LOCAL_STORAGE_KEYS.voicePromptsEnabled, checked ? "true" : "false");
 }
 function loadEquipmentSettings() {
     var _a;

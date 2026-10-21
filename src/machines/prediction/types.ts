@@ -1,10 +1,11 @@
 import type { Activity } from "../../types.js";
 import type { MachineId } from "../trace.js";
 import type { WorkDurationClass } from "../learning/types.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../../persistence/localStorageKeys.js";
 
 export type { WorkDurationClass };
 
-export const SHADOW_PREDICTION_STORAGE_KEY = "fitbaus_trainer_shadow_resistance_predictions";
+export const SHADOW_PREDICTION_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.shadowResistancePredictions;
 export const SHADOW_PREDICTION_STORE_VERSION = 1 as const;
 export const SHADOW_PREDICTION_LIMIT = 20;
 export const MIN_SHADOW_DOSE_SAMPLES = 5;

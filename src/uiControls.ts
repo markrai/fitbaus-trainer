@@ -124,6 +124,7 @@ import {
   machineHeartRateTargetFromResolved,
   resolveWorkoutPrescription,
 } from "./workoutPrescription.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 
 let selectedDay: string | null = null;
 let liveBpm: number | null = null;
@@ -1219,11 +1220,11 @@ function switchTab(tabName: string) {
 }
 
 function getShowSecondsCountdown() {
-  return localStorage.getItem("showSecondsCountdown") === "true";
+  return localStorage.getItem(DURABLE_LOCAL_STORAGE_KEYS.showSecondsCountdown) === "true";
 }
 
 function getVoicePromptsEnabled() {
-  return localStorage.getItem("voicePromptsEnabled") !== "false";
+  return localStorage.getItem(DURABLE_LOCAL_STORAGE_KEYS.voicePromptsEnabled) !== "false";
 }
 
 function loadPreferences() {
@@ -1234,11 +1235,11 @@ function loadPreferences() {
 }
 
 function savePreferenceShowSeconds(checked: boolean) {
-  localStorage.setItem("showSecondsCountdown", checked ? "true" : "false");
+  localStorage.setItem(DURABLE_LOCAL_STORAGE_KEYS.showSecondsCountdown, checked ? "true" : "false");
 }
 
 function savePreferenceVoicePrompts(checked: boolean) {
-  localStorage.setItem("voicePromptsEnabled", checked ? "true" : "false");
+  localStorage.setItem(DURABLE_LOCAL_STORAGE_KEYS.voicePromptsEnabled, checked ? "true" : "false");
 }
 
 function loadEquipmentSettings() {

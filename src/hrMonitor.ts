@@ -1,6 +1,7 @@
 import { dispatchHeartRateMeasurement } from "./platform/heartRateDispatch.js";
 import { HrvSession, type HrvDiagnosticSnapshot } from "./platform/hrvSession.js";
 import { isNativeRuntime } from "./platform/runtime.js";
+import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 
 export type { HrvSnapshot } from "./platform/hrvAccumulator.js";
 export type { HrvReadiness } from "./platform/hrvAccumulator.js";
@@ -22,7 +23,7 @@ const hrvSession = new HrvSession();
 
 function bleDebugEnabled() {
   try {
-    return localStorage.getItem("bleDebug") === "true";
+    return localStorage.getItem(DURABLE_LOCAL_STORAGE_KEYS.bleDebug) === "true";
   } catch {
     return false;
   }
