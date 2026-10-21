@@ -500,7 +500,10 @@ test("policy v1 is frozen and unchanged; v2 is separate; the current policy is v
   assert.equal(E4A_SCIENTIFIC_ASSESSMENT_POLICY_V2.version, 2);
   assert.equal("actuationModeEvidence" in E4A_SCIENTIFIC_ASSESSMENT_POLICY_V2, false);
   assert.equal(E4A_CURRENT_SCIENTIFIC_ASSESSMENT_POLICY, E4A_SCIENTIFIC_ASSESSMENT_POLICY_V2);
-  const diagnostics = readFileSync(new URL("../src/personalizationDiagnosticsView.ts", import.meta.url), "utf8");
+  const diagnosticsDir = new URL("../src/personalization/diagnostics/", import.meta.url);
+  const diagnostics = [new URL("../src/personalizationDiagnosticsView.ts", import.meta.url),
+    ...readdirSync(diagnosticsDir).filter((file) => file.endsWith(".ts")).map((file) => new URL(file, diagnosticsDir))]
+    .map((url) => readFileSync(url, "utf8")).join("\n");
   assert.match(diagnostics, /E4A_CURRENT_SCIENTIFIC_ASSESSMENT_POLICY/);
   assert.doesNotMatch(diagnostics, /E4A_SCIENTIFIC_ASSESSMENT_POLICY_V1/);
 });
@@ -587,11 +590,18 @@ test("no runtime, control, E1, E2-writer, or FitnessState path consumes the v2 j
   const files = walk("../src/");
   const consumers = (pattern) => files.filter((file) =>
     pattern.test(readFileSync(new URL(file, import.meta.url), "utf8")) && !file.endsWith("/scientificSessionEvidence.ts"));
-  assert.deepEqual(consumers(/scientificSessionEvidence/).sort(),
-    ["../src/personalizationDiagnosticsView.ts", "../src/uiControls.ts"]);
+  assert.deepEqual(consumers(/scientificSessionEvidence/).sort(), [
+    "../src/personalization/diagnostics/model.ts",
+    "../src/personalization/diagnostics/projection.ts",
+    "../src/uiControls.ts",
+  ]);
   const e4aConsumers = files.filter((file) => !file.endsWith("/personalizationScientificAssessment.ts") &&
     /personalizationScientificAssessment/.test(readFileSync(new URL(file, import.meta.url), "utf8")));
-  assert.deepEqual(e4aConsumers, ["../src/personalizationDiagnosticsView.ts"]);
+  assert.deepEqual(e4aConsumers.sort(), [
+    "../src/personalization/diagnostics/model.ts",
+    "../src/personalization/diagnostics/projection.ts",
+    "../src/personalization/diagnostics/rendering.ts",
+  ]);
   for (const file of ["workoutPrescription.ts", "workoutLogic.ts", "machines/guidance.ts", "machines/runtime.ts",
     "machines/proformSmartPower10.ts", "machines/learning/index.ts", "machines/dynamics/index.ts", "vo2Protocol.ts",
     "vo2ProtocolV3.ts", "fitnessState.ts", "fitnessRefinement.ts", "personalizedPrescription.ts",

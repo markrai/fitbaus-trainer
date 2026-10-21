@@ -922,9 +922,18 @@ test("developer diagnostics is the only permitted E4A consumer", () => {
   assert.ok(sourceFiles.length > 20);
   const consumers = sourceFiles.filter((file) => !file.endsWith("/personalizationScientificAssessment.ts") &&
     /personalizationScientificAssessment/.test(readFileSync(new URL(file, import.meta.url), "utf8")));
-  assert.deepEqual(consumers, ["../src/personalizationDiagnosticsView.ts"]);
-  const diagnostics = readFileSync(new URL("../src/personalizationDiagnosticsView.ts", import.meta.url), "utf8");
-  assert.match(diagnostics, /from "\.\/personalizationScientificAssessment\.js"/);
+  // Only the developer diagnostics subsystem (behind the personalizationDiagnosticsView facade) consumes E4A.
+  assert.deepEqual(consumers.sort(), [
+    "../src/personalization/diagnostics/model.ts",
+    "../src/personalization/diagnostics/projection.ts",
+    "../src/personalization/diagnostics/rendering.ts",
+  ]);
+  const projection = readFileSync(new URL("../src/personalization/diagnostics/projection.ts", import.meta.url), "utf8");
+  assert.match(projection, /from "\.\.\/\.\.\/personalizationScientificAssessment\.js"/);
+  // Diagnostics consume the public E4A facade, never the scientific implementation modules.
+  for (const file of consumers) {
+    assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), "utf8"), /["'][./]*scientific\//, file);
+  }
   // The implementation subsystem is reachable only through the facade.
   const subsystemConsumers = sourceFiles.filter((file) => !file.endsWith("/personalizationScientificAssessment.ts") &&
     !file.includes("/personalization/scientific/") &&

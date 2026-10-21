@@ -485,11 +485,11 @@ test("diagnostic export is deterministic, provenance-preserving, and excludes pr
 });
 
 test("E3 presentation has no import path into prescription, machine control, fitness, passive refinement, or SISU", async () => {
-  const diagnosticsSource = await readFile(new URL("../src/personalizationDiagnosticsView.ts", import.meta.url), "utf8");
+  const diagnosticsSource = (await diagnosticsSources()).all;
   const statusSource = await readFile(new URL("../src/personalizationStatus.ts", import.meta.url), "utf8");
   const uiSource = await readFile(new URL("../src/uiControls.ts", import.meta.url), "utf8");
-  assert.doesNotMatch(diagnosticsSource, /from ["']\.\/(?:workoutPrescription|bikeBridge|fitnessState|fitnessRefinement|sisuSync)|indexedDB|parsePersonalizedPrescription/);
-  assert.match(diagnosticsSource, /from ["']\.\/performedLoad\.js["']/);
+  assert.doesNotMatch(diagnosticsSource, /from ["'](?:\.\.?\/)+(?:workoutPrescription|bikeBridge|fitnessState|fitnessRefinement|sisuSync)|indexedDB|parsePersonalizedPrescription/);
+  assert.match(diagnosticsSource, /from ["'](?:\.\.?\/)+performedLoad\.js["']/);
   assert.doesNotMatch(diagnosticsSource, /evaluatePersonalizedPrescription|candidatePower\s*=/);
   assert.doesNotMatch(statusSource, /personalizedPrescription|workoutPrescription|bikeBridge|fitnessRefinement|sisuSync/);
   assert.match(uiSource, /getAllWorkoutSummaries\(\)[\s\S]*extractTrustedPersonalizationCharacterizations/);
@@ -935,4 +935,91 @@ test("E3 longitudinal analysis and E2 v3 capture no actuation mode and never ena
   assert.doesNotMatch(typesSource, /actuationMode/);
   assert.match(typesSource, /activationEligible: false/);
   assert.doesNotMatch(typesSource, /activationEligible: true/);
+});
+
+/** Diagnostics sources: the public facade plus every module of its implementation subsystem. */
+async function diagnosticsSources() {
+  const dir = new URL("../src/personalization/diagnostics/", import.meta.url);
+  const files = (await readdir(dir)).filter((file) => file.endsWith(".ts")).sort();
+  assert.ok(files.length >= 5, "diagnostics subsystem modules found");
+  const modules = await Promise.all(files.map(async (file) => ({ file, source: await readFile(new URL(file, dir), "utf8") })));
+  const facade = await readFile(new URL("../src/personalizationDiagnosticsView.ts", import.meta.url), "utf8");
+  return { facade, modules, all: [facade, ...modules.map((module) => module.source)].join("\n") };
+}
+
+test("personalizationDiagnosticsView facade runtime export surface is unchanged", async () => {
+  const view = await import("../dist/personalizationDiagnosticsView.js");
+  const surface = Object.fromEntries(Object.keys(view).sort().map((name) => [name, typeof view[name]]));
+  const fn = "function";
+  assert.deepEqual(surface, {
+    EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS: "object",
+    PERSONALIZATION_DIAGNOSTICS_EXPORT_SCHEMA_VERSION: "number",
+    PERSONALIZATION_DIAGNOSTICS_EXPORT_SCHEMA_VERSION_V1: "number",
+    PERSONALIZATION_DIAGNOSTICS_EXPORT_SCHEMA_VERSION_V2: "number",
+    PERSONALIZATION_DIAGNOSTICS_EXPORT_SCHEMA_VERSION_V3: "number",
+    PERSONALIZATION_DIAGNOSTIC_EXCLUSIONS: "object",
+    buildDiagnosticScientificAssessments: fn,
+    buildPersonalizationDiagnosticsModel: fn,
+    buildThresholdLongitudinalAnalysis: fn,
+    calibrationWorkoutMachineComparison: fn,
+    createHistoricalPersonalizationDiagnosticsExportV2: fn,
+    createPersonalizationDiagnosticsExport: fn,
+    extractTrustedExecutionProvenanceContexts: fn,
+    extractTrustedPersonalizationAssessmentContexts: fn,
+    extractTrustedPersonalizationCharacterizations: fn,
+    extractTrustedPersonalizationPerformedLoadContexts: fn,
+    extractTrustedPersonalizationWorkoutContexts: fn,
+    filterPersonalizationCharacterizations: fn,
+    personalizationDiagnosticDetailHtml: fn,
+    personalizationDiagnosticLabel: fn,
+    personalizationDiagnosticsExportJson: fn,
+    personalizationDiagnosticsFilterOptions: fn,
+    personalizationDiagnosticsHtml: fn,
+    summarizeExecutionProvenance: fn,
+    summarizeHeldActuationContext: fn,
+    summarizeHeldWorkloadForwardEvidence: fn,
+    summarizePersonalizationEvidenceCollection: fn,
+  });
+});
+
+test("diagnostics subsystem: read-only imports only, no DOM, and E4A only through its public facade", async () => {
+  const { facade, modules } = await diagnosticsSources();
+  const specifiers = (source) => [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
+  for (const specifier of specifiers(facade)) {
+    assert.match(specifier, /^\.\/personalization\/diagnostics\/[A-Za-z]+\.js$/, `facade imports ${specifier}`);
+  }
+  const allowed = /^(?:\.\/[A-Za-z]+\.js|\.\.\/\.\.\/(?:personalizedPrescriptionCharacterization|performedLoad|personalizationScientificAssessment|stats|scientificSessionEvidence|types)\.js)$/;
+  for (const { file, source } of modules) {
+    for (const specifier of specifiers(source)) assert.match(specifier, allowed, `${file} imports ${specifier}`);
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+    // DOM API use (not prose such as "held-workload window" inside rendered text).
+    assert.doesNotMatch(code, /\bdocument\.|\bwindow\.|HTMLElement|\.innerHTML|querySelector|addEventListener/, file);
+    assert.doesNotMatch(code, /localStorage|indexedDB|workoutStorage|persistence\/|setItem\(/, file);
+  }
+});
+
+test("diagnostics projection is deterministic, never mutates inputs, and filters only the visible cohort", () => {
+  const deepFreeze = (value) => {
+    if (value && typeof value === "object" && !Object.isFrozen(value)) {
+      Object.freeze(value);
+      for (const item of Object.values(value)) deepFreeze(item);
+    }
+    return value;
+  };
+  const records = deepFreeze([record("session-a"), record("session-b")]);
+  const before = JSON.stringify(records);
+  const first = buildPersonalizationDiagnosticsModel(records);
+  const second = buildPersonalizationDiagnosticsModel(records);
+  assert.deepEqual(first, second);
+  assert.equal(JSON.stringify(records), before);
+  assert.ok(first.rows.length > 0);
+  const none = buildPersonalizationDiagnosticsModel(records,
+    deepFreeze({ ...EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, workoutIntent: "__no_such_intent__" }));
+  assert.equal(none.rows.length, 0);
+  assert.equal(none.records.length, 0);
+  // All-record summaries and filter options never depend on the active filters.
+  assert.deepEqual(none.evidenceCollectionSummary, first.evidenceCollectionSummary);
+  assert.deepEqual(none.thresholdLongitudinal, first.thresholdLongitudinal);
+  assert.deepEqual(none.filterOptions, first.filterOptions);
+  assert.equal(none.sourceRecordCount, first.sourceRecordCount);
 });
