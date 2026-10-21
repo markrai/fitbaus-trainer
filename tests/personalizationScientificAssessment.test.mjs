@@ -1229,3 +1229,125 @@ function assertE4AImportsNothingOutside({ facade, modules }) {
     for (const specifier of specifiers(source)) assert.match(specifier, /^\.\/[A-Za-z]+\.js$/, `${file} imports ${specifier}`);
   }
 }
+
+// ---------------------------------------------------------------- canonical (locale-independent) ordering
+
+const ADVERSARIAL_IDS = ["é", "f", "alpha", "a_b", "Zeta", "aB"];
+/** Required canonical order: JavaScript code-unit order of the exact stored strings. */
+const CANONICAL_IDS = ["Zeta", "aB", "a_b", "alpha", "f", "é"];
+
+function adversarialPipeline() {
+  const rows = ADVERSARIAL_IDS.map((id, index) => characterizedRecord({
+    sessionId: id,
+    createdAt: `2026-09-${String(8 + index * 4).padStart(2, "0")}T14:30:00.000Z`,
+    calibrationIds: [...ADVERSARIAL_IDS].reverse(),
+    signed: index % 3,
+  }));
+  const records = rows.map((row) => row.record);
+  const assessmentContexts = Object.fromEntries(rows.map((row) => [row.record.workoutSessionId, row.assessment]));
+  const workoutContexts = Object.fromEntries(rows.map((row) => [row.record.workoutSessionId, row.workout]));
+  const subjects = discoverDiagnosticSubjects(records, assessmentContexts, workoutContexts, "athlete-a");
+  assert.equal(subjects.length, 1);
+  const target = subjects[0];
+  const built = buildSubjectEvidence({ subject: target, records, assessmentContexts, workoutContexts,
+    currentCalibration: { ...target.calibration, evidenceSessionIds: ["aB", "Zeta", "é", "f", "a_b", "alpha"] } });
+  const assessment = assessPersonalizedWorkloadEvidence(built, target, E4A_SCIENTIFIC_ASSESSMENT_POLICY_V1, EVALUATED_AT);
+  return { target, built, assessment };
+}
+
+/** Policy v2 over the same cohort: incomparable transfer sessions plus several held sessions. */
+function adversarialPolicyV2(target, built, policy) {
+  const comparable = { machineComparison: { comparable: true, reason: "same_machine_and_profile" },
+    actuationCapture: "complete", heldWorkload: null, independentOpenLoopEvidence: false };
+  const incomparable = (reason) => ({ ...comparable, machineComparison: { comparable: false, reason } });
+  const heldProvenance = (comparableFlag, reason) => ({
+    machineComparison: { comparable: comparableFlag, reason }, actuationCapture: "complete",
+    heldWorkload: { available: true, timedJoin: "available", qualifyingWindowCount: 2, qualifyingDurationSec: 600,
+      contexts: { automatic_selected: { windowCount: 2, durationSec: 600 }, programmatic_selected: { windowCount: 0, durationSec: 0 },
+        no_app_selector_observed: { windowCount: 0, durationSec: 0 }, unknown: { windowCount: 0, durationSec: 0 } } },
+    independentOpenLoopEvidence: false });
+  const held = (id, day, provenance) => ({
+    workoutSessionId: id, createdAt: `2026-09-${String(day).padStart(2, "0")}T14:30:00.000Z`, athleteId: "athlete-a",
+    activity: "bike", phaseKind: "work", intensityId: "threshold", calibration: target.calibration,
+    machineId: target.machineId, machineProfileVersion: target.machineProfileVersion,
+    observedPowerProvenance: target.observedPowerProvenance, legacyHrBand: { ...target.legacyHrBand }, provenanceV2: provenance });
+  const v2Evidence = {
+    ...built,
+    sessions: built.sessions.map((entry, index) => ({ ...entry,
+      provenanceV2: index % 3 === 0 ? comparable : incomparable(index % 3 === 1 ? "different_machine" : "same_machine_different_profile") })),
+    heldSessionsV2: [
+      held("é", 9, heldProvenance(true, "same_machine_and_profile")),
+      held("aB", 13, heldProvenance(true, "same_machine_and_profile")),
+      held("Zeta", 17, heldProvenance(false, "different_machine")),
+      held("a_b", 21, heldProvenance(false, "calibration_identity_mismatch")),
+    ],
+  };
+  return assessPersonalizedWorkloadEvidence(v2Evidence, target, policy, EVALUATED_AT);
+}
+
+test("E4A canonical ordering is code-unit order of the stored strings, independent of locale", async () => {
+  const { compareCanonicalText } = await import("../dist/personalization/scientific/guards.js");
+  for (const [first, second] of [["Zeta", "aB"], ["aB", "a_b"], ["a_b", "alpha"], ["alpha", "f"], ["f", "é"]]) {
+    assert.equal(compareCanonicalText(first, second), -1, `${first} < ${second}`);
+    assert.equal(compareCanonicalText(second, first), 1, `${second} > ${first}`);
+  }
+  assert.equal(compareCanonicalText("é", "é"), 0);
+
+  const { target, built, assessment } = adversarialPipeline();
+  // Calibration evidence sessions stay a set; only their canonical serialized order is specified.
+  assert.deepEqual(target.calibration.evidenceSessionIds, CANONICAL_IDS);
+  assert.equal(built.sessions.length, CANONICAL_IDS.length);
+  for (const entry of built.sessions) assert.deepEqual(entry.calibration.evidenceSessionIds, CANONICAL_IDS);
+  assert.deepEqual(assessment.evidenceDigest.sessionIds, CANONICAL_IDS);
+  assert.equal(assessment.evidenceDigest.calibrationInstanceId, CANONICAL_IDS.join(","));
+  // The same set in a different order is still the same calibration (no false supersession).
+  assert.equal(gateOf(assessment, "supersession").status, "pass");
+  assert.equal(assessment.runtimeAuthority, false);
+});
+
+test("E4A provenance exclusion-reason maps use the canonical key order", async () => {
+  const { provenanceDigestV2 } = await import("../dist/personalization/scientific/report.js");
+  const digest = provenanceDigestV2({
+    transferComparableSessionCount: 0,
+    heldComparableSessionCount: 0,
+    excludedTransferMachineIncomparableSessions: Object.fromEntries(ADVERSARIAL_IDS.map((id, index) => [id, index + 1])),
+    excludedHeldMachineIncomparableSessions: Object.fromEntries([...ADVERSARIAL_IDS].reverse().map((id) => [id, 1])),
+    ignoredInvalidHeldSessions: 0,
+    heldDigest: { sessionsWithHeldWorkloadEvidence: 0, sessionsWithTimedActuationJoin: 0, heldContexts: {},
+      independentOpenLoopEvidence: "unavailable" },
+  });
+  assert.deepEqual(Object.keys(digest.excludedTransferMachineIncomparableSessions), CANONICAL_IDS);
+  assert.deepEqual(Object.keys(digest.excludedHeldMachineIncomparableSessions), CANONICAL_IDS);
+  assert.equal(digest.excludedTransferMachineIncomparableSessions["é"], 1);
+  assert.equal(digest.excludedTransferMachineIncomparableSessions.aB, 6);
+});
+
+test("E4A canonical paths never consult String.prototype.localeCompare", async () => {
+  const { E4A_SCIENTIFIC_ASSESSMENT_POLICY_V2 } = await import("../dist/personalizationScientificAssessment.js");
+  const original = String.prototype.localeCompare;
+  String.prototype.localeCompare = () => {
+    throw new Error("localeCompare must not be used for canonical E4A ordering");
+  };
+  try {
+    const { target, built, assessment } = adversarialPipeline();
+    assert.deepEqual(assessment.evidenceDigest.sessionIds, CANONICAL_IDS);
+    const v2 = adversarialPolicyV2(target, built, E4A_SCIENTIFIC_ASSESSMENT_POLICY_V2);
+    const provenance = v2.evidenceDigest.provenanceV2;
+    // Every former localeCompare site ran with at least two entries to order.
+    assert.ok(provenance.heldComparableSessionCount >= 2);
+    assert.ok(Object.keys(provenance.excludedTransferMachineIncomparableSessions).length >= 2);
+    assert.ok(Object.keys(provenance.excludedHeldMachineIncomparableSessions).length >= 2);
+    assert.equal(v2.runtimeAuthority, false);
+  } finally {
+    String.prototype.localeCompare = original;
+  }
+});
+
+test("the E4A scientific subsystem source never calls localeCompare", () => {
+  const dir = new URL("../src/personalization/scientific/", import.meta.url);
+  const files = readdirSync(dir).filter((file) => file.endsWith(".ts"));
+  assert.ok(files.length >= 5);
+  for (const file of files) {
+    assert.doesNotMatch(readFileSync(new URL(file, dir), "utf8"), /\.localeCompare\(/, file);
+  }
+});

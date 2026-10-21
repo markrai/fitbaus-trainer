@@ -6,7 +6,7 @@
  */
 
 import type { PolicyGeneration } from "./policy.js";
-import { isIsoDateTime, isNonEmptyString, isRecord } from "./guards.js";
+import { compareCanonicalText, isIsoDateTime, isNonEmptyString, isRecord } from "./guards.js";
 import { heldSessionValid, phaseHasFrozenCandidate, sessionEvidenceValid } from "./qualification.js";
 import type {
   BuildSubjectEvidenceInput,
@@ -35,7 +35,7 @@ export function calibrationEquals(
 }
 
 export function normalizedSessionIds(ids: readonly string[]): string[] {
-  return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+  return [...new Set(ids)].sort(compareCanonicalText);
 }
 
 /** Subject identity fields shared by both cohorts; no HR-band success or closed-loop value involved. */
@@ -64,7 +64,7 @@ export function sessionIdentityFrom(
   workout: ScientificAssessmentFrozenWorkoutContext | undefined
 ): ScientificAssessmentCalibrationIdentity | null {
   const sessionIds = assessment?.evidenceSessionIds?.filter(isNonEmptyString) ?? [];
-  const uniqueSorted = [...new Set(sessionIds)].sort((a, b) => a.localeCompare(b));
+  const uniqueSorted = [...new Set(sessionIds)].sort(compareCanonicalText);
   if (uniqueSorted.length === 0) return null;
   if (!isIsoDateTime(assessment?.observedAt)) return null;
   if (!isNonEmptyString(assessment?.algorithm?.id)) return null;
@@ -120,7 +120,7 @@ export function admitTransferSessions(
     if (sessionEvidenceValid(session) && idCounts.get(session.workoutSessionId) === 1) return true;
     ignoredInvalidSessions += 1;
     return false;
-  }).sort((a, b) => a.workoutSessionId.localeCompare(b.workoutSessionId));
+  }).sort((a, b) => compareCanonicalText(a.workoutSessionId, b.workoutSessionId));
   return { validSessions, ignoredCrossCohortSessions, ignoredInvalidSessions };
 }
 
@@ -173,7 +173,7 @@ export function admitHeldSessions(
       heldIds.get(session.workoutSessionId) === 1) return true;
     ignoredInvalidHeldSessions += 1;
     return false;
-  }).sort((a, b) => a.workoutSessionId.localeCompare(b.workoutSessionId));
+  }).sort((a, b) => compareCanonicalText(a.workoutSessionId, b.workoutSessionId));
   const validHeldCount = validHeld.length;
   const heldSessions = validHeld.filter((session) => {
     if (session.provenanceV2.machineComparison.comparable) return true;

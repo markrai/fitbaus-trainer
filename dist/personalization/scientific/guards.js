@@ -31,3 +31,16 @@ export function daysBetween(fromIso, toIso) {
         return null;
     return (to - from) / (24 * 60 * 60 * 1000);
 }
+/**
+ * Canonical E4A text order: JavaScript code-unit order of the exact stored
+ * strings. Never locale-sensitive collation, no case folding or
+ * normalization, so canonical identity and output order are the same on
+ * every runtime and locale.
+ */
+export function compareCanonicalText(left, right) {
+    if (left < right)
+        return -1;
+    if (left > right)
+        return 1;
+    return 0;
+}

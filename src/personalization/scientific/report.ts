@@ -9,7 +9,7 @@ import {
   SCIENTIFIC_ASSESSMENT_ASSESSOR_VERSION_V1,
   SCIENTIFIC_ASSESSMENT_SCHEMA_VERSION_V1,
 } from "./policy.js";
-import { isRecord } from "./guards.js";
+import { compareCanonicalText, isRecord } from "./guards.js";
 import { normalizedSessionIds } from "./cohort.js";
 import type { summarizeHeldSessions } from "./aggregation.js";
 import type {
@@ -89,7 +89,7 @@ export function buildEvidenceDigest(input: {
     sessionCount: sessions.length,
     distinctDateCount,
     calendarSpanDays: calendarSpanDays === null ? null : Math.round(calendarSpanDays * 10) / 10,
-    sessionIds: sessions.map((session) => session.workoutSessionId).sort((a, b) => a.localeCompare(b)),
+    sessionIds: sessions.map((session) => session.workoutSessionId).sort(compareCanonicalText),
     interiorSessionCount: interiorCount,
     saturationIncidence: saturationIncidence === null
       ? null
@@ -114,7 +114,7 @@ export function buildEvidenceDigest(input: {
 }
 
 const sortedCounts = (counts: Record<string, number>) =>
-  Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
+  Object.fromEntries(Object.entries(counts).sort(([a], [b]) => compareCanonicalText(a, b)));
 
 /** Runtime-only policy-v2 digest: channel counts, exclusions by reason (sorted), and held-channel totals. */
 export function provenanceDigestV2(input: {

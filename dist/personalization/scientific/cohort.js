@@ -4,7 +4,7 @@
  * set), the full subject-identity match, identity construction from frozen
  * contexts, cohort admission, and distinct-subject discovery.
  */
-import { isIsoDateTime, isNonEmptyString, isRecord } from "./guards.js";
+import { compareCanonicalText, isIsoDateTime, isNonEmptyString, isRecord } from "./guards.js";
 import { heldSessionValid, phaseHasFrozenCandidate, sessionEvidenceValid } from "./qualification.js";
 export function calibrationEquals(left, right) {
     if (left.estimatorId !== right.estimatorId || left.estimatorVersion !== right.estimatorVersion)
@@ -22,7 +22,7 @@ export function calibrationEquals(left, right) {
     return leftIds.every((id, index) => id === rightIds[index]);
 }
 export function normalizedSessionIds(ids) {
-    return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+    return [...new Set(ids)].sort(compareCanonicalText);
 }
 export function sessionMatchesSubject(session, subject) {
     var _a, _b;
@@ -49,7 +49,7 @@ export function sessionMatchesSubject(session, subject) {
 export function sessionIdentityFrom(record, assessment, workout) {
     var _a, _b, _c, _d, _e, _f, _g;
     const sessionIds = (_b = (_a = assessment === null || assessment === void 0 ? void 0 : assessment.evidenceSessionIds) === null || _a === void 0 ? void 0 : _a.filter(isNonEmptyString)) !== null && _b !== void 0 ? _b : [];
-    const uniqueSorted = [...new Set(sessionIds)].sort((a, b) => a.localeCompare(b));
+    const uniqueSorted = [...new Set(sessionIds)].sort(compareCanonicalText);
     if (uniqueSorted.length === 0)
         return null;
     if (!isIsoDateTime(assessment === null || assessment === void 0 ? void 0 : assessment.observedAt))
@@ -107,7 +107,7 @@ export function admitTransferSessions(evidenceSessions, subject, subjectComparab
             return true;
         ignoredInvalidSessions += 1;
         return false;
-    }).sort((a, b) => a.workoutSessionId.localeCompare(b.workoutSessionId));
+    }).sort((a, b) => compareCanonicalText(a.workoutSessionId, b.workoutSessionId));
     return { validSessions, ignoredCrossCohortSessions, ignoredInvalidSessions };
 }
 /**
@@ -147,7 +147,7 @@ export function admitHeldSessions(heldSessionsV2, subject, subjectComparable) {
             return true;
         ignoredInvalidHeldSessions += 1;
         return false;
-    }).sort((a, b) => a.workoutSessionId.localeCompare(b.workoutSessionId));
+    }).sort((a, b) => compareCanonicalText(a.workoutSessionId, b.workoutSessionId));
     const validHeldCount = validHeld.length;
     const heldSessions = validHeld.filter((session) => {
         var _a;
