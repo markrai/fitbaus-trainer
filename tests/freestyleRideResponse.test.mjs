@@ -1096,3 +1096,91 @@ test("opening a persisted Freestyle summary renders visible F2 analytics in the 
 
   await resetWorkoutStorageForTests();
 });
+
+function assertStoredIqrMatchesQuartiles(dist) {
+  assert.equal(dist.iqr, Number((dist.q3 - dist.q1).toFixed(2)));
+}
+
+function persistFreestyleResponse(sessionId, response) {
+  return storeWorkoutSummary({
+    external_session_id: sessionId,
+    athlete_id: "athlete-f2",
+    app_version: "test",
+    startedAt: response.timing.startedAt,
+    endedAt: response.timing.endedAt,
+    category: "cardio",
+    intent: "freestyle",
+    duration_minutes: 1,
+    primary_zone: 0,
+    stress_profile: "unknown",
+    zone_minutes: { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 },
+    hr_trace: { sampling_interval_seconds: 60, samples: [] },
+    day: "Freestyle",
+    freestyle_ride_response: response,
+  });
+}
+
+test("fractional watts [100.01, 100.02] round-trip through parser with consistent IQR", () => {
+  const result = deriveFreestyleRideResponse(baseInput({
+    sessionId: "session-f2-frac-watts",
+    activeDurationSec: 2,
+    endedAtMs: BASE_TIME + 2_000,
+    bikeSamples: [
+      makeSample("session-f2-frac-watts", "athlete-f2", 0, { watts: 100.01 }),
+      makeSample("session-f2-frac-watts", "athlete-f2", 1, { watts: 100.02 }),
+    ],
+  }));
+  assert.ok(result);
+  assertStoredIqrMatchesQuartiles(result.workload.watts.distribution);
+  const parsed = parseFreestyleRideResponse(JSON.parse(JSON.stringify(result)));
+  assert.deepEqual(parsed, result);
+});
+
+test("fractional cadence observations round-trip through parser with consistent IQR", () => {
+  const result = deriveFreestyleRideResponse(baseInput({
+    sessionId: "session-f2-frac-cadence",
+    activeDurationSec: 2,
+    endedAtMs: BASE_TIME + 2_000,
+    bikeSamples: [
+      makeSample("session-f2-frac-cadence", "athlete-f2", 0, { watts: 150, cadence: 80.01 }),
+      makeSample("session-f2-frac-cadence", "athlete-f2", 1, { watts: 150, cadence: 80.02 }),
+    ],
+  }));
+  assert.ok(result);
+  assertStoredIqrMatchesQuartiles(result.workload.cadenceRpm.distribution);
+  const parsed = parseFreestyleRideResponse(JSON.parse(JSON.stringify(result)));
+  assert.deepEqual(parsed, result);
+});
+
+test("fractional watts and cadence F2 responses survive IndexedDB save/read", async () => {
+  await resetWorkoutStorageForTests();
+  const wattsResult = deriveFreestyleRideResponse(baseInput({
+    sessionId: "session-f2-frac-watts-db",
+    activeDurationSec: 2,
+    endedAtMs: BASE_TIME + 2_000,
+    bikeSamples: [
+      makeSample("session-f2-frac-watts-db", "athlete-f2", 0, { watts: 100.01 }),
+      makeSample("session-f2-frac-watts-db", "athlete-f2", 1, { watts: 100.02 }),
+    ],
+  }));
+  const cadenceResult = deriveFreestyleRideResponse(baseInput({
+    sessionId: "session-f2-frac-cadence-db",
+    activeDurationSec: 2,
+    endedAtMs: BASE_TIME + 2_000,
+    bikeSamples: [
+      makeSample("session-f2-frac-cadence-db", "athlete-f2", 0, { watts: 150, cadence: 80.01 }),
+      makeSample("session-f2-frac-cadence-db", "athlete-f2", 1, { watts: 150, cadence: 80.02 }),
+    ],
+  }));
+  assert.ok(wattsResult);
+  assert.ok(cadenceResult);
+  await persistFreestyleResponse("session-f2-frac-watts-db", wattsResult);
+  await persistFreestyleResponse("session-f2-frac-cadence-db", cadenceResult);
+  const reloadedWatts = await getWorkoutSummaryBySessionId("session-f2-frac-watts-db");
+  const reloadedCadence = await getWorkoutSummaryBySessionId("session-f2-frac-cadence-db");
+  assert.deepEqual(reloadedWatts.freestyle_ride_response, wattsResult);
+  assert.deepEqual(reloadedCadence.freestyle_ride_response, cadenceResult);
+  assertStoredIqrMatchesQuartiles(reloadedWatts.freestyle_ride_response.workload.watts.distribution);
+  assertStoredIqrMatchesQuartiles(reloadedCadence.freestyle_ride_response.workload.cadenceRpm.distribution);
+  await resetWorkoutStorageForTests();
+});

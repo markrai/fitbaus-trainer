@@ -51,8 +51,8 @@ function buildScalarSummary(values, activeDurationSec) {
     const sorted = [...values].sort((a, b) => a - b);
     const dist = numericDistribution(sorted);
     const mean = values.reduce((s, v) => s + v, 0) / values.length;
-    const q1 = dist.q1;
-    const q3 = dist.q3;
+    const q1 = roundTo(dist.q1, 2);
+    const q3 = roundTo(dist.q3, 2);
     return {
         sampleCount: values.length,
         coverageRatio: clampRatio(activeDurationSec > 0 ? values.length / activeDurationSec : 0),
@@ -61,8 +61,8 @@ function buildScalarSummary(values, activeDurationSec) {
         min: roundTo(dist.min, 2),
         max: roundTo(dist.max, 2),
         distribution: {
-            q1: roundTo(q1, 2),
-            q3: roundTo(q3, 2),
+            q1,
+            q3,
             iqr: roundTo(q3 - q1, 2),
         },
     };
