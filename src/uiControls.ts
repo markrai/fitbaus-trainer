@@ -73,6 +73,10 @@ import {
   vo2SelectorOptionText,
   vo2WorkoutBlocksText,
 } from "./vo2AssessmentView.js";
+import {
+  buildFreestyleHistoryCompact,
+  renderFreestyleWorkoutSummaryPanel,
+} from "./freestyleRideAnalyticsView.js";
 import { startDownregulationView, stopDownregulationView } from "./downregulation/index.js";
 import { listMachinesForActivity, isMachineId } from "./machines/registry.js";
 import {
@@ -2300,17 +2304,7 @@ function showWorkoutSummaryModal(summary: any) {
       vo2El.innerHTML = "";
     }
   }
-  const freestyleEl = document.getElementById("workoutSummaryFreestyle");
-  if (freestyleEl) {
-    const analyticsHtml = buildFreestyleAnalyticsHtml(summary);
-    if (analyticsHtml) {
-      freestyleEl.style.display = "";
-      freestyleEl.innerHTML = analyticsHtml;
-    } else {
-      freestyleEl.style.display = "none";
-      freestyleEl.innerHTML = "";
-    }
-  }
+  renderFreestyleWorkoutSummaryPanel(summary);
   const bg = document.getElementById("workoutSummaryModalBg");
   if (bg) bg.style.display = "flex";
 }
@@ -2413,91 +2407,6 @@ function showToast(message: string, type: "info" | "success" | "error" = "info")
     setTimeout(() => toast.remove(), 300);
   }, 3000);
 }
-function buildFreestyleHistoryCompact(summary: any): string {
-  const fr = summary?.freestyle_ride_response;
-  if (!fr || summary?.intent !== "freestyle") return "";
-  const incomplete = summary.evidence_incomplete === true
-    ? '<span class="workout-item-detail" style="color:#e6a700;">⚠ Incomplete evidence</span>'
-    : "";
-  const kj = fr.workload?.observedWorkKj;
-  const status = fr.workload?.workStatus;
-  const kjText = typeof kj === "number" && Number.isFinite(kj)
-    ? (status === "partial" ? `${Math.round(kj)} kJ observed` : `${Math.round(kj)} kJ`)
-    : "Unavailable";
-  return `<div class="workout-item-detail">Work: ${kjText}</div>${incomplete}`;
-}
-
-function buildFreestyleAnalyticsHtml(summary: any): string {
-  const fr = summary?.freestyle_ride_response;
-  if (!fr) return "";
-  const sections: string[] = [];
-  sections.push('<div class="freestyle-analytics" style="margin-top:12px;">');
-  sections.push('<div class="label" style="font-weight:600;margin-bottom:6px;">Freestyle Analytics</div>');
-
-  // Workload
-  const wl = fr.workload;
-  if (wl) {
-    const kjText = typeof wl.observedWorkKj === "number" && Number.isFinite(wl.observedWorkKj)
-      ? (wl.workStatus === "partial"
-          ? `${wl.observedWorkKj.toFixed(1)} kJ (partial — observed intervals only)`
-          : `${wl.observedWorkKj.toFixed(1)} kJ (${wl.workStatus})`)
-      : "Unavailable";
-    sections.push(`<div class="label">Observed Work: ${kjText}</div>`);
-    if (wl.watts) {
-      const w = wl.watts;
-      const provenanceLabel = w.provenance === "measured_watts"
-        ? "equipment-derived"
-        : w.provenance === "calibrated_watts"
-          ? "calibrated estimate"
-          : w.provenance === "mixed"
-            ? "mixed provenance"
-            : w.provenance.replace(/_/g, " ");
-      sections.push(`<div class="label">Power: mean ${w.mean}W, median ${w.median}W, min ${w.min}W, max ${w.max}W, IQR ${w.distribution.iqr}W (${provenanceLabel})</div>`);
-    }
-    if (wl.cadenceRpm) {
-      const c = wl.cadenceRpm;
-      sections.push(`<div class="label">Cadence: mean ${c.mean} rpm, median ${c.median} rpm, min ${c.min} rpm, max ${c.max} rpm</div>`);
-    }
-    if (wl.observedResistance) {
-      const r = wl.observedResistance;
-      const levels = r.levelsUsed.map((l: any) => `L${l.level} ${l.activeSeconds}s`).join(", ");
-      const medianText = r.medianLevel != null ? `, median L${r.medianLevel}` : "";
-      sections.push(`<div class="label">Resistance: ${levels}${medianText} (coverage ${(r.coverageRatio * 100).toFixed(0)}%)</div>`);
-    }
-    sections.push(`<div class="label">Power Coverage: ${(wl.powerCoverageRatio * 100).toFixed(0)}%</div>`);
-  } else {
-    sections.push('<div class="label">Workload: Unavailable</div>');
-  }
-
-  // HR
-  const hr = fr.evidence?.hr;
-  if (hr && hr.source === "ble_chest_strap" && hr.validSampleCount > 0) {
-    const parts = [];
-    if (hr.meanBpm != null) parts.push(`mean ${hr.meanBpm} bpm`);
-    if (hr.medianBpm != null) parts.push(`median ${hr.medianBpm} bpm`);
-    if (hr.minBpm != null) parts.push(`min ${hr.minBpm} bpm`);
-    if (hr.maxBpm != null) parts.push(`max ${hr.maxBpm} bpm`);
-    sections.push(`<div class="label">HR: ${parts.join(", ")} (coverage ${(hr.coverageRatio * 100).toFixed(0)}%)</div>`);
-  } else {
-    sections.push('<div class="label">HR: Unavailable</div>');
-  }
-
-  // Evidence quality
-  const bike = fr.evidence?.bike;
-  if (bike) {
-    const missing = bike.implicitMissingCount + bike.staleSampleCount + bike.unavailableSampleCount;
-    if (missing > 0) {
-      sections.push(`<div class="label" style="color:#888;">Missing/Stale: ${missing}s (stale ${bike.staleSampleCount}s, unavailable ${bike.unavailableSampleCount}s, implicit ${bike.implicitMissingCount}s)</div>`);
-    }
-  }
-  if (fr.evidence?.f1EvidenceIncomplete || summary.evidence_incomplete === true) {
-    sections.push('<div class="label" style="color:#e6a700;">⚠ Evidence collection was incomplete</div>');
-  }
-
-  sections.push("</div>");
-  return sections.join("\n");
-}
-
 function displayWorkoutSummaries(workouts: any[]) {
   const listContainer = document.getElementById("workoutSummaryList");
   if (!listContainer) return;

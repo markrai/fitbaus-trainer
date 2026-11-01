@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import { indexedDB, IDBKeyRange } from "fake-indexeddb";
 
 import {
@@ -7,6 +8,10 @@ import {
   parseFreestyleRideResponse,
 } from "../dist/contracts/freestyleRideResponse.js";
 import { deriveFreestyleRideResponse } from "../dist/freestyleRideResponse.js";
+import {
+  buildFreestyleAnalyticsHtml,
+  renderFreestyleWorkoutSummaryPanel,
+} from "../dist/freestyleRideAnalyticsView.js";
 import { buildOrdinaryBikeTelemetrySample } from "../dist/ordinaryWorkoutTelemetry.js";
 import {
   storeOrdinaryBikeTelemetrySample,
@@ -834,5 +839,260 @@ test("reconstructWorkoutRow drops freestyle_ride_response with mismatched identi
   await storeWorkoutSummary(summary);
   const reloaded = await getWorkoutSummaryBySessionId("session-f2");
   assert.equal(reloaded.freestyle_ride_response, undefined);
+  await resetWorkoutStorageForTests();
+});
+
+function validResponse(overrides = {}) {
+  const bikeSamples = Array.from({ length: 100 }, (_, s) =>
+    makeSample("session-f2", "athlete-f2", s, {
+      watts: 100 + (s % 20),
+      cadence: 70 + (s % 10),
+      resistance: s < 40 ? 4 : 7,
+    })
+  );
+  const hrSamples = Array.from({ length: 80 }, (_, s) => makeHrSample("session-f2", s, 140 + (s % 5)));
+  const result = deriveFreestyleRideResponse(baseInput({
+    activeDurationSec: 100,
+    endedAtMs: BASE_TIME + 100_000,
+    bikeSamples,
+    hrSamples,
+    ...overrides,
+  }));
+  assert.ok(result);
+  return JSON.parse(JSON.stringify(result));
+}
+
+test("parser rejects HR expectedDurationSec mismatch with active duration", () => {
+  const asJson = validResponse();
+  asJson.evidence.hr.expectedDurationSec = 50;
+  asJson.evidence.hr.coverageRatio = Math.min(1, asJson.evidence.hr.validSampleCount / 50);
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects bike expectedDurationSec mismatch with active duration", () => {
+  const asJson = validResponse();
+  asJson.evidence.bike.expectedDurationSec = 50;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects HR validSampleCount exceeding active duration", () => {
+  const asJson = validResponse();
+  asJson.evidence.hr.validSampleCount = 101;
+  asJson.evidence.hr.coverageRatio = 1;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects bike rowCount exceeding active duration", () => {
+  const asJson = validResponse();
+  asJson.evidence.bike.rowCount = 101;
+  asJson.evidence.bike.freshSampleCount = 101;
+  asJson.evidence.bike.staleSampleCount = 0;
+  asJson.evidence.bike.unavailableSampleCount = 0;
+  asJson.evidence.bike.implicitMissingCount = 0;
+  asJson.evidence.bike.freshRowCoverageRatio = 1;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects inconsistent implicitMissingCount", () => {
+  const asJson = validResponse();
+  asJson.evidence.bike.implicitMissingCount =
+    asJson.evidence.bike.implicitMissingCount + 1;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects inconsistent freshRowCoverageRatio", () => {
+  const asJson = validResponse();
+  asJson.evidence.bike.freshRowCoverageRatio = 0.11;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects workStatus that disagrees with powerCoverageRatio", () => {
+  const asJson = validResponse();
+  assert.equal(asJson.workload.workStatus, "complete");
+  asJson.workload.workStatus = "partial";
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+
+  const partial = validResponse();
+  // Force partial by zeroing half the coverage claim without changing watts
+  partial.workload.workStatus = "unavailable";
+  assert.equal(parseFreestyleRideResponse(partial), null);
+});
+
+test("parser rejects complete/partial work without power observations", () => {
+  const asJson = validResponse();
+  delete asJson.workload.watts;
+  delete asJson.workload.observedWorkJoules;
+  delete asJson.workload.observedWorkKj;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects unavailable work that still carries work measurements", () => {
+  const noPower = deriveFreestyleRideResponse(baseInput({
+    activeDurationSec: 10,
+    endedAtMs: BASE_TIME + 10_000,
+    bikeSamples: Array.from({ length: 10 }, (_, s) => {
+      const sample = makeSample("session-f2", "athlete-f2", s, { cadence: 80, resistance: 5 });
+      delete sample.watts;
+      return sample;
+    }),
+    hrSamples: [],
+  }));
+  assert.ok(noPower);
+  assert.equal(noPower.workload.workStatus, "unavailable");
+  assert.ok(parseFreestyleRideResponse(JSON.parse(JSON.stringify(noPower))));
+  const tampered = JSON.parse(JSON.stringify(noPower));
+  tampered.workload.observedWorkJoules = 100;
+  tampered.workload.observedWorkKj = 0.1;
+  assert.equal(parseFreestyleRideResponse(tampered), null);
+});
+
+test("parser rejects scalar sampleCount / coverage disagreement with active duration", () => {
+  const asJson = validResponse();
+  asJson.workload.watts.sampleCount = asJson.workload.watts.sampleCount - 1;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects scalar distribution ordering contradictions", () => {
+  const asJson = validResponse();
+  asJson.workload.watts.distribution.q1 = asJson.workload.watts.max + 1;
+  asJson.workload.watts.distribution.q3 = asJson.workload.watts.max + 2;
+  asJson.workload.watts.distribution.iqr = 1;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects resistance coverage that disagrees with level seconds", () => {
+  const asJson = validResponse();
+  assert.ok(asJson.workload.observedResistance);
+  asJson.workload.observedResistance.coverageRatio = 0.01;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects resistance fraction that disagrees with activeSeconds", () => {
+  const asJson = validResponse();
+  asJson.workload.observedResistance.levelsUsed[0].fraction = 0.99;
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects active+paused that exceed wall-clock beyond F1 tolerance", () => {
+  const asJson = validResponse();
+  asJson.timing.pausedDurationSec = 50;
+  // wall is 100s; active 100 + paused 50 = 150 > 102
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("parser rejects active duration exceeding wall-clock + 1", () => {
+  const asJson = validResponse();
+  asJson.timing.activeDurationSec = 102;
+  asJson.evidence.hr.expectedDurationSec = 102;
+  asJson.evidence.hr.coverageRatio = Math.min(1, asJson.evidence.hr.validSampleCount / 102);
+  asJson.evidence.bike.expectedDurationSec = 102;
+  asJson.evidence.bike.implicitMissingCount = Math.max(0, 102 - asJson.evidence.bike.rowCount);
+  asJson.evidence.bike.freshRowCoverageRatio = Math.min(
+    1,
+    asJson.evidence.bike.freshSampleCount / 102
+  );
+  if (asJson.workload?.watts) {
+    asJson.workload.watts.coverageRatio = Math.min(1, asJson.workload.watts.sampleCount / 102);
+    asJson.workload.powerCoverageRatio = asJson.workload.watts.coverageRatio;
+  }
+  assert.equal(parseFreestyleRideResponse(asJson), null);
+});
+
+test("valid derived responses survive JSON serialization and persistence reconstruction", async () => {
+  await resetWorkoutStorageForTests();
+  const response = validResponse();
+  assert.ok(parseFreestyleRideResponse(response));
+  const summary = {
+    external_session_id: response.sessionId,
+    athlete_id: response.athleteId,
+    app_version: "test",
+    startedAt: response.timing.startedAt,
+    endedAt: response.timing.endedAt,
+    category: "cardio",
+    intent: "freestyle",
+    duration_minutes: 2,
+    primary_zone: 0,
+    stress_profile: "unknown",
+    zone_minutes: { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 },
+    hr_trace: { sampling_interval_seconds: 60, samples: [] },
+    day: "Freestyle",
+    freestyle_ride_response: response,
+  };
+  await storeWorkoutSummary(summary);
+  const reloaded = await getWorkoutSummaryBySessionId(response.sessionId);
+  assert.ok(reloaded.freestyle_ride_response);
+  assert.deepEqual(reloaded.freestyle_ride_response, response);
+  await resetWorkoutStorageForTests();
+});
+
+test("index.html mounts workoutSummaryFreestyle in the workout summary modal", async () => {
+  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /id="workoutSummaryFreestyle"/);
+  const modalChunk = html.match(
+    /id="workoutSummaryModalBg"[\s\S]*?id="deleteWorkoutModalBg"/
+  );
+  assert.ok(modalChunk);
+  assert.match(modalChunk[0], /id="workoutSummaryFreestyle"/);
+  assert.match(modalChunk[0], /id="workoutSummaryVo2"/);
+  assert.match(modalChunk[0], /id="workoutSummaryJson"/);
+});
+
+test("opening a persisted Freestyle summary renders visible F2 analytics in the mounted panel", async () => {
+  await resetWorkoutStorageForTests();
+  const response = validResponse();
+  const summary = {
+    external_session_id: response.sessionId,
+    athlete_id: response.athleteId,
+    app_version: "test",
+    startedAt: response.timing.startedAt,
+    endedAt: response.timing.endedAt,
+    category: "cardio",
+    intent: "freestyle",
+    duration_minutes: 2,
+    primary_zone: 0,
+    stress_profile: "unknown",
+    zone_minutes: { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 },
+    hr_trace: { sampling_interval_seconds: 60, samples: [] },
+    day: "Freestyle",
+    freestyle_ride_response: response,
+  };
+  await storeWorkoutSummary(summary);
+  const reloaded = await getWorkoutSummaryBySessionId(response.sessionId);
+  assert.ok(reloaded.freestyle_ride_response);
+
+  const freestyleEl = { style: { display: "none" }, innerHTML: "" };
+  const documentRef = {
+    getElementById(id) {
+      return id === "workoutSummaryFreestyle" ? freestyleEl : null;
+    },
+  };
+
+  renderFreestyleWorkoutSummaryPanel(reloaded, documentRef);
+  assert.notEqual(freestyleEl.style.display, "none");
+  assert.match(freestyleEl.innerHTML, /Freestyle Analytics/);
+  assert.match(freestyleEl.innerHTML, /Observed Work/);
+  assert.match(freestyleEl.innerHTML, /Power Coverage/);
+
+  const structured = {
+    external_session_id: "session-structured",
+    athlete_id: "athlete-f2",
+    intent: "cardio",
+    day: "Monday",
+    startedAt: response.timing.startedAt,
+    endedAt: response.timing.endedAt,
+  };
+  renderFreestyleWorkoutSummaryPanel(structured, documentRef);
+  assert.equal(freestyleEl.style.display, "none");
+  assert.equal(freestyleEl.innerHTML, "");
+
+  const legacyFreestyle = {
+    ...summary,
+    freestyle_ride_response: undefined,
+  };
+  renderFreestyleWorkoutSummaryPanel(legacyFreestyle, documentRef);
+  assert.notEqual(freestyleEl.style.display, "none");
+  assert.match(freestyleEl.innerHTML, /Unavailable for this record/);
+  assert.equal(buildFreestyleAnalyticsHtml(structured), "");
+
   await resetWorkoutStorageForTests();
 });

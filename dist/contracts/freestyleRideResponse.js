@@ -30,12 +30,22 @@ function isOwnerId(v) {
 function isObject(v) {
     return !!v && typeof v === "object" && !Array.isArray(v);
 }
-function parseScalarSummary(v) {
+function nearlyEqual(a, b, tol = 0.001) {
+    return Math.abs(a - b) <= tol;
+}
+function parseScalarSummary(v, activeDurationSec) {
     if (!isObject(v))
         return null;
     if (!isNonNegativeInteger(v.sampleCount) || v.sampleCount === 0)
         return null;
+    if (v.sampleCount > activeDurationSec)
+        return null;
     if (!isRatio(v.coverageRatio))
+        return null;
+    const expectedCoverage = activeDurationSec > 0
+        ? Math.min(1, v.sampleCount / activeDurationSec)
+        : 0;
+    if (!nearlyEqual(v.coverageRatio, expectedCoverage))
         return null;
     if (!isFiniteNumber(v.mean) || !isFiniteNumber(v.median))
         return null;
@@ -52,8 +62,12 @@ function parseScalarSummary(v) {
         return null;
     if (dist.q1 > dist.q3)
         return null;
+    if (dist.q1 + 0.001 < v.min)
+        return null;
+    if (dist.q3 - 0.001 > v.max)
+        return null;
     const expectedIqr = dist.q3 - dist.q1;
-    if (Math.abs(dist.iqr - expectedIqr) > 0.001)
+    if (!nearlyEqual(dist.iqr, expectedIqr))
         return null;
     return {
         sampleCount: v.sampleCount,
@@ -65,25 +79,36 @@ function parseScalarSummary(v) {
         distribution: { q1: dist.q1, q3: dist.q3, iqr: dist.iqr },
     };
 }
-function parseResistanceDistribution(v) {
-    if (!Array.isArray(v))
+function parseResistanceDistribution(v, activeDurationSec, coverageRatio) {
+    if (!Array.isArray(v) || v.length === 0)
         return null;
     const result = [];
+    let totalSeconds = 0;
     for (const item of v) {
         if (!isObject(item))
             return null;
         if (!isNonNegativeFinite(item.level))
             return null;
-        if (!isNonNegativeFinite(item.activeSeconds))
+        if (!isNonNegativeInteger(item.activeSeconds) || item.activeSeconds === 0)
             return null;
         if (!isRatio(item.fraction))
             return null;
+        const seconds = item.activeSeconds;
+        totalSeconds += seconds;
+        const expectedFraction = activeDurationSec > 0 ? Math.min(1, seconds / activeDurationSec) : 0;
+        if (!nearlyEqual(item.fraction, expectedFraction))
+            return null;
         result.push({
             level: item.level,
-            activeSeconds: item.activeSeconds,
+            activeSeconds: seconds,
             fraction: item.fraction,
         });
     }
+    if (totalSeconds > activeDurationSec)
+        return null;
+    const expectedCoverage = activeDurationSec > 0 ? Math.min(1, totalSeconds / activeDurationSec) : 0;
+    if (!nearlyEqual(coverageRatio, expectedCoverage))
+        return null;
     return result;
 }
 /**
@@ -108,9 +133,18 @@ export function parseFreestyleRideResponse(raw) {
         return null;
     if (!isIsoTimestamp(timing.startedAt) || !isIsoTimestamp(timing.endedAt))
         return null;
-    if (Date.parse(timing.endedAt) <= Date.parse(timing.startedAt))
+    const startedAtMs = Date.parse(timing.startedAt);
+    const endedAtMs = Date.parse(timing.endedAt);
+    if (endedAtMs <= startedAtMs)
         return null;
     if (typeof timing.completedNaturally !== "boolean")
+        return null;
+    const activeDurationSec = timing.activeDurationSec;
+    const pausedDurationSec = timing.pausedDurationSec;
+    const wallClockSec = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+    if (activeDurationSec > wallClockSec + 1)
+        return null;
+    if (activeDurationSec + pausedDurationSec > wallClockSec + 2)
         return null;
     // Evidence
     if (!isObject(raw.evidence))
@@ -122,7 +156,11 @@ export function parseFreestyleRideResponse(raw) {
     const hr = evidence.hr;
     if (!isNonNegativeInteger(hr.expectedDurationSec))
         return null;
+    if (hr.expectedDurationSec !== activeDurationSec)
+        return null;
     if (!isNonNegativeInteger(hr.validSampleCount))
+        return null;
+    if (hr.validSampleCount > activeDurationSec)
         return null;
     if (!isRatio(hr.coverageRatio))
         return null;
@@ -143,12 +181,12 @@ export function parseFreestyleRideResponse(raw) {
     if (hr.medianBpm !== undefined && hr.maxBpm !== undefined && hr.medianBpm > hr.maxBpm)
         return null;
     // Cross-validate hr consistency: coverage = validSampleCount / expectedDurationSec
-    if (hr.expectedDurationSec > 0) {
-        const expectedCoverage = Math.min(1, hr.validSampleCount / hr.expectedDurationSec);
-        if (Math.abs(hr.coverageRatio - expectedCoverage) > 0.001)
+    if (activeDurationSec > 0) {
+        const expectedCoverage = Math.min(1, hr.validSampleCount / activeDurationSec);
+        if (!nearlyEqual(hr.coverageRatio, expectedCoverage))
             return null;
     }
-    else if (hr.validSampleCount > 0) {
+    else if (hr.validSampleCount > 0 || hr.coverageRatio !== 0) {
         return null;
     }
     // Evidence.bike
@@ -156,6 +194,8 @@ export function parseFreestyleRideResponse(raw) {
         return null;
     const bike = evidence.bike;
     if (!isNonNegativeInteger(bike.expectedDurationSec))
+        return null;
+    if (bike.expectedDurationSec !== activeDurationSec)
         return null;
     if (!isNonNegativeInteger(bike.rowCount))
         return null;
@@ -172,11 +212,19 @@ export function parseFreestyleRideResponse(raw) {
     const wattsProvenanceValues = ["measured_watts", "calibrated_watts", "mixed", "unavailable"];
     if (!wattsProvenanceValues.includes(bike.wattsProvenance))
         return null;
-    // Row count consistency: rowCount = freshSampleCount + staleSampleCount + unavailableSampleCount
-    const rowSum = bike.freshSampleCount +
-        bike.staleSampleCount +
-        bike.unavailableSampleCount;
-    if (rowSum !== bike.rowCount)
+    const freshCount = bike.freshSampleCount;
+    const staleCount = bike.staleSampleCount;
+    const unavailableCount = bike.unavailableSampleCount;
+    const rowCount = bike.rowCount;
+    if (freshCount + staleCount + unavailableCount !== rowCount)
+        return null;
+    if (rowCount > activeDurationSec)
+        return null;
+    const expectedImplicit = Math.max(0, activeDurationSec - rowCount);
+    if (bike.implicitMissingCount !== expectedImplicit)
+        return null;
+    const expectedFreshCoverage = activeDurationSec > 0 ? Math.min(1, freshCount / activeDurationSec) : 0;
+    if (!nearlyEqual(bike.freshRowCoverageRatio, expectedFreshCoverage))
         return null;
     // Evidence.rawTelemetry
     if (!isObject(evidence.rawTelemetry))
@@ -217,9 +265,12 @@ export function parseFreestyleRideResponse(raw) {
         },
         ...(evidence.f1EvidenceIncomplete === true ? { f1EvidenceIncomplete: true } : {}),
     };
-    // Workload (optional)
     let parsedWorkload;
-    if (raw.workload !== undefined) {
+    if (raw.workload === undefined) {
+        if (activeDurationSec > 0)
+            return null;
+    }
+    else {
         if (!isObject(raw.workload))
             return null;
         const wl = raw.workload;
@@ -227,14 +278,21 @@ export function parseFreestyleRideResponse(raw) {
             return null;
         if (!isRatio(wl.powerCoverageRatio))
             return null;
+        const powerCoverageRatio = wl.powerCoverageRatio;
+        const workStatus = wl.workStatus;
+        if (workStatus === "complete" && powerCoverageRatio < 0.95)
+            return null;
+        if (workStatus === "partial" && !(powerCoverageRatio > 0 && powerCoverageRatio < 0.95))
+            return null;
+        if (workStatus === "unavailable" && powerCoverageRatio !== 0)
+            return null;
         if (wl.observedWorkJoules !== undefined && !isNonNegativeFinite(wl.observedWorkJoules))
             return null;
         if (wl.observedWorkKj !== undefined && !isNonNegativeFinite(wl.observedWorkKj))
             return null;
-        // kJ/J consistency
         if (wl.observedWorkJoules !== undefined && wl.observedWorkKj !== undefined) {
             const expectedKj = wl.observedWorkJoules / 1000;
-            if (Math.abs(wl.observedWorkKj - expectedKj) > 0.01)
+            if (!nearlyEqual(wl.observedWorkKj, expectedKj, 0.01))
                 return null;
         }
         let watts;
@@ -244,15 +302,32 @@ export function parseFreestyleRideResponse(raw) {
             const w = wl.watts;
             if (w.provenance !== "measured_watts" && w.provenance !== "calibrated_watts" && w.provenance !== "mixed")
                 return null;
-            const scalar = parseScalarSummary(w);
+            if (bike.wattsProvenance === "unavailable")
+                return null;
+            if (w.provenance !== bike.wattsProvenance)
+                return null;
+            const scalar = parseScalarSummary(w, activeDurationSec);
             if (!scalar)
                 return null;
-            watts = { ...scalar, provenance: w.provenance };
+            if (!nearlyEqual(scalar.coverageRatio, powerCoverageRatio))
+                return null;
+            watts = {
+                ...scalar,
+                provenance: w.provenance,
+            };
+        }
+        if (workStatus === "unavailable") {
+            if (wl.observedWorkJoules !== undefined || wl.observedWorkKj !== undefined || watts)
+                return null;
+        }
+        else {
+            if (wl.observedWorkJoules === undefined || wl.observedWorkKj === undefined || !watts)
+                return null;
         }
         let cadenceRpm;
         if (wl.cadenceRpm !== undefined) {
-            cadenceRpm = (_a = parseScalarSummary(wl.cadenceRpm)) !== null && _a !== void 0 ? _a : undefined;
-            if (wl.cadenceRpm !== undefined && !cadenceRpm)
+            cadenceRpm = (_a = parseScalarSummary(wl.cadenceRpm, activeDurationSec)) !== null && _a !== void 0 ? _a : undefined;
+            if (!cadenceRpm)
                 return null;
         }
         let observedResistance;
@@ -260,12 +335,12 @@ export function parseFreestyleRideResponse(raw) {
             if (!isObject(wl.observedResistance))
                 return null;
             const or = wl.observedResistance;
-            const levels = parseResistanceDistribution(or.levelsUsed);
-            if (!levels)
-                return null;
             if (!isRatio(or.coverageRatio))
                 return null;
             if (or.medianLevel !== undefined && !isNonNegativeFinite(or.medianLevel))
+                return null;
+            const levels = parseResistanceDistribution(or.levelsUsed, activeDurationSec, or.coverageRatio);
+            if (!levels)
                 return null;
             observedResistance = {
                 levelsUsed: levels,
@@ -274,11 +349,11 @@ export function parseFreestyleRideResponse(raw) {
             };
         }
         parsedWorkload = {
-            workStatus: wl.workStatus,
-            powerCoverageRatio: wl.powerCoverageRatio,
+            workStatus,
+            powerCoverageRatio,
             ...(wl.observedWorkJoules !== undefined ? { observedWorkJoules: wl.observedWorkJoules } : {}),
             ...(wl.observedWorkKj !== undefined ? { observedWorkKj: wl.observedWorkKj } : {}),
-            ...(watts ? { watts: watts } : {}),
+            ...(watts ? { watts } : {}),
             ...(cadenceRpm ? { cadenceRpm } : {}),
             ...(observedResistance ? { observedResistance } : {}),
         };
@@ -288,8 +363,8 @@ export function parseFreestyleRideResponse(raw) {
         athleteId: raw.athleteId,
         sessionId: raw.sessionId,
         timing: {
-            activeDurationSec: timing.activeDurationSec,
-            pausedDurationSec: timing.pausedDurationSec,
+            activeDurationSec,
+            pausedDurationSec,
             startedAt: timing.startedAt,
             endedAt: timing.endedAt,
             completedNaturally: timing.completedNaturally,

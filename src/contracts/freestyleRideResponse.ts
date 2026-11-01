@@ -117,10 +117,23 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-function parseScalarSummary(v: unknown): FreestyleWorkloadScalarSummary | null {
+function nearlyEqual(a: number, b: number, tol = 0.001): boolean {
+  return Math.abs(a - b) <= tol;
+}
+
+function parseScalarSummary(
+  v: unknown,
+  activeDurationSec: number
+): FreestyleWorkloadScalarSummary | null {
   if (!isObject(v)) return null;
   if (!isNonNegativeInteger(v.sampleCount) || (v.sampleCount as number) === 0) return null;
+  if ((v.sampleCount as number) > activeDurationSec) return null;
   if (!isRatio(v.coverageRatio)) return null;
+  const expectedCoverage =
+    activeDurationSec > 0
+      ? Math.min(1, (v.sampleCount as number) / activeDurationSec)
+      : 0;
+  if (!nearlyEqual(v.coverageRatio as number, expectedCoverage)) return null;
   if (!isFiniteNumber(v.mean) || !isFiniteNumber(v.median)) return null;
   if (!isFiniteNumber(v.min) || !isFiniteNumber(v.max)) return null;
   if ((v.min as number) > (v.max as number)) return null;
@@ -129,8 +142,10 @@ function parseScalarSummary(v: unknown): FreestyleWorkloadScalarSummary | null {
   const dist = v.distribution as Record<string, unknown>;
   if (!isFiniteNumber(dist.q1) || !isFiniteNumber(dist.q3) || !isFiniteNumber(dist.iqr)) return null;
   if ((dist.q1 as number) > (dist.q3 as number)) return null;
+  if ((dist.q1 as number) + 0.001 < (v.min as number)) return null;
+  if ((dist.q3 as number) - 0.001 > (v.max as number)) return null;
   const expectedIqr = (dist.q3 as number) - (dist.q1 as number);
-  if (Math.abs((dist.iqr as number) - expectedIqr) > 0.001) return null;
+  if (!nearlyEqual(dist.iqr as number, expectedIqr)) return null;
   return {
     sampleCount: v.sampleCount as number,
     coverageRatio: v.coverageRatio as number,
@@ -142,20 +157,34 @@ function parseScalarSummary(v: unknown): FreestyleWorkloadScalarSummary | null {
   };
 }
 
-function parseResistanceDistribution(v: unknown): FreestyleObservedResistanceDistribution[] | null {
-  if (!Array.isArray(v)) return null;
+function parseResistanceDistribution(
+  v: unknown,
+  activeDurationSec: number,
+  coverageRatio: number
+): FreestyleObservedResistanceDistribution[] | null {
+  if (!Array.isArray(v) || v.length === 0) return null;
   const result: FreestyleObservedResistanceDistribution[] = [];
+  let totalSeconds = 0;
   for (const item of v) {
     if (!isObject(item)) return null;
     if (!isNonNegativeFinite(item.level)) return null;
-    if (!isNonNegativeFinite(item.activeSeconds)) return null;
+    if (!isNonNegativeInteger(item.activeSeconds) || (item.activeSeconds as number) === 0) return null;
     if (!isRatio(item.fraction)) return null;
+    const seconds = item.activeSeconds as number;
+    totalSeconds += seconds;
+    const expectedFraction =
+      activeDurationSec > 0 ? Math.min(1, seconds / activeDurationSec) : 0;
+    if (!nearlyEqual(item.fraction as number, expectedFraction)) return null;
     result.push({
       level: item.level as number,
-      activeSeconds: item.activeSeconds as number,
+      activeSeconds: seconds,
       fraction: item.fraction as number,
     });
   }
+  if (totalSeconds > activeDurationSec) return null;
+  const expectedCoverage =
+    activeDurationSec > 0 ? Math.min(1, totalSeconds / activeDurationSec) : 0;
+  if (!nearlyEqual(coverageRatio, expectedCoverage)) return null;
   return result;
 }
 
@@ -174,8 +203,16 @@ export function parseFreestyleRideResponse(raw: unknown): FreestyleRideResponseV
   if (!isNonNegativeInteger(timing.activeDurationSec)) return null;
   if (!isNonNegativeFinite(timing.pausedDurationSec)) return null;
   if (!isIsoTimestamp(timing.startedAt) || !isIsoTimestamp(timing.endedAt)) return null;
-  if (Date.parse(timing.endedAt as string) <= Date.parse(timing.startedAt as string)) return null;
+  const startedAtMs = Date.parse(timing.startedAt as string);
+  const endedAtMs = Date.parse(timing.endedAt as string);
+  if (endedAtMs <= startedAtMs) return null;
   if (typeof timing.completedNaturally !== "boolean") return null;
+
+  const activeDurationSec = timing.activeDurationSec as number;
+  const pausedDurationSec = timing.pausedDurationSec as number;
+  const wallClockSec = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+  if (activeDurationSec > wallClockSec + 1) return null;
+  if (activeDurationSec + pausedDurationSec > wallClockSec + 2) return null;
 
   // Evidence
   if (!isObject(raw.evidence)) return null;
@@ -185,7 +222,9 @@ export function parseFreestyleRideResponse(raw: unknown): FreestyleRideResponseV
   if (!isObject(evidence.hr)) return null;
   const hr = evidence.hr as Record<string, unknown>;
   if (!isNonNegativeInteger(hr.expectedDurationSec)) return null;
+  if ((hr.expectedDurationSec as number) !== activeDurationSec) return null;
   if (!isNonNegativeInteger(hr.validSampleCount)) return null;
+  if ((hr.validSampleCount as number) > activeDurationSec) return null;
   if (!isRatio(hr.coverageRatio)) return null;
   if (hr.source !== "ble_chest_strap" && hr.source !== "unavailable") return null;
   if (hr.source === "unavailable" && (hr.validSampleCount as number) > 0) return null;
@@ -199,10 +238,10 @@ export function parseFreestyleRideResponse(raw: unknown): FreestyleRideResponseV
   if (hr.medianBpm !== undefined && hr.maxBpm !== undefined && (hr.medianBpm as number) > (hr.maxBpm as number)) return null;
 
   // Cross-validate hr consistency: coverage = validSampleCount / expectedDurationSec
-  if ((hr.expectedDurationSec as number) > 0) {
-    const expectedCoverage = Math.min(1, (hr.validSampleCount as number) / (hr.expectedDurationSec as number));
-    if (Math.abs((hr.coverageRatio as number) - expectedCoverage) > 0.001) return null;
-  } else if ((hr.validSampleCount as number) > 0) {
+  if (activeDurationSec > 0) {
+    const expectedCoverage = Math.min(1, (hr.validSampleCount as number) / activeDurationSec);
+    if (!nearlyEqual(hr.coverageRatio as number, expectedCoverage)) return null;
+  } else if ((hr.validSampleCount as number) > 0 || (hr.coverageRatio as number) !== 0) {
     return null;
   }
 
@@ -210,6 +249,7 @@ export function parseFreestyleRideResponse(raw: unknown): FreestyleRideResponseV
   if (!isObject(evidence.bike)) return null;
   const bike = evidence.bike as Record<string, unknown>;
   if (!isNonNegativeInteger(bike.expectedDurationSec)) return null;
+  if ((bike.expectedDurationSec as number) !== activeDurationSec) return null;
   if (!isNonNegativeInteger(bike.rowCount)) return null;
   if (!isNonNegativeInteger(bike.freshSampleCount)) return null;
   if (!isNonNegativeInteger(bike.staleSampleCount)) return null;
@@ -219,11 +259,17 @@ export function parseFreestyleRideResponse(raw: unknown): FreestyleRideResponseV
   const wattsProvenanceValues = ["measured_watts", "calibrated_watts", "mixed", "unavailable"];
   if (!wattsProvenanceValues.includes(bike.wattsProvenance as string)) return null;
 
-  // Row count consistency: rowCount = freshSampleCount + staleSampleCount + unavailableSampleCount
-  const rowSum = (bike.freshSampleCount as number) +
-    (bike.staleSampleCount as number) +
-    (bike.unavailableSampleCount as number);
-  if (rowSum !== (bike.rowCount as number)) return null;
+  const freshCount = bike.freshSampleCount as number;
+  const staleCount = bike.staleSampleCount as number;
+  const unavailableCount = bike.unavailableSampleCount as number;
+  const rowCount = bike.rowCount as number;
+  if (freshCount + staleCount + unavailableCount !== rowCount) return null;
+  if (rowCount > activeDurationSec) return null;
+  const expectedImplicit = Math.max(0, activeDurationSec - rowCount);
+  if ((bike.implicitMissingCount as number) !== expectedImplicit) return null;
+  const expectedFreshCoverage =
+    activeDurationSec > 0 ? Math.min(1, freshCount / activeDurationSec) : 0;
+  if (!nearlyEqual(bike.freshRowCoverageRatio as number, expectedFreshCoverage)) return null;
 
   // Evidence.rawTelemetry
   if (!isObject(evidence.rawTelemetry)) return null;
@@ -263,46 +309,70 @@ export function parseFreestyleRideResponse(raw: unknown): FreestyleRideResponseV
     ...(evidence.f1EvidenceIncomplete === true ? { f1EvidenceIncomplete: true as const } : {}),
   };
 
-  // Workload (optional)
   let parsedWorkload: FreestyleRideResponseV1["workload"] | undefined;
-  if (raw.workload !== undefined) {
+  if (raw.workload === undefined) {
+    if (activeDurationSec > 0) return null;
+  } else {
     if (!isObject(raw.workload)) return null;
     const wl = raw.workload as Record<string, unknown>;
     if (wl.workStatus !== "complete" && wl.workStatus !== "partial" && wl.workStatus !== "unavailable") return null;
     if (!isRatio(wl.powerCoverageRatio)) return null;
 
+    const powerCoverageRatio = wl.powerCoverageRatio as number;
+    const workStatus = wl.workStatus as "complete" | "partial" | "unavailable";
+    if (workStatus === "complete" && powerCoverageRatio < 0.95) return null;
+    if (workStatus === "partial" && !(powerCoverageRatio > 0 && powerCoverageRatio < 0.95)) return null;
+    if (workStatus === "unavailable" && powerCoverageRatio !== 0) return null;
+
     if (wl.observedWorkJoules !== undefined && !isNonNegativeFinite(wl.observedWorkJoules)) return null;
     if (wl.observedWorkKj !== undefined && !isNonNegativeFinite(wl.observedWorkKj)) return null;
-    // kJ/J consistency
     if (wl.observedWorkJoules !== undefined && wl.observedWorkKj !== undefined) {
       const expectedKj = (wl.observedWorkJoules as number) / 1000;
-      if (Math.abs((wl.observedWorkKj as number) - expectedKj) > 0.01) return null;
+      if (!nearlyEqual(wl.observedWorkKj as number, expectedKj, 0.01)) return null;
     }
 
-    let watts: (FreestyleWorkloadScalarSummary & { provenance: string }) | undefined;
+    let watts: (FreestyleWorkloadScalarSummary & {
+      provenance: "measured_watts" | "calibrated_watts" | "mixed";
+    }) | undefined;
     if (wl.watts !== undefined) {
       if (!isObject(wl.watts)) return null;
       const w = wl.watts as Record<string, unknown>;
       if (w.provenance !== "measured_watts" && w.provenance !== "calibrated_watts" && w.provenance !== "mixed") return null;
-      const scalar = parseScalarSummary(w);
+      if ((bike.wattsProvenance as string) === "unavailable") return null;
+      if (w.provenance !== bike.wattsProvenance) return null;
+      const scalar = parseScalarSummary(w, activeDurationSec);
       if (!scalar) return null;
-      watts = { ...scalar, provenance: w.provenance as string };
+      if (!nearlyEqual(scalar.coverageRatio, powerCoverageRatio)) return null;
+      watts = {
+        ...scalar,
+        provenance: w.provenance as "measured_watts" | "calibrated_watts" | "mixed",
+      };
+    }
+
+    if (workStatus === "unavailable") {
+      if (wl.observedWorkJoules !== undefined || wl.observedWorkKj !== undefined || watts) return null;
+    } else {
+      if (wl.observedWorkJoules === undefined || wl.observedWorkKj === undefined || !watts) return null;
     }
 
     let cadenceRpm: FreestyleWorkloadScalarSummary | undefined;
     if (wl.cadenceRpm !== undefined) {
-      cadenceRpm = parseScalarSummary(wl.cadenceRpm) ?? undefined;
-      if (wl.cadenceRpm !== undefined && !cadenceRpm) return null;
+      cadenceRpm = parseScalarSummary(wl.cadenceRpm, activeDurationSec) ?? undefined;
+      if (!cadenceRpm) return null;
     }
 
-    let observedResistance: FreestyleRideResponseV1["workload"] extends undefined ? never : NonNullable<NonNullable<FreestyleRideResponseV1["workload"]>["observedResistance"]> | undefined;
+    let observedResistance: NonNullable<FreestyleRideResponseV1["workload"]>["observedResistance"] | undefined;
     if (wl.observedResistance !== undefined) {
       if (!isObject(wl.observedResistance)) return null;
       const or = wl.observedResistance as Record<string, unknown>;
-      const levels = parseResistanceDistribution(or.levelsUsed);
-      if (!levels) return null;
       if (!isRatio(or.coverageRatio)) return null;
       if (or.medianLevel !== undefined && !isNonNegativeFinite(or.medianLevel)) return null;
+      const levels = parseResistanceDistribution(
+        or.levelsUsed,
+        activeDurationSec,
+        or.coverageRatio as number
+      );
+      if (!levels) return null;
       observedResistance = {
         levelsUsed: levels,
         coverageRatio: or.coverageRatio as number,
@@ -311,11 +381,11 @@ export function parseFreestyleRideResponse(raw: unknown): FreestyleRideResponseV
     }
 
     parsedWorkload = {
-      workStatus: wl.workStatus as "complete" | "partial" | "unavailable",
-      powerCoverageRatio: wl.powerCoverageRatio as number,
+      workStatus,
+      powerCoverageRatio,
       ...(wl.observedWorkJoules !== undefined ? { observedWorkJoules: wl.observedWorkJoules as number } : {}),
       ...(wl.observedWorkKj !== undefined ? { observedWorkKj: wl.observedWorkKj as number } : {}),
-      ...(watts ? { watts: watts as any } : {}),
+      ...(watts ? { watts } : {}),
       ...(cadenceRpm ? { cadenceRpm } : {}),
       ...(observedResistance ? { observedResistance } : {}),
     };
@@ -326,8 +396,8 @@ export function parseFreestyleRideResponse(raw: unknown): FreestyleRideResponseV
     athleteId: raw.athleteId as string,
     sessionId: raw.sessionId as string,
     timing: {
-      activeDurationSec: timing.activeDurationSec as number,
-      pausedDurationSec: timing.pausedDurationSec as number,
+      activeDurationSec,
+      pausedDurationSec,
       startedAt: timing.startedAt as string,
       endedAt: timing.endedAt as string,
       completedNaturally: timing.completedNaturally as boolean,
