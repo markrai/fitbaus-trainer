@@ -11,6 +11,7 @@
 import { HrSample, WorkoutSummary, SisuSettings, type OrdinaryBikeTelemetrySample } from "./types.js";
 import { parseOrdinaryBikeTelemetrySample } from "./ordinaryWorkoutTelemetry.js";
 import { parseWorkoutResponse } from "./workoutResponse.js";
+import { parseFreestyleRideResponse } from "./contracts/freestyleRideResponse.js";
 import { parsePersonalizedPrescriptionCharacterization } from "./personalizedPrescriptionCharacterization.js";
 import { parseWorkoutExecutionProvenance } from "./executionProvenance.js";
 import { rebuildStoredPassiveFitnessProjection } from "./fitnessRefinement.js";
@@ -448,6 +449,20 @@ function reconstructWorkoutRow(row: any): any {
       row.summary.execution_provenance = parsedProvenance;
     } else {
       delete row.summary.execution_provenance;
+    }
+  }
+  if (row?.summary?.freestyle_ride_response !== undefined) {
+    const parsedFreestyle = parseFreestyleRideResponse(row.summary.freestyle_ride_response);
+    row.summary = { ...row.summary };
+    if (
+      parsedFreestyle &&
+      parsedFreestyle.sessionId === row.session_id &&
+      parsedFreestyle.sessionId === row.summary.external_session_id &&
+      parsedFreestyle.athleteId === row.summary.athlete_id
+    ) {
+      row.summary.freestyle_ride_response = parsedFreestyle;
+    } else {
+      delete row.summary.freestyle_ride_response;
     }
   }
   if (row?.summary?.shadow_prescription_characterization !== undefined) {

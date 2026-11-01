@@ -132,6 +132,17 @@ export type {
   CurrentOrdinaryBikeTelemetrySample,
 } from "./contracts/telemetry.js";
 export {
+  FREESTYLE_RIDE_RESPONSE_SCHEMA_VERSION_V1,
+} from "./contracts/freestyleRideResponse.js";
+export type {
+  FreestyleWorkloadScalarSummary,
+  FreestyleObservedResistanceDistribution,
+  FreestyleRideResponseV1,
+} from "./contracts/freestyleRideResponse.js";
+export {
+  parseFreestyleRideResponse,
+} from "./contracts/freestyleRideResponse.js";
+export {
   WORKOUT_RESPONSE_SCHEMA_VERSION_V1,
   WORKOUT_RESPONSE_SCHEMA_VERSION,
 } from "./contracts/workoutResponse.js";

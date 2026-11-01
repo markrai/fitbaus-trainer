@@ -9,6 +9,7 @@
  */
 import { parseOrdinaryBikeTelemetrySample } from "./ordinaryWorkoutTelemetry.js";
 import { parseWorkoutResponse } from "./workoutResponse.js";
+import { parseFreestyleRideResponse } from "./contracts/freestyleRideResponse.js";
 import { parsePersonalizedPrescriptionCharacterization } from "./personalizedPrescriptionCharacterization.js";
 import { parseWorkoutExecutionProvenance } from "./executionProvenance.js";
 import { rebuildStoredPassiveFitnessProjection } from "./fitnessRefinement.js";
@@ -328,7 +329,7 @@ async function clearHrSamples(sessionId) {
  * session/athlete. Persisted rows themselves are never rewritten.
  */
 function reconstructWorkoutRow(row) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     if (((_a = row === null || row === void 0 ? void 0 : row.summary) === null || _a === void 0 ? void 0 : _a.workout_response) !== undefined) {
         const parsed = parseWorkoutResponse(row.summary.workout_response);
         row.summary = { ...row.summary };
@@ -363,7 +364,20 @@ function reconstructWorkoutRow(row) {
             delete row.summary.execution_provenance;
         }
     }
-    if (((_d = row === null || row === void 0 ? void 0 : row.summary) === null || _d === void 0 ? void 0 : _d.shadow_prescription_characterization) !== undefined) {
+    if (((_d = row === null || row === void 0 ? void 0 : row.summary) === null || _d === void 0 ? void 0 : _d.freestyle_ride_response) !== undefined) {
+        const parsedFreestyle = parseFreestyleRideResponse(row.summary.freestyle_ride_response);
+        row.summary = { ...row.summary };
+        if (parsedFreestyle &&
+            parsedFreestyle.sessionId === row.session_id &&
+            parsedFreestyle.sessionId === row.summary.external_session_id &&
+            parsedFreestyle.athleteId === row.summary.athlete_id) {
+            row.summary.freestyle_ride_response = parsedFreestyle;
+        }
+        else {
+            delete row.summary.freestyle_ride_response;
+        }
+    }
+    if (((_e = row === null || row === void 0 ? void 0 : row.summary) === null || _e === void 0 ? void 0 : _e.shadow_prescription_characterization) !== undefined) {
         const parsedCharacterization = row.summary.workout_response === undefined
             ? null
             : parsePersonalizedPrescriptionCharacterization(row.summary.shadow_prescription_characterization, row.summary.shadow_prescription_evaluation, {

@@ -15,6 +15,7 @@ test("types.js facade runtime export surface is unchanged (names and literal val
     FITNESS_STATE_SCHEMA_VERSION_V2: 2,
     FITNESS_STATE_SCHEMA_VERSION_V3: 3,
     FORMAL_CALIBRATION_MACHINE_PROVENANCE_SCHEMA_VERSION_V1: 1,
+    FREESTYLE_RIDE_RESPONSE_SCHEMA_VERSION_V1: 1,
     LEGACY_HR_TARGET_RESOLVER_ID: "legacy-hr-target-resolver",
     LEGACY_HR_TARGET_RESOLVER_VERSION: 1,
     LEGACY_VO2_PROTOCOL_ID: "bike-submax-70rpm",
@@ -50,6 +51,7 @@ test("types.js facade runtime export surface is unchanged (names and literal val
     WORKOUT_PRESCRIPTION_SCHEMA_VERSION: 1,
     WORKOUT_RESPONSE_SCHEMA_VERSION: 1,
     WORKOUT_RESPONSE_SCHEMA_VERSION_V1: 1,
+    parseFreestyleRideResponse: types.parseFreestyleRideResponse,
   });
 });
 

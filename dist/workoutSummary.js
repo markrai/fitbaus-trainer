@@ -35,6 +35,7 @@ import { recordPromotedCalibrationMachineProvenance } from "./calibrationMachine
 import { readFitnessState } from "./fitnessState.js";
 import { APP_VERSION } from "./version.js";
 import { countValidHrSampleSeconds, isFreestyleWorkoutSelector, } from "./freestyleRide.js";
+import { deriveFreestyleRideResponse } from "./freestyleRideResponse.js";
 export function buildHrTrace(hrSamples) {
     if (!hrSamples || hrSamples.length === 0) {
         return { sampling_interval_seconds: 60, samples: [] };
@@ -320,6 +321,31 @@ async function generateWorkoutSummary(sessionId, startedAt, endedAt, day, option
             ? buildVo2ProtocolEvidenceForRuntime(session.vo2ProtocolRuntime, session.sessionId || sessionId ? getBikeTelemetrySamples(session.sessionId || sessionId) : [])
             : undefined,
     }));
+    // Freestyle Level-A analytics: derive after open_ended_timing, before structured response
+    if (isFreestyle && session.athleteId && session.activity === "bike") {
+        try {
+            await flushOrdinaryBikeTelemetryWrites(sessionId);
+            const bikeSamples = await getOrdinaryBikeTelemetrySamples(sessionId);
+            const freestyleResponse = deriveFreestyleRideResponse({
+                athleteId: session.athleteId,
+                sessionId,
+                startedAtMs: effectiveStartedAt,
+                endedAtMs: effectiveEndedAt,
+                activeDurationSec,
+                pausedDurationSec,
+                cancelled: (options === null || options === void 0 ? void 0 : options.cancelled) === true,
+                evidenceIncomplete: (freestyleFinalization === null || freestyleFinalization === void 0 ? void 0 : freestyleFinalization.evidenceIncomplete) === true,
+                hrSamples,
+                bikeSamples,
+            });
+            if (freestyleResponse) {
+                summary.freestyle_ride_response = freestyleResponse;
+            }
+        }
+        catch (error) {
+            console.error("Error deriving freestyle ride response:", error);
+        }
+    }
     if (isVo2WorkoutSelector(day)) {
         const profile = (_p = (_m = options === null || options === void 0 ? void 0 : options.vo2Profile) !== null && _m !== void 0 ? _m : (_o = session.vo2ProtocolRuntime) === null || _o === void 0 ? void 0 : _o.assessment_profile) !== null && _p !== void 0 ? _p : readExplicitVo2ProfileInputs();
         summary.vo2_assessment = assessVo2(summary.vo2_evidence, profile);

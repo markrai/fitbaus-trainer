@@ -52,6 +52,7 @@ import {
   isFreestyleWorkoutSelector,
   type SessionFinalizationV1,
 } from "./freestyleRide.js";
+import { deriveFreestyleRideResponse } from "./freestyleRideResponse.js";
 
 export function buildHrTrace(hrSamples: any[]) {
   if (!hrSamples || hrSamples.length === 0) {
@@ -393,6 +394,31 @@ async function generateWorkoutSummary(
           : undefined,
     })
   );
+
+  // Freestyle Level-A analytics: derive after open_ended_timing, before structured response
+  if (isFreestyle && session.athleteId && session.activity === "bike") {
+    try {
+      await flushOrdinaryBikeTelemetryWrites(sessionId);
+      const bikeSamples = await getOrdinaryBikeTelemetrySamples(sessionId);
+      const freestyleResponse = deriveFreestyleRideResponse({
+        athleteId: session.athleteId,
+        sessionId,
+        startedAtMs: effectiveStartedAt,
+        endedAtMs: effectiveEndedAt,
+        activeDurationSec,
+        pausedDurationSec,
+        cancelled: options?.cancelled === true,
+        evidenceIncomplete: freestyleFinalization?.evidenceIncomplete === true,
+        hrSamples,
+        bikeSamples,
+      });
+      if (freestyleResponse) {
+        summary.freestyle_ride_response = freestyleResponse;
+      }
+    } catch (error) {
+      console.error("Error deriving freestyle ride response:", error);
+    }
+  }
 
   if (isVo2WorkoutSelector(day)) {
     const profile = options?.vo2Profile ?? session.vo2ProtocolRuntime?.assessment_profile ?? readExplicitVo2ProfileInputs();
