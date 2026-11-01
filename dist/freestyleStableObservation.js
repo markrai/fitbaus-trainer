@@ -89,54 +89,48 @@ function classifyWindow(observations, hrBySecond, evidenceIncomplete) {
     const startActiveSec = observations[0].activeSec;
     const endActiveSec = observations[observations.length - 1].activeSec + 1;
     const durationSec = endActiveSec - startActiveSec;
-    const wattsEntries = observations.filter((obs) => obs.watts !== undefined).map((obs) => ({
-        activeSec: obs.activeSec,
-        value: obs.watts.value,
-        source: obs.watts.source,
-    }));
-    const cadenceEntries = observations.filter((obs) => obs.cadenceRpm !== undefined).map((obs) => ({
-        activeSec: obs.activeSec,
-        value: obs.cadenceRpm,
-    }));
-    const powerSeconds = new Set(wattsEntries.map((entry) => entry.activeSec));
-    const cadenceSeconds = new Set(cadenceEntries.map((entry) => entry.activeSec));
-    const hrSeconds = new Set();
+    const wattsBySec = new Map();
+    const cadenceValues = [];
+    for (const obs of observations) {
+        if (obs.watts !== undefined)
+            wattsBySec.set(obs.activeSec, obs.watts);
+        if (obs.cadenceRpm !== undefined)
+            cadenceValues.push(obs.cadenceRpm);
+    }
     const hrValues = [];
-    for (let sec = startActiveSec; sec < endActiveSec; sec += 1) {
-        const hr = hrBySecond.get(sec);
-        if (hr === undefined)
+    const hrInWindow = new Set();
+    for (const [sec, hr] of hrBySecond) {
+        if (sec < startActiveSec || sec >= endActiveSec)
             continue;
-        hrSeconds.add(sec);
+        hrInWindow.add(sec);
         hrValues.push(hr);
     }
     let joint = 0;
     let powerOnly = 0;
+    const wattsEntries = [];
     const jointPower = [];
     const jointHr = [];
-    for (const sec of powerSeconds) {
-        if (hrSeconds.has(sec)) {
+    for (const [sec, watts] of wattsBySec) {
+        wattsEntries.push(watts);
+        const hr = hrBySecond.get(sec);
+        if (hr !== undefined) {
             joint += 1;
-            const watts = wattsEntries.find((entry) => entry.activeSec === sec);
-            if (watts)
-                jointPower.push(watts.value);
-            const hr = hrBySecond.get(sec);
-            if (hr !== undefined)
-                jointHr.push(hr);
+            jointPower.push(watts.value);
+            jointHr.push(hr);
         }
         else
             powerOnly += 1;
     }
     let hrOnly = 0;
-    for (const sec of hrSeconds) {
-        if (!powerSeconds.has(sec))
+    for (const sec of hrInWindow) {
+        if (!wattsBySec.has(sec))
             hrOnly += 1;
     }
     const freshPowerCoverageRatio = clampRatio(durationSec > 0 ? (powerOnly + joint) / durationSec : 0);
-    const cadenceCoverageRatio = clampRatio(durationSec > 0 ? cadenceSeconds.size / durationSec : 0);
-    const hrCoverageRatio = clampRatio(durationSec > 0 ? hrSeconds.size / durationSec : 0);
+    const cadenceCoverageRatio = clampRatio(durationSec > 0 ? cadenceValues.length / durationSec : 0);
+    const hrCoverageRatio = clampRatio(durationSec > 0 ? hrInWindow.size / durationSec : 0);
     const jointHrPowerCoverageRatio = clampRatio(durationSec > 0 ? joint / durationSec : 0);
     const wattsValues = wattsEntries.map((entry) => entry.value);
-    const cadenceValues = cadenceEntries.map((entry) => entry.value);
     const wattsProvenance = provenanceOf(wattsEntries);
     const reasons = [];
     if (durationSec < POLICY.minMechanicallyQualifiedDurationSec)
@@ -189,7 +183,7 @@ function classifyWindow(observations, hrBySecond, evidenceIncomplete) {
     ];
     const mechanicallyOk = mechanicalReasons.every((reason) => !reasons.includes(reason));
     if (jointHrPowerCoverageRatio < POLICY.minJointHrPowerCoverageRatio) {
-        reasons.push(hrSeconds.size === 0 ? "insufficient_hr_coverage" : "insufficient_joint_hr_power_coverage");
+        reasons.push(hrInWindow.size === 0 ? "insufficient_hr_coverage" : "insufficient_joint_hr_power_coverage");
     }
     if (evidenceIncomplete)
         reasons.push("f1_evidence_incomplete");

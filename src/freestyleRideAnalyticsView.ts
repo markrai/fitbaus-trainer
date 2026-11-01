@@ -1,3 +1,12 @@
+export function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function isFreestyleWorkoutSummary(summary: unknown): boolean {
   if (!summary || typeof summary !== "object") return false;
   const s = summary as Record<string, unknown>;
@@ -108,20 +117,28 @@ function buildFreestyleStableObservationHtml(summary: any): string {
   const lines: string[] = [];
   lines.push('<div class="freestyle-stable-observation" style="margin-top:10px;">');
   lines.push('<div class="label" style="font-weight:600;">Observational windows (descriptive only)</div>');
-  lines.push(`<div class="label">Candidates: ${obs.candidateWindowCount} · Mechanically qualified: ${obs.mechanicallyQualifiedCount} · HR co-observed: ${obs.hrCoObservedCount}</div>`);
+  lines.push(`<div class="label">Candidates: ${escapeHtml(obs.candidateWindowCount)} · Mechanically qualified: ${escapeHtml(obs.mechanicallyQualifiedCount)} · HR co-observed: ${escapeHtml(obs.hrCoObservedCount)}</div>`);
   const windows = Array.isArray(obs.windows) ? obs.windows : [];
   for (const window of windows) {
-    const parts = [`L${window.observedResistanceLevel}`, `${window.durationSec}s`, window.qualification.replace(/_/g, " ")];
+    const qualification = String(window.qualification || "").replace(/_/g, " ");
+    const parts = [
+      `L${escapeHtml(window.observedResistanceLevel)}`,
+      `${escapeHtml(window.durationSec)}s`,
+      escapeHtml(qualification),
+    ];
     if (typeof window.powerMedianWatts === "number") {
-      parts.push(`${window.powerMedianWatts}W`);
-      if (typeof window.powerMadWatts === "number") parts.push(`MAD ${window.powerMadWatts}W`);
+      parts.push(`${escapeHtml(window.powerMedianWatts)}W`);
+      if (typeof window.powerMadWatts === "number") parts.push(`MAD ${escapeHtml(window.powerMadWatts)}W`);
     }
-    if (typeof window.cadenceMedianRpm === "number") parts.push(`${window.cadenceMedianRpm} rpm`);
-    if (typeof window.hrMedianBpm === "number") parts.push(`${window.hrMedianBpm} bpm`);
-    parts.push(`joint ${(window.jointHrPowerCoverageRatio * 100).toFixed(0)}%`);
+    if (typeof window.cadenceMedianRpm === "number") parts.push(`${escapeHtml(window.cadenceMedianRpm)} rpm`);
+    if (typeof window.hrMedianBpm === "number") parts.push(`${escapeHtml(window.hrMedianBpm)} bpm`);
+    const jointPct = Number.isFinite(window.jointHrPowerCoverageRatio)
+      ? (window.jointHrPowerCoverageRatio * 100).toFixed(0)
+      : "0";
+    parts.push(`joint ${escapeHtml(jointPct)}%`);
     lines.push(`<div class="label">${parts.join(" · ")}</div>`);
     if (Array.isArray(window.reasons) && window.reasons.length > 0 && window.qualification !== "hr_co_observed") {
-      lines.push(`<div class="label" style="color:#888;">${window.reasons.join(", ")}</div>`);
+      lines.push(`<div class="label" style="color:#888;">${window.reasons.map((reason: unknown) => escapeHtml(reason)).join(", ")}</div>`);
     }
   }
   if (obs.f1EvidenceIncomplete || summary.evidence_incomplete === true) {

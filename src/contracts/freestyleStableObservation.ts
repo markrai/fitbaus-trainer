@@ -31,6 +31,40 @@ export type FreestyleStableWattsProvenance =
   | "mixed"
   | "unavailable";
 
+export const FREESTYLE_STABLE_OBSERVATION_REASONS = [
+  "insufficient_duration",
+  "power_unavailable",
+  "mixed_watt_provenance",
+  "insufficient_power_coverage",
+  "non_pedaling_zero_load",
+  "workload_unstable",
+  "insufficient_cadence_coverage",
+  "coasting",
+  "cadence_unstable",
+  "insufficient_hr_coverage",
+  "insufficient_joint_hr_power_coverage",
+  "f1_evidence_incomplete",
+] as const;
+
+export type FreestyleStableObservationReason = (typeof FREESTYLE_STABLE_OBSERVATION_REASONS)[number];
+
+const REASON_SET = new Set<string>(FREESTYLE_STABLE_OBSERVATION_REASONS);
+const MECHANICAL_REASONS = new Set<FreestyleStableObservationReason>([
+  "insufficient_duration",
+  "power_unavailable",
+  "mixed_watt_provenance",
+  "insufficient_power_coverage",
+  "non_pedaling_zero_load",
+  "workload_unstable",
+  "insufficient_cadence_coverage",
+  "coasting",
+  "cadence_unstable",
+]);
+const HR_INSUFFICIENCY_REASONS = new Set<FreestyleStableObservationReason>([
+  "insufficient_hr_coverage",
+  "insufficient_joint_hr_power_coverage",
+]);
+
 export interface FreestyleStableObservationWindowV1 {
   startActiveSec: number;
   endActiveSec: number;
@@ -54,7 +88,7 @@ export interface FreestyleStableObservationWindowV1 {
   jointPowerMedianWatts?: number;
   jointHrMedianBpm?: number;
   qualification: FreestyleStableWindowQualification;
-  reasons: string[];
+  reasons: FreestyleStableObservationReason[];
 }
 
 export interface FreestyleStableObservationV1 {
@@ -134,14 +168,101 @@ function nearlyEqual(a: number, b: number, tol = 0.001): boolean {
   return Math.abs(a - b) <= tol;
 }
 
-function parseReasons(v: unknown): string[] | null {
+function parseReasons(v: unknown): FreestyleStableObservationReason[] | null {
   if (!Array.isArray(v)) return null;
-  const reasons: string[] = [];
+  const reasons: FreestyleStableObservationReason[] = [];
+  const seen = new Set<string>();
   for (const item of v) {
-    if (typeof item !== "string" || item === "") return null;
-    reasons.push(item);
+    if (typeof item !== "string" || !REASON_SET.has(item) || seen.has(item)) return null;
+    seen.add(item);
+    reasons.push(item as FreestyleStableObservationReason);
   }
   return reasons;
+}
+
+function wattsMadLimit(medianWatts: number): number {
+  return Math.max(
+    FREESTYLE_STABLE_OBSERVATION_POLICY.maxWattsMadAbs,
+    FREESTYLE_STABLE_OBSERVATION_POLICY.maxWattsMadRatio * medianWatts
+  );
+}
+
+function reasonsInclude(
+  reasons: readonly FreestyleStableObservationReason[],
+  reason: FreestyleStableObservationReason
+): boolean {
+  return reasons.includes(reason);
+}
+
+function hasAnyReason(
+  reasons: readonly FreestyleStableObservationReason[],
+  set: Set<FreestyleStableObservationReason>
+): boolean {
+  return reasons.some((reason) => set.has(reason));
+}
+
+function qualificationAgreesWithMeasurements(
+  window: {
+    durationSec: number;
+    wattsProvenance: FreestyleStableWattsProvenance;
+    freshPowerCoverageRatio: number;
+    cadenceCoverageRatio: number;
+    hrCoverageRatio: number;
+    jointHrPowerCoverageRatio: number;
+    powerMedianWatts?: number;
+    powerMadWatts?: number;
+    cadenceMedianRpm?: number;
+    cadenceMadRpm?: number;
+  },
+  reasons: readonly FreestyleStableObservationReason[],
+  qualification: FreestyleStableWindowQualification,
+  evidenceIncomplete: boolean
+): boolean {
+  const policy = FREESTYLE_STABLE_OBSERVATION_POLICY;
+  const durationOk = window.durationSec >= policy.minMechanicallyQualifiedDurationSec;
+  const provenanceOk =
+    window.wattsProvenance === "measured_watts" || window.wattsProvenance === "calibrated_watts";
+  const powerCoverageOk = window.freshPowerCoverageRatio >= policy.minFreshPowerCoverageRatio;
+  const cadenceCoverageOk = window.cadenceCoverageRatio >= policy.minCadenceCoverageRatio;
+  const powerPresent = window.powerMedianWatts !== undefined && window.powerMadWatts !== undefined;
+  const cadencePresent = window.cadenceMedianRpm !== undefined && window.cadenceMadRpm !== undefined;
+  const positiveLoad = powerPresent && (window.powerMedianWatts as number) > 0;
+  const powerStable = positiveLoad &&
+    (window.powerMadWatts as number) <= wattsMadLimit(window.powerMedianWatts as number);
+  const cadencePositive = cadencePresent && (window.cadenceMedianRpm as number) > 0;
+  const cadenceStable = cadencePositive &&
+    (window.cadenceMadRpm as number) <= policy.maxCadenceMadRpm;
+  const mechanicalOk =
+    durationOk && provenanceOk && powerCoverageOk && cadenceCoverageOk &&
+    powerPresent && cadencePresent && positiveLoad && powerStable && cadencePositive && cadenceStable;
+  if (reasonsInclude(reasons, "insufficient_duration") !== !durationOk) return false;
+  if (reasonsInclude(reasons, "power_unavailable") !== !powerPresent) return false;
+  if (reasonsInclude(reasons, "mixed_watt_provenance") !== (window.wattsProvenance === "mixed")) return false;
+  if (reasonsInclude(reasons, "insufficient_power_coverage") !== (powerPresent && !powerCoverageOk)) return false;
+  if (reasonsInclude(reasons, "non_pedaling_zero_load") !== (powerPresent && (window.powerMedianWatts as number) === 0)) {
+    return false;
+  }
+  if (reasonsInclude(reasons, "workload_unstable") !== (positiveLoad && !powerStable)) return false;
+  if (reasonsInclude(reasons, "insufficient_cadence_coverage") !== !cadenceCoverageOk) return false;
+  if (!cadencePositive && cadencePresent && !reasonsInclude(reasons, "coasting")) return false;
+  if (reasonsInclude(reasons, "cadence_unstable") !== (cadencePositive && !cadenceStable)) return false;
+  if (reasonsInclude(reasons, "f1_evidence_incomplete") !== evidenceIncomplete) return false;
+  const jointOk = window.jointHrPowerCoverageRatio >= policy.minJointHrPowerCoverageRatio;
+  if (reasonsInclude(reasons, "insufficient_hr_coverage") !== (window.hrCoverageRatio === 0)) return false;
+  if (reasonsInclude(reasons, "insufficient_joint_hr_power_coverage") !== (window.hrCoverageRatio > 0 && !jointOk)) {
+    return false;
+  }
+  if (qualification === "hr_co_observed") {
+    return mechanicalOk && jointOk && !evidenceIncomplete &&
+      !hasAnyReason(reasons, MECHANICAL_REASONS) &&
+      !hasAnyReason(reasons, HR_INSUFFICIENCY_REASONS);
+  }
+  if (qualification === "mechanically_qualified") {
+    return mechanicalOk && !jointOk && !evidenceIncomplete &&
+      !hasAnyReason(reasons, MECHANICAL_REASONS) &&
+      hasAnyReason(reasons, HR_INSUFFICIENCY_REASONS);
+  }
+  return !mechanicalOk || evidenceIncomplete || hasAnyReason(reasons, MECHANICAL_REASONS);
 }
 
 function parseOptionalMetric(v: unknown): number | undefined | null {
@@ -226,15 +347,23 @@ function parseWindow(
   const reasons = parseReasons(v.reasons);
   if (!reasons) return null;
   const qualification = v.qualification as FreestyleStableWindowQualification;
-  const policy = FREESTYLE_STABLE_OBSERVATION_POLICY;
-  if (qualification !== "candidate" && evidenceIncomplete) return null;
-  if (qualification !== "candidate" && duration < policy.minMechanicallyQualifiedDurationSec) return null;
-  if (qualification === "hr_co_observed") {
-    if ((v.jointHrPowerCoverageRatio as number) < policy.minJointHrPowerCoverageRatio) return null;
-    if (joint === 0) return null;
-  }
-  if (qualification === "mechanically_qualified" && reasons.includes("f1_evidence_incomplete")) return null;
-  if (qualification === "hr_co_observed" && reasons.includes("f1_evidence_incomplete")) return null;
+  if (!qualificationAgreesWithMeasurements(
+    {
+      durationSec: duration,
+      wattsProvenance: v.wattsProvenance as FreestyleStableWattsProvenance,
+      freshPowerCoverageRatio: v.freshPowerCoverageRatio as number,
+      cadenceCoverageRatio: v.cadenceCoverageRatio as number,
+      hrCoverageRatio: v.hrCoverageRatio as number,
+      jointHrPowerCoverageRatio: v.jointHrPowerCoverageRatio as number,
+      ...(powerMedianWatts !== undefined ? { powerMedianWatts } : {}),
+      ...(powerMadWatts !== undefined ? { powerMadWatts } : {}),
+      ...(cadenceMedianRpm !== undefined ? { cadenceMedianRpm } : {}),
+      ...(cadenceMadRpm !== undefined ? { cadenceMadRpm } : {}),
+    },
+    reasons,
+    qualification,
+    evidenceIncomplete
+  )) return null;
   return {
     startActiveSec: v.startActiveSec as number,
     endActiveSec: v.endActiveSec as number,

@@ -37,6 +37,24 @@ import { APP_VERSION } from "./version.js";
 import { countValidHrSampleSeconds, isFreestyleWorkoutSelector, } from "./freestyleRide.js";
 import { deriveFreestyleRideResponse } from "./freestyleRideResponse.js";
 import { deriveFreestyleStableObservation } from "./freestyleStableObservation.js";
+export function attachFreestyleDerivedAnalytics(summary, input, deriveRide = deriveFreestyleRideResponse, deriveStable = deriveFreestyleStableObservation) {
+    try {
+        const freestyleResponse = deriveRide(input);
+        if (freestyleResponse)
+            summary.freestyle_ride_response = freestyleResponse;
+    }
+    catch (error) {
+        console.error("Error deriving freestyle ride response:", error);
+    }
+    try {
+        const stableObservation = deriveStable(input);
+        if (stableObservation)
+            summary.freestyle_stable_observation = stableObservation;
+    }
+    catch (error) {
+        console.error("Error deriving freestyle stable observation:", error);
+    }
+}
 export function buildHrTrace(hrSamples) {
     if (!hrSamples || hrSamples.length === 0) {
         return { sampling_interval_seconds: 60, samples: [] };
@@ -327,7 +345,7 @@ async function generateWorkoutSummary(sessionId, startedAt, endedAt, day, option
         try {
             await flushOrdinaryBikeTelemetryWrites(sessionId);
             const bikeSamples = await getOrdinaryBikeTelemetrySamples(sessionId);
-            const freestyleResponse = deriveFreestyleRideResponse({
+            attachFreestyleDerivedAnalytics(summary, {
                 athleteId: session.athleteId,
                 sessionId,
                 startedAtMs: effectiveStartedAt,
@@ -339,31 +357,9 @@ async function generateWorkoutSummary(sessionId, startedAt, endedAt, day, option
                 hrSamples,
                 bikeSamples,
             });
-            if (freestyleResponse) {
-                summary.freestyle_ride_response = freestyleResponse;
-            }
-            try {
-                const stableObservation = deriveFreestyleStableObservation({
-                    athleteId: session.athleteId,
-                    sessionId,
-                    startedAtMs: effectiveStartedAt,
-                    endedAtMs: effectiveEndedAt,
-                    activeDurationSec,
-                    pausedDurationSec,
-                    evidenceIncomplete: (freestyleFinalization === null || freestyleFinalization === void 0 ? void 0 : freestyleFinalization.evidenceIncomplete) === true,
-                    hrSamples,
-                    bikeSamples,
-                });
-                if (stableObservation) {
-                    summary.freestyle_stable_observation = stableObservation;
-                }
-            }
-            catch (error) {
-                console.error("Error deriving freestyle stable observation:", error);
-            }
         }
         catch (error) {
-            console.error("Error deriving freestyle ride response:", error);
+            console.error("Error loading freestyle telemetry for analytics:", error);
         }
     }
     if (isVo2WorkoutSelector(day)) {

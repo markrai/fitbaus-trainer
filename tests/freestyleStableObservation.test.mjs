@@ -17,7 +17,16 @@ import {
   resetWorkoutStorageForTests,
 } from "../dist/workoutStorage.js";
 import { buildSisuWorkoutPayload } from "../dist/sisuSync.js";
-import { generateWorkoutSummary, emitWorkoutSummary } from "../dist/workoutSummary.js";
+import {
+  generateWorkoutSummary,
+  emitWorkoutSummary,
+  attachFreestyleDerivedAnalytics,
+} from "../dist/workoutSummary.js";
+import { deriveFreestyleRideResponse } from "../dist/freestyleRideResponse.js";
+import {
+  buildFreestyleAnalyticsHtml,
+  escapeHtml,
+} from "../dist/freestyleRideAnalyticsView.js";
 import { startSession } from "../dist/sessionStore.js";
 import { installStandaloneFreestyleWorkout, getWorkoutMetadata } from "../dist/workoutData.js";
 import { FITNESS_STATE_STORAGE_KEY } from "../dist/fitnessState.js";
@@ -297,6 +306,8 @@ test("HR and power present on disjoint seconds are not co-observed", () => {
     hr: s % 2 === 1 ? 140 : null,
   }));
   assert.equal(result.windows[0].jointHrPowerSeconds, 0);
+  assert.equal(result.windows[0].powerOnlyObservedSeconds, 90);
+  assert.equal(result.windows[0].hrOnlyObservedSeconds, 90);
   assert.notEqual(result.windows[0].qualification, "hr_co_observed");
 });
 
@@ -557,4 +568,113 @@ test("returns null for invalid identity or timestamps", () => {
     startedAtMs: BASE_TIME,
     endedAtMs: BASE_TIME,
   })), null);
+});
+
+test("repeated derivation of the same dense window is identical", () => {
+  const first = stableRide("s-ident", 180, (s) => ({ hr: 140 }));
+  const second = stableRide("s-ident", 180, (s) => ({ hr: 140 }));
+  assert.deepEqual(first, second);
+  assert.ok(parseFreestyleStableObservation(JSON.parse(JSON.stringify(first))));
+});
+
+test("3-hour dense window completes without pathological pairing", () => {
+  const count = 10_800;
+  const sessionId = "s-3h";
+  const filled = fillRide(sessionId, count, (s) => ({ hr: 140 }));
+  const started = Date.now();
+  const result = deriveFreestyleStableObservation(baseInput(sessionId, count, filled));
+  const elapsedMs = Date.now() - started;
+  assert.ok(result);
+  assert.equal(result.candidateWindowCount, 1);
+  assert.equal(result.windows[0].durationSec, count);
+  assert.equal(result.windows[0].jointHrPowerSeconds, count);
+  assert.equal(result.windows[0].qualification, "hr_co_observed");
+  assert.ok(elapsedMs < 5000, `3-hour window took ${elapsedMs}ms`);
+});
+
+test("parser rejects unknown or malformed reason codes", () => {
+  const valid = JSON.parse(JSON.stringify(stableRide("s-reason", 60, (s) => ({ hr: 140 }))));
+  assert.ok(parseFreestyleStableObservation(valid));
+  valid.windows[0].reasons = ["<img src=x onerror=alert(1)>"];
+  assert.equal(parseFreestyleStableObservation(valid), null);
+  const duplicate = JSON.parse(JSON.stringify(stableRide("s-reason-dup", 60, (s) => ({ hr: 140 }))));
+  duplicate.windows[0].reasons.push("insufficient_duration");
+  assert.equal(parseFreestyleStableObservation(duplicate), null);
+});
+
+test("malicious HTML in a reason cannot create executable markup", () => {
+  const payload = "<img src=x onerror=alert(1)>";
+  assert.equal(escapeHtml(payload), "&lt;img src=x onerror=alert(1)&gt;");
+  const html = buildFreestyleAnalyticsHtml({
+    intent: "freestyle",
+    day: "Freestyle",
+    freestyle_ride_response: { workload: { workStatus: "unavailable", powerCoverageRatio: 0 } },
+    freestyle_stable_observation: {
+      candidateWindowCount: 1,
+      mechanicallyQualifiedCount: 0,
+      hrCoObservedCount: 0,
+      windows: [{
+        observedResistanceLevel: 5,
+        durationSec: 60,
+        qualification: "candidate",
+        jointHrPowerCoverageRatio: 0,
+        reasons: [payload, "insufficient_duration"],
+      }],
+    },
+  });
+  assert.match(html, /insufficient_duration/);
+  assert.doesNotMatch(html, /<img/);
+  assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+});
+
+test("parser rejects qualified windows that contradict mechanical policy", () => {
+  const qualified = JSON.parse(JSON.stringify(stableRide("s-contradict", 180, (s) => ({ hr: 140 }))));
+  assert.equal(qualified.windows[0].qualification, "hr_co_observed");
+  const mad = JSON.parse(JSON.stringify(qualified));
+  mad.windows[0].powerMadWatts = 80;
+  assert.equal(parseFreestyleStableObservation(mad), null);
+  const mixed = JSON.parse(JSON.stringify(qualified));
+  mixed.windows[0].wattsProvenance = "mixed";
+  assert.equal(parseFreestyleStableObservation(mixed), null);
+  const zeroLoad = JSON.parse(JSON.stringify(qualified));
+  zeroLoad.windows[0].powerMedianWatts = 0;
+  assert.equal(parseFreestyleStableObservation(zeroLoad), null);
+  const reason = JSON.parse(JSON.stringify(qualified));
+  reason.windows[0].reasons = ["workload_unstable"];
+  assert.equal(parseFreestyleStableObservation(reason), null);
+  const demote = JSON.parse(JSON.stringify(qualified));
+  demote.windows[0].qualification = "mechanically_qualified";
+  demote.mechanicallyQualifiedCount = 1;
+  demote.hrCoObservedCount = 0;
+  assert.equal(parseFreestyleStableObservation(demote), null);
+});
+
+test("F2 derivation exceptions do not suppress F3, and F3 exceptions do not suppress F2", () => {
+  const sessionId = "s-indep";
+  const filled = fillRide(sessionId, 180, (s) => ({ hr: 140 }));
+  const input = {
+    athleteId: ATHLETE,
+    sessionId,
+    startedAtMs: BASE_TIME,
+    endedAtMs: BASE_TIME + 180_000,
+    activeDurationSec: 180,
+    pausedDurationSec: 0,
+    cancelled: false,
+    evidenceIncomplete: false,
+    ...filled,
+  };
+  const f3Only = {};
+  attachFreestyleDerivedAnalytics(f3Only, input, () => { throw new Error("injected f2 failure"); });
+  assert.equal(f3Only.freestyle_ride_response, undefined);
+  assert.ok(f3Only.freestyle_stable_observation);
+  assert.equal(f3Only.freestyle_stable_observation.windows[0].qualification, "hr_co_observed");
+  const f2Only = {};
+  attachFreestyleDerivedAnalytics(
+    f2Only,
+    input,
+    deriveFreestyleRideResponse,
+    () => { throw new Error("injected f3 failure"); }
+  );
+  assert.ok(f2Only.freestyle_ride_response);
+  assert.equal(f2Only.freestyle_stable_observation, undefined);
 });

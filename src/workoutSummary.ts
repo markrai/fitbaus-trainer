@@ -17,7 +17,13 @@ import {
   storeWorkoutSummary,
 } from "./workoutStorage.js";
 import { formatISO8601UTC } from "./utils/dateTime.js";
-import { Activity, WorkoutSummary, type WorkoutExecutionProvenanceV1 } from "./types.js";
+import {
+  Activity,
+  WorkoutSummary,
+  type WorkoutExecutionProvenanceV1,
+  type HrSample,
+  type OrdinaryBikeTelemetrySample,
+} from "./types.js";
 import type { MachineId } from "./machines/types.js";
 import { getMachineUsageSnapshot, type MachineUsageSnapshot } from "./machines/runtime.js";
 import { getSession, totalPausedDurationSec } from "./sessionStore.js";
@@ -54,6 +60,39 @@ import {
 } from "./freestyleRide.js";
 import { deriveFreestyleRideResponse } from "./freestyleRideResponse.js";
 import { deriveFreestyleStableObservation } from "./freestyleStableObservation.js";
+
+export interface FreestyleDerivedAnalyticsInput {
+  athleteId: string;
+  sessionId: string;
+  startedAtMs: number;
+  endedAtMs: number;
+  activeDurationSec: number;
+  pausedDurationSec: number;
+  cancelled?: boolean;
+  evidenceIncomplete?: boolean;
+  hrSamples: readonly HrSample[];
+  bikeSamples: readonly OrdinaryBikeTelemetrySample[];
+}
+
+export function attachFreestyleDerivedAnalytics(
+  summary: WorkoutSummary,
+  input: FreestyleDerivedAnalyticsInput,
+  deriveRide: typeof deriveFreestyleRideResponse = deriveFreestyleRideResponse,
+  deriveStable: typeof deriveFreestyleStableObservation = deriveFreestyleStableObservation
+): void {
+  try {
+    const freestyleResponse = deriveRide(input);
+    if (freestyleResponse) summary.freestyle_ride_response = freestyleResponse;
+  } catch (error) {
+    console.error("Error deriving freestyle ride response:", error);
+  }
+  try {
+    const stableObservation = deriveStable(input);
+    if (stableObservation) summary.freestyle_stable_observation = stableObservation;
+  } catch (error) {
+    console.error("Error deriving freestyle stable observation:", error);
+  }
+}
 
 export function buildHrTrace(hrSamples: any[]) {
   if (!hrSamples || hrSamples.length === 0) {
@@ -401,7 +440,7 @@ async function generateWorkoutSummary(
     try {
       await flushOrdinaryBikeTelemetryWrites(sessionId);
       const bikeSamples = await getOrdinaryBikeTelemetrySamples(sessionId);
-      const freestyleResponse = deriveFreestyleRideResponse({
+      attachFreestyleDerivedAnalytics(summary, {
         athleteId: session.athleteId,
         sessionId,
         startedAtMs: effectiveStartedAt,
@@ -413,29 +452,8 @@ async function generateWorkoutSummary(
         hrSamples,
         bikeSamples,
       });
-      if (freestyleResponse) {
-        summary.freestyle_ride_response = freestyleResponse;
-      }
-      try {
-        const stableObservation = deriveFreestyleStableObservation({
-          athleteId: session.athleteId,
-          sessionId,
-          startedAtMs: effectiveStartedAt,
-          endedAtMs: effectiveEndedAt,
-          activeDurationSec,
-          pausedDurationSec,
-          evidenceIncomplete: freestyleFinalization?.evidenceIncomplete === true,
-          hrSamples,
-          bikeSamples,
-        });
-        if (stableObservation) {
-          summary.freestyle_stable_observation = stableObservation;
-        }
-      } catch (error) {
-        console.error("Error deriving freestyle stable observation:", error);
-      }
     } catch (error) {
-      console.error("Error deriving freestyle ride response:", error);
+      console.error("Error loading freestyle telemetry for analytics:", error);
     }
   }
 

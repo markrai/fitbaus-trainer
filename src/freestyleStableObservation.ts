@@ -6,6 +6,7 @@ import {
   type FreestyleStableObservationWindowV1,
   type FreestyleStableWattsProvenance,
   type FreestyleStableWindowQualification,
+  type FreestyleStableObservationReason,
 } from "./contracts/freestyleStableObservation.js";
 import { ORDINARY_BIKE_TELEMETRY_SCHEMA_VERSION_V1 } from "./contracts/telemetry.js";
 import type { BikeWattsProvenance, HrSample, OrdinaryBikeTelemetrySample } from "./types.js";
@@ -129,50 +130,44 @@ function classifyWindow(
   const startActiveSec = observations[0].activeSec;
   const endActiveSec = observations[observations.length - 1].activeSec + 1;
   const durationSec = endActiveSec - startActiveSec;
-  const wattsEntries = observations.filter((obs) => obs.watts !== undefined).map((obs) => ({
-    activeSec: obs.activeSec,
-    value: obs.watts!.value,
-    source: obs.watts!.source,
-  }));
-  const cadenceEntries = observations.filter((obs) => obs.cadenceRpm !== undefined).map((obs) => ({
-    activeSec: obs.activeSec,
-    value: obs.cadenceRpm as number,
-  }));
-  const powerSeconds = new Set(wattsEntries.map((entry) => entry.activeSec));
-  const cadenceSeconds = new Set(cadenceEntries.map((entry) => entry.activeSec));
-  const hrSeconds = new Set<number>();
+  const wattsBySec = new Map<number, { value: number; source: BikeWattsProvenance }>();
+  const cadenceValues: number[] = [];
+  for (const obs of observations) {
+    if (obs.watts !== undefined) wattsBySec.set(obs.activeSec, obs.watts);
+    if (obs.cadenceRpm !== undefined) cadenceValues.push(obs.cadenceRpm);
+  }
   const hrValues: number[] = [];
-  for (let sec = startActiveSec; sec < endActiveSec; sec += 1) {
-    const hr = hrBySecond.get(sec);
-    if (hr === undefined) continue;
-    hrSeconds.add(sec);
+  const hrInWindow = new Set<number>();
+  for (const [sec, hr] of hrBySecond) {
+    if (sec < startActiveSec || sec >= endActiveSec) continue;
+    hrInWindow.add(sec);
     hrValues.push(hr);
   }
   let joint = 0;
   let powerOnly = 0;
+  const wattsEntries: { value: number; source: BikeWattsProvenance }[] = [];
   const jointPower: number[] = [];
   const jointHr: number[] = [];
-  for (const sec of powerSeconds) {
-    if (hrSeconds.has(sec)) {
+  for (const [sec, watts] of wattsBySec) {
+    wattsEntries.push(watts);
+    const hr = hrBySecond.get(sec);
+    if (hr !== undefined) {
       joint += 1;
-      const watts = wattsEntries.find((entry) => entry.activeSec === sec);
-      if (watts) jointPower.push(watts.value);
-      const hr = hrBySecond.get(sec);
-      if (hr !== undefined) jointHr.push(hr);
+      jointPower.push(watts.value);
+      jointHr.push(hr);
     } else powerOnly += 1;
   }
   let hrOnly = 0;
-  for (const sec of hrSeconds) {
-    if (!powerSeconds.has(sec)) hrOnly += 1;
+  for (const sec of hrInWindow) {
+    if (!wattsBySec.has(sec)) hrOnly += 1;
   }
   const freshPowerCoverageRatio = clampRatio(durationSec > 0 ? (powerOnly + joint) / durationSec : 0);
-  const cadenceCoverageRatio = clampRatio(durationSec > 0 ? cadenceSeconds.size / durationSec : 0);
-  const hrCoverageRatio = clampRatio(durationSec > 0 ? hrSeconds.size / durationSec : 0);
+  const cadenceCoverageRatio = clampRatio(durationSec > 0 ? cadenceValues.length / durationSec : 0);
+  const hrCoverageRatio = clampRatio(durationSec > 0 ? hrInWindow.size / durationSec : 0);
   const jointHrPowerCoverageRatio = clampRatio(durationSec > 0 ? joint / durationSec : 0);
   const wattsValues = wattsEntries.map((entry) => entry.value);
-  const cadenceValues = cadenceEntries.map((entry) => entry.value);
   const wattsProvenance = provenanceOf(wattsEntries);
-  const reasons: string[] = [];
+  const reasons: FreestyleStableObservationReason[] = [];
   if (durationSec < POLICY.minMechanicallyQualifiedDurationSec) reasons.push("insufficient_duration");
   if (wattsValues.length === 0) reasons.push("power_unavailable");
   else if (wattsProvenance === "mixed") reasons.push("mixed_watt_provenance");
@@ -201,7 +196,7 @@ function classifyWindow(
   } else {
     reasons.push("insufficient_cadence_coverage");
   }
-  const mechanicalReasons = [
+  const mechanicalReasons: FreestyleStableObservationReason[] = [
     "insufficient_duration",
     "power_unavailable",
     "mixed_watt_provenance",
@@ -214,7 +209,7 @@ function classifyWindow(
   ];
   const mechanicallyOk = mechanicalReasons.every((reason) => !reasons.includes(reason));
   if (jointHrPowerCoverageRatio < POLICY.minJointHrPowerCoverageRatio) {
-    reasons.push(hrSeconds.size === 0 ? "insufficient_hr_coverage" : "insufficient_joint_hr_power_coverage");
+    reasons.push(hrInWindow.size === 0 ? "insufficient_hr_coverage" : "insufficient_joint_hr_power_coverage");
   }
   if (evidenceIncomplete) reasons.push("f1_evidence_incomplete");
   let qualification: FreestyleStableWindowQualification = "candidate";
