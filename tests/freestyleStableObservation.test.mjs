@@ -279,6 +279,57 @@ test("zero watts with zero cadence is not exercise-load evidence", () => {
   assert.ok(result.windows[0].reasons.includes("coasting"));
 });
 
+test("a single zero cadence sample coasts without requiring cadence_unstable", async () => {
+  await resetWorkoutStorageForTests();
+  const sessionId = "s-coast-mad";
+  const result = stableRide(sessionId, 180, (s) => ({
+    watts: 150,
+    resistance: 5,
+    cadence: s === 0 ? 0 : s < 90 ? 60 : 80,
+    hr: 140,
+  }));
+  assert.ok(result);
+  const window = result.windows[0];
+  assert.equal(result.candidateWindowCount, 1);
+  assert.equal(result.mechanicallyQualifiedCount, 0);
+  assert.equal(result.hrCoObservedCount, 0);
+  assert.equal(window.qualification, "candidate");
+  assert.equal(window.cadenceMedianRpm, 70);
+  assert.equal(window.cadenceMadRpm, 10);
+  assert.ok(window.cadenceMadRpm > POLICY.maxCadenceMadRpm);
+  assert.ok(window.reasons.includes("coasting"));
+  assert.equal(window.reasons.includes("cadence_unstable"), false);
+  const asJson = JSON.parse(JSON.stringify(result));
+  const parsed = parseFreestyleStableObservation(asJson);
+  assert.ok(parsed);
+  assert.deepEqual(parsed, result);
+  const forgedBoth = JSON.parse(JSON.stringify(asJson));
+  forgedBoth.windows[0].reasons = ["coasting", "cadence_unstable"];
+  assert.equal(parseFreestyleStableObservation(forgedBoth), null);
+  const strippedCoasting = JSON.parse(JSON.stringify(asJson));
+  strippedCoasting.windows[0].reasons = [];
+  assert.equal(parseFreestyleStableObservation(strippedCoasting), null);
+  await storeWorkoutSummary({
+    external_session_id: sessionId,
+    athlete_id: ATHLETE,
+    app_version: "test",
+    startedAt: result.timing.startedAt,
+    endedAt: result.timing.endedAt,
+    category: "cardio",
+    intent: "freestyle",
+    duration_minutes: 3,
+    primary_zone: 0,
+    stress_profile: "unknown",
+    zone_minutes: { z1: 0, z2: 0, z3: 0, z4: 0, z5: 0 },
+    hr_trace: { sampling_interval_seconds: 60, samples: [] },
+    day: "Freestyle",
+    freestyle_stable_observation: result,
+  });
+  const reloaded = await getWorkoutSummaryBySessionId(sessionId);
+  assert.deepEqual(reloaded.freestyle_stable_observation, result);
+  await resetWorkoutStorageForTests();
+});
+
 test("no HR measurements can still be mechanically qualified", () => {
   const result = stableRide("s-nohr", 180, (s) => ({ watts: 150, cadence: 80 }));
   assert.equal(result.windows[0].qualification, "mechanically_qualified");
@@ -590,6 +641,51 @@ test("3-hour dense window completes without pathological pairing", () => {
   assert.equal(result.windows[0].jointHrPowerSeconds, count);
   assert.equal(result.windows[0].qualification, "hr_co_observed");
   assert.ok(elapsedMs < 5000, `3-hour window took ${elapsedMs}ms`);
+});
+
+test("fragmented multi-hour ride pairs HR locally and stays deterministic", () => {
+  const count = 10_800;
+  const fragmentSec = 5;
+  const sessionId = "s-3h-frag";
+  const filled = fillRide(sessionId, count, (s) => {
+    const offset = s % fragmentSec;
+    return {
+      watts: offset === fragmentSec - 1 ? null : 150,
+      dropWatts: offset === fragmentSec - 1,
+      resistance: 5 + Math.floor(s / fragmentSec) % 10,
+      hr: offset === 0 ? null : 140,
+    };
+  });
+  const started = Date.now();
+  const result = deriveFreestyleStableObservation(baseInput(sessionId, count, filled));
+  const elapsedMs = Date.now() - started;
+  const expectedWindows = count / fragmentSec;
+  assert.ok(result);
+  assert.equal(result.candidateWindowCount, expectedWindows);
+  assert.equal(result.windows.length, expectedWindows);
+  assert.equal(result.mechanicallyQualifiedCount, 0);
+  assert.equal(result.hrCoObservedCount, 0);
+  const first = result.windows[0];
+  const last = result.windows[expectedWindows - 1];
+  assert.equal(first.startActiveSec, 0);
+  assert.equal(first.endActiveSec, fragmentSec);
+  assert.equal(last.startActiveSec, count - fragmentSec);
+  assert.equal(last.endActiveSec, count);
+  for (const window of result.windows) {
+    assert.equal(window.durationSec, fragmentSec);
+    assert.equal(window.qualifyingObservedSeconds, fragmentSec);
+    assert.equal(window.jointHrPowerSeconds, 3);
+    assert.equal(window.powerOnlyObservedSeconds, 1);
+    assert.equal(window.hrOnlyObservedSeconds, 1);
+    assert.equal(window.freshPowerCoverageRatio, 0.8);
+    assert.equal(window.hrCoverageRatio, 0.8);
+    assert.equal(window.jointHrPowerCoverageRatio, 0.6);
+    assert.equal(window.qualification, "candidate");
+    assert.ok(window.reasons.includes("insufficient_duration"));
+  }
+  const again = deriveFreestyleStableObservation(baseInput(sessionId, count, filled));
+  assert.deepEqual(again, result);
+  assert.ok(elapsedMs < 5000, `fragmented 3-hour ride took ${elapsedMs}ms`);
 });
 
 test("parser rejects unknown or malformed reason codes", () => {

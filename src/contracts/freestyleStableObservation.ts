@@ -244,8 +244,10 @@ function qualificationAgreesWithMeasurements(
   }
   if (reasonsInclude(reasons, "workload_unstable") !== (positiveLoad && !powerStable)) return false;
   if (reasonsInclude(reasons, "insufficient_cadence_coverage") !== !cadenceCoverageOk) return false;
-  if (!cadencePositive && cadencePresent && !reasonsInclude(reasons, "coasting")) return false;
-  if (reasonsInclude(reasons, "cadence_unstable") !== (cadencePositive && !cadenceStable)) return false;
+  const coasting = reasonsInclude(reasons, "coasting");
+  if (!cadencePositive && cadencePresent && !coasting) return false;
+  const expectCadenceUnstable = cadencePositive && !cadenceStable && !coasting;
+  if (reasonsInclude(reasons, "cadence_unstable") !== expectCadenceUnstable) return false;
   if (reasonsInclude(reasons, "f1_evidence_incomplete") !== evidenceIncomplete) return false;
   const jointOk = window.jointHrPowerCoverageRatio >= policy.minJointHrPowerCoverageRatio;
   if (reasonsInclude(reasons, "insufficient_hr_coverage") !== (window.hrCoverageRatio === 0)) return false;

@@ -138,8 +138,9 @@ function classifyWindow(
   }
   const hrValues: number[] = [];
   const hrInWindow = new Set<number>();
-  for (const [sec, hr] of hrBySecond) {
-    if (sec < startActiveSec || sec >= endActiveSec) continue;
+  for (let sec = startActiveSec; sec < endActiveSec; sec += 1) {
+    const hr = hrBySecond.get(sec);
+    if (hr === undefined) continue;
     hrInWindow.add(sec);
     hrValues.push(hr);
   }

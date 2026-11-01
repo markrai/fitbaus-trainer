@@ -137,9 +137,11 @@ function qualificationAgreesWithMeasurements(window, reasons, qualification, evi
         return false;
     if (reasonsInclude(reasons, "insufficient_cadence_coverage") !== !cadenceCoverageOk)
         return false;
-    if (!cadencePositive && cadencePresent && !reasonsInclude(reasons, "coasting"))
+    const coasting = reasonsInclude(reasons, "coasting");
+    if (!cadencePositive && cadencePresent && !coasting)
         return false;
-    if (reasonsInclude(reasons, "cadence_unstable") !== (cadencePositive && !cadenceStable))
+    const expectCadenceUnstable = cadencePositive && !cadenceStable && !coasting;
+    if (reasonsInclude(reasons, "cadence_unstable") !== expectCadenceUnstable)
         return false;
     if (reasonsInclude(reasons, "f1_evidence_incomplete") !== evidenceIncomplete)
         return false;
