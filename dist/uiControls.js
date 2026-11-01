@@ -11,6 +11,7 @@ import { createActuationProvenanceObserver } from "./actuationProvenanceObserver
 import { buildScientificSessionEvidenceV2Contexts } from "./scientificSessionEvidence.js";
 import { isVo2WorkoutSelector, vo2ProtocolDisplayName, VO2_WORKOUT_SELECTOR_ID, } from "./vo2Protocol.js";
 import { FREESTYLE_WORKOUT_LABEL, FREESTYLE_WORKOUT_SELECTOR_ID, clearFreestyleAuthorityFault, freestyleWorkoutBlocksText, isFreestyleWorkoutSelector, markFreestyleAuthorityFault, readActiveSessionOwner, readFreestyleAuthorityFault, readSessionFinalization, } from "./freestyleRide.js";
+import { clearFreestyleObservationHudOwnership, freestyleObservationHudOwnsLiveElement, hideFreestyleObservationHud, renderFreestyleObservationHud, } from "./freestyleObservationHud.js";
 import { vo2ProtocolHoldForPhaseForRuntime, vo2ProtocolUiTargetsForRuntime } from "./vo2ProtocolV3.js";
 import { genericWorkoutBlocksText, vo2AssessmentPresentation, vo2CancelModalBody, vo2CancelModalTitle, vo2EndWorkoutButtonLabel, vo2HistoryOutcomeText, vo2LimitReachedButtonVisible, vo2SelectorOptionText, vo2WorkoutBlocksText, } from "./vo2AssessmentView.js";
 import { buildFreestyleHistoryCompact, renderFreestyleWorkoutSummaryPanel, } from "./freestyleRideAnalyticsView.js";
@@ -684,17 +685,22 @@ function deriveWorkoutState(day, plan, workoutMetadata, base, startTime, paused,
         liveBpmStale,
     };
 }
+function freestyleObservationHudShouldOwnPanel() {
+    const day = resolveOwnedWorkoutDay();
+    if (!isFreestyleWorkoutSelector(day))
+        return false;
+    const session = getSession(day);
+    return !!(session.sessionId && session.startTime);
+}
 function renderMachineGuidance(update) {
     const panel = document.getElementById("machineGuidance");
     if (!panel)
         return;
     if (!update || update.guidance.resistance === undefined || update.guidance.cadenceRpm === undefined) {
-        panel.hidden = true;
-        const bikeLive = document.getElementById("machineGuidanceBikeLive");
-        if (bikeLive)
-            bikeLive.hidden = true;
+        hideFreestyleObservationHud();
         return;
     }
+    clearFreestyleObservationHudOwnership();
     panel.hidden = false;
     const name = document.getElementById("machineGuidanceName");
     const resistance = document.getElementById("machineGuidanceResistance");
@@ -731,10 +737,21 @@ function renderAssessmentBasedWorkloadAdvice(workload) {
         `Your assessment-based workload: ${workload.minWatts}\u2013${workload.maxWatts} W`;
     advice.hidden = false;
 }
+function renderLiveBikeTelemetryHud() {
+    if (freestyleObservationHudShouldOwnPanel() || freestyleObservationHudOwnsLiveElement()) {
+        renderFreestyleObservationHud(getBikeBridgeSession().getViewState());
+        return;
+    }
+    renderBikeBridgeHud();
+}
 function renderBikeBridgeHud() {
     const live = document.getElementById("machineGuidanceBikeLive");
     if (!live)
         return;
+    if (freestyleObservationHudShouldOwnPanel() || freestyleObservationHudOwnsLiveElement()) {
+        renderFreestyleObservationHud(getBikeBridgeSession().getViewState());
+        return;
+    }
     const panel = document.getElementById("machineGuidance");
     const state = getBikeBridgeSession().getViewState();
     if (!panel || panel.hidden || state.readiness === "not_configured") {
@@ -742,12 +759,12 @@ function renderBikeBridgeHud() {
         live.textContent = "";
         return;
     }
+    clearFreestyleObservationHudOwnership();
     live.hidden = false;
     const observed = formatBikeBridgeNumber(state.observedResistance);
     const rpm = formatBikeBridgeNumber(state.rpm);
     const watts = formatBikeBridgeNumber(state.watts);
     const stale = state.telemetryStale ? " (stale)" : "";
-    // Live resistance/RPM/watts use Bike Bridge colors when measurements are present.
     const observedHtml = observed === "-"
         ? observed
         : `<span class="machine-guidance-resistance">${observed}</span>`;
@@ -860,7 +877,7 @@ function syncBikeBridgeGuidance(update, workoutActive, paused, workout) {
         actuationOrigin: update === null || update === void 0 ? void 0 : update.actuationOrigin,
         workout,
     });
-    renderBikeBridgeHud();
+    renderLiveBikeTelemetryHud();
     const equipmentTab = document.getElementById("equipmentTab");
     if (equipmentTab === null || equipmentTab === void 0 ? void 0 : equipmentTab.classList.contains("active"))
         renderBikeBridgeSettingsStatus();
@@ -1181,8 +1198,7 @@ function renderWorkout(state) {
                 hrTargetEl.textContent =
                     "Authority fault - resistance control disarmed. Evidence preserved.";
             }
-            renderMachineGuidance(null);
-            renderFreestyleObservationHud();
+            renderFreestyleObservationHud(getBikeBridgeSession().getViewState());
             applyPhaseStyle(active.phase.phase);
             return;
         }
@@ -1225,8 +1241,7 @@ function renderWorkout(state) {
         : null;
     if (isFreestyleActive) {
         syncBikeBridgeGuidance(null, true, active.paused, session.sessionId ? { day: active.day, sessionId: session.sessionId } : undefined);
-        renderMachineGuidance(null);
-        renderFreestyleObservationHud();
+        renderFreestyleObservationHud(getBikeBridgeSession().getViewState());
     }
     else {
         syncBikeBridgeGuidance(machineUpdate, true, active.paused, session.sessionId ? { day: active.day, sessionId: session.sessionId } : undefined);
@@ -1240,43 +1255,6 @@ function renderWorkout(state) {
     }
     pendingVo2Cues = [];
     applyPhaseStyle(active.phase.phase);
-}
-function renderFreestyleObservationHud() {
-    const panel = document.getElementById("machineGuidance");
-    const live = document.getElementById("machineGuidanceBikeLive");
-    if (!panel || !live)
-        return;
-    const state = getBikeBridgeSession().getViewState();
-    panel.hidden = false;
-    const name = document.getElementById("machineGuidanceName");
-    const resistance = document.getElementById("machineGuidanceResistance");
-    const cadence = document.getElementById("machineGuidanceCadence");
-    const watts = document.getElementById("machineGuidanceWatts");
-    if (name)
-        name.textContent = "Freestyle observation";
-    const observed = state.telemetryStale ? null : state.observedResistance;
-    const rpm = state.telemetryStale ? null : state.rpm;
-    const power = state.telemetryStale ? null : state.watts;
-    if (resistance)
-        resistance.textContent = formatBikeBridgeNumber(observed);
-    if (cadence) {
-        cadence.textContent =
-            formatBikeBridgeNumber(rpm) === "-"
-                ? "- RPM"
-                : `${formatBikeBridgeNumber(rpm)} RPM`;
-    }
-    if (watts) {
-        watts.hidden = false;
-        watts.textContent =
-            formatBikeBridgeNumber(power) === "-"
-                ? "- W"
-                : `${formatBikeBridgeNumber(power)} W`;
-    }
-    live.hidden = false;
-    const stale = state.telemetryStale ? " (stale)" : "";
-    live.textContent = state.readiness === "not_configured"
-        ? "Bike Bridge not configured"
-        : `Live telemetry${stale}`;
 }
 let updateDisplaySeq = 0;
 function updateDisplay() {
@@ -2438,7 +2416,7 @@ function registerUiGlobals(phaseBoxEl) {
     window.updateHeartColor = updateHeartColor;
     window.updateDisplay = updateDisplay;
     getBikeBridgeSession().subscribe(() => {
-        renderBikeBridgeHud();
+        renderLiveBikeTelemetryHud();
         recordVo2BikeTelemetryIfActive();
         recordOrdinaryBikeTelemetryIfActive();
         const equipmentTab = document.getElementById("equipmentTab");
