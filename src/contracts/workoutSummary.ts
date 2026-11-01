@@ -26,9 +26,34 @@ export interface WorkoutSummary {
   category: "cardio";
   intent: string;
   duration_minutes: number;
+  /**
+   * Dominant observed HR zone (1-5). Zero means no valid HR was observed for
+   * long enough to assign a primary zone (Freestyle / honest coverage).
+   */
   primary_zone: number;
-  stress_profile: "low" | "moderate" | "high";
+  /**
+   * Physiological strain label. `"unknown"` means no valid HR evidence was
+   * available to classify strain (Freestyle / honest coverage).
+   */
+  stress_profile: "low" | "moderate" | "high" | "unknown";
   zone_minutes: ZoneMinutes;
+  /**
+   * Open-ended ride timing and HR coverage. Present for Freestyle finishes;
+   * absent on structured / VO2 summaries. Not a Level-A analytics contract.
+   */
+  open_ended_timing?: {
+    wall_clock_sec: number;
+    active_sec: number;
+    paused_sec: number;
+    valid_hr_sec: number;
+    unknown_hr_sec: number;
+  };
+  /**
+   * True when Freestyle finalization accepted an explicitly incomplete raw
+   * evidence set (for example irrecoverable telemetry rejection). Omitted when
+   * evidence is complete. Local history only; never fabricate coverage.
+   */
+  evidence_incomplete?: boolean;
   hr_trace: {
     sampling_interval_seconds: number;
     samples: Array<{ t: number; hr: number }>;

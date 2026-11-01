@@ -703,3 +703,679 @@ test("configure preserves brightness and URL change does not post it", async () 
   assert.deepEqual(fake.state.brightnessPosts, [{ value: 33 }]);
 });
 
+
+// ---------------------------------------------------------------------------
+// F0: manual_freestyle_ride - Bike Bridge authority boundary tests
+// ---------------------------------------------------------------------------
+
+// Helpers for Freestyle tests
+
+function freestyleSession(fake, overrides = {}) {
+  const session = readySession(fake, overrides);
+  session.bindSession({ sessionId: "fs-bridge-001", controlMode: "manual_freestyle_ride" });
+  return session;
+}
+
+async function waitForTelemetry(session) {
+  session.start();
+  await waitUntil(() => session.getViewState().telemetrySnapshotAt !== null);
+}
+
+// --- bindSession / getSessionBinding / isDisarmed ---
+
+test("bindSession(freestyle) sets binding and isDisarmed returns false", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  session.bindSession({ sessionId: "fs-001", controlMode: "manual_freestyle_ride" });
+  const binding = session.getSessionBinding();
+  assert.ok(binding);
+  assert.equal(binding.sessionId, "fs-001");
+  assert.equal(binding.controlMode, "manual_freestyle_ride");
+  assert.equal(session.isDisarmed(), false);
+});
+
+test("bindSession(null) sets disarmed and getSessionBinding returns null", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  session.bindSession(null);
+  assert.equal(session.isDisarmed(), true);
+  assert.equal(session.getSessionBinding(), null);
+});
+
+test("initial_unbound state: getSessionBinding returns null and isDisarmed returns false", () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  assert.equal(session.getSessionBinding(), null);
+  assert.equal(session.isDisarmed(), false);
+});
+
+// --- Scenario 1: No POST commands after Freestyle binding ---
+
+test("F0-1: Freestyle binding prevents any resistance POST during active guidance", async () => {
+  const fake = createFakeBikeBridge();
+  const session = freestyleSession(fake);
+  await waitForControl(session);
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    desiredResistance: 8,
+    recommendationChanged: true,
+    workout: { day: "", sessionId: "fs-bridge-001" },
+  });
+  await delay(30);
+  assert.equal(fake.state.posts.length, 0, "Freestyle must not POST any resistance commands");
+  session.stop();
+});
+
+// --- Scenario 2: Telemetry polling continues after Freestyle binding ---
+
+test("F0-2: Freestyle binding preserves telemetry polling", async () => {
+  const fake = createFakeBikeBridge();
+  const session = freestyleSession(fake, { pollIntervalMs: 20 });
+  await waitForTelemetry(session);
+  const vs = session.getViewState();
+  assert.ok(vs.watts !== null || vs.rpm !== null || vs.observedResistance !== null,
+    "Telemetry should arrive during Freestyle");
+  assert.equal(fake.state.posts.length, 0, "No resistance POSTs during telemetry-only mode");
+  session.stop();
+});
+
+// --- Scenario 3: Disarmed blocks commands and does not silently restore control ---
+
+test("F0-3: bindSession(null) disarm prevents commands; does not auto-restore on next guidance", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  await waitForControl(session);
+  // Prime an active workout first
+  session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5, recommendationChanged: true });
+  await delay(20);
+  const postsBeforeDisarm = fake.state.posts.length;
+  // Disarm
+  session.bindSession(null);
+  // Send more guidance - must not result in any new POSTs
+  session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 9, recommendationChanged: true });
+  await delay(30);
+  assert.equal(fake.state.posts.length, postsBeforeDisarm, "Disarm must block all subsequent commands");
+  assert.equal(session.isDisarmed(), true);
+  session.stop();
+});
+
+// --- Scenario 4: Stale prior-session guidance rejected ---
+
+test("F0-4: guidance from a different sessionId is rejected after Freestyle bind", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  await waitForControl(session);
+  session.bindSession({ sessionId: "fs-current", controlMode: "manual_freestyle_ride" });
+  // Simulate stale guidance from a previous session
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    desiredResistance: 10,
+    recommendationChanged: true,
+    workout: { day: "Monday", sessionId: "old-session-id" },
+  });
+  await delay(30);
+  assert.equal(fake.state.posts.length, 0, "Stale foreign session guidance must be rejected");
+  session.stop();
+});
+
+// --- Scenario 5: Global automatic control toggle cannot re-enable commands during Freestyle ---
+
+test("F0-5: enabling automaticControl via configure does not send commands during Freestyle", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake, { automaticControlEnabled: false });
+  await waitForControl(session);
+  session.bindSession({ sessionId: "fs-toggle", controlMode: "manual_freestyle_ride" });
+  session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 7, recommendationChanged: true,
+    workout: { day: "", sessionId: "fs-toggle" } });
+  await delay(10);
+  // Re-enable global automatic control
+  session.configure({ automaticControlEnabled: true });
+  await delay(30);
+  assert.equal(fake.state.posts.length, 0,
+    "configure(automaticControlEnabled: true) must not dispatch commands during Freestyle");
+  session.stop();
+});
+
+// --- Scenario 6: No reconciliation send after reconnect during Freestyle ---
+
+test("F0-6: bridge reconnect does not trigger reconciliation send during Freestyle", async () => {
+  const fake = createFakeBikeBridge({ connected: false });
+  const session = freestyleSession(fake, { pollIntervalMs: 20 });
+  session.start();
+  session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 6, recommendationChanged: true,
+    workout: { day: "", sessionId: "fs-bridge-001" } });
+  // Simulate reconnect
+  await delay(30);
+  fake.state.connected = true;
+  fake.state.initialized = true;
+  fake.state.controlAvailable = true;
+  await delay(60);
+  assert.equal(fake.state.posts.length, 0,
+    "Reconnect reconciliation must not send resistance during Freestyle");
+  session.stop();
+});
+
+// --- Scenario 7: Freestyle binding clears stale pending/desired state ---
+
+test("F0-7: bindSession(freestyle) clears desiredResistance and pendingLevel from previous session", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  await waitForControl(session);
+  // Prime state with previous session guidance
+  session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 8, recommendationChanged: true });
+  await delay(20);
+  const postsBefore = fake.state.posts.length;
+  // Bind Freestyle - must clear stale desired resistance
+  session.bindSession({ sessionId: "new-freestyle", controlMode: "manual_freestyle_ride" });
+  const vs = session.getViewState();
+  assert.equal(vs.desiredResistance, undefined, "Freestyle bind must clear desiredResistance");
+  // Send Freestyle guidance - no command must fire
+  session.onGuidance({ workoutActive: true, paused: false, recommendationChanged: false,
+    workout: { day: "", sessionId: "new-freestyle" } });
+  await delay(30);
+  assert.equal(fake.state.posts.length, postsBefore, "No new commands after Freestyle rebind");
+  session.stop();
+});
+
+// --- Scenario 8: Rebinding to a structured session after disarm restores commands ---
+
+test("F0-8: binding a controllable session after disarm re-enables resistance commands", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  await waitForControl(session);
+  session.bindSession(null); // disarm
+  assert.equal(session.isDisarmed(), true);
+  // Bind a new structured session
+  session.bindSession({ sessionId: "legacy-after-disarm", controlMode: "legacy_hr_control" });
+  assert.equal(session.isDisarmed(), false);
+  const binding = session.getSessionBinding();
+  assert.ok(binding);
+  assert.equal(binding.controlMode, "legacy_hr_control");
+  // Send guidance - now commands should be allowed
+  session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5, recommendationChanged: true,
+    workout: { day: "Monday", sessionId: "legacy-after-disarm" } });
+  await delay(30);
+  assert.ok(fake.state.posts.length > 0, "Structured session after disarm should send resistance commands");
+  session.stop();
+});
+
+// --- Scenario 9: Freestyle viewState shows no desiredResistance or commandedResistance ---
+
+test("F0-9: Freestyle viewState never exposes desiredResistance or commandedResistance", async () => {
+  const fake = createFakeBikeBridge();
+  const session = freestyleSession(fake);
+  await waitForControl(session);
+  session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 9, recommendationChanged: true,
+    workout: { day: "", sessionId: "fs-bridge-001" } });
+  await delay(30);
+  const vs = session.getViewState();
+  assert.equal(vs.desiredResistance, undefined, "desiredResistance must be absent in Freestyle viewState");
+  assert.equal(vs.commandedResistance, undefined, "commandedResistance must be absent in Freestyle viewState");
+  session.stop();
+});
+
+// --- Scenario 10: postedResistanceBodies stays empty after Freestyle guidance ---
+
+test("F0-10: postedResistanceBodies stays empty for entire Freestyle session", async () => {
+  const fake = createFakeBikeBridge();
+  const session = freestyleSession(fake, { pollIntervalMs: 20 });
+  await waitForTelemetry(session);
+  for (let i = 0; i < 5; i++) {
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: i + 1,
+      recommendationChanged: true, workout: { day: "", sessionId: "fs-bridge-001" } });
+    await delay(10);
+  }
+  assert.equal(session.postedResistanceBodies().length, 0,
+    "postedResistanceBodies must remain empty for Freestyle");
+  session.stop();
+});
+
+// --- Scenario 11: In-flight command completed before Freestyle bind does not trigger retry ---
+
+test("F0-11a: freestyle bind after dispatch sends zero additional posts on success", async () => {
+  const deferred = createDeferredBridge();
+  const session = readySession(deferred);
+  const resolved = completionWatcher(session);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "f0-11a", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "f0-11a" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 7,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "f0-11a" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.bindSession({ sessionId: "f0-11a-fs", controlMode: "manual_freestyle_ride" });
+    deferred.state.pending[0].resolve({ status: 200, text: JSON.stringify({ requested: 5 }) });
+    await waitUntil(() => resolved.length === 1);
+    assert.equal(resolved[0], "accepted");
+    assert.equal(deferred.state.posts.length, 1);
+    assert.equal(session.getViewState().desiredResistance, undefined);
+    assert.equal(session.getViewState().lastCommandOutcome, null);
+  } finally {
+    session.stop();
+  }
+});
+
+test("F0-11b: freestyle bind after dispatch sends zero additional posts on failure", async () => {
+  const deferred = createDeferredBridge();
+  const session = readySession(deferred);
+  const resolved = completionWatcher(session);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "f0-11b", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "f0-11b" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 7,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "f0-11b" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.bindSession({ sessionId: "f0-11b-fs", controlMode: "manual_freestyle_ride" });
+    deferred.state.pending[0].resolve({ status: 500, text: JSON.stringify({ error: "setter unavailable" }) });
+    await waitUntil(() => resolved.length === 1);
+    assert.equal(resolved[0], "failed");
+    assert.equal(deferred.state.posts.length, 1);
+    assert.equal(session.getViewState().desiredResistance, undefined);
+    assert.equal(session.getViewState().lastCommandOutcome, null);
+    assert.equal(session.getViewState().lastError, null);
+  } finally {
+    session.stop();
+  }
+});
+
+test("F0-11c: freestyle bind after dispatch sends zero additional posts on timeout", async () => {
+  const deferred = createDeferredBridge();
+  const session = readySession(deferred);
+  const resolved = completionWatcher(session);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "f0-11c", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "f0-11c" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 7,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "f0-11c" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.bindSession({ sessionId: "f0-11c-fs", controlMode: "manual_freestyle_ride" });
+    const timeout = new Error("timeout");
+    timeout.name = "AbortError";
+    deferred.state.pending[0].reject(timeout);
+    await waitUntil(() => resolved.length === 1);
+    assert.equal(resolved[0], "timeout");
+    assert.equal(deferred.state.posts.length, 1);
+    assert.equal(session.getViewState().desiredResistance, undefined);
+    assert.equal(session.getViewState().lastCommandOutcome, null);
+  } finally {
+    session.stop();
+  }
+});
+
+// --- Scenario 12: Freestyle binding does not affect telemetry readiness classification ---
+
+test("F0-12: readiness classification is unaffected by Freestyle binding", async () => {
+  const fake = createFakeBikeBridge();
+  const session = freestyleSession(fake, { pollIntervalMs: 20 });
+  await waitForTelemetry(session);
+  const vs = session.getViewState();
+  // Readiness should still reflect the physical bridge state
+  assert.ok(
+    vs.readiness === "control_ready" || vs.readiness === "telemetry_ready",
+    `Expected control_ready or telemetry_ready but got ${vs.readiness}`
+  );
+  session.stop();
+});
+
+// --- Scenario 13: Disarmed bridge correctly renders automaticControlEnabled from storage ---
+
+test("F0-13: disarmed bridge reflects automaticControlEnabled from settings without sending commands", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake, { automaticControlEnabled: true });
+  await waitForControl(session);
+  session.bindSession(null);
+  // Even though automatic control is enabled in settings, no command should fire
+  session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 4, recommendationChanged: true });
+  await delay(30);
+  assert.equal(fake.state.posts.length, 0, "Disarmed session must not send commands");
+  // View should still reflect the stored automatic control setting
+  assert.equal(session.getViewState().automaticControlEnabled, true,
+    "automaticControlEnabled viewState should still reflect storage");
+  session.stop();
+});
+
+// F0 hardening: deferred resistance transport. GETs answer immediately;
+// resistance POSTs stay pending until the test settles them explicitly.
+function createDeferredBridge() {
+  const state = {
+    posts: [],
+    pending: [],
+    connected: true,
+    initialized: true,
+    controlAvailable: true,
+    observed: 3,
+    rpm: 56,
+    watts: 42,
+  };
+  const transport = {
+    async request(req) {
+      const url = new URL(req.url);
+      const path = url.pathname;
+      if (req.method === "POST" && path === "/api/v1/resistance") {
+        state.posts.push(req.jsonBody);
+        return new Promise((resolve, reject) => {
+          state.pending.push({ resolve, reject });
+        });
+      }
+      if (req.method === "GET" && path === "/api/v1/status") {
+        return {
+          status: 200,
+          text: JSON.stringify({
+            status: "ok",
+            bridgeVersion: "0.1.0-poc",
+            connected: state.connected,
+            initialized: state.initialized,
+            resistanceControlAvailable: state.controlAvailable,
+            resistance: {
+              requested: null,
+              requestedAt: null,
+              observed: state.observed,
+              observedAt: "2026-08-28T12:00:00.000Z",
+            },
+          }),
+        };
+      }
+      if (req.method === "GET" && path === "/api/v1/telemetry") {
+        return {
+          status: 200,
+          text: JSON.stringify({
+            connected: state.connected,
+            initialized: state.initialized,
+            snapshotAt: "2026-08-28T12:00:00.000Z",
+            resistance: metric(state.observed),
+            rpm: metric(state.rpm),
+            watts: metric(state.watts),
+            machine: null,
+          }),
+        };
+      }
+      return { status: 404, text: JSON.stringify({ error: "not found" }) };
+    },
+  };
+  return { state, transport };
+}
+
+// Records actuation outcomes so tests can wait for a completion deterministically.
+function completionWatcher(session) {
+  const resolved = [];
+  session.setActuationObserver({
+    requested() {
+      return {};
+    },
+    resolved(token, outcome) {
+      resolved.push(outcome);
+    },
+  });
+  return resolved;
+}
+
+function abortTimeout() {
+  const error = new Error("timeout");
+  error.name = "AbortError";
+  return error;
+}
+
+// Task 1: same-session authority is immutable.
+
+test("F0-bind-1: frozen freestyle session cannot rebind to a controllable mode", async () => {
+  for (const mode of ["legacy_hr_control", "vo2_protocol", "prospective_fixed_load"]) {
+    const fake = createFakeBikeBridge();
+    const session = readySession(fake);
+    try {
+      await waitForControl(session);
+      session.bindSession({ sessionId: "fs-frozen", controlMode: "manual_freestyle_ride" });
+      assert.throws(
+        () => session.bindSession({ sessionId: "fs-frozen", controlMode: mode }),
+        /conflicting/
+      );
+      assert.deepEqual(session.getSessionBinding(),
+        { sessionId: "fs-frozen", controlMode: "manual_freestyle_ride" });
+      // Same-mode retry stays idempotent.
+      session.bindSession({ sessionId: "fs-frozen", controlMode: "manual_freestyle_ride" });
+      assert.deepEqual(session.getSessionBinding(),
+        { sessionId: "fs-frozen", controlMode: "manual_freestyle_ride" });
+      // The frozen session stays observation-only.
+      session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 9,
+        recommendationChanged: true, workout: { day: "", sessionId: "fs-frozen" } });
+      await delay(20);
+      assert.equal(fake.state.posts.length, 0);
+    } finally {
+      session.stop();
+    }
+  }
+});
+
+test("F0-bind-2: same-session same-mode rebind is idempotent and preserves state", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "stable", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "stable" } });
+    await waitUntil(() => fake.state.posts.length === 1);
+    await waitUntil(() => session.getViewState().lastCommandOutcome === "accepted");
+    session.bindSession({ sessionId: "stable", controlMode: "legacy_hr_control" });
+    assert.deepEqual(session.getSessionBinding(),
+      { sessionId: "stable", controlMode: "legacy_hr_control" });
+    assert.equal(session.getViewState().desiredResistance, 5);
+    assert.equal(session.getViewState().requestedResistance, 5);
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: false, workout: { day: "Monday", sessionId: "stable" } });
+    await delay(20);
+    assert.equal(fake.state.posts.length, 1);
+  } finally {
+    session.stop();
+  }
+});
+
+test("F0-bind-3: different session id starts a new binding and invalidates prior state", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "session-a", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "session-a" } });
+    await waitUntil(() => session.getViewState().lastCommandOutcome === "accepted");
+    session.bindSession({ sessionId: "session-b", controlMode: "legacy_hr_control" });
+    assert.equal(session.getViewState().desiredResistance, undefined);
+    assert.equal(session.getViewState().commandedResistance, undefined);
+    // Delayed guidance from session A is rejected and changes nothing.
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 9,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "session-a" } });
+    await delay(20);
+    assert.equal(fake.state.posts.length, 1);
+    assert.equal(session.getViewState().desiredResistance, undefined);
+    // Session B commands with matching identity.
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 6,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "session-b" } });
+    await waitUntil(() => fake.state.posts.length === 2);
+    assert.deepEqual(fake.state.posts[1], { value: 6 });
+  } finally {
+    session.stop();
+  }
+});
+
+test("F0-bind-4: invalid bindings fail closed without changing state", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  try {
+    await waitForControl(session);
+    assert.throws(() => session.bindSession({ sessionId: "", controlMode: "legacy_hr_control" }), /Invalid/);
+    assert.throws(() => session.bindSession({ sessionId: "x", controlMode: "bogus" }), /Invalid/);
+    assert.equal(session.getSessionBinding(), null);
+    assert.equal(session.isDisarmed(), false);
+    session.bindSession({ sessionId: "kept", controlMode: "legacy_hr_control" });
+    assert.throws(() => session.bindSession({ sessionId: "", controlMode: "legacy_hr_control" }), /Invalid/);
+    assert.throws(() => session.bindSession({ sessionId: "kept", controlMode: "bogus" }), /Invalid/);
+    assert.deepEqual(session.getSessionBinding(),
+      { sessionId: "kept", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "kept" } });
+    await waitUntil(() => fake.state.posts.length === 1);
+  } finally {
+    session.stop();
+  }
+});
+
+// Task 2: bound sessions require matching identity.
+
+test("F0-id-1: controllable binding ignores missing and foreign identity", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "id-a", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "id-a" } });
+    await waitUntil(() => fake.state.posts.length === 1);
+    await waitUntil(() => session.getViewState().lastCommandOutcome === "accepted");
+    // Foreign identity authorizes nothing and preserves live state.
+    session.onGuidance({ workoutActive: false, paused: false, desiredResistance: 9,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "foreign" } });
+    await delay(20);
+    assert.equal(fake.state.posts.length, 1);
+    assert.equal(session.getViewState().desiredResistance, 5);
+    assert.equal(session.getViewState().commandedResistance, 5);
+    // Missing identity authorizes nothing and preserves live state.
+    session.onGuidance({ workoutActive: false, paused: false, desiredResistance: 9, recommendationChanged: true });
+    await delay(20);
+    assert.equal(fake.state.posts.length, 1);
+    assert.equal(session.getViewState().desiredResistance, 5);
+    assert.equal(session.getViewState().commandedResistance, 5);
+    assert.equal(session.getViewState().lastCommandOutcome, "accepted");
+  } finally {
+    session.stop();
+  }
+});
+
+test("F0-id-2: freestyle binding ignores missing, foreign, and delayed identity", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "fs-id", controlMode: "manual_freestyle_ride" });
+    session.onGuidance({ workoutActive: true, paused: false, recommendationChanged: false,
+      workout: { day: "", sessionId: "fs-id" } });
+    await delay(10);
+    assert.equal(fake.state.posts.length, 0);
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 9, recommendationChanged: true });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 9,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "other" } });
+    await delay(20);
+    assert.equal(fake.state.posts.length, 0);
+    assert.equal(session.getViewState().desiredResistance, undefined);
+    assert.equal(session.getSessionBinding().controlMode, "manual_freestyle_ride");
+    // Delayed guidance from a superseded freestyle session changes nothing.
+    session.bindSession({ sessionId: "fs-next", controlMode: "manual_freestyle_ride" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 9,
+      recommendationChanged: true, workout: { day: "", sessionId: "fs-id" } });
+    await delay(20);
+    assert.equal(fake.state.posts.length, 0);
+    assert.equal(session.getViewState().desiredResistance, undefined);
+    assert.equal(session.getSessionBinding().sessionId, "fs-next");
+  } finally {
+    session.stop();
+  }
+});
+
+// Task 3: stale completions cannot contaminate the new session.
+
+test("F0-stale-1: late success from session A does not touch session B", async () => {
+  const deferred = createDeferredBridge();
+  const session = readySession(deferred);
+  const resolved = completionWatcher(session);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "stale-a", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "stale-a" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.bindSession({ sessionId: "stale-b", controlMode: "legacy_hr_control" });
+    deferred.state.pending[0].resolve({ status: 200, text: JSON.stringify({ requested: 5 }) });
+    await waitUntil(() => resolved.length === 1);
+    assert.equal(resolved[0], "accepted");
+    assert.equal(deferred.state.posts.length, 1);
+    assert.equal(session.getViewState().lastCommandOutcome, null);
+    assert.equal(session.getViewState().requestedResistance, null);
+    // Session B issues its own command and it completes normally.
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 9,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "stale-b" } });
+    await waitUntil(() => deferred.state.posts.length === 2);
+    assert.deepEqual(deferred.state.posts[1], { value: 9 });
+    deferred.state.pending[1].resolve({ status: 200, text: JSON.stringify({ requested: 9 }) });
+    await waitUntil(() => session.getViewState().lastCommandOutcome === "accepted");
+    assert.equal(session.getViewState().requestedResistance, 9);
+  } finally {
+    session.stop();
+  }
+});
+
+test("F0-stale-2: late failure from session A does not touch session B, queued B command survives", async () => {
+  const deferred = createDeferredBridge();
+  const session = readySession(deferred);
+  const resolved = completionWatcher(session);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "fail-a", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "fail-a" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.bindSession({ sessionId: "fail-b", controlMode: "legacy_hr_control" });
+    // Session B queues its command while A's request is still in flight.
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 8,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "fail-b" } });
+    assert.equal(deferred.state.posts.length, 1);
+    deferred.state.pending[0].resolve({ status: 500, text: JSON.stringify({ error: "setter unavailable" }) });
+    await waitUntil(() => deferred.state.posts.length === 2);
+    assert.deepEqual(deferred.state.posts[1], { value: 8 });
+    assert.equal(resolved[0], "failed");
+    assert.equal(session.getViewState().lastCommandOutcome, null);
+    assert.equal(session.getViewState().lastError, null);
+    deferred.state.pending[1].resolve({ status: 200, text: JSON.stringify({ requested: 8 }) });
+    await waitUntil(() => session.getViewState().lastCommandOutcome === "accepted");
+    assert.equal(session.getViewState().requestedResistance, 8);
+  } finally {
+    session.stop();
+  }
+});
+
+test("F0-stale-3: late timeout from session A does not touch session B", async () => {
+  const deferred = createDeferredBridge();
+  const session = readySession(deferred);
+  const resolved = completionWatcher(session);
+  try {
+    await waitForControl(session);
+    session.bindSession({ sessionId: "timeout-a", controlMode: "legacy_hr_control" });
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 5,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "timeout-a" } });
+    assert.equal(deferred.state.posts.length, 1);
+    session.bindSession({ sessionId: "timeout-b", controlMode: "legacy_hr_control" });
+    deferred.state.pending[0].reject(abortTimeout());
+    await waitUntil(() => resolved.length === 1);
+    assert.equal(resolved[0], "timeout");
+    assert.equal(deferred.state.posts.length, 1);
+    assert.equal(session.getViewState().lastCommandOutcome, null);
+    assert.equal(session.getViewState().lastError, null);
+    session.onGuidance({ workoutActive: true, paused: false, desiredResistance: 6,
+      recommendationChanged: true, workout: { day: "Monday", sessionId: "timeout-b" } });
+    await waitUntil(() => deferred.state.posts.length === 2);
+    assert.deepEqual(deferred.state.posts[1], { value: 6 });
+    deferred.state.pending[1].resolve({ status: 200, text: JSON.stringify({ requested: 6 }) });
+    await waitUntil(() => session.getViewState().lastCommandOutcome === "accepted");
+    assert.equal(session.getViewState().requestedResistance, 6);
+  } finally {
+    session.stop();
+  }
+});

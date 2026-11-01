@@ -47,6 +47,11 @@ import { finalizeExecutionProvenance } from "./executionProvenance.js";
 import { recordPromotedCalibrationMachineProvenance } from "./calibrationMachineProvenance.js";
 import { readFitnessState } from "./fitnessState.js";
 import { APP_VERSION } from "./version.js";
+import {
+  countValidHrSampleSeconds,
+  isFreestyleWorkoutSelector,
+  type SessionFinalizationV1,
+} from "./freestyleRide.js";
 
 export function buildHrTrace(hrSamples: any[]) {
   if (!hrSamples || hrSamples.length === 0) {
@@ -73,10 +78,32 @@ export function buildHrTrace(hrSamples: any[]) {
   return { sampling_interval_seconds: 60, samples: downsampled };
 }
 
-export function determineStressProfile(primaryZone: number): "low" | "moderate" | "high" {
+export function determineStressProfile(
+  primaryZone: number
+): "low" | "moderate" | "high" | "unknown" {
+  if (primaryZone <= 0) return "unknown";
   if (primaryZone === 1 || primaryZone === 2) return "low";
   if (primaryZone === 3) return "moderate";
   return "high";
+}
+
+export function determinePrimaryZoneHonest(zoneMinutes: {
+  z1: number;
+  z2: number;
+  z3: number;
+  z4: number;
+  z5: number;
+}): number {
+  let max = 0;
+  let primary = 0;
+  (["z5", "z4", "z3", "z2", "z1"] as const).forEach((key) => {
+    const val = zoneMinutes[key];
+    if (val > max) {
+      max = val;
+      primary = parseInt(key.slice(1), 10);
+    }
+  });
+  return max === 0 ? 0 : primary;
 }
 
 export function applyMachineUsageToSummary(
@@ -139,8 +166,12 @@ export function applyWorkoutActivityToSummary(
 
 function validateSummary(summary: WorkoutSummary) {
   const errors: string[] = [];
+  const freestyleHonest =
+    isFreestyleWorkoutSelector(summary.day) || summary.open_ended_timing != null;
   const totalSeconds = Math.floor((new Date(summary.endedAt).getTime() - new Date(summary.startedAt).getTime()) / 1000);
-  const expectedDuration = Math.round(totalSeconds / 60);
+  const expectedDuration = freestyleHonest
+    ? Math.max(0, Math.round((summary.open_ended_timing?.active_sec ?? 0) / 60))
+    : Math.round(totalSeconds / 60);
   if (summary.duration_minutes !== expectedDuration) {
     errors.push(`duration_minutes mismatch: expected ${expectedDuration}, got ${summary.duration_minutes}`);
   }
@@ -150,12 +181,32 @@ function validateSummary(summary: WorkoutSummary) {
     summary.zone_minutes.z3 +
     summary.zone_minutes.z4 +
     summary.zone_minutes.z5;
-  if (zoneSum !== summary.duration_minutes) {
+  if (!freestyleHonest && zoneSum !== summary.duration_minutes) {
     errors.push(`zone_minutes sum (${zoneSum}) does not equal duration_minutes (${summary.duration_minutes})`);
   }
-  const primaryZoneKey = `z${summary.primary_zone}` as keyof typeof summary.zone_minutes;
-  if (summary.zone_minutes[primaryZoneKey] <= 0) {
-    errors.push(`primary_zone ${summary.primary_zone} has zero or negative minutes in zone_minutes`);
+  if (freestyleHonest) {
+    if (summary.primary_zone < 0 || summary.primary_zone > 5) {
+      errors.push(`primary_zone ${summary.primary_zone} is out of range for open-ended timing`);
+    }
+    if (summary.primary_zone > 0) {
+      const primaryZoneKey = `z${summary.primary_zone}` as keyof typeof summary.zone_minutes;
+      if (summary.zone_minutes[primaryZoneKey] <= 0) {
+        errors.push(`primary_zone ${summary.primary_zone} has zero or negative minutes in zone_minutes`);
+      }
+    } else if (zoneSum > 0) {
+      errors.push("primary_zone 0 is incompatible with non-zero observed zone minutes");
+    }
+    if (summary.evidence_incomplete != null && summary.evidence_incomplete !== true) {
+      errors.push("evidence_incomplete must be true when present");
+    }
+  } else {
+    if (summary.evidence_incomplete === true) {
+      errors.push("evidence_incomplete is only valid for Freestyle open-ended summaries");
+    }
+    const primaryZoneKey = `z${summary.primary_zone}` as keyof typeof summary.zone_minutes;
+    if (summary.zone_minutes[primaryZoneKey] <= 0) {
+      errors.push(`primary_zone ${summary.primary_zone} has zero or negative minutes in zone_minutes`);
+    }
   }
   if (new Date(summary.startedAt) >= new Date(summary.endedAt)) {
     errors.push(`startedAt (${summary.startedAt}) must be before endedAt (${summary.endedAt})`);
@@ -177,27 +228,75 @@ async function generateWorkoutSummary(
   startedAt: number,
   endedAt: number,
   day: string,
-  options?: { cancelled?: boolean; vo2Profile?: Vo2ProfileInputs }
+  options?: {
+    cancelled?: boolean;
+    vo2Profile?: Vo2ProfileInputs;
+    freestyleFinalization?: SessionFinalizationV1;
+  }
 ): Promise<WorkoutSummary> {
-  const durationMs = endedAt - startedAt;
+  const freestyleFinalization = options?.freestyleFinalization;
+  const isFreestyle = isFreestyleWorkoutSelector(day) || freestyleFinalization != null;
+  const effectiveEndedAt = freestyleFinalization?.endedAtMs ?? endedAt;
+  const effectiveStartedAt = freestyleFinalization?.startedAtMs ?? startedAt;
+  if (
+    !Number.isFinite(effectiveStartedAt) ||
+    !Number.isFinite(effectiveEndedAt) ||
+    effectiveEndedAt <= effectiveStartedAt
+  ) {
+    throw new Error(
+      `Invalid workout timestamps. Started: ${effectiveStartedAt}, Ended: ${effectiveEndedAt}`
+    );
+  }
+  const durationMs = effectiveEndedAt - effectiveStartedAt;
   const durationMinutesCheck = Math.round(durationMs / (1000 * 60));
   const MAX_DURATION_MINUTES = 1440;
-  if (durationMinutesCheck > MAX_DURATION_MINUTES) {
+  const MAX_FREESTYLE_ACTIVE_DURATION_SEC = MAX_DURATION_MINUTES * 60;
+
+  const session = getSession(day);
+  const activeDurationSec = freestyleFinalization
+    ? freestyleFinalization.activeDurationSec
+    : actualElapsedSeconds(session.startTime, session.paused, session.pausedElapsed, effectiveEndedAt);
+  const pausedDurationSec = freestyleFinalization
+    ? freestyleFinalization.pausedDurationSec
+    : totalPausedDurationSec(session, effectiveEndedAt);
+  const wallClockSec = Math.max(0, Math.floor((effectiveEndedAt - effectiveStartedAt) / 1000));
+
+  if (isFreestyle) {
+    if (
+      !Number.isFinite(activeDurationSec) ||
+      activeDurationSec < 0 ||
+      !Number.isFinite(pausedDurationSec) ||
+      pausedDurationSec < 0 ||
+      activeDurationSec > wallClockSec + 1 ||
+      activeDurationSec + pausedDurationSec > wallClockSec + 2
+    ) {
+      throw new Error(
+        `Inconsistent Freestyle timing. active=${activeDurationSec}, paused=${pausedDurationSec}, wall=${wallClockSec}`
+      );
+    }
+    if (activeDurationSec > MAX_FREESTYLE_ACTIVE_DURATION_SEC) {
+      throw new Error(
+        `Freestyle active duration ${activeDurationSec} seconds exceeds maximum of ${MAX_FREESTYLE_ACTIVE_DURATION_SEC} seconds.`
+      );
+    }
+  } else if (durationMinutesCheck > MAX_DURATION_MINUTES) {
     throw new Error(
       `Workout duration ${durationMinutesCheck} minutes exceeds maximum of ${MAX_DURATION_MINUTES} minutes. This likely indicates a stale workout session. Started: ${new Date(
-        startedAt
-      ).toISOString()}, Ended: ${new Date(endedAt).toISOString()}`
+        effectiveStartedAt
+      ).toISOString()}, Ended: ${new Date(effectiveEndedAt).toISOString()}`
     );
   }
 
   const hrSamples = await getHrSamples(sessionId);
   const zoneMinutes = calculateZoneMinutes(hrSamples);
-  const primaryZone = determinePrimaryZone(zoneMinutes);
+  const primaryZone = isFreestyle
+    ? determinePrimaryZoneHonest(zoneMinutes)
+    : determinePrimaryZone(zoneMinutes);
   const stressProfile = determineStressProfile(primaryZone);
   const hrTrace = buildHrTrace(hrSamples);
-
-  const totalSeconds = Math.floor((endedAt - startedAt) / 1000);
-  const durationMinutes = Math.round(totalSeconds / 60);
+  const durationMinutes = isFreestyle
+    ? Math.max(0, Math.round(activeDurationSec / 60))
+    : Math.round(wallClockSec / 60);
 
   let intent = "unknown";
   if (typeof (window as any).getWorkoutMetadata === "function") {
@@ -210,8 +309,8 @@ async function generateWorkoutSummary(
   const summary: WorkoutSummary = {
     external_session_id: sessionId,
     app_version: APP_VERSION,
-    startedAt: formatISO8601UTC(startedAt),
-    endedAt: formatISO8601UTC(endedAt),
+    startedAt: formatISO8601UTC(effectiveStartedAt),
+    endedAt: formatISO8601UTC(effectiveEndedAt),
     category: "cardio",
     intent,
     duration_minutes: durationMinutes,
@@ -223,7 +322,21 @@ async function generateWorkoutSummary(
     cancelled: options?.cancelled,
   };
 
-  const session = getSession(day);
+  if (isFreestyle) {
+    const validHrSec = countValidHrSampleSeconds(hrSamples);
+    const unknownHrSec = Math.max(0, activeDurationSec - validHrSec);
+    summary.open_ended_timing = {
+      wall_clock_sec: wallClockSec,
+      active_sec: activeDurationSec,
+      paused_sec: pausedDurationSec,
+      valid_hr_sec: validHrSec,
+      unknown_hr_sec: unknownHrSec,
+    };
+    if (freestyleFinalization?.evidenceIncomplete === true) {
+      summary.evidence_incomplete = true;
+    }
+  }
+
   const machineUsage = getMachineUsageSnapshot(sessionId);
   applyFrozenMachineUsageToSummary(summary, session.executionProvenance, machineUsage);
   if (session.athleteId) summary.athlete_id = session.athleteId;
@@ -236,53 +349,48 @@ async function generateWorkoutSummary(
   const base = getPlan()[day];
   const liveBlocks = base ? adjustedBlockLengths(base, null) : null;
   const phasePlan = session.phasePlan;
-  const blocks = phasePlan?.blocks ?? liveBlocks;
-  const rawPrescriptionTime = Number(session.sessionStart ?? session.startTime ?? startedAt);
-  const resolvedPrescription = blocks
-    ? phasePlan?.resolvedPrescription ?? resolveWorkoutPrescription({
-        workoutSelector: day,
-        blocks,
-        hrTargets: phasePlan ? phasePlan.hrTargets : getHrTargets()[day] ?? null,
-        resolvedAt: Number.isFinite(rawPrescriptionTime) && rawPrescriptionTime > 0
-          ? new Date(rawPrescriptionTime).toISOString()
-          : formatISO8601UTC(startedAt),
-      })
-    : undefined;
+  const blocks = isFreestyle ? null : phasePlan?.blocks ?? liveBlocks;
+  const rawPrescriptionTime = Number(session.sessionStart ?? session.startTime ?? effectiveStartedAt);
+  const resolvedPrescription =
+    !isFreestyle && blocks
+      ? phasePlan?.resolvedPrescription ?? resolveWorkoutPrescription({
+          workoutSelector: day,
+          blocks,
+          hrTargets: phasePlan ? phasePlan.hrTargets : getHrTargets()[day] ?? null,
+          resolvedAt: Number.isFinite(rawPrescriptionTime) && rawPrescriptionTime > 0
+            ? new Date(rawPrescriptionTime).toISOString()
+            : formatISO8601UTC(effectiveStartedAt),
+        })
+      : undefined;
   if (resolvedPrescription) summary.resolved_prescription = resolvedPrescription;
-  if (phasePlan?.shadowPrescriptionEvaluation) {
-    // Copy the workout-start record exactly; never re-read current athlete evidence here.
+  if (!isFreestyle && phasePlan?.shadowPrescriptionEvaluation) {
     summary.shadow_prescription_evaluation = phasePlan.shadowPrescriptionEvaluation;
   }
-  const activeDurationSec = actualElapsedSeconds(
-    session.startTime,
-    session.paused,
-    session.pausedElapsed,
-    endedAt
-  );
   attachVo2Evidence(
     summary,
     buildVo2Evidence({
       day,
       activity: summary.activity,
       intent: summary.intent,
-      blocks,
-      hrTargets: phasePlan ? phasePlan.hrTargets : getHrTargets()[day] ?? null,
+      blocks: blocks ?? undefined,
+      hrTargets: isFreestyle ? null : phasePlan ? phasePlan.hrTargets : getHrTargets()[day] ?? null,
       resolvedPrescription,
       activeDurationSec,
-      pausedDurationSec: totalPausedDurationSec(session, endedAt),
-      earlyCooldownElapsed: session.earlyCooldownElapsed,
+      pausedDurationSec,
+      earlyCooldownElapsed: isFreestyle ? null : session.earlyCooldownElapsed,
       cancelled: options?.cancelled,
       hrSamples,
       machineId: summary.machine_id,
       machineProfileVersion: summary.machine_profile_version,
       machineGuidanceTraceEntryCount: summary.machine_guidance_trace?.length,
-      vo2Protocol: session.vo2ProtocolRuntime,
-      protocol: session.vo2ProtocolRuntime
-        ? buildVo2ProtocolEvidenceForRuntime(
-            session.vo2ProtocolRuntime,
-            session.sessionId || sessionId ? getBikeTelemetrySamples(session.sessionId || sessionId) : []
-          )
-        : undefined,
+      vo2Protocol: isFreestyle ? null : session.vo2ProtocolRuntime,
+      protocol:
+        !isFreestyle && session.vo2ProtocolRuntime
+          ? buildVo2ProtocolEvidenceForRuntime(
+              session.vo2ProtocolRuntime,
+              session.sessionId || sessionId ? getBikeTelemetrySamples(session.sessionId || sessionId) : []
+            )
+          : undefined,
     })
   );
 
@@ -290,6 +398,7 @@ async function generateWorkoutSummary(
     const profile = options?.vo2Profile ?? session.vo2ProtocolRuntime?.assessment_profile ?? readExplicitVo2ProfileInputs();
     summary.vo2_assessment = assessVo2(summary.vo2_evidence, profile);
   } else if (
+    !isFreestyle &&
     session.activity === "bike" &&
     session.athleteId &&
     phasePlan?.resolvedPrescription
@@ -347,16 +456,18 @@ async function generateWorkoutSummary(
   }
 
   validateSummary(summary);
-  const zoneSum =
-    summary.zone_minutes.z1 +
-    summary.zone_minutes.z2 +
-    summary.zone_minutes.z3 +
-    summary.zone_minutes.z4 +
-    summary.zone_minutes.z5;
-  if (zoneSum !== summary.duration_minutes) {
-    const diff = summary.duration_minutes - zoneSum;
-    const primaryZoneKey = `z${summary.primary_zone}` as keyof typeof summary.zone_minutes;
-    summary.zone_minutes[primaryZoneKey] = Math.max(0, summary.zone_minutes[primaryZoneKey] + diff);
+  if (!isFreestyle) {
+    const zoneSum =
+      summary.zone_minutes.z1 +
+      summary.zone_minutes.z2 +
+      summary.zone_minutes.z3 +
+      summary.zone_minutes.z4 +
+      summary.zone_minutes.z5;
+    if (zoneSum !== summary.duration_minutes) {
+      const diff = summary.duration_minutes - zoneSum;
+      const primaryZoneKey = `z${summary.primary_zone}` as keyof typeof summary.zone_minutes;
+      summary.zone_minutes[primaryZoneKey] = Math.max(0, summary.zone_minutes[primaryZoneKey] + diff);
+    }
   }
 
   return summary;
@@ -392,7 +503,15 @@ export function recordPromotedFormalCalibrationMachine(
   }, store, recordedAt);
 }
 
-async function emitWorkoutSummary(summary: WorkoutSummary) {
+function isFreestyleSummary(summary: WorkoutSummary): boolean {
+  return (
+    isFreestyleWorkoutSelector(summary.day) ||
+    summary.intent === "freestyle" ||
+    summary.open_ended_timing != null
+  );
+}
+
+async function emitWorkoutSummary(summary: WorkoutSummary): Promise<boolean> {
   const saved = await storeWorkoutSummary(summary);
   if (saved && summary.vo2_assessment) {
     try {
@@ -433,7 +552,7 @@ async function emitWorkoutSummary(summary: WorkoutSummary) {
       console.error("Error promoting VO2 assessment to fitness state:", error);
     }
   }
-  if (saved) {
+  if (saved && !isFreestyleSummary(summary)) {
     try {
       const history = await getAllWorkoutSummaries();
       rebuildStoredPassiveFitnessProjection(history.map((row) => row.summary));
@@ -441,15 +560,28 @@ async function emitWorkoutSummary(summary: WorkoutSummary) {
       console.error("Error rebuilding passive fitness projection:", error);
     }
   }
-  await learnFromCompletedWorkout(summary);
-  await learnShadowPredictionsFromCompletedWorkout(summary);
-  await learnHrDynamicsFromCompletedWorkout(summary);
+  if (!isFreestyleSummary(summary)) {
+    await learnFromCompletedWorkout(summary);
+    await learnShadowPredictionsFromCompletedWorkout(summary);
+    await learnHrDynamicsFromCompletedWorkout(summary);
+  }
+  return saved;
+}
+
+async function emitWorkoutSummaryConfirmed(summary: WorkoutSummary): Promise<boolean> {
+  return emitWorkoutSummary(summary);
 }
 
 export function registerSummaryGlobals() {
   (window as any).generateUUID = generateUUID;
   (window as any).generateWorkoutSummary = generateWorkoutSummary;
   (window as any).emitWorkoutSummary = emitWorkoutSummary;
+  (window as any).emitWorkoutSummaryConfirmed = emitWorkoutSummaryConfirmed;
 }
 
-export { generateUUID, generateWorkoutSummary, emitWorkoutSummary };
+export {
+  generateUUID,
+  generateWorkoutSummary,
+  emitWorkoutSummary,
+  emitWorkoutSummaryConfirmed,
+};

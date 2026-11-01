@@ -77,7 +77,7 @@ export interface ResolvedWorkoutPrescription {
 }
 
 export interface WorkoutPhaseState {
-  phase: "Warm-Up" | "Sustain" | "Cool-Down" | "Completed";
+  phase: "Warm-Up" | "Sustain" | "Cool-Down" | "Completed" | "Freestyle";
   kind: WorkoutPhaseKind | "completed";
   phaseId: string;
   phaseElapsedSeconds: number;

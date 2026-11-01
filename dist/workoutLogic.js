@@ -1,10 +1,12 @@
 import { getHrTargets, getPlan, getWorkoutMetadata } from "./workoutData.js";
 import { todayName } from "./utils/dateTime.js";
 import { getSession, startSession, pauseSession, resumeSession, clearSession, getEarlyCooldownElapsed, setEarlyCooldownElapsed, persistVo2ProtocolRuntime, } from "./sessionStore.js";
-import { handleWorkoutCancellation } from "./workoutLifecycle.js";
+import { discardFreestyleRide, handleWorkoutCancellation } from "./workoutLifecycle.js";
 import { resetMachineGuidanceRuntime } from "./machines/runtime.js";
 import { getActiveWorkoutActivity, requireAllowedActivity } from "./workoutActivity.js";
 import { isVo2WorkoutSelector, vo2ProtocolVoiceCues, isStaleVo2ProtocolTick, VO2_HR_FRESHNESS_MS, } from "./vo2Protocol.js";
+import { claimActiveSessionOwner, clearActiveSessionOwner, freestylePhaseState, isFreestyleWorkoutSelector, readActiveSessionOwner, readFreestyleAuthorityFault, readSessionFinalization, } from "./freestyleRide.js";
+import { getBikeBridgeSession } from "./platform/bikeBridgeRuntime.js";
 import { advanceVo2ProtocolRuntime, createVo2ProtocolRuntimeV3, evaluateVo2PreflightV3ForUi, resolveVo2PreflightPolicyOverride, getVo2ProtocolPhaseForRuntime, vo2ProtocolNeedsHrEvaluationForRuntime, } from "./vo2ProtocolV3.js";
 import { clearOrdinaryBikeTelemetry, getHrSamples } from "./workoutStorage.js";
 import { clearBikeTelemetrySamples, getBikeTelemetrySamples, recordBikeTelemetrySample, } from "./bikeTelemetryTrace.js";
@@ -229,10 +231,48 @@ function requestVo2LimitReached(day, options) {
         vo2LimitReachedInFlight = false;
     }
 }
+function competingActiveSessionBlocksStart(day) {
+    const owner = readActiveSessionOwner();
+    if (!owner)
+        return false;
+    if (owner.selector === day) {
+        const existing = getSession(day);
+        if (existing.sessionId === owner.sessionId && existing.startTime)
+            return true;
+        return false;
+    }
+    const other = getSession(owner.selector);
+    return Boolean(other.sessionId === owner.sessionId && other.startTime);
+}
+/** Freestyle start must inspect live session + finalization, not owner alone. */
+function freestyleStartBlocked(day, storage) {
+    if (!isFreestyleWorkoutSelector(day))
+        return competingActiveSessionBlocksStart(day);
+    const existing = getSession(day, storage);
+    if (existing.sessionId && existing.startTime)
+        return true;
+    if (readSessionFinalization(day, storage))
+        return true;
+    if (readFreestyleAuthorityFault(day, storage))
+        return true;
+    return competingActiveSessionBlocksStart(day);
+}
 function startWorkout() {
-    var _a, _b;
+    var _a, _b, _c, _d;
     const day = typeof window.getSelectedDay === "function" ? window.getSelectedDay() : todayName();
-    const allowed = (_b = (_a = getWorkoutMetadata()[day]) === null || _a === void 0 ? void 0 : _a.activities) !== null && _b !== void 0 ? _b : [];
+    if (((_a = readSessionFinalization(day)) === null || _a === void 0 ? void 0 : _a.status) === "save_failed" || ((_b = readSessionFinalization(day)) === null || _b === void 0 ? void 0 : _b.status) === "finalizing") {
+        if (typeof window.showToast === "function") {
+            window.showToast("Finish save is pending. Use Retry Save.", "error");
+        }
+        return;
+    }
+    if (isFreestyleWorkoutSelector(day) ? freestyleStartBlocked(day) : competingActiveSessionBlocksStart(day)) {
+        if (typeof window.showToast === "function") {
+            window.showToast("A workout is already in progress.", "error");
+        }
+        return;
+    }
+    const allowed = (_d = (_c = getWorkoutMetadata()[day]) === null || _c === void 0 ? void 0 : _c.activities) !== null && _d !== void 0 ? _d : [];
     const automatic = getActiveWorkoutActivity(allowed);
     if (automatic) {
         beginWorkout(automatic);
@@ -246,9 +286,46 @@ function startWorkout() {
     }
     beginWorkout();
 }
-/** Current product entry points may select only the two already-shipping authorities. */
+/** Product entry points select freestyle, VO2, or legacy HR control. */
 function controlModeForUserFacingWorkout(day) {
+    if (isFreestyleWorkoutSelector(day))
+        return "manual_freestyle_ride";
     return isVo2WorkoutSelector(day) ? "vo2_protocol" : "legacy_hr_control";
+}
+function bindBikeBridgeForStartedSession(day, sessionId) {
+    if (!sessionId)
+        return false;
+    const session = getSession(day);
+    const authority = session.controlAuthority;
+    if (!authority || authority.source !== "frozen" || authority.sessionId !== sessionId) {
+        return false;
+    }
+    if (isFreestyleWorkoutSelector(day) && authority.mode !== "manual_freestyle_ride") {
+        return false;
+    }
+    try {
+        getBikeBridgeSession().bindSession({
+            sessionId,
+            controlMode: authority.mode,
+        });
+        return true;
+    }
+    catch (error) {
+        console.error("Failed to bind Bike Bridge session authority:", error);
+        return false;
+    }
+}
+function restoreBikeBridgeBindingForActiveSession(day) {
+    const owner = readActiveSessionOwner();
+    const dayToUse = day ||
+        (owner === null || owner === void 0 ? void 0 : owner.selector) ||
+        (typeof window.getSelectedDay === "function" ? window.getSelectedDay() : todayName());
+    const session = getSession(dayToUse);
+    if (!session.sessionId || !session.startTime || !session.controlAuthority)
+        return false;
+    if (owner && (owner.selector !== dayToUse || owner.sessionId !== session.sessionId))
+        return false;
+    return bindBikeBridgeForStartedSession(dayToUse, session.sessionId);
 }
 /** Freeze the plan inputs the live runtime will use for this session. */
 function capturePhasePlanSnapshot(day, resolvedAt = new Date().toISOString()) {
@@ -325,8 +402,109 @@ function captureWorkoutStartContext(day, activity, resolvedAt, storage) {
     }
 }
 function beginWorkout(activity) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e, _f;
     const day = typeof window.getSelectedDay === "function" ? window.getSelectedDay() : todayName();
+    if (isFreestyleWorkoutSelector(day)) {
+        if (freestyleStartBlocked(day)) {
+            if (typeof window.showToast === "function") {
+                window.showToast("A workout is already in progress.", "error");
+            }
+            return;
+        }
+        const allowed = (_b = (_a = getWorkoutMetadata()[day]) === null || _a === void 0 ? void 0 : _a.activities) !== null && _b !== void 0 ? _b : [];
+        const resolved = activity !== undefined
+            ? requireAllowedActivity(allowed, activity)
+            : getActiveWorkoutActivity(allowed);
+        if (resolved !== "bike") {
+            if (typeof window.showToast === "function") {
+                window.showToast("Freestyle Ride requires the bike.", "error");
+            }
+            return;
+        }
+        if (typeof window.generateUUID !== "function") {
+            if (typeof window.showToast === "function") {
+                window.showToast("Freestyle Ride requires a session identity.", "error");
+            }
+            return;
+        }
+        const sessionId = window.generateUUID();
+        const provisionalAthleteId = getSession(day).athleteId;
+        const claim = claimActiveSessionOwner({
+            selector: day,
+            sessionId,
+            athleteId: provisionalAthleteId,
+        });
+        if (!claim.ok) {
+            if (typeof window.showToast === "function") {
+                window.showToast("A workout is already in progress.", "error");
+            }
+            return;
+        }
+        if (freestyleStartBlocked(day)) {
+            clearActiveSessionOwner({ selector: day, sessionId });
+            if (typeof window.showToast === "function") {
+                window.showToast("A workout is already in progress.", "error");
+            }
+            return;
+        }
+        const startTime = Date.now();
+        startSession(day, startTime, sessionId, "bike", undefined, null, undefined, undefined, "manual_freestyle_ride");
+        const session = getSession(day);
+        if (!session.sessionId ||
+            session.sessionId !== sessionId ||
+            !session.controlAuthority ||
+            session.controlAuthority.source !== "frozen" ||
+            session.controlAuthority.mode !== "manual_freestyle_ride" ||
+            session.controlAuthority.sessionId !== sessionId) {
+            clearSession(day);
+            resetMachineGuidanceRuntime();
+            try {
+                getBikeBridgeSession().bindSession(null);
+            }
+            catch (error) {
+                console.error("Failed to disarm Bike Bridge after freestyle start failure:", error);
+            }
+            if (typeof window.showToast === "function") {
+                window.showToast("Freestyle authority failed; workout not started.", "error");
+            }
+            if (typeof window.updateDisplay === "function")
+                window.updateDisplay();
+            return;
+        }
+        if (session.athleteId) {
+            claimActiveSessionOwner({
+                selector: day,
+                sessionId,
+                athleteId: session.athleteId,
+            });
+        }
+        if (!bindBikeBridgeForStartedSession(day, sessionId)) {
+            clearSession(day);
+            resetMachineGuidanceRuntime();
+            try {
+                getBikeBridgeSession().bindSession(null);
+            }
+            catch (error) {
+                console.error("Failed to disarm Bike Bridge after freestyle bind failure:", error);
+            }
+            if (typeof window.showToast === "function") {
+                window.showToast("Bike Bridge binding failed; workout not started.", "error");
+            }
+            if (typeof window.updateDisplay === "function")
+                window.updateDisplay();
+            return;
+        }
+        resetMachineGuidanceRuntime(sessionId);
+        if (typeof window.initDB === "function") {
+            window.initDB().catch((err) => console.error("Failed to init DB:", err));
+        }
+        if (typeof window.requestWakeLock === "function") {
+            window.requestWakeLock();
+        }
+        if (typeof window.updateDisplay === "function")
+            window.updateDisplay();
+        return;
+    }
     if (isVo2WorkoutSelector(day)) {
         const preflight = evaluateVo2PreflightV3ForUi(Date.now(), resolveVo2PreflightPolicyOverride());
         if (preflight.ok === false) {
@@ -335,7 +513,7 @@ function beginWorkout(activity) {
             }
             return;
         }
-        const allowed = (_b = (_a = getWorkoutMetadata()[day]) === null || _a === void 0 ? void 0 : _a.activities) !== null && _b !== void 0 ? _b : [];
+        const allowed = (_d = (_c = getWorkoutMetadata()[day]) === null || _c === void 0 ? void 0 : _c.activities) !== null && _d !== void 0 ? _d : [];
         const resolved = activity !== undefined
             ? requireAllowedActivity(allowed, activity)
             : getActiveWorkoutActivity(allowed);
@@ -355,6 +533,15 @@ function beginWorkout(activity) {
             startSession(day, startTime, null, resolved, undefined, startContext.phasePlan, startContext.athleteFitnessSnapshot, undefined, controlModeForUserFacingWorkout(day));
         }
         persistVo2ProtocolRuntime(day, runtime);
+        if (sessionId) {
+            const vo2Session = getSession(day);
+            claimActiveSessionOwner({
+                selector: day,
+                sessionId,
+                athleteId: vo2Session.athleteId,
+            });
+            bindBikeBridgeForStartedSession(day, sessionId);
+        }
         resetMachineGuidanceRuntime(sessionId);
         if (typeof window.initDB === "function") {
             window.initDB().catch((err) => console.error("Failed to init DB:", err));
@@ -366,7 +553,13 @@ function beginWorkout(activity) {
             window.updateDisplay();
         return;
     }
-    const allowed = (_d = (_c = getWorkoutMetadata()[day]) === null || _c === void 0 ? void 0 : _c.activities) !== null && _d !== void 0 ? _d : [];
+    if (competingActiveSessionBlocksStart(day)) {
+        if (typeof window.showToast === "function") {
+            window.showToast("A workout is already in progress.", "error");
+        }
+        return;
+    }
+    const allowed = (_f = (_e = getWorkoutMetadata()[day]) === null || _e === void 0 ? void 0 : _e.activities) !== null && _f !== void 0 ? _f : [];
     const resolved = activity !== undefined
         ? requireAllowedActivity(allowed, activity)
         : getActiveWorkoutActivity(allowed);
@@ -387,6 +580,15 @@ function beginWorkout(activity) {
         void releaseReplacedSessionTelemetry(day, null);
         startSession(day, startTime, null, resolved, undefined, startContext.phasePlan, startContext.athleteFitnessSnapshot, undefined, controlModeForUserFacingWorkout(day));
     }
+    if (sessionId) {
+        const ordinarySession = getSession(day);
+        claimActiveSessionOwner({
+            selector: day,
+            sessionId,
+            athleteId: ordinarySession.athleteId,
+        });
+        bindBikeBridgeForStartedSession(day, sessionId);
+    }
     resetMachineGuidanceRuntime(sessionId);
     if (typeof window.requestWakeLock === "function") {
         window.requestWakeLock();
@@ -395,7 +597,23 @@ function beginWorkout(activity) {
         window.updateDisplay();
 }
 async function restartWorkout() {
+    var _a;
     const day = typeof window.getSelectedDay === "function" ? window.getSelectedDay() : todayName();
+    if (isFreestyleWorkoutSelector(day)) {
+        const session = getSession(day);
+        const finalization = readSessionFinalization(day);
+        if (session.sessionId &&
+            (finalization === null || finalization === void 0 ? void 0 : finalization.sessionId) &&
+            session.sessionId !== finalization.sessionId) {
+            if (typeof window.showToast === "function") {
+                window.showToast("Cannot discard: session records conflict. Evidence preserved.", "error");
+            }
+            return;
+        }
+        const targetSessionId = (_a = session.sessionId) !== null && _a !== void 0 ? _a : finalization === null || finalization === void 0 ? void 0 : finalization.sessionId;
+        await discardFreestyleRide(day, undefined, targetSessionId ? { sessionId: targetSessionId } : undefined);
+        return;
+    }
     const session = getSession(day);
     const elapsedSec = actualElapsedSeconds(session.startTime, session.paused, session.pausedElapsed, Date.now());
     markVo2ProtocolCancelled(day, elapsedSec);
@@ -405,6 +623,12 @@ async function restartWorkout() {
     }
     clearSession(day);
     resetMachineGuidanceRuntime();
+    try {
+        getBikeBridgeSession().bindSession(null);
+    }
+    catch (error) {
+        console.error("Failed to disarm Bike Bridge after restart:", error);
+    }
     if (session.sessionId) {
         clearBikeTelemetrySamples(session.sessionId);
         await clearOrdinaryBikeTelemetry(session.sessionId);
@@ -462,6 +686,9 @@ function resolveVo2ProtocolRuntime(day, options) {
 function getPhase(elapsedSec, blocks, earlyCooldownElapsed, options) {
     var _a, _b, _c;
     const day = (_a = options === null || options === void 0 ? void 0 : options.day) !== null && _a !== void 0 ? _a : (typeof window.getSelectedDay === "function" ? window.getSelectedDay() : todayName());
+    if (isFreestyleWorkoutSelector(day)) {
+        return freestylePhaseState(elapsedSec);
+    }
     const vo2Runtime = resolveVo2ProtocolRuntime(day, options);
     if (vo2Runtime)
         return getVo2ProtocolPhaseForRuntime(elapsedSec, vo2Runtime, earlyCooldownElapsed);
@@ -614,33 +841,41 @@ function getTodayHRV() {
 function adjustedBlockLengths(base, _hrv) {
     return base;
 }
-function updateRing(elapsedSec, blocks) {
+function updateRing(elapsedSec, blocks, options) {
     const ringEl = document.getElementById("ringProgress");
     const center = document.getElementById("ringCenterText");
     if (!(ringEl instanceof SVGCircleElement) || !blocks)
         return;
+    const labelEl = document.getElementById("ringCenterLabel");
+    const ringCirc = getRingCircumference();
+    const showSeconds = typeof window.getShowSecondsCountdown === "function" && window.getShowSecondsCountdown();
+    if (options === null || options === void 0 ? void 0 : options.freestyle) {
+        const active = Math.max(0, Math.floor(elapsedSec));
+        ringEl.style.strokeDasharray = String(ringCirc);
+        ringEl.style.strokeDashoffset = "0";
+        if (center)
+            center.textContent = formatTime(active, { showSeconds: true });
+        if (labelEl)
+            labelEl.textContent = "elapsed";
+        return;
+    }
     const totalSec = (blocks.warm + blocks.sustain + blocks.cool) * 60;
     if (totalSec <= 0)
         return;
     const cappedElapsed = Math.max(0, Math.min(elapsedSec, totalSec));
     const remaining = totalSec - cappedElapsed;
-    const ringCirc = getRingCircumference();
     const showElapsed = typeof window.getShowElapsed === "function" && window.getShowElapsed();
     if (showElapsed) {
-        // Increasing ring: fill as elapsed time grows (phase colors match progress)
         const progress = cappedElapsed / totalSec;
         const offset = ringCirc * (1 - progress);
         ringEl.style.strokeDasharray = String(ringCirc);
         ringEl.style.strokeDashoffset = String(offset);
     }
     else {
-        // Decrementing ring: show remaining portion
         const visibleLength = ringCirc * (remaining / totalSec);
         ringEl.style.strokeDasharray = `${visibleLength} ${ringCirc}`;
         ringEl.style.strokeDashoffset = "0";
     }
-    const showSeconds = typeof window.getShowSecondsCountdown === "function" && window.getShowSecondsCountdown();
-    const labelEl = document.getElementById("ringCenterLabel");
     if (center)
         center.textContent = formatTime(showElapsed ? cappedElapsed : remaining, { showSeconds });
     if (labelEl)
@@ -702,4 +937,4 @@ export function registerWorkoutLogicGlobals() {
     window.hrTargetText = hrTargetText;
     window.parseHrTargetRange = parseHrTargetRange;
 }
-export { todayName, getStartTime, isPaused, getPausedElapsed, pauseWorkout, resumeWorkout, startWorkout, beginWorkout, restartWorkout, requestEarlyCooldown, requestVo2LimitReached, planEarlyCooldownTransition, actualElapsedSeconds, activeElapsedSeconds, lastPersistedElapsedFromHrSamples, workoutRelativeHrSample, recordVo2ActiveBikeTelemetry, ordinaryActiveBikeTelemetrySample, releaseReplacedSessionTelemetry, capturePhasePlanSnapshot, captureWorkoutStartContext, controlModeForUserFacingWorkout, getPhase, formatTime, adjustedBlockLengths, updateRing, hrTargetText, parseHrTargetRange, tickVo2Protocol, tickVo2ProtocolWithCanonicalHr, markVo2ProtocolCancelled, markVo2ProtocolLimitReached, };
+export { todayName, getStartTime, isPaused, getPausedElapsed, pauseWorkout, resumeWorkout, startWorkout, beginWorkout, restartWorkout, requestEarlyCooldown, requestVo2LimitReached, planEarlyCooldownTransition, actualElapsedSeconds, activeElapsedSeconds, lastPersistedElapsedFromHrSamples, workoutRelativeHrSample, recordVo2ActiveBikeTelemetry, ordinaryActiveBikeTelemetrySample, releaseReplacedSessionTelemetry, capturePhasePlanSnapshot, captureWorkoutStartContext, controlModeForUserFacingWorkout, getPhase, formatTime, adjustedBlockLengths, updateRing, hrTargetText, parseHrTargetRange, tickVo2Protocol, tickVo2ProtocolWithCanonicalHr, markVo2ProtocolCancelled, markVo2ProtocolLimitReached, restoreBikeBridgeBindingForActiveSession, bindBikeBridgeForStartedSession, freestyleStartBlocked, };

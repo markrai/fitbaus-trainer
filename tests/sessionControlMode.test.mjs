@@ -5,7 +5,10 @@ import { readFile } from "node:fs/promises";
 import {
   freezeSessionControlMode,
   inspectFrozenSessionControlMode,
+  isSessionControlMode,
   parseFrozenSessionControlMode,
+  resolveSessionControlAuthority,
+  SESSION_CONTROL_MODES,
   sessionControlModeKey,
 } from "../dist/sessionControlMode.js";
 import { getSession, persistVo2ProtocolRuntime, startSession } from "../dist/sessionStore.js";
@@ -254,4 +257,188 @@ test("no current product workout entry point can select prospective mode", () =>
   for (const selector of ["Monday", "Tuesday", VO2_WORKOUT_SELECTOR_ID]) {
     assert.notEqual(controlModeForUserFacingWorkout(selector), "prospective_fixed_load");
   }
+});
+
+// ---------------------------------------------------------------------------
+// F0: manual_freestyle_ride — session control mode and machine guidance tests
+// ---------------------------------------------------------------------------
+// Note: SESSION_CONTROL_MODES, isSessionControlMode, freezeSessionControlMode,
+// parseFrozenSessionControlMode, resolveSessionControlAuthority, and all machine
+// runtime helpers are already imported at the top of this file.
+
+// --- Parsing and schema ---
+
+test("manual_freestyle_ride is a recognized SessionControlMode", () => {
+  assert.ok(SESSION_CONTROL_MODES.includes("manual_freestyle_ride"));
+  assert.ok(isSessionControlMode("manual_freestyle_ride"));
+});
+
+test("parseFrozenSessionControlMode accepts manual_freestyle_ride", () => {
+  const record = parseFrozenSessionControlMode({
+    schemaVersion: 1,
+    sessionId: "fs-session-1",
+    mode: "manual_freestyle_ride",
+  });
+  assert.ok(record);
+  assert.equal(record.mode, "manual_freestyle_ride");
+  assert.equal(record.sessionId, "fs-session-1");
+});
+
+test("parseFrozenSessionControlMode rejects unknown modes", () => {
+  assert.equal(parseFrozenSessionControlMode({
+    schemaVersion: 1,
+    sessionId: "fs-session-1",
+    mode: "unknown_future_mode",
+  }), null);
+});
+
+// --- Freeze / idempotency ---
+
+test("freezeSessionControlMode freezes manual_freestyle_ride and is idempotent", () => {
+  const storage = memoryStorage();
+  const r1 = freezeSessionControlMode("freestyle-day", "fs-001", "manual_freestyle_ride", storage);
+  assert.equal(r1.mode, "manual_freestyle_ride");
+  // Idempotent same-value retry
+  const r2 = freezeSessionControlMode("freestyle-day", "fs-001", "manual_freestyle_ride", storage);
+  assert.deepEqual(r1, r2);
+});
+
+test("freezeSessionControlMode rejects conflicting mode on same day", () => {
+  const storage = memoryStorage();
+  freezeSessionControlMode("freestyle-day", "fs-001", "manual_freestyle_ride", storage);
+  assert.throws(
+    () => freezeSessionControlMode("freestyle-day", "fs-001", "legacy_hr_control", storage),
+    /conflicting/
+  );
+});
+
+test("freezeSessionControlMode rejects conflicting session on same day", () => {
+  const storage = memoryStorage();
+  freezeSessionControlMode("freestyle-day", "fs-001", "manual_freestyle_ride", storage);
+  assert.throws(
+    () => freezeSessionControlMode("freestyle-day", "fs-999", "manual_freestyle_ride", storage),
+    /conflicting/
+  );
+});
+
+// --- Historical compatibility: Freestyle never inferred ---
+
+test("resolveSessionControlAuthority never infers manual_freestyle_ride from missing record", () => {
+  const storage = memoryStorage(); // no stored record
+  const authority = resolveSessionControlAuthority("freestyle-day", "fs-001", false, storage);
+  // Returns historical_compatibility fallback, which must be legacy_hr_control or vo2_protocol
+  assert.ok(authority);
+  assert.notEqual(authority.mode, "manual_freestyle_ride");
+  assert.equal(authority.source, "historical_compatibility");
+});
+
+test("resolveSessionControlAuthority returns frozen freestyle when record is valid", () => {
+  const storage = memoryStorage();
+  freezeSessionControlMode("fs-day", "fs-abc", "manual_freestyle_ride", storage);
+  const authority = resolveSessionControlAuthority("fs-day", "fs-abc", false, storage);
+  assert.ok(authority);
+  assert.equal(authority.mode, "manual_freestyle_ride");
+  assert.equal(authority.source, "frozen");
+  assert.equal(authority.sessionId, "fs-abc");
+});
+
+// --- Machine guidance bypass ---
+
+test("updateMachineGuidanceRuntime returns null for frozen manual_freestyle_ride authority", () => {
+  const storage = memoryStorage();
+  setSelectedMachine("bike", "proform-smart-power-10", storage);
+  resetMachineGuidanceRuntime("fs-machine-test");
+  const result = updateMachineGuidanceRuntime({
+    sessionId: "fs-machine-test",
+    activity: "bike",
+    phaseId: "p1",
+    phaseKind: "work",
+    workoutElapsedSeconds: 60,
+    controlAuthority: authority("fs-machine-test", "manual_freestyle_ride", "frozen"),
+  }, storage);
+  assert.equal(result, null, "Freestyle must emit no guidance update");
+});
+
+test("updateMachineGuidanceRuntime returns null for freestyle even if holdResistance is provided", () => {
+  const storage = memoryStorage();
+  setSelectedMachine("bike", "proform-smart-power-10", storage);
+  resetMachineGuidanceRuntime("fs-machine-test-hold");
+  const result = updateMachineGuidanceRuntime({
+    sessionId: "fs-machine-test-hold",
+    activity: "bike",
+    phaseId: "p1",
+    phaseKind: "work",
+    workoutElapsedSeconds: 10,
+    holdResistance: 8,
+    controlAuthority: authority("fs-machine-test-hold", "manual_freestyle_ride", "frozen"),
+  }, storage);
+  assert.equal(result, null, "Freestyle with holdResistance must still produce no guidance");
+});
+
+test("updateMachineGuidanceRuntime returns null for freestyle with historical_compatibility source", () => {
+  // historical_compatibility can never produce manual_freestyle_ride (resolveSessionControlAuthority
+  // never infers it), but if a caller somehow passes one it must be rejected not acted upon.
+  const storage = memoryStorage();
+  setSelectedMachine("bike", "proform-smart-power-10", storage);
+  resetMachineGuidanceRuntime("fs-historical");
+  const result = updateMachineGuidanceRuntime({
+    sessionId: "fs-historical",
+    activity: "bike",
+    phaseId: "p1",
+    phaseKind: "work",
+    workoutElapsedSeconds: 10,
+    controlAuthority: authority("fs-historical", "manual_freestyle_ride", "historical_compatibility"),
+  }, storage);
+  assert.equal(result, null, "Freestyle with non-frozen source must produce no guidance");
+});
+
+test("updateMachineGuidanceRuntime still produces guidance for legacy_hr_control after freestyle reset", () => {
+  const storage = memoryStorage();
+  setSelectedMachine("bike", "proform-smart-power-10", storage);
+  // First: freestyle session produces no guidance
+  resetMachineGuidanceRuntime("fs-then-legacy");
+  assert.equal(updateMachineGuidanceRuntime({
+    sessionId: "fs-then-legacy",
+    activity: "bike",
+    phaseId: "p1",
+    phaseKind: "work",
+    workoutElapsedSeconds: 10,
+    controlAuthority: authority("fs-then-legacy", "manual_freestyle_ride", "frozen"),
+  }, storage), null);
+  // Then: a new legacy session must still work
+  resetMachineGuidanceRuntime("legacy-after-fs");
+  recordMachineHeartRateSample("legacy-after-fs", 140, 20);
+  const result = updateMachineGuidanceRuntime({
+    sessionId: "legacy-after-fs",
+    activity: "bike",
+    phaseId: "p2",
+    phaseKind: "work",
+    workoutElapsedSeconds: 20,
+    heartRateBpm: 140,
+    controlAuthority: authority("legacy-after-fs", "legacy_hr_control", "frozen"),
+  }, storage);
+  assert.ok(result, "Legacy session after freestyle must still produce guidance");
+});
+
+// --- controlModeForUserFacingWorkout never returns manual_freestyle_ride ---
+
+test("no user-facing workout selector produces manual_freestyle_ride", () => {
+  for (const selector of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", VO2_WORKOUT_SELECTOR_ID]) {
+    assert.notEqual(controlModeForUserFacingWorkout(selector), "manual_freestyle_ride",
+      `${selector} must not map to manual_freestyle_ride`);
+  }
+});
+
+// --- Source code structural test: freestyle bypass precedes learned-start lookup ---
+
+test("freestyle bypass guard precedes learned-start and HR-timing in runtime.ts", async () => {
+  const source = await readFile(new URL("../src/machines/runtime.ts", import.meta.url), "utf8");
+  const freestyleGuard = source.indexOf("manual_freestyle_ride");
+  const prospectiveBranch = source.indexOf("const prospectiveFixedLoad");
+  const learnedStart = source.indexOf("lookupLearnedWorkStart(");
+  assert.ok(freestyleGuard >= 0, "Freestyle guard must exist in runtime.ts");
+  assert.ok(freestyleGuard < prospectiveBranch,
+    "Freestyle guard must appear before prospectiveFixedLoad branch");
+  assert.ok(freestyleGuard < learnedStart,
+    "Freestyle guard must appear before lookupLearnedWorkStart call site");
 });

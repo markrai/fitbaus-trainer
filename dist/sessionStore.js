@@ -7,6 +7,7 @@ import { parsePersonalizedPrescriptionEvaluation } from "./personalizedPrescript
 import { captureWorkoutMachineProvenance, createInProgressExecutionProvenance, executionProvenanceKey, readInProgressExecutionProvenance, writeInProgressExecutionProvenance, } from "./executionProvenance.js";
 import { calibrationIdentityFromE1Snapshot, resolveWorkoutCalibrationMachine } from "./calibrationMachineProvenance.js";
 import { clearFrozenSessionControlMode, freezeSessionControlMode, resolveSessionControlAuthority, sessionControlModeKey, } from "./sessionControlMode.js";
+import { clearActiveSessionOwner, clearSessionFinalization, readActiveSessionOwner, } from "./freestyleRide.js";
 const MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000;
 function storageOrBrowser(storage) {
     return storage !== null && storage !== void 0 ? storage : localStorage;
@@ -246,8 +247,9 @@ export function resumeSession(day, storage, now = Date.now()) {
     store.removeItem("paused_elapsed_" + day);
     store.removeItem(pauseWallStartKey(day));
 }
-export function clearSession(day, storage) {
+export function clearSession(day, storage, options) {
     const store = storageOrBrowser(storage);
+    const previousSessionId = store.getItem("session_id_" + day);
     store.removeItem("start_" + day);
     store.removeItem("session_id_" + day);
     store.removeItem("session_start_" + day);
@@ -265,6 +267,17 @@ export function clearSession(day, storage) {
     clearFrozenSessionControlMode(day, store);
     store.removeItem(legacyVo2ProtocolPlanKey(day));
     store.removeItem(vo2ProtocolRuntimeKey(day));
+    if (!(options === null || options === void 0 ? void 0 : options.preserveFinalization)) {
+        clearSessionFinalization(day, store);
+    }
+    if (previousSessionId) {
+        clearActiveSessionOwner({ selector: day, sessionId: previousSessionId }, store);
+    }
+    else {
+        const owner = readActiveSessionOwner(store);
+        if ((owner === null || owner === void 0 ? void 0 : owner.selector) === day)
+            clearActiveSessionOwner(owner, store);
+    }
 }
 export function persistVo2ProtocolRuntime(day, runtime, storage) {
     const valid = isVo2ProtocolRuntimeV3(runtime)
@@ -274,11 +287,11 @@ export function persistVo2ProtocolRuntime(day, runtime, storage) {
         return;
     storageOrBrowser(storage).setItem(vo2ProtocolRuntimeKey(day), JSON.stringify(runtime));
 }
-export function markSummaryEmitted(day) {
-    localStorage.setItem("summary_emitted_" + day, "true");
+export function markSummaryEmitted(day, storage) {
+    storageOrBrowser(storage).setItem("summary_emitted_" + day, "true");
 }
-export function isSessionStale(day) {
-    const sessionStart = localStorage.getItem("session_start_" + day);
+export function isSessionStale(day, storage) {
+    const sessionStart = storageOrBrowser(storage).getItem("session_start_" + day);
     if (!sessionStart)
         return true;
     const sessionAge = Date.now() - parseInt(sessionStart);

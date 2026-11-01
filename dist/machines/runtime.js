@@ -112,7 +112,7 @@ function completedShortWorkFromPending(pending, liveSamples) {
     };
 }
 export function updateMachineGuidanceRuntime(input, storage) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     ensureSession(input.sessionId);
     if (input.controlAuthority === null)
         return null;
@@ -121,8 +121,16 @@ export function updateMachineGuidanceRuntime(input, storage) {
     const controlMode = (_b = (_a = input.controlAuthority) === null || _a === void 0 ? void 0 : _a.mode) !== null && _b !== void 0 ? _b : (input.holdResistance != null && Number.isFinite(input.holdResistance)
         ? "vo2_protocol"
         : "legacy_hr_control");
+    // Freestyle: observation-only. No learned starts, HR timing, guidance trace, or resistance
+    // recommendations are produced. The frozen authority check prevents historical_compatibility
+    // from accidentally matching this branch.
+    if (controlMode === "manual_freestyle_ride") {
+        if (((_c = input.controlAuthority) === null || _c === void 0 ? void 0 : _c.source) !== "frozen")
+            return null;
+        return null;
+    }
     const prospectiveFixedLoad = controlMode === "prospective_fixed_load";
-    if (prospectiveFixedLoad && ((_c = input.controlAuthority) === null || _c === void 0 ? void 0 : _c.source) !== "frozen")
+    if (prospectiveFixedLoad && ((_d = input.controlAuthority) === null || _d === void 0 ? void 0 : _d.source) !== "frozen")
         return null;
     if (prospectiveFixedLoad && (!Number.isInteger(input.holdResistance) ||
         input.holdResistance < 1 ||
@@ -228,7 +236,7 @@ export function updateMachineGuidanceRuntime(input, storage) {
             phaseDurationSeconds: input.phaseDurationSeconds,
             phaseElapsedSeconds: input.phaseElapsedSeconds,
             workoutElapsedSeconds: input.workoutElapsedSeconds,
-            resistance: (_e = (_d = result.state.currentResistance) !== null && _d !== void 0 ? _d : result.guidance.resistance) !== null && _e !== void 0 ? _e : 11,
+            resistance: (_f = (_e = result.state.currentResistance) !== null && _e !== void 0 ? _e : result.guidance.resistance) !== null && _f !== void 0 ? _f : 11,
             targetHeartRateMin: input.targetHeartRateMin,
             targetHeartRateMax: input.targetHeartRateMax,
             recentHeartRates: workPhaseHeartRates(runtime.recentHeartRates, input.workoutElapsedSeconds, input.phaseElapsedSeconds),

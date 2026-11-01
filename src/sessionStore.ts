@@ -43,6 +43,11 @@ import {
   type SessionControlAuthority,
   type SessionControlMode,
 } from "./sessionControlMode.js";
+import {
+  clearActiveSessionOwner,
+  clearSessionFinalization,
+  readActiveSessionOwner,
+} from "./freestyleRide.js";
 
 const MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -369,8 +374,13 @@ export function resumeSession(day: string, storage?: SessionStorage, now = Date.
   store.removeItem(pauseWallStartKey(day));
 }
 
-export function clearSession(day: string, storage?: SessionStorage): void {
+export function clearSession(
+  day: string,
+  storage?: SessionStorage,
+  options?: { preserveFinalization?: boolean }
+): void {
   const store = storageOrBrowser(storage);
+  const previousSessionId = store.getItem("session_id_" + day);
   store.removeItem("start_" + day);
   store.removeItem("session_id_" + day);
   store.removeItem("session_start_" + day);
@@ -388,6 +398,15 @@ export function clearSession(day: string, storage?: SessionStorage): void {
   clearFrozenSessionControlMode(day, store);
   store.removeItem(legacyVo2ProtocolPlanKey(day));
   store.removeItem(vo2ProtocolRuntimeKey(day));
+  if (!options?.preserveFinalization) {
+    clearSessionFinalization(day, store);
+  }
+  if (previousSessionId) {
+    clearActiveSessionOwner({ selector: day, sessionId: previousSessionId }, store);
+  } else {
+    const owner = readActiveSessionOwner(store);
+    if (owner?.selector === day) clearActiveSessionOwner(owner, store);
+  }
 }
 
 export function persistVo2ProtocolRuntime(
@@ -402,12 +421,12 @@ export function persistVo2ProtocolRuntime(
   storageOrBrowser(storage).setItem(vo2ProtocolRuntimeKey(day), JSON.stringify(runtime));
 }
 
-export function markSummaryEmitted(day: string): void {
-  localStorage.setItem("summary_emitted_" + day, "true");
+export function markSummaryEmitted(day: string, storage?: SessionStorage): void {
+  storageOrBrowser(storage).setItem("summary_emitted_" + day, "true");
 }
 
-export function isSessionStale(day: string): boolean {
-  const sessionStart = localStorage.getItem("session_start_" + day);
+export function isSessionStale(day: string, storage?: SessionStorage): boolean {
+  const sessionStart = storageOrBrowser(storage).getItem("session_start_" + day);
   if (!sessionStart) return true;
   const sessionAge = Date.now() - parseInt(sessionStart);
   return sessionAge > MAX_SESSION_AGE_MS;

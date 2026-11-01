@@ -16,7 +16,8 @@
 import { openCurrentDatabase, transactionComplete, untilTransactionComplete } from "../indexedDb.js";
 import { STORE_ORDINARY_BIKE_TELEMETRY, deleteOrdinaryBikeTelemetryRowsInTransaction, findTelemetrySessionIdsObservedBeforeInTransaction, } from "../repositories/ordinaryBikeTelemetryRepository.js";
 import { STORE_WORKOUTS, getWorkoutRowInTransaction } from "../repositories/workoutsRepository.js";
-export async function deleteAbandonedOrdinaryBikeTelemetry(cutoffIso) {
+export async function deleteAbandonedOrdinaryBikeTelemetry(cutoffIso, protectedSessionIds = []) {
+    const protectedIds = new Set(protectedSessionIds.filter((id) => typeof id === "string" && id.length > 0));
     const database = await openCurrentDatabase();
     const tx = database.transaction([STORE_WORKOUTS, STORE_ORDINARY_BIKE_TELEMETRY], "readwrite");
     const completed = transactionComplete(tx);
@@ -25,6 +26,8 @@ export async function deleteAbandonedOrdinaryBikeTelemetry(cutoffIso) {
             const candidates = await findTelemetrySessionIdsObservedBeforeInTransaction(tx, cutoffIso);
             let deleted = 0;
             for (const sessionId of candidates) {
+                if (protectedIds.has(sessionId))
+                    continue;
                 if ((await getWorkoutRowInTransaction(tx, sessionId)) !== undefined)
                     continue;
                 await deleteOrdinaryBikeTelemetryRowsInTransaction(tx, sessionId);

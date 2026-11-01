@@ -3,6 +3,11 @@ import { todayName } from "./utils/dateTime.js";
 import { isActivity } from "./workoutActivity.js";
 import { VO2_WORKOUT_SELECTOR_ID, vo2PlanBlocks, vo2WorkoutMetadata } from "./vo2Protocol.js";
 import {
+  FREESTYLE_WORKOUT_SELECTOR_ID,
+  freestylePlanBlocks,
+  freestyleWorkoutMetadata,
+} from "./freestyleRide.js";
+import {
   parseWorkoutDuration,
   parseWorkoutTemplateDocument,
   type WorkoutTemplate,
@@ -132,12 +137,22 @@ async function initializeWorkoutPlan() {
   const today = todayName();
   console.log("Today is:", today, "Plan for today:", plan[today as DayName]);
   installStandaloneVo2Workout();
+  installStandaloneFreestyleWorkout();
 }
 
 function installStandaloneVo2Workout(): void {
   plan[VO2_WORKOUT_SELECTOR_ID] = vo2PlanBlocks();
   workoutMetadata[VO2_WORKOUT_SELECTOR_ID] = vo2WorkoutMetadata();
   hrTargets[VO2_WORKOUT_SELECTOR_ID] = {
+    intervals: null,
+    main_set_kind: "work",
+  };
+}
+
+function installStandaloneFreestyleWorkout(): void {
+  plan[FREESTYLE_WORKOUT_SELECTOR_ID] = freestylePlanBlocks();
+  workoutMetadata[FREESTYLE_WORKOUT_SELECTOR_ID] = freestyleWorkoutMetadata();
+  hrTargets[FREESTYLE_WORKOUT_SELECTOR_ID] = {
     intervals: null,
     main_set_kind: "work",
   };
@@ -160,6 +175,7 @@ export {
   getWorkoutMetadata,
   getHrTargets,
   installStandaloneVo2Workout,
+  installStandaloneFreestyleWorkout,
   getSelectedVariant,
   transformWorkoutData,
 };

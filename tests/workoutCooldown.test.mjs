@@ -66,13 +66,15 @@ test("End workout modal exposes Cooldown, Yes end and save, and Keep going", asy
   const buttons = modalActionButtons(html);
   assert.deepEqual(
     buttons.map((button) => button.label),
-    ["Cooldown", "Reached my limit", "Yes, end and save", "Keep going"]
+    ["Cooldown", "Reached my limit", "Yes, end and save", "Discard Ride", "Keep going"]
   );
   assert.match(buttons[0].attrs, /confirmEarlyCooldownWorkout\(\)/);
   assert.match(buttons[1].attrs, /confirmVo2LimitReached\(\)/);
   assert.match(buttons[1].attrs, /display:\s*none/);
   assert.match(buttons[2].attrs, /confirmCancelWorkout\(\)/);
-  assert.match(buttons[3].attrs, /closeCancelModal\(\)/);
+  assert.match(buttons[3].attrs, /confirmDiscardFreestyleRide\(\)/);
+  assert.match(buttons[3].attrs, /display:\s*none/);
+  assert.match(buttons[4].attrs, /closeCancelModal\(\)/);
   assert.match(html, /You can cool down first, end and save now, or keep going\./);
   assert.doesNotMatch(html, /marked as cancelled/);
 

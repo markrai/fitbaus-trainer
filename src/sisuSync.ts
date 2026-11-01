@@ -269,6 +269,63 @@ function adjustedBlockLengthsFromSISU(base: any, todayHRV: any, baselineHRV: any
   return base;
 }
 
+export type SisuWorkoutPayloadPreparation =
+  | { ok: true; payload: Record<string, unknown> }
+  | { ok: false; reason: "sisu_incompatible_hr_coverage"; message: string };
+
+function zoneMinutesSum(zoneMinutes: any): number {
+  if (!zoneMinutes || typeof zoneMinutes !== "object") return 0;
+  return (
+    Number(zoneMinutes.z1 || 0) +
+    Number(zoneMinutes.z2 || 0) +
+    Number(zoneMinutes.z3 || 0) +
+    Number(zoneMinutes.z4 || 0) +
+    Number(zoneMinutes.z5 || 0)
+  );
+}
+
+function prepareSisuWorkoutPayload(summary: any): SisuWorkoutPayloadPreparation {
+  const primaryZone = Number(summary?.primary_zone);
+  const stress = summary?.stress_profile;
+  const zoneSum = zoneMinutesSum(summary?.zone_minutes);
+  const duration = Number(summary?.duration_minutes);
+  const openEnded = summary?.open_ended_timing != null || summary?.intent === "freestyle";
+  if (openEnded) {
+    const timing = summary?.open_ended_timing;
+    const validHrSec = Number(timing?.valid_hr_sec);
+    const unknownHrSec = Number(timing?.unknown_hr_sec);
+    const activeSec = Number(timing?.active_sec);
+    const coverageValid =
+      timing &&
+      typeof timing === "object" &&
+      Number.isFinite(validHrSec) &&
+      Number.isFinite(unknownHrSec) &&
+      Number.isFinite(activeSec) &&
+      validHrSec >= 0 &&
+      unknownHrSec >= 0 &&
+      activeSec >= 0 &&
+      validHrSec + unknownHrSec === activeSec;
+    const completeCoverage = coverageValid && unknownHrSec === 0 && validHrSec === activeSec;
+    if (
+      summary?.evidence_incomplete === true ||
+      !coverageValid ||
+      !completeCoverage ||
+      primaryZone === 0 ||
+      stress === "unknown" ||
+      (Number.isFinite(duration) && zoneSum !== duration)
+    ) {
+      return {
+        ok: false,
+        reason: "sisu_incompatible_hr_coverage",
+        message:
+          "SISU ingest cannot represent Freestyle rides with unknown or partial HR coverage without fabricating zone data. Local history remains accurate.",
+      };
+    }
+  }
+  const payload = buildSisuWorkoutPayload(summary);
+  return { ok: true, payload };
+}
+
 function buildSisuWorkoutPayload(summary: any) {
   const payload = { ...summary };
   delete payload.app_version;
@@ -288,6 +345,7 @@ function buildSisuWorkoutPayload(summary: any) {
   delete payload.athlete_fitness_snapshot;
   delete payload.workout_response;
   delete payload.execution_provenance;
+  delete payload.open_ended_timing;
   if (typeof payload.day !== "string" || payload.day.trim() === "") delete payload.day;
   return payload;
 }
@@ -324,11 +382,14 @@ async function sendWorkoutToSisu(sessionId: string) {
     if (!workoutData || !workoutData.summary) {
       return { success: false, message: "Workout not found" };
     }
-    const payload = buildSisuWorkoutPayload(workoutData.summary);
+    const prepared = prepareSisuWorkoutPayload(workoutData.summary);
+    if (prepared.ok === false) {
+      return { success: false, message: prepared.message };
+    }
     const response = await requestSisu({
       url: `${formatEndpoint(endpoint)}/workout/ingest`,
       method: "POST",
-      data: payload,
+      data: prepared.payload,
       timeoutMs: SISU_INGEST_TIMEOUT_MS,
     });
     if (response.ok) {
@@ -373,5 +434,6 @@ export {
   getTodayHRVFromSISU,
   adjustedBlockLengthsFromSISU,
   buildSisuWorkoutPayload,
+  prepareSisuWorkoutPayload,
   sendWorkoutToSisu,
 };

@@ -24,6 +24,8 @@ import {
 import {
   STORE_WORKOUTS,
   deleteWorkoutRowInTransaction,
+  getWorkoutRowInTransaction,
+  getWorkoutRowsBySessionId,
   putWorkoutRow,
   readWorkoutRowsNewestFirst,
 } from "./persistence/repositories/workoutsRepository.js";
@@ -53,13 +55,41 @@ export const ABANDONED_ORDINARY_TELEMETRY_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 
 export type OrdinaryTelemetryWriteResult = "stored" | "duplicate" | "rejected" | "failed";
 
+export interface OrdinaryTelemetryFlushResult {
+  ok: boolean;
+  failedCount: number;
+  retriedCount: number;
+  unresolvedFailures: number;
+  /** Irrecoverable parse/admission rejections retained across flushes. */
+  rejectedCount: number;
+  /** Storage failures still present after this flush's retry pass. */
+  retryableFailures: number;
+}
+
 const initDB = openCurrentDatabase;
+
+let ordinaryTelemetryWriteFailureInjectorForTests: (() => boolean) | null = null;
+let ordinaryTelemetryWriteGateForTests: (() => Promise<void>) | null = null;
+
+function setOrdinaryTelemetryWriteFailureInjectorForTests(
+  injector: (() => boolean) | null
+): void {
+  ordinaryTelemetryWriteFailureInjectorForTests = injector;
+}
+
+function setOrdinaryTelemetryWriteGateForTests(gate: (() => Promise<void>) | null): void {
+  ordinaryTelemetryWriteGateForTests = gate;
+}
 
 async function storeOrdinaryBikeTelemetrySample(
   value: OrdinaryBikeTelemetrySample
 ): Promise<OrdinaryTelemetryWriteResult> {
   const sample = parseOrdinaryBikeTelemetrySample(value);
   if (!sample) return "rejected";
+  if (ordinaryTelemetryWriteFailureInjectorForTests?.()) return "failed";
+  if (ordinaryTelemetryWriteGateForTests) {
+    await ordinaryTelemetryWriteGateForTests();
+  }
   try {
     return await writeOrdinaryBikeTelemetrySample(sample);
   } catch (error) {
@@ -68,24 +98,149 @@ async function storeOrdinaryBikeTelemetrySample(
   }
 }
 
-const pendingOrdinaryWrites = new Map<string, Promise<void>>();
+interface PendingOrdinaryWriteChain {
+  promise: Promise<void>;
+  failedSamples: OrdinaryBikeTelemetrySample[];
+  failedCount: number;
+  rejectedCount: number;
+  flushing: boolean;
+}
+
+const pendingOrdinaryWrites = new Map<string, PendingOrdinaryWriteChain>();
+const sealedOrdinaryTelemetrySessions = new Set<string>();
 
 /** Serialize per-session writes so finalization can reliably flush the last observed second. */
 export function queueOrdinaryBikeTelemetrySample(sample: OrdinaryBikeTelemetrySample): void {
-  const prior = pendingOrdinaryWrites.get(sample.sessionId) ?? Promise.resolve();
-  const next = prior
+  if (sealedOrdinaryTelemetrySessions.has(sample.sessionId)) {
+    return;
+  }
+  const prior = pendingOrdinaryWrites.get(sample.sessionId);
+  const chain: PendingOrdinaryWriteChain = prior ?? {
+    promise: Promise.resolve(),
+    failedSamples: [],
+    failedCount: 0,
+    rejectedCount: 0,
+    flushing: false,
+  };
+  const nextPromise = chain.promise
     .catch(() => undefined)
     .then(async () => {
-      await storeOrdinaryBikeTelemetrySample(sample);
+      const result = await storeOrdinaryBikeTelemetrySample(sample);
+      if (result === "failed") {
+        chain.failedCount += 1;
+        chain.failedSamples.push(sample);
+      } else if (result === "rejected") {
+        chain.rejectedCount += 1;
+      }
     });
-  pendingOrdinaryWrites.set(sample.sessionId, next);
-  void next.finally(() => {
-    if (pendingOrdinaryWrites.get(sample.sessionId) === next) pendingOrdinaryWrites.delete(sample.sessionId);
+  chain.promise = nextPromise;
+  pendingOrdinaryWrites.set(sample.sessionId, chain);
+  void nextPromise.finally(() => {
+    const current = pendingOrdinaryWrites.get(sample.sessionId);
+    if (
+      current &&
+      current.promise === nextPromise &&
+      current.failedSamples.length === 0 &&
+      current.rejectedCount === 0 &&
+      !current.flushing
+    ) {
+      pendingOrdinaryWrites.delete(sample.sessionId);
+    }
   });
 }
 
-export async function flushOrdinaryBikeTelemetryWrites(sessionId: string): Promise<void> {
-  await (pendingOrdinaryWrites.get(sessionId) ?? Promise.resolve());
+export async function flushOrdinaryBikeTelemetryWrites(
+  sessionId: string
+): Promise<OrdinaryTelemetryFlushResult> {
+  let failedCount = 0;
+  let retriedCount = 0;
+
+  for (;;) {
+    const chain = pendingOrdinaryWrites.get(sessionId);
+    if (!chain) {
+      return {
+        ok: true,
+        failedCount,
+        retriedCount,
+        unresolvedFailures: 0,
+        rejectedCount: 0,
+        retryableFailures: 0,
+      };
+    }
+
+    chain.flushing = true;
+    const awaited = chain.promise;
+    try {
+      await awaited.catch(() => undefined);
+    } finally {
+      const current = pendingOrdinaryWrites.get(sessionId);
+      if (current) current.flushing = false;
+    }
+
+    const afterAwait = pendingOrdinaryWrites.get(sessionId);
+    if (!afterAwait) {
+      return {
+        ok: true,
+        failedCount,
+        retriedCount,
+        unresolvedFailures: 0,
+        rejectedCount: 0,
+        retryableFailures: 0,
+      };
+    }
+    if (afterAwait.promise !== awaited) {
+      continue;
+    }
+
+    failedCount += afterAwait.failedCount;
+
+    const retryQueue = afterAwait.failedSamples.splice(0, afterAwait.failedSamples.length);
+    afterAwait.failedCount = 0;
+    retriedCount += retryQueue.length;
+    afterAwait.flushing = true;
+    let stillFailed = 0;
+    try {
+      for (const sample of retryQueue) {
+        const result = await storeOrdinaryBikeTelemetrySample(sample);
+        if (result === "failed") {
+          stillFailed += 1;
+          afterAwait.failedSamples.push(sample);
+        } else if (result === "rejected") {
+          afterAwait.rejectedCount += 1;
+        }
+      }
+    } finally {
+      afterAwait.flushing = false;
+      afterAwait.failedCount = stillFailed;
+    }
+
+    const latest = pendingOrdinaryWrites.get(sessionId);
+    if (latest && latest.promise !== awaited) {
+      continue;
+    }
+    const rejectedCount = latest?.rejectedCount ?? afterAwait.rejectedCount;
+    const retryableFailures = stillFailed;
+    if (retryableFailures === 0 && rejectedCount === 0 && latest && latest.promise === awaited) {
+      pendingOrdinaryWrites.delete(sessionId);
+    }
+    return {
+      ok: retryableFailures === 0 && rejectedCount === 0,
+      failedCount,
+      retriedCount,
+      unresolvedFailures: retryableFailures + rejectedCount,
+      rejectedCount,
+      retryableFailures,
+    };
+  }
+}
+
+/** Drop pending queue state after incomplete Freestyle evidence has been explicitly accepted. */
+function clearOrdinaryBikeTelemetryQueue(sessionId: string): void {
+  pendingOrdinaryWrites.delete(sessionId);
+}
+
+function peekOrdinaryBikeTelemetryWriteFailures(sessionId: string): number {
+  return pendingOrdinaryWrites.get(sessionId)?.failedCount ?? 0;
 }
 
 async function getOrdinaryBikeTelemetrySamples(sessionId: string): Promise<OrdinaryBikeTelemetrySample[]> {
@@ -121,15 +276,85 @@ async function clearOrdinaryBikeTelemetry(sessionId: string): Promise<void> {
   }
 }
 
+let freestyleEvidenceDeleteFailureInjectorForTests: (() => boolean) | null = null;
+
+function setFreestyleEvidenceDeleteFailureInjectorForTests(
+  injector: (() => boolean) | null
+): void {
+  freestyleEvidenceDeleteFailureInjectorForTests = injector;
+}
+
+function setOrdinaryTelemetryDeleteFailureInjectorForTests(
+  injector: (() => boolean) | null
+): void {
+  freestyleEvidenceDeleteFailureInjectorForTests = injector;
+}
+
+/** Throws on failure so Freestyle discard can fail closed before clearing session markers. */
+export async function deleteOrdinaryBikeTelemetryForSessionStrict(
+  sessionId: string
+): Promise<void> {
+  await flushOrdinaryBikeTelemetryWrites(sessionId);
+  await deleteOrdinaryBikeTelemetryRowsForSession(sessionId);
+}
+
+export async function deleteHrSamplesForSessionStrict(sessionId: string): Promise<void> {
+  await deleteHrSampleRowsForSession(sessionId);
+}
+
+/**
+ * Atomically delete Freestyle HR + ordinary telemetry for one session.
+ * Queued writes are flushed and sealed first so they cannot recreate rows.
+ */
+async function deleteFreestyleSessionEvidenceAtomic(sessionId: string): Promise<void> {
+  const flush = await flushOrdinaryBikeTelemetryWrites(sessionId);
+  if (!flush.ok && flush.retryableFailures > 0) {
+    throw new Error("cannot discard while telemetry flush has retryable failures");
+  }
+  sealedOrdinaryTelemetrySessions.add(sessionId);
+  pendingOrdinaryWrites.delete(sessionId);
+  try {
+    const database = await openCurrentDatabase();
+    const tx = database.transaction(
+      [STORE_WORKOUTS, STORE_HR_SAMPLES, STORE_ORDINARY_BIKE_TELEMETRY],
+      "readwrite"
+    );
+    const completed = transactionComplete(tx);
+    const work = (async () => {
+      const workout = await getWorkoutRowInTransaction(tx, sessionId);
+      if (workout !== undefined) {
+        throw new Error("cannot delete evidence owned by a persisted workout");
+      }
+      await deleteOrdinaryBikeTelemetryRowsInTransaction(tx, sessionId);
+      if (freestyleEvidenceDeleteFailureInjectorForTests?.()) {
+        try {
+          tx.abort();
+        } catch {
+          // Already aborting or finished.
+        }
+        throw new Error("injected freestyle evidence delete failure");
+      }
+      await deleteHrSampleRowsInTransaction(tx, sessionId);
+    })();
+    await untilTransactionComplete(work, completed);
+  } finally {
+    sealedOrdinaryTelemetrySessions.delete(sessionId);
+  }
+}
+
 /** Delete old raw traces only when no immutable workout summary owns the session. */
 async function cleanupAbandonedOrdinaryBikeTelemetry(
   now = Date.now(),
-  maxAgeMs = ABANDONED_ORDINARY_TELEMETRY_MAX_AGE_MS
+  maxAgeMs = ABANDONED_ORDINARY_TELEMETRY_MAX_AGE_MS,
+  protectedSessionIds: readonly string[] = []
 ): Promise<number> {
   try {
     if (!Number.isFinite(now) || !Number.isFinite(maxAgeMs) || maxAgeMs < 0) return 0;
     const cutoff = now - maxAgeMs;
-    return await deleteAbandonedOrdinaryBikeTelemetry(new Date(cutoff).toISOString());
+    return await deleteAbandonedOrdinaryBikeTelemetry(
+      new Date(cutoff).toISOString(),
+      protectedSessionIds
+    );
   } catch (error) {
     console.error("Error cleaning abandoned ordinary bike telemetry:", error);
     return 0;
@@ -160,6 +385,18 @@ async function storeWorkoutSummary(summary: WorkoutSummary): Promise<boolean> {
   } catch (error) {
     console.error("Error storing workout summary:", error);
     return false;
+  }
+}
+
+async function getWorkoutSummaryBySessionId(sessionId: string): Promise<WorkoutSummary | null> {
+  try {
+    const [entry] = await getWorkoutRowsBySessionId([sessionId]);
+    const row = entry?.row as { summary?: WorkoutSummary } | undefined;
+    if (!row?.summary || row.summary.external_session_id !== sessionId) return null;
+    return reconstructWorkoutRow({ ...row, session_id: sessionId }).summary ?? null;
+  } catch (error) {
+    console.error("Error reading workout summary by session:", error);
+    return null;
   }
 }
 
@@ -339,6 +576,7 @@ export {
   storeHrSample,
   getHrSamples,
   storeWorkoutSummary,
+  getWorkoutSummaryBySessionId,
   clearHrSamples,
   storeOrdinaryBikeTelemetrySample,
   getOrdinaryBikeTelemetrySamples,
@@ -349,4 +587,11 @@ export {
   storeSisuSettings,
   getSisuSettings,
   clearSisuSettings,
+  peekOrdinaryBikeTelemetryWriteFailures,
+  setOrdinaryTelemetryWriteFailureInjectorForTests,
+  setOrdinaryTelemetryWriteGateForTests,
+  setOrdinaryTelemetryDeleteFailureInjectorForTests,
+  setFreestyleEvidenceDeleteFailureInjectorForTests,
+  deleteFreestyleSessionEvidenceAtomic,
+  clearOrdinaryBikeTelemetryQueue,
 };

@@ -1,4 +1,5 @@
 import { defaultBikeBridgeStorage, loadBikeBridgeSettings, parseBikeBridgeBaseUrl, saveBikeBridgeSettings, } from "./bikeBridgeConfig.js";
+import { isSessionControlMode } from "../sessionControlMode.js";
 import { BIKE_BRIDGE_REQUEST_TIMEOUT_MS, createBikeBridgeClient, createDefaultBikeBridgeTransport, isBikeBridgeClientOk, isBikeBridgeUrlOk, toBridgeBrightness, toBridgeHeartRateBpm, toBridgeResistanceLevel, } from "./bikeBridgeClient.js";
 import { getCurrentBpm } from "../hrMonitor.js";
 export const BIKE_BRIDGE_POLL_INTERVAL_MS = 1000;
@@ -70,6 +71,11 @@ export function createBikeBridgeSession(options = {}) {
     let lastCommandOutcome = null;
     let previousControlAvailable = false;
     const listeners = new Set();
+    let bindingState = { type: "initial_unbound" };
+    // Authority generation, bumped on every effective bindSession change.
+    // sendTarget captures it at dispatch; a stale completion still releases
+    // the transport lock but must not touch the new session's bookkeeping.
+    let bindingGeneration = 0;
     function notify() {
         listeners.forEach((listener) => listener());
     }
@@ -83,6 +89,12 @@ export function createBikeBridgeSession(options = {}) {
         return (lastStatus === null || lastStatus === void 0 ? void 0 : lastStatus.resistanceControlAvailable) === true;
     }
     function canCommand() {
+        // Explicit disarm permanently blocks until a new session is bound.
+        if (bindingState.type === "disarmed")
+            return false;
+        // Freestyle binding is observation-only: no resistance commands.
+        if (bindingState.type === "bound" && bindingState.controlMode === "manual_freestyle_ride")
+            return false;
         return (configured() &&
             settings().automaticControlEnabled &&
             workoutActive &&
@@ -172,6 +184,13 @@ export function createBikeBridgeSession(options = {}) {
             pendingTrigger = trigger;
             return;
         }
+        // Re-check authority at the actual HTTP dispatch boundary. If Freestyle
+        // binding was established while a send was queued, discard without firing.
+        if (!canCommand()) {
+            pendingLevel = undefined;
+            return;
+        }
+        const generation = bindingGeneration;
         sendInFlight = true;
         pendingLevel = undefined;
         commandedResistance = target;
@@ -179,7 +198,18 @@ export function createBikeBridgeSession(options = {}) {
         let outcome = "failed";
         try {
             const result = await client.setResistance(target);
-            if (isBikeBridgeClientOk(result)) {
+            if (generation !== bindingGeneration) {
+                // Stale completion: the bridge was rebound while this request was in
+                // flight. The hardware may still execute it, but it must not mutate
+                // the new session's command bookkeeping.
+                if (isBikeBridgeClientOk(result))
+                    outcome = "accepted";
+                else if (result.kind === "timeout")
+                    outcome = "timeout";
+                else if (result.status === 503 || result.kind === "unreachable")
+                    outcome = "unavailable";
+            }
+            else if (isBikeBridgeClientOk(result)) {
                 lastAccepted = result.value.requested;
                 holdFailedLevel = undefined;
                 lastCommandOutcome = "accepted";
@@ -217,10 +247,16 @@ export function createBikeBridgeSession(options = {}) {
             sendInFlight = false;
             observeOutcome(token, outcome);
             notify();
-            if (pendingLevel !== undefined) {
+            // Only reschedule a pending level if we still have authority to command.
+            // This prevents a Freestyle binding established during a now-completed
+            // in-flight HTTP request from triggering another command.
+            if (pendingLevel !== undefined && canCommand()) {
                 const next = pendingLevel;
                 pendingLevel = undefined;
                 scheduleSend(next, false, pendingTrigger);
+            }
+            else {
+                pendingLevel = undefined;
             }
         }
     }
@@ -401,7 +437,11 @@ export function createBikeBridgeSession(options = {}) {
             if (enabledChanged && nextEnabled) {
                 holdFailedLevel = undefined;
                 needsReconcile = true;
-                scheduleSend(desiredResistance, true);
+                // Only dispatch if session authority permits. Freestyle or disarmed bindings
+                // must not receive a resistance command when the user toggles the global setting.
+                if (canCommand() && desiredResistance !== undefined) {
+                    scheduleSend(desiredResistance, true);
+                }
             }
             notify();
             return { ok: true };
@@ -426,6 +466,34 @@ export function createBikeBridgeSession(options = {}) {
         },
         onGuidance(input) {
             var _a;
+            // --- Session authority guards ---
+            // Disarmed: no commands, but allow workoutActive/paused flags to update
+            // for correct view-state rendering. Resistance-setting paths are blocked by canCommand().
+            if (bindingState.type === "disarmed") {
+                workoutActive = input.workoutActive;
+                paused = input.paused;
+                pendingLevel = undefined;
+                notify();
+                return;
+            }
+            // Bound sessions require matching identity. Missing or foreign
+            // workout identity never authorizes commands or touches live state.
+            if (bindingState.type === "bound") {
+                if (input.workout === undefined || input.workout.sessionId !== bindingState.sessionId)
+                    return;
+            }
+            // Freestyle binding: allow telemetry/state updates; suppress all command paths.
+            if (bindingState.type === "bound" && bindingState.controlMode === "manual_freestyle_ride") {
+                workoutActive = input.workoutActive;
+                paused = input.paused;
+                // Clear any stale desired state; never set a desiredResistance for freestyle.
+                desiredResistance = undefined;
+                pendingLevel = undefined;
+                needsReconcile = false;
+                notify();
+                return;
+            }
+            // --- Existing structured workout logic (unchanged) ---
             const wasActive = workoutActive;
             const wasPaused = paused;
             workoutActive = input.workoutActive;
@@ -481,6 +549,58 @@ export function createBikeBridgeSession(options = {}) {
         setActuationObserver(observer) {
             actuationObserver = observer;
         },
+        bindSession(binding) {
+            if (binding === null) {
+                if (bindingState.type === "disarmed")
+                    return;
+                bindingGeneration += 1;
+                // Explicit disarm blocks all resistance commands until a new session binds.
+                bindingState = { type: "disarmed" };
+                desiredResistance = undefined;
+                pendingLevel = undefined;
+                needsReconcile = false;
+                commandedResistance = undefined;
+                guidanceWorkout = undefined;
+                // An already-dispatched request cannot be recalled; its late result is
+                // ignored by the generation guard. holdFailedLevel no longer applies.
+                holdFailedLevel = undefined;
+                notify();
+                return;
+            }
+            if (typeof binding.sessionId !== "string" ||
+                binding.sessionId.length === 0 ||
+                !isSessionControlMode(binding.controlMode)) {
+                throw new Error("Invalid session binding");
+            }
+            if (bindingState.type === "bound" && bindingState.sessionId === binding.sessionId) {
+                // Same-session authority is immutable: a mode change is rejected
+                // without touching state; a same-mode retry is idempotent.
+                if (bindingState.controlMode !== binding.controlMode) {
+                    throw new Error("Session binding is already frozen with a conflicting control mode");
+                }
+                return;
+            }
+            bindingGeneration += 1;
+            bindingState = { type: "bound", sessionId: binding.sessionId, controlMode: binding.controlMode };
+            // New binding: discard stale command state from the previous session.
+            desiredResistance = undefined;
+            pendingLevel = undefined;
+            needsReconcile = false;
+            commandedResistance = undefined;
+            holdFailedLevel = undefined;
+            lastAccepted = undefined;
+            guidanceWorkout = { day: "", sessionId: binding.sessionId };
+            notify();
+        },
+        getSessionBinding() {
+            if (bindingState.type === "bound") {
+                return { sessionId: bindingState.sessionId, controlMode: bindingState.controlMode };
+            }
+            return null;
+        },
+        isDisarmed() {
+            return bindingState.type === "disarmed";
+        },
     };
 }
 let appSession;
@@ -488,6 +608,10 @@ export function getBikeBridgeSession() {
     if (!appSession)
         appSession = createBikeBridgeSession();
     return appSession;
+}
+/** Test-only seam so F1 lifecycle can assert against a mocked bridge transport. */
+export function setBikeBridgeSessionForTests(session) {
+    appSession = session !== null && session !== void 0 ? session : undefined;
 }
 export function startBikeBridgeRuntime() {
     getBikeBridgeSession().start();

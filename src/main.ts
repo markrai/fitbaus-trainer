@@ -14,10 +14,19 @@ import { registerUiGlobals, updateDisplay } from "./uiControls.js";
 import { registerPwaGlobals } from "./pwaInstall.js";
 import { registerDataMigrationGlobals } from "./dataMigration.js";
 import { getSession, isSessionStale } from "./sessionStore.js";
-import { discardWorkoutSession } from "./workoutLifecycle.js";
+import { discardWorkoutSession, finishFreestyleRide } from "./workoutLifecycle.js";
 import { applyRuntimeDocumentState } from "./platform/runtime.js";
 import { startBikeBridgeRuntime } from "./platform/bikeBridgeRuntime.js";
 import { VO2_WORKOUT_SELECTOR_ID } from "./vo2Protocol.js";
+import {
+  FREESTYLE_WORKOUT_SELECTOR_ID,
+  collectProtectedFreestyleSessionIds,
+  isFreestyleWorkoutSelector,
+  readActiveSessionOwner,
+  readSessionFinalization,
+} from "./freestyleRide.js";
+import { restoreBikeBridgeBindingForActiveSession } from "./workoutLogic.js";
+import { setSelectedDay } from "./uiControls.js";
 
 applyRuntimeDocumentState();
 
@@ -42,6 +51,86 @@ function cleanupStaleWorkoutSessions() {
       discardWorkoutSession(day);
     }
   });
+}
+
+async function recoverActiveOrFinalizingSession(): Promise<void> {
+  const freestyleFinalization = readSessionFinalization(FREESTYLE_WORKOUT_SELECTOR_ID);
+  if (freestyleFinalization) {
+    setSelectedDay(FREESTYLE_WORKOUT_SELECTOR_ID);
+    try {
+      if (
+        freestyleFinalization.status === "finalizing" ||
+        freestyleFinalization.status === "save_failed"
+      ) {
+        await finishFreestyleRide(FREESTYLE_WORKOUT_SELECTOR_ID);
+      }
+    } catch (error) {
+      console.error("Freestyle recovery failed; preserving ride evidence:", error);
+    }
+    return;
+  }
+
+  const freestyleSession = getSession(FREESTYLE_WORKOUT_SELECTOR_ID);
+  if (freestyleSession.sessionId && freestyleSession.startTime) {
+    setSelectedDay(FREESTYLE_WORKOUT_SELECTOR_ID);
+    restoreBikeBridgeBindingForActiveSession(FREESTYLE_WORKOUT_SELECTOR_ID);
+    return;
+  }
+
+  const owner = readActiveSessionOwner();
+  if (!owner) return;
+  const session = getSession(owner.selector);
+  if (!session.sessionId || session.sessionId !== owner.sessionId || !session.startTime) {
+    return;
+  }
+  setSelectedDay(owner.selector);
+  if (isFreestyleWorkoutSelector(owner.selector)) {
+    restoreBikeBridgeBindingForActiveSession(owner.selector);
+  }
+}
+
+async function bootstrap() {
+  registerProfileGlobals();
+  registerProfileFitnessGlobals();
+  registerStorageGlobals();
+  registerZoneGlobals();
+  registerSummaryGlobals();
+  registerWorkoutDataGlobals();
+  registerWorkoutLogicGlobals();
+  registerWakeLockGlobals();
+  registerVoiceGlobals();
+  registerSisuGlobals();
+  registerPwaGlobals();
+  registerDataMigrationGlobals();
+
+  const phaseDisplayEl = document.getElementById("phaseDisplay");
+  registerUiGlobals(phaseDisplayEl);
+
+  setVersionOnDom();
+  setupModalBackgroundHandlers();
+  loadProfile();
+  loadProfileFitness();
+  cleanupStaleWorkoutSessions();
+  void cleanupAbandonedOrdinaryBikeTelemetry(
+    Date.now(),
+    undefined,
+    collectProtectedFreestyleSessionIds(
+      undefined,
+      getSession(FREESTYLE_WORKOUT_SELECTOR_ID).sessionId
+    )
+  );
+  await initializeWorkoutPlan();
+  startBikeBridgeRuntime();
+  try {
+    await recoverActiveOrFinalizingSession();
+  } catch (error) {
+    console.error("Active session recovery failed; continuing bootstrap:", error);
+  }
+  updateDisplay();
+  setInterval(updateDisplay, 1000);
+  if (typeof (window as any).loadSisuSettings === "function") {
+    await (window as any).loadSisuSettings();
+  }
 }
 
 function setupModalBackgroundHandlers() {
@@ -88,38 +177,6 @@ function setupModalBackgroundHandlers() {
         (window as any).closeResetLearnedModal();
       }
     });
-  }
-}
-
-async function bootstrap() {
-  registerProfileGlobals();
-  registerProfileFitnessGlobals();
-  registerStorageGlobals();
-  registerZoneGlobals();
-  registerSummaryGlobals();
-  registerWorkoutDataGlobals();
-  registerWorkoutLogicGlobals();
-  registerWakeLockGlobals();
-  registerVoiceGlobals();
-  registerSisuGlobals();
-  registerPwaGlobals();
-  registerDataMigrationGlobals();
-
-  const phaseDisplayEl = document.getElementById("phaseDisplay");
-  registerUiGlobals(phaseDisplayEl);
-
-  setVersionOnDom();
-  setupModalBackgroundHandlers();
-  loadProfile();
-  loadProfileFitness();
-  cleanupStaleWorkoutSessions();
-  void cleanupAbandonedOrdinaryBikeTelemetry();
-  await initializeWorkoutPlan();
-  startBikeBridgeRuntime();
-  updateDisplay();
-  setInterval(updateDisplay, 1000);
-  if (typeof (window as any).loadSisuSettings === "function") {
-    await (window as any).loadSisuSettings();
   }
 }
 

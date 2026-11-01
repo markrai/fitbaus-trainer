@@ -4,10 +4,14 @@ export const SESSION_CONTROL_MODES = [
   "legacy_hr_control",
   "vo2_protocol",
   "prospective_fixed_load",
+  "manual_freestyle_ride",
 ] as const;
 
 export type SessionControlMode = (typeof SESSION_CONTROL_MODES)[number];
-export type HistoricalSessionControlMode = Exclude<SessionControlMode, "prospective_fixed_load">;
+export type HistoricalSessionControlMode = Exclude<
+  SessionControlMode,
+  "prospective_fixed_load" | "manual_freestyle_ride"
+>;
 
 export interface FrozenSessionControlModeV1 {
   schemaVersion: typeof SESSION_CONTROL_MODE_SCHEMA_VERSION_V1;

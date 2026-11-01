@@ -3,6 +3,7 @@ export const SESSION_CONTROL_MODES = [
     "legacy_hr_control",
     "vo2_protocol",
     "prospective_fixed_load",
+    "manual_freestyle_ride",
 ];
 function exactKeys(value, expected) {
     const keys = Object.keys(value).sort();

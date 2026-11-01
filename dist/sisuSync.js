@@ -245,6 +245,52 @@ function adjustedBlockLengthsFromSISU(base, todayHRV, baselineHRV) {
         return base;
     return base;
 }
+function zoneMinutesSum(zoneMinutes) {
+    if (!zoneMinutes || typeof zoneMinutes !== "object")
+        return 0;
+    return (Number(zoneMinutes.z1 || 0) +
+        Number(zoneMinutes.z2 || 0) +
+        Number(zoneMinutes.z3 || 0) +
+        Number(zoneMinutes.z4 || 0) +
+        Number(zoneMinutes.z5 || 0));
+}
+function prepareSisuWorkoutPayload(summary) {
+    const primaryZone = Number(summary === null || summary === void 0 ? void 0 : summary.primary_zone);
+    const stress = summary === null || summary === void 0 ? void 0 : summary.stress_profile;
+    const zoneSum = zoneMinutesSum(summary === null || summary === void 0 ? void 0 : summary.zone_minutes);
+    const duration = Number(summary === null || summary === void 0 ? void 0 : summary.duration_minutes);
+    const openEnded = (summary === null || summary === void 0 ? void 0 : summary.open_ended_timing) != null || (summary === null || summary === void 0 ? void 0 : summary.intent) === "freestyle";
+    if (openEnded) {
+        const timing = summary === null || summary === void 0 ? void 0 : summary.open_ended_timing;
+        const validHrSec = Number(timing === null || timing === void 0 ? void 0 : timing.valid_hr_sec);
+        const unknownHrSec = Number(timing === null || timing === void 0 ? void 0 : timing.unknown_hr_sec);
+        const activeSec = Number(timing === null || timing === void 0 ? void 0 : timing.active_sec);
+        const coverageValid = timing &&
+            typeof timing === "object" &&
+            Number.isFinite(validHrSec) &&
+            Number.isFinite(unknownHrSec) &&
+            Number.isFinite(activeSec) &&
+            validHrSec >= 0 &&
+            unknownHrSec >= 0 &&
+            activeSec >= 0 &&
+            validHrSec + unknownHrSec === activeSec;
+        const completeCoverage = coverageValid && unknownHrSec === 0 && validHrSec === activeSec;
+        if ((summary === null || summary === void 0 ? void 0 : summary.evidence_incomplete) === true ||
+            !coverageValid ||
+            !completeCoverage ||
+            primaryZone === 0 ||
+            stress === "unknown" ||
+            (Number.isFinite(duration) && zoneSum !== duration)) {
+            return {
+                ok: false,
+                reason: "sisu_incompatible_hr_coverage",
+                message: "SISU ingest cannot represent Freestyle rides with unknown or partial HR coverage without fabricating zone data. Local history remains accurate.",
+            };
+        }
+    }
+    const payload = buildSisuWorkoutPayload(summary);
+    return { ok: true, payload };
+}
 function buildSisuWorkoutPayload(summary) {
     const payload = { ...summary };
     delete payload.app_version;
@@ -264,6 +310,7 @@ function buildSisuWorkoutPayload(summary) {
     delete payload.athlete_fitness_snapshot;
     delete payload.workout_response;
     delete payload.execution_provenance;
+    delete payload.open_ended_timing;
     if (typeof payload.day !== "string" || payload.day.trim() === "")
         delete payload.day;
     return payload;
@@ -301,11 +348,14 @@ async function sendWorkoutToSisu(sessionId) {
         if (!workoutData || !workoutData.summary) {
             return { success: false, message: "Workout not found" };
         }
-        const payload = buildSisuWorkoutPayload(workoutData.summary);
+        const prepared = prepareSisuWorkoutPayload(workoutData.summary);
+        if (prepared.ok === false) {
+            return { success: false, message: prepared.message };
+        }
         const response = await requestSisu({
             url: `${formatEndpoint(endpoint)}/workout/ingest`,
             method: "POST",
-            data: payload,
+            data: prepared.payload,
             timeoutMs: SISU_INGEST_TIMEOUT_MS,
         });
         if (response.ok) {
@@ -340,4 +390,4 @@ export function registerSisuGlobals() {
     hostInput === null || hostInput === void 0 ? void 0 : hostInput.addEventListener("change", normalizePastedSisuUrl);
     hostInput === null || hostInput === void 0 ? void 0 : hostInput.addEventListener("blur", normalizePastedSisuUrl);
 }
-export { loadSisuSettings, connectSISU, disconnectSISU, updateSISUStatus, syncWithSISU, getTodayHRVFromSISU, adjustedBlockLengthsFromSISU, buildSisuWorkoutPayload, sendWorkoutToSisu, };
+export { loadSisuSettings, connectSISU, disconnectSISU, updateSISUStatus, syncWithSISU, getTodayHRVFromSISU, adjustedBlockLengthsFromSISU, buildSisuWorkoutPayload, prepareSisuWorkoutPayload, sendWorkoutToSisu, };

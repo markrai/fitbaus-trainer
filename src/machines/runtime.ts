@@ -224,6 +224,13 @@ export function updateMachineGuidanceRuntime(
     (input.holdResistance != null && Number.isFinite(input.holdResistance)
       ? "vo2_protocol"
       : "legacy_hr_control");
+  // Freestyle: observation-only. No learned starts, HR timing, guidance trace, or resistance
+  // recommendations are produced. The frozen authority check prevents historical_compatibility
+  // from accidentally matching this branch.
+  if (controlMode === "manual_freestyle_ride") {
+    if (input.controlAuthority?.source !== "frozen") return null;
+    return null;
+  }
   const prospectiveFixedLoad = controlMode === "prospective_fixed_load";
   if (prospectiveFixedLoad && input.controlAuthority?.source !== "frozen") return null;
   if (prospectiveFixedLoad && (
