@@ -7,6 +7,7 @@ import type { MachineGuidanceTraceEntry, MachineId } from "../machines/trace.js"
 import type { WorkoutExecutionProvenanceV1 } from "./executionProvenance.js";
 import type { AthleteFitnessSnapshot } from "./fitnessState.js";
 import type { FreestyleRideResponseV1 } from "./freestyleRideResponse.js";
+import type { FreestyleStableObservationV1 } from "./freestyleStableObservation.js";
 import type { PersonalizedPrescriptionCharacterization } from "./personalizedPrescriptionCharacterization.js";
 import type { PersonalizedPrescriptionEvaluationV1 } from "./personalizedPrescriptionEvaluation.js";
 import type { Vo2AssessmentResult } from "./vo2Assessment.js";
@@ -90,6 +91,11 @@ export interface WorkoutSummary {
    * structured / VO2 summaries. Stripped before SISU ingest.
    */
   freestyle_ride_response?: FreestyleRideResponseV1;
+  /**
+   * Freestyle Level B observational windows. Local-only sidecar; absent on
+   * historical and structured summaries. Never calibration or prescription evidence.
+   */
+  freestyle_stable_observation?: FreestyleStableObservationV1;
   /**
    * Frozen execution provenance (start-time machine identity, calibration machine
    * provenance, explicit resistance-actuation events). Local-only; absent on

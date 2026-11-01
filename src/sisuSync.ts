@@ -345,6 +345,7 @@ function buildSisuWorkoutPayload(summary: any) {
   delete payload.athlete_fitness_snapshot;
   delete payload.workout_response;
   delete payload.freestyle_ride_response;
+  delete payload.freestyle_stable_observation;
   delete payload.execution_provenance;
   delete payload.open_ended_timing;
   if (typeof payload.day !== "string" || payload.day.trim() === "") delete payload.day;

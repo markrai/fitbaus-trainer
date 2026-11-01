@@ -97,8 +97,43 @@ export function buildFreestyleAnalyticsHtml(summary) {
     if (((_c = fr.evidence) === null || _c === void 0 ? void 0 : _c.f1EvidenceIncomplete) || summary.evidence_incomplete === true) {
         sections.push('<div class="label" style="color:#e6a700;">⚠ Evidence collection was incomplete</div>');
     }
+    const stableHtml = buildFreestyleStableObservationHtml(summary);
+    if (stableHtml)
+        sections.push(stableHtml);
     sections.push("</div>");
     return sections.join("\n");
+}
+function buildFreestyleStableObservationHtml(summary) {
+    const obs = summary === null || summary === void 0 ? void 0 : summary.freestyle_stable_observation;
+    if (!obs)
+        return "";
+    const lines = [];
+    lines.push('<div class="freestyle-stable-observation" style="margin-top:10px;">');
+    lines.push('<div class="label" style="font-weight:600;">Observational windows (descriptive only)</div>');
+    lines.push(`<div class="label">Candidates: ${obs.candidateWindowCount} · Mechanically qualified: ${obs.mechanicallyQualifiedCount} · HR co-observed: ${obs.hrCoObservedCount}</div>`);
+    const windows = Array.isArray(obs.windows) ? obs.windows : [];
+    for (const window of windows) {
+        const parts = [`L${window.observedResistanceLevel}`, `${window.durationSec}s`, window.qualification.replace(/_/g, " ")];
+        if (typeof window.powerMedianWatts === "number") {
+            parts.push(`${window.powerMedianWatts}W`);
+            if (typeof window.powerMadWatts === "number")
+                parts.push(`MAD ${window.powerMadWatts}W`);
+        }
+        if (typeof window.cadenceMedianRpm === "number")
+            parts.push(`${window.cadenceMedianRpm} rpm`);
+        if (typeof window.hrMedianBpm === "number")
+            parts.push(`${window.hrMedianBpm} bpm`);
+        parts.push(`joint ${(window.jointHrPowerCoverageRatio * 100).toFixed(0)}%`);
+        lines.push(`<div class="label">${parts.join(" · ")}</div>`);
+        if (Array.isArray(window.reasons) && window.reasons.length > 0 && window.qualification !== "hr_co_observed") {
+            lines.push(`<div class="label" style="color:#888;">${window.reasons.join(", ")}</div>`);
+        }
+    }
+    if (obs.f1EvidenceIncomplete || summary.evidence_incomplete === true) {
+        lines.push('<div class="label" style="color:#e6a700;">Incomplete evidence remains diagnostic only</div>');
+    }
+    lines.push("</div>");
+    return lines.join("\n");
 }
 export function renderFreestyleWorkoutSummaryPanel(summary, documentRef = document) {
     const freestyleEl = documentRef.getElementById("workoutSummaryFreestyle");

@@ -10,6 +10,7 @@
 import { parseOrdinaryBikeTelemetrySample } from "./ordinaryWorkoutTelemetry.js";
 import { parseWorkoutResponse } from "./workoutResponse.js";
 import { parseFreestyleRideResponse } from "./contracts/freestyleRideResponse.js";
+import { parseFreestyleStableObservation } from "./contracts/freestyleStableObservation.js";
 import { parsePersonalizedPrescriptionCharacterization } from "./personalizedPrescriptionCharacterization.js";
 import { parseWorkoutExecutionProvenance } from "./executionProvenance.js";
 import { rebuildStoredPassiveFitnessProjection } from "./fitnessRefinement.js";
@@ -329,7 +330,7 @@ async function clearHrSamples(sessionId) {
  * session/athlete. Persisted rows themselves are never rewritten.
  */
 function reconstructWorkoutRow(row) {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f;
     if (((_a = row === null || row === void 0 ? void 0 : row.summary) === null || _a === void 0 ? void 0 : _a.workout_response) !== undefined) {
         const parsed = parseWorkoutResponse(row.summary.workout_response);
         row.summary = { ...row.summary };
@@ -377,7 +378,20 @@ function reconstructWorkoutRow(row) {
             delete row.summary.freestyle_ride_response;
         }
     }
-    if (((_e = row === null || row === void 0 ? void 0 : row.summary) === null || _e === void 0 ? void 0 : _e.shadow_prescription_characterization) !== undefined) {
+    if (((_e = row === null || row === void 0 ? void 0 : row.summary) === null || _e === void 0 ? void 0 : _e.freestyle_stable_observation) !== undefined) {
+        const parsedStable = parseFreestyleStableObservation(row.summary.freestyle_stable_observation);
+        row.summary = { ...row.summary };
+        if (parsedStable &&
+            parsedStable.sessionId === row.session_id &&
+            parsedStable.sessionId === row.summary.external_session_id &&
+            parsedStable.athleteId === row.summary.athlete_id) {
+            row.summary.freestyle_stable_observation = parsedStable;
+        }
+        else {
+            delete row.summary.freestyle_stable_observation;
+        }
+    }
+    if (((_f = row === null || row === void 0 ? void 0 : row.summary) === null || _f === void 0 ? void 0 : _f.shadow_prescription_characterization) !== undefined) {
         const parsedCharacterization = row.summary.workout_response === undefined
             ? null
             : parsePersonalizedPrescriptionCharacterization(row.summary.shadow_prescription_characterization, row.summary.shadow_prescription_evaluation, {

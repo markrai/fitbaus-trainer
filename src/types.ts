@@ -143,6 +143,16 @@ export {
   parseFreestyleRideResponse,
 } from "./contracts/freestyleRideResponse.js";
 export {
+  FREESTYLE_STABLE_OBSERVATION_SCHEMA_VERSION_V1,
+  FREESTYLE_STABLE_OBSERVATION_POLICY_ID_V1,
+  FREESTYLE_STABLE_OBSERVATION_POLICY_VERSION_V1,
+  parseFreestyleStableObservation,
+} from "./contracts/freestyleStableObservation.js";
+export type {
+  FreestyleStableObservationV1,
+  FreestyleStableObservationWindowV1,
+} from "./contracts/freestyleStableObservation.js";
+export {
   WORKOUT_RESPONSE_SCHEMA_VERSION_V1,
   WORKOUT_RESPONSE_SCHEMA_VERSION,
 } from "./contracts/workoutResponse.js";
