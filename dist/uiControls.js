@@ -692,6 +692,19 @@ function freestyleObservationHudShouldOwnPanel() {
     const session = getSession(day);
     return !!(session.sessionId && session.startTime);
 }
+function renderActiveFreestyleObservationHud() {
+    renderFreestyleObservationHud(getBikeBridgeSession().getViewState(), document, {
+        onReleaseHold: () => {
+            getBikeBridgeSession().releaseFreestyleHold();
+        },
+        onEnableHold: () => {
+            const result = getBikeBridgeSession().enableFreestyleHold();
+            if (result.ok === false && typeof window.showToast === "function") {
+                window.showToast(result.error, "error");
+            }
+        },
+    });
+}
 function renderMachineGuidance(update) {
     const panel = document.getElementById("machineGuidance");
     if (!panel)
@@ -739,7 +752,7 @@ function renderAssessmentBasedWorkloadAdvice(workload) {
 }
 function renderLiveBikeTelemetryHud() {
     if (freestyleObservationHudShouldOwnPanel() || freestyleObservationHudOwnsLiveElement()) {
-        renderFreestyleObservationHud(getBikeBridgeSession().getViewState());
+        renderActiveFreestyleObservationHud();
         return;
     }
     renderBikeBridgeHud();
@@ -749,7 +762,7 @@ function renderBikeBridgeHud() {
     if (!live)
         return;
     if (freestyleObservationHudShouldOwnPanel() || freestyleObservationHudOwnsLiveElement()) {
-        renderFreestyleObservationHud(getBikeBridgeSession().getViewState());
+        renderActiveFreestyleObservationHud();
         return;
     }
     const panel = document.getElementById("machineGuidance");
@@ -1198,7 +1211,7 @@ function renderWorkout(state) {
                 hrTargetEl.textContent =
                     "Authority fault - resistance control disarmed. Evidence preserved.";
             }
-            renderFreestyleObservationHud(getBikeBridgeSession().getViewState());
+            renderActiveFreestyleObservationHud();
             applyPhaseStyle(active.phase.phase);
             return;
         }
@@ -1241,7 +1254,7 @@ function renderWorkout(state) {
         : null;
     if (isFreestyleActive) {
         syncBikeBridgeGuidance(null, true, active.paused, session.sessionId ? { day: active.day, sessionId: session.sessionId } : undefined);
-        renderFreestyleObservationHud(getBikeBridgeSession().getViewState());
+        renderActiveFreestyleObservationHud();
     }
     else {
         syncBikeBridgeGuidance(machineUpdate, true, active.paused, session.sessionId ? { day: active.day, sessionId: session.sessionId } : undefined);

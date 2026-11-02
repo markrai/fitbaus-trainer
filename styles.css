@@ -37,6 +37,22 @@ h1 { font-size: 1.8rem; text-align: center; margin: 16px 0 18px; }
 .machine-guidance-power { color: #0096ff; }
 .machine-guidance-watts { margin-top: 9px; font-size: 0.82rem; opacity: 0.72; }
 .machine-guidance-bike-live { margin-top: 8px; font-size: 0.78rem; opacity: 0.78; font-variant-numeric: tabular-nums; }
+.machine-guidance-hold { margin-top: 10px; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; }
+.machine-guidance-hold-status { font-size: 0.78rem; opacity: 0.82; }
+.machine-guidance-hold-release,
+.machine-guidance-hold-enable {
+  appearance: none;
+  border: 1px solid rgba(61,124,255,0.45);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.machine-guidance-hold-release:hover,
+.machine-guidance-hold-enable:hover { border-color: rgba(61,124,255,0.8); }
 .bike-bridge-status { margin-top: 10px; line-height: 1.45; text-align: left; white-space: pre-line; }
 .bike-bridge-status .machine-guidance-rpm,
 .bike-bridge-status .machine-guidance-resistance,

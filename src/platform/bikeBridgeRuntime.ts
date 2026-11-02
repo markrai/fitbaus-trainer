@@ -27,6 +27,21 @@ import { getCurrentBpm } from "../hrMonitor.js";
 import type { ResistanceActuationOriginV1, ResistanceActuationTriggerV1 } from "../types.js";
 
 export const BIKE_BRIDGE_POLL_INTERVAL_MS = 1000;
+export const FREESTYLE_RESISTANCE_LATCH_DEBOUNCE_MS = 2000;
+export const FREESTYLE_HOLD_MISMATCH_CONFIRM_POLLS = 2;
+export const FREESTYLE_HOLD_MIN_CORRECTION_SPACING_MS = 3000;
+export const FREESTYLE_HOLD_MAX_CORRECTION_ATTEMPTS = 3;
+export const FREESTYLE_HOLD_BACKOFF_MS = 5000;
+export const FREESTYLE_HOLD_ACTIVE_PEDAL_RPM_MIN = 1;
+export const FREESTYLE_HOLD_FAILURE_WINDOW_MS = 60_000;
+export const FREESTYLE_HOLD_STABLE_CLEAR_MS = 20_000;
+
+export type FreestyleResistanceHoldStatus =
+  | "inactive"
+  | "holding"
+  | "released"
+  | "unavailable"
+  | "suspended";
 
 export type BikeBridgeReadiness =
   | "not_configured"
@@ -64,6 +79,8 @@ export interface BikeBridgeViewState {
   telemetryStale: boolean;
   lastError: string | null;
   lastCommandOutcome: BikeBridgeLastCommandOutcome | null;
+  freestyleHoldStatus: FreestyleResistanceHoldStatus;
+  freestyleHoldTarget: number | null;
 }
 
 export interface BikeBridgeGuidanceInput {
@@ -115,6 +132,14 @@ export interface BikeBridgeSessionOptions {
   transport?: BikeBridgeHttpTransport;
   pollIntervalMs?: number;
   requestTimeoutMs?: number;
+  freestyleLatchDebounceMs?: number;
+  freestyleHoldMismatchConfirmPolls?: number;
+  freestyleHoldMinCorrectionSpacingMs?: number;
+  freestyleHoldMaxCorrectionAttempts?: number;
+  freestyleHoldBackoffMs?: number;
+  freestyleHoldActivePedalRpmMin?: number;
+  freestyleHoldFailureWindowMs?: number;
+  freestyleHoldStableClearMs?: number;
   now?: () => number;
   /** Override live BPM source (defaults to hrMonitor.getCurrentBpm). */
   getCurrentBpm?: () => number | null;
@@ -141,6 +166,16 @@ export interface BikeBridgeSession {
   getSessionBinding(): BikeBridgeSessionBinding | null;
   /** True when explicitly disarmed via bindSession(null). */
   isDisarmed(): boolean;
+  /**
+   * Clear Freestyle hold target and disable latching/restoration until enableFreestyleHold().
+   * Does not issue a synthetic zero command.
+   */
+  releaseFreestyleHold(): void;
+  /**
+   * Explicitly activate hold at the current fresh observed resistance (1-15).
+   * Refuses when observed resistance is R0 or unavailable.
+   */
+  enableFreestyleHold(): { ok: true } | { ok: false; error: string };
 }
 
 function classifyReadiness(
@@ -166,6 +201,38 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
   const storage = options.storage ?? defaultBikeBridgeStorage();
   const timeoutMs = options.requestTimeoutMs ?? BIKE_BRIDGE_REQUEST_TIMEOUT_MS;
   const pollIntervalMs = options.pollIntervalMs ?? BIKE_BRIDGE_POLL_INTERVAL_MS;
+  const freestyleLatchDebounceMs = Math.max(
+    0,
+    options.freestyleLatchDebounceMs ?? FREESTYLE_RESISTANCE_LATCH_DEBOUNCE_MS
+  );
+  const freestyleHoldMismatchConfirmPolls = Math.max(
+    1,
+    Math.floor(options.freestyleHoldMismatchConfirmPolls ?? FREESTYLE_HOLD_MISMATCH_CONFIRM_POLLS)
+  );
+  const freestyleHoldMinCorrectionSpacingMs = Math.max(
+    0,
+    options.freestyleHoldMinCorrectionSpacingMs ?? FREESTYLE_HOLD_MIN_CORRECTION_SPACING_MS
+  );
+  const freestyleHoldMaxCorrectionAttempts = Math.max(
+    1,
+    Math.floor(options.freestyleHoldMaxCorrectionAttempts ?? FREESTYLE_HOLD_MAX_CORRECTION_ATTEMPTS)
+  );
+  const freestyleHoldBackoffMs = Math.max(
+    0,
+    options.freestyleHoldBackoffMs ?? FREESTYLE_HOLD_BACKOFF_MS
+  );
+  const freestyleHoldActivePedalRpmMin = Math.max(
+    0,
+    options.freestyleHoldActivePedalRpmMin ?? FREESTYLE_HOLD_ACTIVE_PEDAL_RPM_MIN
+  );
+  const freestyleHoldFailureWindowMs = Math.max(
+    0,
+    options.freestyleHoldFailureWindowMs ?? FREESTYLE_HOLD_FAILURE_WINDOW_MS
+  );
+  const freestyleHoldStableClearMs = Math.max(
+    0,
+    options.freestyleHoldStableClearMs ?? FREESTYLE_HOLD_STABLE_CLEAR_MS
+  );
   const now = options.now ?? Date.now;
   const readBpm = options.getCurrentBpm ?? getCurrentBpm;
   const postedBodies: string[] = [];
@@ -234,8 +301,139 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
   // the transport lock but must not touch the new session's bookkeeping.
   let bindingGeneration = 0;
 
+  let freestyleLatchBaselineReady = false;
+  let freestyleLatchBaselineLevel: number | null = null;
+  let freestyleLatchCandidate: number | undefined;
+  let freestyleLatchTimer: ReturnType<typeof setTimeout> | undefined;
+  let freestyleQueued:
+    | {
+        level: number;
+        trigger: ResistanceActuationTriggerV1;
+        authority: "freestyle_latch" | "freestyle_hold";
+      }
+    | undefined;
+  let freestyleLastDispatchedLatch: number | undefined;
+  let freestyleHoldTarget: number | undefined;
+  let freestyleHoldReleased = false;
+  let freestyleHoldSuspended = false;
+  let freestyleHoldMismatchPolls = 0;
+  let freestyleHoldAwaitingLevel: number | undefined;
+  let freestyleHoldAwaitingMissPolls = 0;
+  let freestyleHoldLastCorrectionAtMs: number | undefined;
+  let freestyleHoldFailureAtMs: number[] = [];
+  let freestyleHoldStableSinceMs: number | undefined;
+
   function notify(): void {
     listeners.forEach((listener) => listener());
+  }
+
+  function isFreestyleBound(): boolean {
+    return bindingState.type === "bound" && bindingState.controlMode === "manual_freestyle_ride";
+  }
+
+  function clearFreestyleHoldCorrectionState(): void {
+    freestyleHoldMismatchPolls = 0;
+    freestyleHoldAwaitingLevel = undefined;
+    freestyleHoldAwaitingMissPolls = 0;
+    if (freestyleQueued?.authority === "freestyle_hold") {
+      freestyleQueued = undefined;
+    }
+  }
+
+  function clearFreestyleHoldFailureBudget(): void {
+    freestyleHoldFailureAtMs = [];
+    freestyleHoldStableSinceMs = undefined;
+  }
+
+  function pruneFreestyleHoldFailures(atMs: number): void {
+    if (freestyleHoldFailureWindowMs <= 0) {
+      freestyleHoldFailureAtMs = [];
+      return;
+    }
+    const cutoff = atMs - freestyleHoldFailureWindowMs;
+    freestyleHoldFailureAtMs = freestyleHoldFailureAtMs.filter((stamp) => stamp >= cutoff);
+  }
+
+  function freestyleHoldFailureCount(atMs = now()): number {
+    pruneFreestyleHoldFailures(atMs);
+    return freestyleHoldFailureAtMs.length;
+  }
+
+  function recordFreestyleHoldFailure(): void {
+    const atMs = now();
+    freestyleHoldStableSinceMs = undefined;
+    freestyleHoldFailureAtMs.push(atMs);
+    pruneFreestyleHoldFailures(atMs);
+    if (freestyleHoldFailureAtMs.length >= freestyleHoldMaxCorrectionAttempts) {
+      freestyleHoldSuspended = true;
+      clearFreestyleHoldCorrectionState();
+    }
+  }
+
+  function clearFreestyleHoldTarget(): void {
+    freestyleHoldTarget = undefined;
+    freestyleHoldSuspended = false;
+    freestyleHoldLastCorrectionAtMs = undefined;
+    clearFreestyleHoldFailureBudget();
+    clearFreestyleHoldCorrectionState();
+  }
+
+  function resetFreestyleLatchState(): void {
+    if (freestyleLatchTimer !== undefined) {
+      clearTimeout(freestyleLatchTimer);
+      freestyleLatchTimer = undefined;
+    }
+    freestyleLatchBaselineReady = false;
+    freestyleLatchBaselineLevel = null;
+    freestyleLatchCandidate = undefined;
+    freestyleQueued = undefined;
+    freestyleLastDispatchedLatch = undefined;
+    freestyleHoldReleased = false;
+    clearFreestyleHoldTarget();
+  }
+
+  function cancelFreestyleLatchPending(): void {
+    if (freestyleLatchTimer !== undefined) {
+      clearTimeout(freestyleLatchTimer);
+      freestyleLatchTimer = undefined;
+    }
+    freestyleLatchCandidate = undefined;
+    if (freestyleQueued?.authority === "freestyle_latch") {
+      freestyleQueued = undefined;
+    }
+  }
+
+  function canFreestyleAuthorityCommand(): boolean {
+    if (!isFreestyleBound()) return false;
+    if (!configured()) return false;
+    if (!workoutActive || paused) return false;
+    if (telemetryStale) return false;
+    if (!lastStatus?.connected || !lastStatus?.initialized) return false;
+    if (!controlAvailable()) return false;
+    return true;
+  }
+
+  function isActivelyPedaling(): boolean {
+    const rpm = lastTelemetry?.rpm;
+    if (!rpm || rpm.current !== true || rpm.value === null || rpm.value === undefined) return false;
+    return rpm.value >= freestyleHoldActivePedalRpmMin;
+  }
+
+  function freestyleHoldStatusForView(): FreestyleResistanceHoldStatus {
+    if (!isFreestyleBound() || !workoutActive) return "inactive";
+    if (freestyleHoldReleased) return "released";
+    if (freestyleHoldSuspended) return "suspended";
+    if (freestyleHoldTarget === undefined) return "inactive";
+    if (
+      paused ||
+      telemetryStale ||
+      !lastStatus?.connected ||
+      !lastStatus?.initialized ||
+      !controlAvailable()
+    ) {
+      return "unavailable";
+    }
+    return "holding";
   }
 
   function settings(): BikeBridgeSettings {
@@ -253,7 +451,8 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
   function canCommand(): boolean {
     // Explicit disarm permanently blocks until a new session is bound.
     if (bindingState.type === "disarmed") return false;
-    // Freestyle binding is observation-only: no resistance commands.
+    // Freestyle blocks the structured guidance/reconcile command path.
+    // Observed-change latching and hold restore use canFreestyleAuthorityCommand().
     if (bindingState.type === "bound" && bindingState.controlMode === "manual_freestyle_ride") return false;
     return (
       configured() &&
@@ -293,6 +492,8 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
       telemetryStale,
       lastError,
       lastCommandOutcome,
+      freestyleHoldStatus: freestyleHoldStatusForView(),
+      freestyleHoldTarget: freestyleHoldTarget ?? null,
     };
   }
 
@@ -310,15 +511,20 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
       pendingTrigger = trigger;
       return;
     }
-    void sendTarget(target, trigger);
+    void sendTarget(target, trigger, "structured");
   }
 
-  function observeRequest(target: number, trigger: ResistanceActuationTriggerV1): unknown {
+  function observeRequest(
+    target: number,
+    trigger: ResistanceActuationTriggerV1,
+    origin: ResistanceActuationOriginV1,
+    decisionId: string
+  ): unknown {
     if (!actuationObserver) return undefined;
     try {
       return actuationObserver.requested({
-        decisionId: desiredDecision?.id ?? decisionEpoch + "-0",
-        origin: desiredDecision?.origin ?? "unclassified",
+        decisionId,
+        origin,
         trigger,
         requestedResistance: target,
         observedAtMs: now(),
@@ -338,30 +544,62 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
     }
   }
 
-  async function sendTarget(target: number, trigger: ResistanceActuationTriggerV1): Promise<void> {
+  async function sendTarget(
+    target: number,
+    trigger: ResistanceActuationTriggerV1,
+    authority: "structured" | "freestyle_latch" | "freestyle_hold"
+  ): Promise<void> {
     if (sendInFlight) {
-      pendingLevel = target;
-      pendingTrigger = trigger;
+      if (authority === "structured") {
+        pendingLevel = target;
+        pendingTrigger = trigger;
+      } else if (authority === "freestyle_latch") {
+        freestyleQueued = { level: target, trigger, authority };
+      } else if (!freestyleQueued || freestyleQueued.authority !== "freestyle_latch") {
+        freestyleQueued = { level: target, trigger, authority };
+      }
       return;
     }
-    // Re-check authority at the actual HTTP dispatch boundary. If Freestyle
-    // binding was established while a send was queued, discard without firing.
-    if (!canCommand()) {
-      pendingLevel = undefined;
+    if (authority === "structured") {
+      if (!canCommand()) {
+        pendingLevel = undefined;
+        return;
+      }
+    } else if (!canFreestyleAuthorityCommand()) {
+      freestyleQueued = undefined;
       return;
+    } else if (authority === "freestyle_hold") {
+      if (freestyleHoldReleased || freestyleHoldSuspended || freestyleHoldTarget !== target) {
+        if (freestyleQueued?.authority === "freestyle_hold") freestyleQueued = undefined;
+        return;
+      }
     }
     const generation = bindingGeneration;
+    const origin: ResistanceActuationOriginV1 =
+      authority === "freestyle_latch"
+        ? "freestyle_observed_resistance_latch"
+        : authority === "freestyle_hold"
+          ? "freestyle_resistance_hold_restore"
+          : desiredDecision?.origin ?? "unclassified";
+    const decisionId =
+      authority === "freestyle_latch"
+        ? decisionEpoch + "-fl-" + (++decisionSeq)
+        : authority === "freestyle_hold"
+          ? decisionEpoch + "-fh-" + (++decisionSeq)
+          : desiredDecision?.id ?? decisionEpoch + "-0";
     sendInFlight = true;
     pendingLevel = undefined;
+    freestyleQueued = undefined;
     commandedResistance = target;
-    const token = observeRequest(target, trigger);
+    if (authority === "freestyle_hold") {
+      freestyleHoldLastCorrectionAtMs = now();
+      freestyleHoldStableSinceMs = undefined;
+    }
+    const token = observeRequest(target, trigger, origin, decisionId);
     let outcome: BikeBridgeActuationOutcome = "failed";
     try {
       const result = await client.setResistance(target);
       if (generation !== bindingGeneration) {
-        // Stale completion: the bridge was rebound while this request was in
-        // flight. The hardware may still execute it, but it must not mutate
-        // the new session's command bookkeeping.
         if (isBikeBridgeClientOk(result)) outcome = "accepted";
         else if (result.kind === "timeout") outcome = "timeout";
         else if (result.status === 503 || result.kind === "unreachable") outcome = "unavailable";
@@ -371,6 +609,10 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
         lastCommandOutcome = "accepted";
         outcome = "accepted";
         lastError = null;
+        if (authority === "freestyle_hold") {
+          freestyleHoldAwaitingLevel = target;
+          freestyleHoldAwaitingMissPolls = 0;
+        }
         if (lastStatus) {
           lastStatus = {
             ...lastStatus,
@@ -385,31 +627,236 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
         outcome = "timeout";
         lastError = "resistance command timed out";
         holdFailedLevel = target;
+        if (authority === "freestyle_hold") {
+          freestyleHoldAwaitingLevel = undefined;
+          recordFreestyleHoldFailure();
+        }
       } else if (result.status === 503 || result.kind === "unreachable") {
         lastCommandOutcome = "unavailable";
         outcome = "unavailable";
         lastError = result.message;
         holdFailedLevel = target;
+        if (authority === "freestyle_hold") {
+          freestyleHoldAwaitingLevel = undefined;
+          recordFreestyleHoldFailure();
+        }
       } else {
         lastCommandOutcome = "failed";
         lastError = result.message;
         holdFailedLevel = target;
+        if (authority === "freestyle_hold") {
+          freestyleHoldAwaitingLevel = undefined;
+          recordFreestyleHoldFailure();
+        }
       }
     } finally {
       sendInFlight = false;
       observeOutcome(token, outcome);
       notify();
-      // Only reschedule a pending level if we still have authority to command.
-      // This prevents a Freestyle binding established during a now-completed
-      // in-flight HTTP request from triggering another command.
       if (pendingLevel !== undefined && canCommand()) {
         const next = pendingLevel;
         pendingLevel = undefined;
         scheduleSend(next, false, pendingTrigger);
       } else {
         pendingLevel = undefined;
+        if (freestyleQueued && canFreestyleAuthorityCommand()) {
+          const next = freestyleQueued;
+          freestyleQueued = undefined;
+          void sendTarget(next.level, next.trigger, next.authority);
+        } else {
+          freestyleQueued = undefined;
+        }
       }
     }
+  }
+
+  function armFreestyleLatch(level: number): void {
+    if (freestyleHoldReleased) return;
+    clearFreestyleHoldCorrectionState();
+    if (freestyleLatchTimer !== undefined) {
+      clearTimeout(freestyleLatchTimer);
+      freestyleLatchTimer = undefined;
+    }
+    freestyleLatchCandidate = level;
+    freestyleLatchTimer = setTimeout(() => {
+      freestyleLatchTimer = undefined;
+      void dispatchFreestyleLatch(level);
+    }, freestyleLatchDebounceMs);
+  }
+
+  function adoptFreestyleHoldTarget(target: number): void {
+    freestyleHoldTarget = target;
+    freestyleHoldReleased = false;
+    freestyleHoldSuspended = false;
+    freestyleHoldLastCorrectionAtMs = undefined;
+    clearFreestyleHoldFailureBudget();
+    clearFreestyleHoldCorrectionState();
+    freestyleLastDispatchedLatch = target;
+    freestyleLatchBaselineLevel = target;
+  }
+
+  async function dispatchFreestyleLatch(level: number): Promise<void> {
+    if (freestyleLatchCandidate !== level) return;
+    freestyleLatchCandidate = undefined;
+    if (freestyleHoldReleased) return;
+    if (!canFreestyleAuthorityCommand()) return;
+    const observed = lastTelemetry?.resistance;
+    if (
+      !observed ||
+      observed.current !== true ||
+      observed.value === null ||
+      observed.value === undefined ||
+      observed.value !== level
+    ) {
+      return;
+    }
+    const target = toBridgeResistanceLevel(level);
+    if (target === undefined) return;
+    if (freestyleLastDispatchedLatch === target && freestyleHoldTarget === target) {
+      freestyleLatchBaselineLevel = target;
+      return;
+    }
+    adoptFreestyleHoldTarget(target);
+    await sendTarget(target, "observed_change_latch", "freestyle_latch");
+  }
+
+  function spacingElapsedForHoldCorrection(): boolean {
+    if (freestyleHoldLastCorrectionAtMs === undefined) return true;
+    const elapsed = now() - freestyleHoldLastCorrectionAtMs;
+    const needBackoff =
+      freestyleHoldFailureCount() > 0 && freestyleHoldAwaitingLevel === undefined;
+    const required = needBackoff
+      ? Math.max(freestyleHoldMinCorrectionSpacingMs, freestyleHoldBackoffMs)
+      : freestyleHoldMinCorrectionSpacingMs;
+    return elapsed >= required;
+  }
+
+  function maybeRestoreFreestyleHold(): void {
+    freestyleHoldStableSinceMs = undefined;
+    if (!canFreestyleAuthorityCommand()) return;
+    if (freestyleHoldReleased || freestyleHoldSuspended) return;
+    if (freestyleHoldTarget === undefined) return;
+    if (freestyleLatchCandidate !== undefined) return;
+    if (!isActivelyPedaling()) {
+      freestyleHoldMismatchPolls = 0;
+      return;
+    }
+    if (freestyleHoldAwaitingLevel !== undefined) {
+      freestyleHoldAwaitingMissPolls += 1;
+      if (
+        freestyleHoldAwaitingMissPolls >= freestyleHoldMismatchConfirmPolls &&
+        spacingElapsedForHoldCorrection()
+      ) {
+        freestyleHoldAwaitingLevel = undefined;
+        freestyleHoldAwaitingMissPolls = 0;
+        recordFreestyleHoldFailure();
+        if (freestyleHoldSuspended) return;
+      } else {
+        return;
+      }
+    }
+    freestyleHoldMismatchPolls += 1;
+    if (freestyleHoldMismatchPolls < freestyleHoldMismatchConfirmPolls) return;
+    if (!spacingElapsedForHoldCorrection()) return;
+    if (freestyleHoldFailureCount() >= freestyleHoldMaxCorrectionAttempts) {
+      freestyleHoldSuspended = true;
+      clearFreestyleHoldCorrectionState();
+      return;
+    }
+    freestyleHoldMismatchPolls = 0;
+    void sendTarget(freestyleHoldTarget, "unexpected_zero_restore", "freestyle_hold");
+  }
+
+  function noteFreestyleHoldObservation(value: number): void {
+    if (freestyleHoldTarget === undefined) return;
+    if (value !== freestyleHoldTarget) {
+      freestyleHoldStableSinceMs = undefined;
+      return;
+    }
+    freestyleHoldMismatchPolls = 0;
+    if (freestyleHoldAwaitingLevel === value) {
+      freestyleHoldAwaitingLevel = undefined;
+      freestyleHoldAwaitingMissPolls = 0;
+    }
+    const atMs = now();
+    if (freestyleHoldStableSinceMs === undefined) {
+      freestyleHoldStableSinceMs = atMs;
+      return;
+    }
+    if (
+      freestyleHoldFailureAtMs.length > 0 &&
+      atMs - freestyleHoldStableSinceMs >= freestyleHoldStableClearMs
+    ) {
+      freestyleHoldFailureAtMs = [];
+    }
+  }
+
+  function updateFreestyleLatchFromTelemetry(): void {
+    if (!isFreestyleBound()) return;
+    if (!workoutActive || paused) {
+      cancelFreestyleLatchPending();
+      clearFreestyleHoldTarget();
+      return;
+    }
+    if (!lastStatus?.connected || !lastStatus?.initialized || !controlAvailable()) {
+      cancelFreestyleLatchPending();
+      clearFreestyleHoldTarget();
+      return;
+    }
+    if (telemetryStale || !lastTelemetry) {
+      cancelFreestyleLatchPending();
+      clearFreestyleHoldCorrectionState();
+      return;
+    }
+    const observed = lastTelemetry.resistance;
+    if (!observed || observed.current !== true || observed.value === null || observed.value === undefined) {
+      cancelFreestyleLatchPending();
+      clearFreestyleHoldCorrectionState();
+      return;
+    }
+    const value = observed.value;
+    if (!freestyleLatchBaselineReady) {
+      freestyleLatchBaselineReady = true;
+      freestyleLatchBaselineLevel = value;
+      return;
+    }
+    if (freestyleHoldReleased) {
+      cancelFreestyleLatchPending();
+      if (value === 0) {
+        freestyleLatchBaselineLevel = 0;
+        return;
+      }
+      if (Number.isInteger(value) && value >= 1 && value <= 15) {
+        freestyleLatchBaselineLevel = value;
+      }
+      return;
+    }
+    if (value === 0) {
+      cancelFreestyleLatchPending();
+      freestyleLatchBaselineLevel = 0;
+      maybeRestoreFreestyleHold();
+      return;
+    }
+    if (!Number.isInteger(value) || value < 1 || value > 15) {
+      cancelFreestyleLatchPending();
+      clearFreestyleHoldCorrectionState();
+      return;
+    }
+    noteFreestyleHoldObservation(value);
+    if (value === freestyleLatchBaselineLevel) {
+      if (freestyleLatchCandidate === value) {
+        cancelFreestyleLatchPending();
+      }
+      return;
+    }
+    if (value === freestyleHoldTarget || value === freestyleLastDispatchedLatch) {
+      freestyleLatchBaselineLevel = value;
+      cancelFreestyleLatchPending();
+      clearFreestyleHoldCorrectionState();
+      return;
+    }
+    if (freestyleLatchCandidate === value) return;
+    armFreestyleLatch(value);
   }
 
   async function mirrorHeartRate(): Promise<void> {
@@ -499,6 +946,7 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
         holdFailedLevel = undefined;
         scheduleSend(desiredResistance, true);
       }
+      updateFreestyleLatchFromTelemetry();
     } finally {
       pollInFlight = false;
       void mirrorHeartRate();
@@ -519,6 +967,8 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
         clearInterval(timer);
         timer = undefined;
       }
+      cancelFreestyleLatchPending();
+      clearFreestyleHoldCorrectionState();
     },
     isPolling() {
       return timer !== undefined;
@@ -637,14 +1087,26 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
       if (bindingState.type === "bound") {
         if (input.workout === undefined || input.workout.sessionId !== bindingState.sessionId) return;
       }
-      // Freestyle binding: allow telemetry/state updates; suppress all command paths.
+      // Freestyle binding: observation + latch/hold only.
+      // Structured guidance/reconcile command paths stay suppressed.
       if (bindingState.type === "bound" && bindingState.controlMode === "manual_freestyle_ride") {
         workoutActive = input.workoutActive;
         paused = input.paused;
-        // Clear any stale desired state; never set a desiredResistance for freestyle.
         desiredResistance = undefined;
         pendingLevel = undefined;
         needsReconcile = false;
+        if (input.workoutActive) {
+          guidanceWorkout = input.workout ? { ...input.workout } : guidanceWorkout;
+        }
+        if (input.paused) {
+          cancelFreestyleLatchPending();
+          clearFreestyleHoldTarget();
+          freestyleHoldReleased = false;
+        }
+        if (!input.workoutActive) {
+          resetFreestyleLatchState();
+          commandedResistance = undefined;
+        }
         notify();
         return;
       }
@@ -707,16 +1169,14 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
       if (binding === null) {
         if (bindingState.type === "disarmed") return;
         bindingGeneration += 1;
-        // Explicit disarm blocks all resistance commands until a new session binds.
         bindingState = { type: "disarmed" };
         desiredResistance = undefined;
         pendingLevel = undefined;
         needsReconcile = false;
         commandedResistance = undefined;
         guidanceWorkout = undefined;
-        // An already-dispatched request cannot be recalled; its late result is
-        // ignored by the generation guard. holdFailedLevel no longer applies.
         holdFailedLevel = undefined;
+        resetFreestyleLatchState();
         notify();
         return;
       }
@@ -728,8 +1188,6 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
         throw new Error("Invalid session binding");
       }
       if (bindingState.type === "bound" && bindingState.sessionId === binding.sessionId) {
-        // Same-session authority is immutable: a mode change is rejected
-        // without touching state; a same-mode retry is idempotent.
         if (bindingState.controlMode !== binding.controlMode) {
           throw new Error("Session binding is already frozen with a conflicting control mode");
         }
@@ -737,7 +1195,6 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
       }
       bindingGeneration += 1;
       bindingState = { type: "bound", sessionId: binding.sessionId, controlMode: binding.controlMode };
-      // New binding: discard stale command state from the previous session.
       desiredResistance = undefined;
       pendingLevel = undefined;
       needsReconcile = false;
@@ -745,6 +1202,7 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
       holdFailedLevel = undefined;
       lastAccepted = undefined;
       guidanceWorkout = { day: "", sessionId: binding.sessionId };
+      resetFreestyleLatchState();
       notify();
     },
     getSessionBinding() {
@@ -755,6 +1213,55 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
     },
     isDisarmed() {
       return bindingState.type === "disarmed";
+    },
+    releaseFreestyleHold() {
+      cancelFreestyleLatchPending();
+      clearFreestyleHoldTarget();
+      freestyleHoldReleased = true;
+      freestyleQueued = undefined;
+      freestyleLastDispatchedLatch = undefined;
+      notify();
+    },
+    enableFreestyleHold() {
+      if (!isFreestyleBound()) {
+        return { ok: false as const, error: "Freestyle hold is unavailable" };
+      }
+      if (!workoutActive || paused) {
+        return { ok: false as const, error: "Start or resume Freestyle to enable hold" };
+      }
+      if (
+        telemetryStale ||
+        !lastTelemetry ||
+        !lastStatus?.connected ||
+        !lastStatus?.initialized ||
+        !controlAvailable()
+      ) {
+        return { ok: false as const, error: "Fresh bike telemetry is required to enable hold" };
+      }
+      const observed = lastTelemetry.resistance;
+      if (!observed || observed.current !== true || observed.value === null || observed.value === undefined) {
+        return { ok: false as const, error: "Fresh bike telemetry is required to enable hold" };
+      }
+      if (observed.value === 0) {
+        return {
+          ok: false as const,
+          error: "Enable hold requires a rider-selectable resistance (R1–R15)",
+        };
+      }
+      const target = toBridgeResistanceLevel(observed.value);
+      if (target === undefined) {
+        return {
+          ok: false as const,
+          error: "Enable hold requires a rider-selectable resistance (R1–R15)",
+        };
+      }
+      if (!canFreestyleAuthorityCommand()) {
+        return { ok: false as const, error: "Freestyle hold is unavailable" };
+      }
+      adoptFreestyleHoldTarget(target);
+      void sendTarget(target, "observed_change_latch", "freestyle_latch");
+      notify();
+      return { ok: true as const };
     },
   };
 }

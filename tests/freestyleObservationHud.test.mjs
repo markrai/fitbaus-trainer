@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 import {
   clearFreestyleObservationHudOwnership,
+  formatFreestyleHoldStatusText,
   freestyleObservationHudOwnsLiveElement,
   hideFreestyleObservationHud,
   renderFreestyleObservationHud,
@@ -12,14 +13,18 @@ import {
 function el(tag = "div") {
   const attrs = new Map();
   const children = [];
+  const listeners = new Map();
   const node = {
     tagName: tag.toUpperCase(),
+    id: "",
+    className: "",
     hidden: true,
     innerHTML: "",
     childNodes: children,
     _text: "",
     setAttribute(name, value) {
       attrs.set(String(name), String(value));
+      if (name === "id") node.id = String(value);
     },
     getAttribute(name) {
       return attrs.has(String(name)) ? attrs.get(String(name)) : null;
@@ -31,10 +36,24 @@ function el(tag = "div") {
       for (const child of nodes) children.push(child);
     },
     querySelector(selector) {
-      const match = /^\[([^\]]+)\]$/.exec(String(selector));
-      if (!match) return null;
-      const attr = match[1];
-      return children.find((child) => child.getAttribute(attr) !== null) ?? null;
+      const attrMatch = /^\[([^\]]+)\]$/.exec(String(selector));
+      if (attrMatch) {
+        const attr = attrMatch[1];
+        return children.find((child) => child.getAttribute(attr) !== null) ?? null;
+      }
+      const idMatch = /^#(.+)$/.exec(String(selector));
+      if (idMatch) {
+        return children.find((child) => child.id === idMatch[1]) ?? null;
+      }
+      return null;
+    },
+    addEventListener(type, listener) {
+      const list = listeners.get(type) ?? [];
+      list.push(listener);
+      listeners.set(type, list);
+    },
+    click() {
+      for (const listener of listeners.get("click") ?? []) listener();
     },
   };
   Object.defineProperty(node, "textContent", {
@@ -61,6 +80,17 @@ function fakeDocument() {
     machineGuidanceWatts: el("div"),
     machineGuidanceBikeLive: el("div"),
   };
+  elements.machineGuidance.append = function append(...nodes) {
+    for (const child of nodes) {
+      elements.machineGuidance.childNodes.push(child);
+      if (child.id) elements[child.id] = child;
+    }
+  };
+  elements.machineGuidance.querySelector = function querySelector(selector) {
+    const idMatch = /^#(.+)$/.exec(String(selector));
+    if (idMatch) return elements[idMatch[1]] ?? null;
+    return el.prototype?.querySelector?.call(this, selector) ?? null;
+  };
   return {
     elements,
     getElementById(id) {
@@ -82,6 +112,8 @@ function freshState(overrides = {}) {
     watts: 150,
     wattsCurrent: true,
     telemetryStale: false,
+    freestyleHoldStatus: "inactive",
+    freestyleHoldTarget: null,
     ...overrides,
   };
 }
@@ -195,15 +227,80 @@ test("clearing ownership and hide restore a blank live element for normal guidan
   assert.equal(freestyleObservationHudOwnsLiveElement(doc), false);
 });
 
+test("hold status and release/enable controls follow hold state", () => {
+  const doc = fakeDocument();
+  let released = false;
+  let enabled = false;
+  renderFreestyleObservationHud(
+    freshState({ freestyleHoldStatus: "holding", freestyleHoldTarget: 5 }),
+    doc,
+    {
+      onReleaseHold: () => { released = true; },
+      onEnableHold: () => { enabled = true; },
+    }
+  );
+  const hold = doc.elements.machineGuidanceHold;
+  assert.ok(hold);
+  assert.equal(hold.hidden, false);
+  assert.match(hold.textContent, /Hold R5/);
+  assert.match(hold.textContent, /Release hold/);
+  const release = hold.childNodes.find((child) => child.getAttribute("data-freestyle-hold-release") === "1");
+  const enable = hold.childNodes.find((child) => child.getAttribute("data-freestyle-hold-enable") === "1");
+  assert.ok(release);
+  assert.ok(enable);
+  assert.equal(release.hidden, false);
+  assert.equal(enable.hidden, true);
+  release.click();
+  assert.equal(released, true);
+
+  renderFreestyleObservationHud(
+    freshState({ freestyleHoldStatus: "unavailable", freestyleHoldTarget: 5 }),
+    doc
+  );
+  assert.match(doc.elements.machineGuidanceHold.textContent, /Hold R5 unavailable/);
+  assert.equal(
+    doc.elements.machineGuidanceHold.childNodes.find((child) => child.getAttribute("data-freestyle-hold-release") === "1").hidden,
+    false
+  );
+  assert.equal(
+    doc.elements.machineGuidanceHold.childNodes.find((child) => child.getAttribute("data-freestyle-hold-enable") === "1").hidden,
+    true
+  );
+
+  renderFreestyleObservationHud(freshState({ freestyleHoldStatus: "released", freestyleHoldTarget: null }), doc);
+  assert.match(doc.elements.machineGuidanceHold.textContent, /Hold released/);
+  assert.equal(
+    doc.elements.machineGuidanceHold.childNodes.find((child) => child.getAttribute("data-freestyle-hold-release") === "1").hidden,
+    true
+  );
+  const enableWhenReleased = doc.elements.machineGuidanceHold.childNodes.find(
+    (child) => child.getAttribute("data-freestyle-hold-enable") === "1"
+  );
+  assert.equal(enableWhenReleased.hidden, false);
+  enableWhenReleased.click();
+  assert.equal(enabled, true);
+});
+
+test("formatFreestyleHoldStatusText covers hold states", () => {
+  assert.equal(formatFreestyleHoldStatusText("holding", 5), "Hold R5");
+  assert.equal(formatFreestyleHoldStatusText("released", null), "Hold released");
+  assert.equal(formatFreestyleHoldStatusText("unavailable", 4), "Hold R4 unavailable");
+  assert.match(formatFreestyleHoldStatusText("suspended", 3), /Hold R3 suspended/);
+  assert.equal(formatFreestyleHoldStatusText("inactive", null), "");
+});
+
 test("active Freestyle UI path owns telemetry without hiding via machine guidance null", async () => {
   const source = await readFile(new URL("../src/uiControls.ts", import.meta.url), "utf8");
   assert.match(source, /function renderLiveBikeTelemetryHud/);
-  assert.match(source, /renderFreestyleObservationHud\(getBikeBridgeSession\(\)\.getViewState\(\)\)/);
+  assert.match(source, /function renderActiveFreestyleObservationHud/);
+  assert.match(source, /renderActiveFreestyleObservationHud\(\)/);
+  assert.match(source, /releaseFreestyleHold\(\)/);
+  assert.match(source, /enableFreestyleHold\(\)/);
   assert.match(source, /getBikeBridgeSession\(\)\.subscribe\(\(\) => \{\s*renderLiveBikeTelemetryHud\(\);/s);
   const freestyleBranch = source.slice(
     source.indexOf("if (isFreestyleActive) {"),
     source.indexOf("} else {\n    syncBikeBridgeGuidance(machineUpdate")
   );
-  assert.match(freestyleBranch, /renderFreestyleObservationHud\(/);
+  assert.match(freestyleBranch, /renderActiveFreestyleObservationHud\(/);
   assert.doesNotMatch(freestyleBranch, /renderMachineGuidance\(null\)/);
 });

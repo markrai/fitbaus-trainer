@@ -21,6 +21,8 @@ export const ACTUATION_ORIGINS = [
     "controller_carryover",
     "scripted_phase_program",
     "vo2_protocol_fixed_resistance",
+    "freestyle_observed_resistance_latch",
+    "freestyle_resistance_hold_restore",
     "unclassified",
 ];
 const PROGRAMMATIC_ORIGINS = new Set([
@@ -30,7 +32,12 @@ const PROGRAMMATIC_ORIGINS = new Set([
     "scripted_phase_program",
     "vo2_protocol_fixed_resistance",
 ]);
-const TRIGGERS = new Set(["decision", "reconciliation_resend"]);
+const TRIGGERS = new Set([
+    "decision",
+    "reconciliation_resend",
+    "observed_change_latch",
+    "unexpected_zero_restore",
+]);
 const OUTCOMES = new Set(["accepted", "failed", "unavailable", "timeout", "pending"]);
 const INCOMPLETE_REASONS = ["active_clock_unavailable", "persistence_failed"];
 const PHASE_KINDS = new Set(["warmup", "work", "recovery", "cooldown"]);

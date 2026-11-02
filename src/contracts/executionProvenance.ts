@@ -61,9 +61,9 @@ export type WorkoutCalibrationMachineProvenanceV1 =
   | { status: "integrity_failure"; calibration: FormalCalibrationInstanceIdentityV1 };
 
 /**
- * Who/what chose the requested resistance. Captured at the guidance source;
- * never inferred from commanded/desired/observed resistance. There is no in-app
- * manual resistance control, so no manual origin exists in v1.
+ * Who/what chose the requested resistance. Captured at the guidance source or
+ * Freestyle observed-change latch site; never inferred solely from commanded or
+ * desired fields. There is no in-app resistance slider.
  */
 export type ResistanceActuationOriginV1 =
   /** Live HR-guidance evaluation changed resistance (work or recovery). */
@@ -78,6 +78,10 @@ export type ResistanceActuationOriginV1 =
   | "scripted_phase_program"
   /** Fixed VO2 protocol stage resistance. */
   | "vo2_protocol_fixed_resistance"
+  /** Freestyle one-shot latch of a stable observed resistance change (1-15). */
+  | "freestyle_observed_resistance_latch"
+  /** Freestyle event-driven restore of a rider-selected hold target after unexpected R0. */
+  | "freestyle_resistance_hold_restore"
   /** Command sent without a classified guidance decision. */
   | "unclassified";
 
@@ -85,7 +89,11 @@ export type ResistanceActuationTriggerV1 =
   /** First command for a new guidance decision. */
   | "decision"
   /** Re-send of the current decision (resume, bridge recovery, control re-enabled). Not a new decision. */
-  | "reconciliation_resend";
+  | "reconciliation_resend"
+  /** One Freestyle latch after a debounced observed resistance change. */
+  | "observed_change_latch"
+  /** Freestyle restore after confirmed unexpected drop to R0 while holding a positive target. */
+  | "unexpected_zero_restore";
 
 export type ResistanceActuationOutcomeV1 = "accepted" | "failed" | "unavailable" | "timeout" | "pending";
 

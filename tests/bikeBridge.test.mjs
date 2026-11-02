@@ -175,6 +175,15 @@ function readySession(fake, overrides = {}) {
     transport: fake.transport,
     pollIntervalMs: overrides.pollIntervalMs ?? 1000,
     requestTimeoutMs: overrides.requestTimeoutMs ?? 50,
+    freestyleLatchDebounceMs: overrides.freestyleLatchDebounceMs,
+    freestyleHoldMismatchConfirmPolls: overrides.freestyleHoldMismatchConfirmPolls,
+    freestyleHoldMinCorrectionSpacingMs: overrides.freestyleHoldMinCorrectionSpacingMs,
+    freestyleHoldMaxCorrectionAttempts: overrides.freestyleHoldMaxCorrectionAttempts,
+    freestyleHoldBackoffMs: overrides.freestyleHoldBackoffMs,
+    freestyleHoldActivePedalRpmMin: overrides.freestyleHoldActivePedalRpmMin,
+    freestyleHoldFailureWindowMs: overrides.freestyleHoldFailureWindowMs,
+    freestyleHoldStableClearMs: overrides.freestyleHoldStableClearMs,
+    now: overrides.now,
     getCurrentBpm: overrides.getCurrentBpm,
   });
   const configured = session.configure({
@@ -903,7 +912,7 @@ test("F0-8: binding a controllable session after disarm re-enables resistance co
 
 // --- Scenario 9: Freestyle viewState shows no desiredResistance or commandedResistance ---
 
-test("F0-9: Freestyle viewState never exposes desiredResistance or commandedResistance", async () => {
+test("F0-9: Freestyle guidance never sets desiredResistance or commandedResistance", async () => {
   const fake = createFakeBikeBridge();
   const session = freestyleSession(fake);
   await waitForControl(session);
@@ -911,14 +920,14 @@ test("F0-9: Freestyle viewState never exposes desiredResistance or commandedResi
     workout: { day: "", sessionId: "fs-bridge-001" } });
   await delay(30);
   const vs = session.getViewState();
-  assert.equal(vs.desiredResistance, undefined, "desiredResistance must be absent in Freestyle viewState");
-  assert.equal(vs.commandedResistance, undefined, "commandedResistance must be absent in Freestyle viewState");
+  assert.equal(vs.desiredResistance, undefined, "desiredResistance must be absent after Freestyle guidance");
+  assert.equal(vs.commandedResistance, undefined, "commandedResistance must stay unset without an observed latch");
   session.stop();
 });
 
-// --- Scenario 10: postedResistanceBodies stays empty after Freestyle guidance ---
+// --- Scenario 10: Freestyle guidance alone never posts resistance ---
 
-test("F0-10: postedResistanceBodies stays empty for entire Freestyle session", async () => {
+test("F0-10: Freestyle guidance alone does not POST resistance", async () => {
   const fake = createFakeBikeBridge();
   const session = freestyleSession(fake, { pollIntervalMs: 20 });
   await waitForTelemetry(session);
@@ -928,7 +937,7 @@ test("F0-10: postedResistanceBodies stays empty for entire Freestyle session", a
     await delay(10);
   }
   assert.equal(session.postedResistanceBodies().length, 0,
-    "postedResistanceBodies must remain empty for Freestyle");
+    "Freestyle guidance/reconcile paths must not POST resistance");
   session.stop();
 });
 
@@ -1378,4 +1387,749 @@ test("F0-stale-3: late timeout from session A does not touch session B", async (
   } finally {
     session.stop();
   }
+});
+
+// ---------------------------------------------------------------------------
+// Freestyle observed-resistance latch
+// ---------------------------------------------------------------------------
+
+function freestyleLatchSession(fake, overrides = {}) {
+  const session = freestyleSession(fake, {
+    pollIntervalMs: 20,
+    freestyleLatchDebounceMs: 40,
+    freestyleHoldMismatchConfirmPolls: 2,
+    freestyleHoldMinCorrectionSpacingMs: 40,
+    freestyleHoldMaxCorrectionAttempts: 3,
+    freestyleHoldBackoffMs: 40,
+    freestyleHoldActivePedalRpmMin: 1,
+    ...overrides,
+  });
+  return session;
+}
+
+async function activateFreestyle(session, sessionId = "fs-bridge-001") {
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId },
+  });
+}
+
+test("Freestyle latch: R0 to R5 sends exactly one matching command", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(50);
+  assert.equal(fake.state.posts.length, 0, "baseline observation must not latch");
+  fake.state.observed = 5;
+  await waitUntil(() => fake.state.posts.length === 1);
+  assert.deepEqual(fake.state.posts, [{ value: 5 }]);
+  await delay(120);
+  assert.equal(fake.state.posts.length, 1, "stable R5 must not duplicate");
+  session.stop();
+});
+
+test("Freestyle latch: R5 to R4 sends exactly one matching command", async () => {
+  const fake = createFakeBikeBridge({ observed: 5 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(50);
+  assert.equal(fake.state.posts.length, 0);
+  fake.state.observed = 4;
+  await waitUntil(() => fake.state.posts.length === 1);
+  assert.deepEqual(fake.state.posts, [{ value: 4 }]);
+  await delay(120);
+  assert.equal(fake.state.posts.length, 1);
+  session.stop();
+});
+
+test("Freestyle latch: rapid increments only latch the final stabilized level", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake, { freestyleLatchDebounceMs: 80 });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  fake.state.observed = 2;
+  await delay(20);
+  fake.state.observed = 3;
+  await delay(20);
+  fake.state.observed = 5;
+  await waitUntil(() => fake.state.posts.length === 1);
+  await delay(120);
+  assert.deepEqual(fake.state.posts, [{ value: 5 }]);
+  session.stop();
+});
+
+test("Freestyle latch: repeated identical R5 polls do not duplicate commands", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  fake.state.observed = 5;
+  await waitUntil(() => fake.state.posts.length === 1);
+  for (let i = 0; i < 8; i++) await delay(30);
+  assert.equal(fake.state.posts.length, 1);
+  session.stop();
+});
+
+test("Freestyle latch: R5 to R0 cancels pending latch and does not restore", async () => {
+  const fake = createFakeBikeBridge({ observed: 5 });
+  const session = freestyleLatchSession(fake, { freestyleLatchDebounceMs: 80 });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  fake.state.observed = 7;
+  await delay(30);
+  fake.state.observed = 0;
+  await delay(150);
+  assert.equal(fake.state.posts.length, 0, "transition to R0 must not command or restore");
+  session.stop();
+});
+
+test("Freestyle latch: temporary telemetry loss does not latch", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake, { freestyleLatchDebounceMs: 80 });
+  try {
+    await waitForTelemetry(session);
+    await activateFreestyle(session);
+    await delay(40);
+    fake.state.observed = 6;
+    await delay(30);
+    fake.state.failNext = { path: "/api/v1/telemetry", drop: true };
+    await delay(200);
+    assert.equal(fake.state.posts.length, 0, "stale/missing telemetry must not latch");
+  } finally {
+    session.stop();
+  }
+});
+
+test("Freestyle latch: disconnect then reconnect does not automatically resend", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  fake.state.observed = 5;
+  await waitUntil(() => fake.state.posts.length === 1);
+  fake.state.connected = false;
+  fake.state.controlAvailable = false;
+  await delay(60);
+  fake.state.connected = true;
+  fake.state.initialized = true;
+  fake.state.controlAvailable = true;
+  await delay(120);
+  assert.equal(fake.state.posts.length, 1, "reconnect must not resend Freestyle latch");
+  session.stop();
+});
+
+test("Freestyle latch: pause then resume does not automatically resend", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  fake.state.observed = 5;
+  await waitUntil(() => fake.state.posts.length === 1);
+  session.onGuidance({
+    workoutActive: true,
+    paused: true,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  await delay(40);
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  await delay(120);
+  assert.equal(fake.state.posts.length, 1, "resume must not resend Freestyle latch");
+  session.stop();
+});
+
+test("Freestyle latch: finish cancels a pending latch", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake, { freestyleLatchDebounceMs: 120 });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  fake.state.observed = 8;
+  await delay(40);
+  session.onGuidance({
+    workoutActive: false,
+    paused: false,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  await delay(180);
+  assert.equal(fake.state.posts.length, 0, "finish must cancel pending latch");
+  session.stop();
+});
+
+test("Freestyle latch: invalid session authority never commands", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  session.bindSession(null);
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  fake.state.observed = 5;
+  await delay(150);
+  assert.equal(fake.state.posts.length, 0);
+  session.stop();
+});
+
+test("Freestyle latch works while global automatic control is disabled", async () => {
+  const fake = createFakeBikeBridge({ observed: 0 });
+  const session = freestyleLatchSession(fake, { automaticControlEnabled: false });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  fake.state.observed = 5;
+  await waitUntil(() => fake.state.posts.length === 1);
+  assert.deepEqual(fake.state.posts, [{ value: 5 }]);
+  session.stop();
+});
+
+test("structured workout control is unchanged by Freestyle latch support", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake, { pollIntervalMs: 20 });
+  await waitForControl(session);
+  session.bindSession({ sessionId: "structured-1", controlMode: "legacy_hr_control" });
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    desiredResistance: 8,
+    recommendationChanged: true,
+    workout: { day: "Monday", sessionId: "structured-1" },
+  });
+  await waitUntil(() => fake.state.posts.length >= 1);
+  assert.deepEqual(fake.state.posts[0], { value: 8 });
+  session.stop();
+});
+
+// ---------------------------------------------------------------------------
+// Freestyle active resistance hold
+// ---------------------------------------------------------------------------
+
+async function establishHoldTarget(session, fake, level) {
+  fake.state.observed = level;
+  fake.state.rpm = 60;
+  await waitUntil(() => fake.state.posts.some((body) => body.value === level));
+  assert.equal(session.getViewState().freestyleHoldTarget, level);
+  assert.equal(session.getViewState().freestyleHoldStatus, "holding");
+}
+
+test("Freestyle hold: R0 to R5 establishes target R5", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 55 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(50);
+  await establishHoldTarget(session, fake, 5);
+  assert.deepEqual(fake.state.posts, [{ value: 5 }]);
+  session.stop();
+});
+
+test("Freestyle hold: stable R5 causes no additional POSTs", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 55 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  const count = fake.state.posts.length;
+  for (let i = 0; i < 8; i++) await delay(30);
+  assert.equal(fake.state.posts.length, count);
+  session.stop();
+});
+
+test("Freestyle hold: unexpected R5 to R0 while pedaling triggers one bounded R5 correction", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 0;
+  fake.state.rpm = 68;
+  await waitUntil(() => fake.state.posts.length >= 2);
+  assert.deepEqual(fake.state.posts.slice(-1)[0], { value: 5 });
+  await delay(80);
+  assert.equal(fake.state.posts.filter((body) => body.value === 5).length, 2);
+  session.stop();
+});
+
+test("Freestyle hold: R5 to R0 to R5 recovery does not loop or repeatedly POST", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 0;
+  fake.state.rpm = 70;
+  await waitUntil(() => fake.state.posts.length >= 2);
+  fake.state.observed = 5;
+  await delay(150);
+  assert.equal(fake.state.posts.length, 2);
+  session.stop();
+});
+
+test("Freestyle hold: another reset after recovery can trigger a subsequent correction", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 0;
+  await waitUntil(() => fake.state.posts.length >= 2);
+  fake.state.observed = 5;
+  await delay(80);
+  fake.state.observed = 0;
+  await waitUntil(() => fake.state.posts.length >= 3);
+  assert.equal(fake.state.posts.filter((body) => body.value === 5).length, 3);
+  session.stop();
+});
+
+test("Freestyle hold: physical R5 to R4 adopts R4 rather than restoring R5", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 4;
+  await waitUntil(() => fake.state.posts.some((body) => body.value === 4));
+  assert.equal(session.getViewState().freestyleHoldTarget, 4);
+  await delay(100);
+  assert.equal(fake.state.posts.filter((body) => body.value === 5).length, 1);
+  assert.equal(fake.state.posts.filter((body) => body.value === 4).length, 1);
+  session.stop();
+});
+
+test("Freestyle hold: rapid physical adjustments do not cause competing commands", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, { freestyleLatchDebounceMs: 80 });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 3;
+  await delay(20);
+  fake.state.observed = 4;
+  await delay(20);
+  fake.state.observed = 6;
+  await waitUntil(() => fake.state.posts.some((body) => body.value === 6));
+  await delay(120);
+  assert.deepEqual(
+    fake.state.posts.filter((body) => body.value !== 5),
+    [{ value: 6 }]
+  );
+  assert.equal(session.getViewState().freestyleHoldTarget, 6);
+  session.stop();
+});
+
+test("Freestyle hold: release hold cancels corrections", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  session.releaseFreestyleHold();
+  assert.equal(session.getViewState().freestyleHoldStatus, "released");
+  assert.equal(session.getViewState().freestyleHoldTarget, null);
+  fake.state.observed = 0;
+  fake.state.rpm = 70;
+  await delay(160);
+  assert.equal(fake.state.posts.length, 1);
+  session.stop();
+});
+
+test("Freestyle hold: after release, R4→R1→R5 issues zero commands until Enable hold", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, { freestyleLatchDebounceMs: 40 });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 4);
+  const postsAfterLatch = fake.state.posts.length;
+  session.releaseFreestyleHold();
+  assert.equal(session.getViewState().freestyleHoldStatus, "released");
+  for (const level of [3, 2, 1]) {
+    fake.state.observed = level;
+    fake.state.rpm = 55;
+    await delay(80);
+  }
+  fake.state.observed = 5;
+  fake.state.rpm = 60;
+  await delay(160);
+  assert.equal(
+    fake.state.posts.length,
+    postsAfterLatch,
+    "physical descent/ascent after release must not command resistance"
+  );
+  assert.equal(session.getViewState().freestyleHoldTarget, null);
+  assert.equal(session.getViewState().freestyleHoldStatus, "released");
+
+  const enabled = session.enableFreestyleHold();
+  assert.equal(enabled.ok, true);
+  await waitUntil(() => fake.state.posts.some((body) => body.value === 5));
+  assert.equal(session.getViewState().freestyleHoldTarget, 5);
+  assert.equal(session.getViewState().freestyleHoldStatus, "holding");
+  assert.ok(!fake.state.posts.some((body) => body.value === 0), "must never command R0");
+  session.stop();
+});
+
+test("Freestyle hold: Enable hold activates at R1 without ever observing R0", async () => {
+  const fake = createFakeBikeBridge({ observed: 1, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  assert.equal(session.getViewState().freestyleHoldStatus, "inactive");
+  assert.equal(fake.state.posts.length, 0);
+
+  const enabled = session.enableFreestyleHold();
+  assert.equal(enabled.ok, true);
+  await waitUntil(() => fake.state.posts.some((body) => body.value === 1));
+  assert.equal(session.getViewState().freestyleHoldTarget, 1);
+  assert.equal(session.getViewState().freestyleHoldStatus, "holding");
+  assert.deepEqual(fake.state.posts, [{ value: 1 }]);
+  assert.ok(!fake.state.posts.some((body) => body.value === 0), "must never command R0");
+  session.stop();
+});
+
+test("Freestyle hold: Enable hold refuses when telemetry reports R0", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 4);
+  const postsAfterLatch = fake.state.posts.length;
+  session.releaseFreestyleHold();
+  fake.state.observed = 0;
+  await delay(80);
+  const refused = session.enableFreestyleHold();
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /R1–R15|rider-selectable/);
+  assert.equal(fake.state.posts.length, postsAfterLatch);
+  assert.equal(session.getViewState().freestyleHoldStatus, "released");
+  assert.equal(session.getViewState().freestyleHoldTarget, null);
+
+  fake.state.observed = 3;
+  await delay(80);
+  const enabled = session.enableFreestyleHold();
+  assert.equal(enabled.ok, true);
+  await waitUntil(() => fake.state.posts.some((body) => body.value === 3));
+  assert.equal(session.getViewState().freestyleHoldTarget, 3);
+  assert.equal(session.getViewState().freestyleHoldStatus, "holding");
+  session.stop();
+});
+
+test("Freestyle hold: pause clears hold and resume does not resurrect target", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  session.onGuidance({
+    workoutActive: true,
+    paused: true,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  assert.equal(session.getViewState().freestyleHoldTarget, null);
+  fake.state.observed = 0;
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  await delay(160);
+  assert.equal(fake.state.posts.length, 1);
+  assert.equal(session.getViewState().freestyleHoldTarget, null);
+  session.stop();
+});
+
+test("Freestyle hold: finish clears hold", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  session.onGuidance({
+    workoutActive: false,
+    paused: false,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  assert.equal(session.getViewState().freestyleHoldStatus, "inactive");
+  assert.equal(session.getViewState().freestyleHoldTarget, null);
+  session.stop();
+});
+
+test("Freestyle hold: disconnect clears hold and reconnect does not resurrect", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.connected = false;
+  fake.state.controlAvailable = false;
+  await waitUntil(() => session.getViewState().freestyleHoldTarget === null);
+  fake.state.connected = true;
+  fake.state.initialized = true;
+  fake.state.controlAvailable = true;
+  fake.state.observed = 0;
+  fake.state.rpm = 70;
+  await delay(160);
+  assert.equal(fake.state.posts.length, 1);
+  session.stop();
+});
+
+test("Freestyle hold: stale telemetry prohibits correction", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 0;
+  fake.state.failNext = { path: "/api/v1/telemetry", drop: true };
+  await delay(160);
+  assert.equal(fake.state.posts.length, 1);
+  session.stop();
+});
+
+test("Freestyle hold: stopped pedaling prohibits correction", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake);
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 0;
+  fake.state.rpm = 0;
+  await delay(160);
+  assert.equal(fake.state.posts.length, 1);
+  session.stop();
+});
+
+test("Freestyle hold: persistent reset failure suspends after bounded attempts", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, {
+    freestyleHoldMaxCorrectionAttempts: 2,
+    freestyleHoldMismatchConfirmPolls: 1,
+    freestyleHoldMinCorrectionSpacingMs: 20,
+    freestyleHoldBackoffMs: 20,
+    freestyleHoldFailureWindowMs: 60_000,
+    freestyleHoldStableClearMs: 60_000,
+  });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 0;
+  fake.state.rpm = 70;
+  await waitUntil(() => session.getViewState().freestyleHoldStatus === "suspended", 800);
+  const restoreCount = fake.state.posts.filter((body) => body.value === 5).length;
+  assert.ok(restoreCount >= 2);
+  const afterSuspend = fake.state.posts.length;
+  await delay(120);
+  assert.equal(fake.state.posts.length, afterSuspend);
+  session.stop();
+});
+
+test("Freestyle hold: brief observed recovery does not clear failure budget", async () => {
+  let clock = 1_000_000;
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, {
+    now: () => clock,
+    freestyleHoldMaxCorrectionAttempts: 2,
+    freestyleHoldMismatchConfirmPolls: 1,
+    freestyleHoldMinCorrectionSpacingMs: 20,
+    freestyleHoldBackoffMs: 20,
+    freestyleHoldFailureWindowMs: 10_000,
+    freestyleHoldStableClearMs: 5_000,
+  });
+  try {
+    await waitForTelemetry(session);
+    await activateFreestyle(session);
+    await delay(40);
+    await establishHoldTarget(session, fake, 5);
+    const latchPosts = fake.state.posts.length;
+    fake.state.observed = 0;
+    fake.state.rpm = 70;
+    fake.state.failNext = { path: "/api/v1/resistance", status: 500, once: true };
+    await waitUntil(() => fake.state.posts.length >= latchPosts + 1);
+    clock += 100;
+    fake.state.observed = 5;
+    await delay(40);
+    clock += 100;
+    fake.state.observed = 0;
+    fake.state.failNext = { path: "/api/v1/resistance", status: 500, once: true };
+    await waitUntil(() => session.getViewState().freestyleHoldStatus === "suspended", 800);
+    assert.equal(session.getViewState().freestyleHoldStatus, "suspended");
+    const afterSuspend = fake.state.posts.length;
+    clock += 100;
+    await delay(120);
+    assert.equal(fake.state.posts.length, afterSuspend, "brief R5 flash must not clear the failure budget");
+  } finally {
+    session.stop();
+  }
+});
+
+test("Freestyle hold: sustained stability clears failure budget so later restores continue", async () => {
+  let clock = 2_000_000;
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, {
+    now: () => clock,
+    freestyleHoldMaxCorrectionAttempts: 2,
+    freestyleHoldMismatchConfirmPolls: 1,
+    freestyleHoldMinCorrectionSpacingMs: 20,
+    freestyleHoldBackoffMs: 20,
+    freestyleHoldFailureWindowMs: 60_000,
+    freestyleHoldStableClearMs: 1_000,
+  });
+  try {
+    await waitForTelemetry(session);
+    await activateFreestyle(session);
+    await delay(40);
+    await establishHoldTarget(session, fake, 5);
+    const latchPosts = fake.state.posts.length;
+    fake.state.observed = 0;
+    fake.state.rpm = 70;
+    fake.state.failNext = { path: "/api/v1/resistance", status: 500, once: true };
+    await waitUntil(() => fake.state.posts.length >= latchPosts + 1);
+    fake.state.observed = 5;
+    clock += 1_100;
+    await delay(80);
+    clock += 50;
+    await delay(40);
+    fake.state.observed = 0;
+    await waitUntil(() => fake.state.posts.length >= latchPosts + 2);
+    assert.notEqual(session.getViewState().freestyleHoldStatus, "suspended");
+    assert.equal(fake.state.posts.at(-1).value, 5);
+  } finally {
+    session.stop();
+  }
+});
+
+test("Freestyle hold: successful restores minutes apart do not suspend", async () => {
+  let clock = 3_000_000;
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, {
+    now: () => clock,
+    freestyleHoldMaxCorrectionAttempts: 2,
+    freestyleHoldMismatchConfirmPolls: 1,
+    freestyleHoldMinCorrectionSpacingMs: 20,
+    freestyleHoldBackoffMs: 20,
+    freestyleHoldFailureWindowMs: 60_000,
+    freestyleHoldStableClearMs: 500,
+  });
+  try {
+    await waitForTelemetry(session);
+    await activateFreestyle(session);
+    await delay(40);
+    await establishHoldTarget(session, fake, 5);
+    for (let cycle = 0; cycle < 3; cycle++) {
+      fake.state.observed = 0;
+      fake.state.rpm = 70;
+      await waitUntil(() => fake.state.posts.length >= 2 + cycle);
+      fake.state.observed = 5;
+      clock += 600;
+      await delay(60);
+      clock += 50;
+      await delay(40);
+      clock += 120_000;
+    }
+    assert.notEqual(session.getViewState().freestyleHoldStatus, "suspended");
+    assert.equal(fake.state.posts.filter((body) => body.value === 5).length, 4);
+  } finally {
+    session.stop();
+  }
+});
+
+test("Freestyle hold: three rapid failed restorations suspend within the failure window", async () => {
+  let clock = 4_000_000;
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, {
+    now: () => clock,
+    freestyleHoldMaxCorrectionAttempts: 3,
+    freestyleHoldMismatchConfirmPolls: 1,
+    freestyleHoldMinCorrectionSpacingMs: 10,
+    freestyleHoldBackoffMs: 10,
+    freestyleHoldFailureWindowMs: 5_000,
+    freestyleHoldStableClearMs: 60_000,
+  });
+  try {
+    await waitForTelemetry(session);
+    await activateFreestyle(session);
+    await delay(40);
+    await establishHoldTarget(session, fake, 5);
+    fake.state.observed = 0;
+    fake.state.rpm = 70;
+    const start = Date.now();
+    while (Date.now() - start < 1500) {
+      if (session.getViewState().freestyleHoldStatus === "suspended") break;
+      clock += 25;
+      await delay(10);
+    }
+    assert.equal(session.getViewState().freestyleHoldStatus, "suspended");
+    const restoreCount = fake.state.posts.filter((body) => body.value === 5).length;
+    assert.equal(restoreCount, 4, "latch + three failed restores then suspend");
+    const afterSuspend = fake.state.posts.length;
+    clock += 100;
+    await delay(120);
+    assert.equal(fake.state.posts.length, afterSuspend);
+  } finally {
+    session.stop();
+  }
+});
+
+test("Freestyle hold works while global automatic control is disabled", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, { automaticControlEnabled: false });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  fake.state.observed = 0;
+  await waitUntil(() => fake.state.posts.length >= 2);
+  assert.equal(fake.state.posts.at(-1).value, 5);
+  session.stop();
+});
+
+test("structured workout control is unchanged by Freestyle hold support", async () => {
+  const fake = createFakeBikeBridge();
+  const session = readySession(fake, { pollIntervalMs: 20 });
+  await waitForControl(session);
+  session.bindSession({ sessionId: "structured-2", controlMode: "legacy_hr_control" });
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    desiredResistance: 9,
+    recommendationChanged: true,
+    workout: { day: "Tuesday", sessionId: "structured-2" },
+  });
+  await waitUntil(() => fake.state.posts.length >= 1);
+  assert.deepEqual(fake.state.posts[0], { value: 9 });
+  session.stop();
 });
