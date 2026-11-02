@@ -322,6 +322,9 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
   let freestyleHoldLastCorrectionAtMs: number | undefined;
   let freestyleHoldFailureAtMs: number[] = [];
   let freestyleHoldStableSinceMs: number | undefined;
+  // Bumped when hold identity changes (clear/adopt/release). sendTarget captures it so a
+  // deferred freestyle_hold response cannot mutate a newer hold's awaiting/failure state.
+  let freestyleHoldRevision = 0;
 
   function notify(): void {
     listeners.forEach((listener) => listener());
@@ -371,11 +374,16 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
   }
 
   function clearFreestyleHoldTarget(): void {
+    const hadHold =
+      freestyleHoldTarget !== undefined ||
+      freestyleHoldSuspended ||
+      freestyleHoldAwaitingLevel !== undefined;
     freestyleHoldTarget = undefined;
     freestyleHoldSuspended = false;
     freestyleHoldLastCorrectionAtMs = undefined;
     clearFreestyleHoldFailureBudget();
     clearFreestyleHoldCorrectionState();
+    if (hadHold) freestyleHoldRevision += 1;
   }
 
   function resetFreestyleLatchState(): void {
@@ -575,6 +583,7 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
       }
     }
     const generation = bindingGeneration;
+    const holdRevision = freestyleHoldRevision;
     const origin: ResistanceActuationOriginV1 =
       authority === "freestyle_latch"
         ? "freestyle_observed_resistance_latch"
@@ -599,7 +608,9 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
     let outcome: BikeBridgeActuationOutcome = "failed";
     try {
       const result = await client.setResistance(target);
-      if (generation !== bindingGeneration) {
+      const holdStale =
+        authority === "freestyle_hold" && holdRevision !== freestyleHoldRevision;
+      if (generation !== bindingGeneration || holdStale) {
         if (isBikeBridgeClientOk(result)) outcome = "accepted";
         else if (result.kind === "timeout") outcome = "timeout";
         else if (result.status === 503 || result.kind === "unreachable") outcome = "unavailable";
@@ -685,6 +696,7 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
   }
 
   function adoptFreestyleHoldTarget(target: number): void {
+    freestyleHoldRevision += 1;
     freestyleHoldTarget = target;
     freestyleHoldReleased = false;
     freestyleHoldSuspended = false;
@@ -1101,7 +1113,7 @@ export function createBikeBridgeSession(options: BikeBridgeSessionOptions = {}):
         if (input.paused) {
           cancelFreestyleLatchPending();
           clearFreestyleHoldTarget();
-          freestyleHoldReleased = false;
+          // Preserve freestyleHoldReleased across pause/resume. Only Enable hold may clear it.
         }
         if (!input.workoutActive) {
           resetFreestyleLatchState();

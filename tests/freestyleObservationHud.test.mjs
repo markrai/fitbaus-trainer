@@ -279,6 +279,24 @@ test("hold status and release/enable controls follow hold state", () => {
   assert.equal(enableWhenReleased.hidden, false);
   enableWhenReleased.click();
   assert.equal(enabled, true);
+
+  enabled = false;
+  renderFreestyleObservationHud(
+    freshState({ freestyleHoldStatus: "inactive", freestyleHoldTarget: null }),
+    doc,
+    { onEnableHold: () => { enabled = true; } }
+  );
+  const enableWhenInactive = doc.elements.machineGuidanceHold.childNodes.find(
+    (child) => child.getAttribute("data-freestyle-hold-enable") === "1"
+  );
+  assert.equal(doc.elements.machineGuidanceHold.hidden, false);
+  assert.equal(enableWhenInactive.hidden, false);
+  assert.equal(
+    doc.elements.machineGuidanceHold.childNodes.find((child) => child.getAttribute("data-freestyle-hold-release") === "1").hidden,
+    true
+  );
+  enableWhenInactive.click();
+  assert.equal(enabled, true);
 });
 
 test("formatFreestyleHoldStatusText covers hold states", () => {

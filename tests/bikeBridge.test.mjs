@@ -1866,6 +1866,98 @@ test("Freestyle hold: pause clears hold and resume does not resurrect target", a
   session.stop();
 });
 
+test("Freestyle hold: released state survives pause/resume until Enable hold", async () => {
+  const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
+  const session = freestyleLatchSession(fake, { freestyleLatchDebounceMs: 40 });
+  await waitForTelemetry(session);
+  await activateFreestyle(session);
+  await delay(40);
+  await establishHoldTarget(session, fake, 5);
+  const postsAfterLatch = fake.state.posts.length;
+  session.releaseFreestyleHold();
+  assert.equal(session.getViewState().freestyleHoldStatus, "released");
+  session.onGuidance({
+    workoutActive: true,
+    paused: true,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  assert.equal(session.getViewState().freestyleHoldStatus, "released");
+  session.onGuidance({
+    workoutActive: true,
+    paused: false,
+    recommendationChanged: false,
+    workout: { day: "Freestyle", sessionId: "fs-bridge-001" },
+  });
+  assert.equal(session.getViewState().freestyleHoldStatus, "released");
+  fake.state.observed = 7;
+  fake.state.rpm = 65;
+  await delay(160);
+  assert.equal(fake.state.posts.length, postsAfterLatch, "resume must not relatch without Enable");
+  assert.equal(session.getViewState().freestyleHoldTarget, null);
+  assert.equal(session.getViewState().freestyleHoldStatus, "released");
+  const enabled = session.enableFreestyleHold();
+  assert.equal(enabled.ok, true);
+  await waitUntil(() => fake.state.posts.some((body) => body.value === 7));
+  assert.equal(session.getViewState().freestyleHoldTarget, 7);
+  assert.equal(session.getViewState().freestyleHoldStatus, "holding");
+  session.stop();
+});
+
+test("Freestyle hold: deferred restore response cannot mutate a newer hold", async () => {
+  const deferred = createDeferredBridge();
+  deferred.state.observed = 0;
+  deferred.state.rpm = 60;
+  const session = freestyleLatchSession(deferred, {
+    freestyleHoldMaxCorrectionAttempts: 1,
+    freestyleHoldMismatchConfirmPolls: 1,
+    freestyleHoldMinCorrectionSpacingMs: 10,
+    freestyleHoldBackoffMs: 10,
+    freestyleHoldFailureWindowMs: 60_000,
+    freestyleHoldStableClearMs: 60_000,
+  });
+  try {
+    await waitForTelemetry(session);
+    await activateFreestyle(session);
+    await delay(40);
+    deferred.state.observed = 5;
+    await waitUntil(() => deferred.state.posts.some((body) => body.value === 5));
+    assert.equal(deferred.state.pending.length, 1);
+    deferred.state.pending[0].resolve({ status: 200, text: JSON.stringify({ requested: 5 }) });
+    await waitUntil(() => session.getViewState().freestyleHoldStatus === "holding");
+    assert.equal(session.getViewState().freestyleHoldTarget, 5);
+
+    deferred.state.observed = 0;
+    deferred.state.rpm = 70;
+    await waitUntil(() => deferred.state.posts.length >= 2);
+    assert.equal(deferred.state.pending.length, 2, "restore must remain in flight");
+
+    session.releaseFreestyleHold();
+    deferred.state.observed = 3;
+    await waitUntil(() => session.getViewState().observedResistance === 3);
+    const enabled = session.enableFreestyleHold();
+    assert.equal(enabled.ok, true);
+    assert.equal(deferred.state.posts.length, 2, "Enable must queue while restore is in flight");
+
+    deferred.state.pending[1].resolve({
+      status: 503,
+      text: JSON.stringify({ error: "setter unavailable" }),
+    });
+    await waitUntil(() => deferred.state.posts.some((body) => body.value === 3));
+    assert.equal(deferred.state.pending.length, 3);
+    deferred.state.pending[2].resolve({ status: 200, text: JSON.stringify({ requested: 3 }) });
+    await waitUntil(() => session.getViewState().freestyleHoldStatus === "holding");
+    assert.equal(session.getViewState().freestyleHoldTarget, 3);
+    assert.notEqual(
+      session.getViewState().freestyleHoldStatus,
+      "suspended",
+      "stale restore failure must not consume the new hold's failure budget"
+    );
+  } finally {
+    session.stop();
+  }
+});
+
 test("Freestyle hold: finish clears hold", async () => {
   const fake = createFakeBikeBridge({ observed: 0, rpm: 60 });
   const session = freestyleLatchSession(fake);

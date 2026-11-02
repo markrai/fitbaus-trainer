@@ -243,7 +243,8 @@ export function renderFreestyleObservationHud(
     (state.freestyleHoldStatus === "unavailable" &&
       state.freestyleHoldTarget !== null &&
       state.freestyleHoldTarget !== undefined);
-  const showEnable = state.freestyleHoldStatus === "released";
+  const showEnable =
+    state.freestyleHoldStatus === "released" || state.freestyleHoldStatus === "inactive";
   if (holdText || showRelease || showEnable) {
     const hold = ensureHoldShell(panel as HoldHost, documentRef, options);
     hold.status.hidden = !holdText;
