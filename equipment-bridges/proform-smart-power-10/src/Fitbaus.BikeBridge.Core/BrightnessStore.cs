@@ -21,12 +21,25 @@ namespace Fitbaus.BikeBridge.Core
     /// <summary>
     /// Thread-safe owner of last accepted console brightness.
     /// Never writes BikeTelemetryStore or resistance state.
+    /// Optional persistence hydrates across process restarts.
     /// </summary>
     public sealed class BrightnessStore
     {
         private readonly object _gate = new object();
+        private readonly IBrightnessPersistence _persistence;
         private int? _percent;
         private DateTime? _requestedAt;
+
+        public BrightnessStore()
+            : this(null)
+        {
+        }
+
+        public BrightnessStore(IBrightnessPersistence persistence)
+        {
+            _persistence = persistence;
+            HydrateFromPersistence();
+        }
 
         public BrightnessSnapshot GetSnapshot()
         {
@@ -44,6 +57,7 @@ namespace Fitbaus.BikeBridge.Core
                 _requestedAt = utcNow.Kind == DateTimeKind.Utc
                     ? utcNow
                     : utcNow.ToUniversalTime();
+                PersistUnlocked(percent);
             }
         }
 
@@ -54,6 +68,38 @@ namespace Fitbaus.BikeBridge.Core
                 _percent = null;
                 _requestedAt = null;
             }
+        }
+
+        private void HydrateFromPersistence()
+        {
+            if (_persistence == null)
+            {
+                return;
+            }
+
+            int percent;
+            if (!_persistence.TryLoad(out percent))
+            {
+                return;
+            }
+
+            string error;
+            if (!BrightnessLimits.TryValidate(percent, out error))
+            {
+                return;
+            }
+
+            _percent = percent;
+        }
+
+        private void PersistUnlocked(int percent)
+        {
+            if (_persistence == null)
+            {
+                return;
+            }
+
+            _persistence.Save(percent);
         }
     }
 }

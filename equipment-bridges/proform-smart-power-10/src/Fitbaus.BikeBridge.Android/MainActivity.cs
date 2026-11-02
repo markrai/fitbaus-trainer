@@ -46,6 +46,7 @@ namespace Fitbaus.BikeBridge.AndroidApp
         protected override void OnCreate(Bundle savedInstanceState)
         {
             base.OnCreate(savedInstanceState);
+            Window.AddFlags(WindowManagerFlags.KeepScreenOn);
             Android.Util.Log.Info(Diagnostics.LogTag, "main activity onCreate");
             SetContentView(BuildUi());
             Android.Util.Log.Info(Diagnostics.LogTag, "before BridgeRuntime.EnsureStarted");

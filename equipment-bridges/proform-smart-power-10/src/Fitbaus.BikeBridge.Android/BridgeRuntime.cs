@@ -210,7 +210,7 @@ namespace Fitbaus.BikeBridge.AndroidApp
             Telemetry = new BikeTelemetryStore();
             Commands = new ResistanceCommandStore();
             HeartRate = new HeartRateStore();
-            Brightness = new BrightnessStore();
+            Brightness = new BrightnessStore(new SharedPreferencesBrightnessPersistence(_appContext));
             Log("BikeTelemetryStore constructed");
         }
 

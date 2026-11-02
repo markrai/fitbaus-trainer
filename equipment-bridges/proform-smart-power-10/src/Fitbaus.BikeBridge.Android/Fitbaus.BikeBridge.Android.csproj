@@ -97,6 +97,7 @@
     <Compile Include="BridgeApplication.cs" />
     <Compile Include="BridgeRuntime.cs" />
     <Compile Include="MainActivity.cs" />
+    <Compile Include="SharedPreferencesBrightnessPersistence.cs" />
     <Compile Include="BridgeControlPolicy.cs" />
     <Compile Include="ShireRuntimeHost.cs" />
     <!-- Explicit Core list: do not use *.cs. Unrelated host files must not enter the XA Full-link graph. -->
@@ -150,6 +151,9 @@
     </Compile>
     <Compile Include="..\Fitbaus.BikeBridge.Core\BrightnessLimits.cs">
       <Link>Shared\BrightnessLimits.cs</Link>
+    </Compile>
+    <Compile Include="..\Fitbaus.BikeBridge.Core\IBrightnessPersistence.cs">
+      <Link>Shared\IBrightnessPersistence.cs</Link>
     </Compile>
     <Compile Include="..\Fitbaus.BikeBridge.Core\BrightnessStore.cs">
       <Link>Shared\BrightnessStore.cs</Link>

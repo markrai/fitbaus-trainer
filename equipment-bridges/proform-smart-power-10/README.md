@@ -86,7 +86,11 @@ overwritten by the request path.
 - HR: display ingest only (BPM window in `HeartRateLimits`); never initializes
   USB or changes resistance/telemetry.
 - Brightness: Activity window percent 0–100 (`BrightnessLimits`); never bike
-  control.
+  control. Last accepted value is persisted on the console and reapplied when
+  the Bridge Activity becomes visible. While Bike Bridge is the visible
+  foreground Activity, `FLAG_KEEP_SCREEN_ON` prevents normal Android inactivity
+  dimming/screen-off. If this OEM still dims despite that flag, treat it as a
+  separate hardware finding rather than adding workarounds.
 
 ## Security boundary
 
