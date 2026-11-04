@@ -240,7 +240,7 @@ function ensureWorkoutDayDropdown() {
       const opt = document.createElement("option");
       opt.value = day;
       const meta = (metadata as any)[day];
-      opt.textContent = meta && meta.type ? day + ": " + meta.type : day;
+      opt.textContent = meta && meta.type ? meta.type : day;
       select.appendChild(opt);
     });
     const freestyleOpt = document.createElement("option");
