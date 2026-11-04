@@ -164,6 +164,59 @@
         <div class="profile-helper">Assessment power is estimated from the protocol; it is not a directly measured maximum.</div>
       </div>
 
+      <div class="modal-section profile-card" aria-labelledby="restingHrTitle">
+        <div class="profile-section-heading">
+          <div id="restingHrTitle" class="modal-section-title">Resting heart rate</div>
+          <span class="profile-origin profile-origin-measured">Measured session</span>
+        </div>
+        <div id="restingHrEmpty" class="profile-empty">
+          <strong>No resting-session measurement yet.</strong>
+          <span>Sit, relax, and stay still, preferably after several minutes of quiet rest. This is a seated resting-session observation, not necessarily your lowest morning resting HR or a clinical baseline.</span>
+        </div>
+        <dl id="restingHrContent" class="profile-metrics" hidden>
+          <div class="profile-metric-row">
+            <dt>Resting-session HR</dt>
+            <dd id="restingHrBpm"></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Measured</dt>
+            <dd id="restingHrMeasuredAt"></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Source</dt>
+            <dd id="restingHrSource"></dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Quality</dt>
+            <dd id="restingHrQuality"></dd>
+          </div>
+        </dl>
+        <div id="restingHrSession" class="resting-hr-session" hidden>
+          <div class="profile-metric-row">
+            <dt>Live HR</dt>
+            <dd id="restingHrLiveBpm">—</dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Elapsed</dt>
+            <dd id="restingHrElapsed">0:00</dd>
+          </div>
+          <div class="profile-metric-row">
+            <dt>Status</dt>
+            <dd id="restingHrPhase"></dd>
+          </div>
+          <div class="profile-metric-row profile-metric-row-stacked">
+            <dt>Signal</dt>
+            <dd id="restingHrSignal"></dd>
+          </div>
+        </div>
+        <p id="restingHrResult" class="profile-helper" hidden></p>
+        <div class="resting-hr-actions">
+          <button id="restingHrMeasureButton" class="button" type="button" onclick="startRestingHrMeasurement()">Measure Resting HR</button>
+          <button id="restingHrCancelButton" class="button secondary" type="button" hidden onclick="cancelRestingHrMeasurement()">Cancel</button>
+        </div>
+        <div class="profile-helper profile-informational">Informational only. Not currently used to change workout targets. Not a validated clinical resting-HR baseline.</div>
+      </div>
+
       <div class="modal-section profile-card profile-readonly-card" aria-labelledby="trainingObservationsTitle">
         <div class="profile-section-heading">
           <div id="trainingObservationsTitle" class="modal-section-title">Training observations</div>

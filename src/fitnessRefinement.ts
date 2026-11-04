@@ -22,6 +22,7 @@ import {
 } from "./types.js";
 import {
   FITNESS_STATE_STORAGE_KEY,
+  attachRestingHeartRateSession,
   readFitnessState,
   storeFitnessState,
   type WritableFitnessStateStorage,
@@ -556,7 +557,7 @@ export function rebuildPassiveFitnessProjection(input: {
     selected.length < minimumSessions ||
     distinctDates.length < FITNESS_REFINEMENT_ALGORITHM_V2.minimumDistinctDates
   ) {
-    return { state: formalState, diagnostics: baseDiagnostics };
+    return { state: attachRestingHeartRateSession(formalState, input.currentState), diagnostics: baseDiagnostics };
   }
 
   const baselineSessions = selected.slice(0, minimumSessions);
@@ -642,7 +643,7 @@ export function rebuildPassiveFitnessProjection(input: {
       },
     },
   };
-  const state: FitnessState = {
+  const state: FitnessState = attachRestingHeartRateSession({
     schemaVersion: FITNESS_STATE_SCHEMA_VERSION_V3,
     athleteId: input.athleteId,
     ...(formalState?.vo2Max ? { vo2Max: formalState.vo2Max } : {}),
@@ -650,7 +651,7 @@ export function rebuildPassiveFitnessProjection(input: {
     ...(formalState?.hrWorkloadCalibration ? { hrWorkloadCalibration: formalState.hrWorkloadCalibration } : {}),
     passiveAerobicObservation,
     updatedAt: [formalState?.updatedAt, latest].filter((value): value is string => !!value).sort().slice(-1)[0],
-  };
+  }, input.currentState) as FitnessState;
   return {
     state,
     diagnostics: {
@@ -672,6 +673,7 @@ export function rebuildStoredPassiveFitnessProjection(
   if (!store) return "persistence_failed";
   const athlete = loadAthleteProfile(store);
   const currentState = readFitnessState(athlete.athleteId, store);
+  // Unreadable or wrong-athlete durable state must not be treated as empty.
   if (store.getItem(FITNESS_STATE_STORAGE_KEY) !== null && !currentState) {
     return "persistence_failed";
   }
@@ -683,6 +685,37 @@ export function rebuildStoredPassiveFitnessProjection(
   if (!rebuilt.state) {
     if (!currentState?.passiveAerobicTrend && !currentState?.passiveAerobicObservation) {
       return "insufficient_evidence";
+    }
+    const hasFormal =
+      !!currentState?.vo2Max ||
+      !!currentState?.predictedMaxWatts ||
+      !!currentState?.hrWorkloadCalibration;
+    const hasResting = !!currentState?.restingHeartRateSession;
+    // Clear passive projection without destroying formal or resting-session evidence.
+    if (hasFormal || hasResting) {
+      const preserved = attachRestingHeartRateSession(
+        {
+          schemaVersion: currentState.schemaVersion,
+          athleteId: currentState.athleteId,
+          ...(currentState.vo2Max ? { vo2Max: currentState.vo2Max } : {}),
+          ...(currentState.predictedMaxWatts ? { predictedMaxWatts: currentState.predictedMaxWatts } : {}),
+          ...(currentState.hrWorkloadCalibration
+            ? { hrWorkloadCalibration: currentState.hrWorkloadCalibration }
+            : {}),
+          updatedAt: [
+            currentState.vo2Max?.updatedAt,
+            currentState.predictedMaxWatts?.updatedAt,
+            currentState.hrWorkloadCalibration?.updatedAt,
+            currentState.restingHeartRateSession?.updatedAt,
+          ]
+            .filter((value): value is string => !!value)
+            .sort()
+            .slice(-1)[0] ?? currentState.updatedAt,
+        },
+        currentState
+      );
+      if (!preserved) return "persistence_failed";
+      return storeFitnessState(preserved, store) ? "refined" : "persistence_failed";
     }
     if (typeof store.removeItem !== "function") return "persistence_failed";
     try {

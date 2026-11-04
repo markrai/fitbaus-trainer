@@ -34,7 +34,7 @@ import {
 } from "../dist/profile.js";
 import { assessVo2, assessVo2V1 } from "../dist/vo2Estimator.js";
 import {
-  FITNESS_STATE_SCHEMA_VERSION,
+  FITNESS_STATE_SCHEMA_VERSION_V3,
   VO2_EVIDENCE_SCHEMA_VERSION,
   VO2_PROTOCOL_VERSION,
   VO2_PROTOCOL_VERSION_V3,
@@ -293,7 +293,8 @@ test("fitness state parser and local persistence reconstruct strict versioned re
   assert.equal(storeFitnessState(promoted, storage), true);
   assert.deepEqual(readFitnessState(fixture.athlete.athleteId, storage), promoted);
   assert.equal(readFitnessState("different-athlete", storage), null);
-  assert.equal(parseFitnessState({ ...promoted, schemaVersion: 4 }), null);
+  assert.deepEqual(parseFitnessState({ ...promoted, schemaVersion: 4 }), { ...promoted, schemaVersion: 4 });
+  assert.equal(parseFitnessState({ ...promoted, schemaVersion: 5 }), null);
   assert.equal(parseFitnessState({ ...promoted, athleteId: "" }), null);
   assert.equal(parseFitnessState({ ...promoted, vo2Max: { ...promoted.vo2Max, value: "bad" } }), null);
   assert.equal(parseFitnessState({ ...promoted, updatedAt: "not-a-date" }), null);
@@ -374,7 +375,7 @@ test("current protocol-v3 assessment promotes exact formal state, round-trips, a
   assert.equal(fixture.assessment.diagnostics.expected_protocol_version, VO2_PROTOCOL_VERSION);
   assert.equal(fixture.assessment.diagnostics.observed_protocol_version, VO2_PROTOCOL_VERSION_V3);
 
-  assert.equal(VO2_FITNESS_PROJECTION_V2_PROTOCOL_V3.fitnessStateSchemaVersion, FITNESS_STATE_SCHEMA_VERSION);
+  assert.equal(VO2_FITNESS_PROJECTION_V2_PROTOCOL_V3.fitnessStateSchemaVersion, FITNESS_STATE_SCHEMA_VERSION_V3);
   assert.equal(VO2_FITNESS_PROJECTION_V2_PROTOCOL_V3.assessmentSchemaVersion, 2);
   assert.equal(VO2_FITNESS_PROJECTION_V2_PROTOCOL_V3.evidenceSchemaVersion, 2);
   assert.equal(VO2_FITNESS_PROJECTION_V2_PROTOCOL_V3.estimatorVersion, 2);
@@ -383,7 +384,7 @@ test("current protocol-v3 assessment promotes exact formal state, round-trips, a
 
   const state = promote(fixture);
   assert.ok(state, "current protocol-v3 assessment should promote");
-  assert.equal(state.schemaVersion, FITNESS_STATE_SCHEMA_VERSION);
+  assert.equal(state.schemaVersion, FITNESS_STATE_SCHEMA_VERSION_V3);
   assert.equal(state.vo2Max.source, "formal_assessment");
   assert.equal(state.predictedMaxWatts.source, "formal_assessment");
   assert.equal(state.hrWorkloadCalibration.source, "formal_assessment");
@@ -636,7 +637,7 @@ test("workout finalization promotes and persists a current protocol-v3 assessmen
     assert.deepEqual(diagnostics, { warnings: [], errors: [] });
     const stored = readFitnessState(fixture.athlete.athleteId, storage);
     assert.ok(stored);
-    assert.equal(stored.schemaVersion, FITNESS_STATE_SCHEMA_VERSION);
+    assert.equal(stored.schemaVersion, FITNESS_STATE_SCHEMA_VERSION_V3);
     assert.equal(stored.vo2Max.algorithm.version, 2);
     assert.equal(stored.hrWorkloadCalibration.value.protocol.version, VO2_PROTOCOL_VERSION_V3);
     assert.deepEqual(stored.hrWorkloadCalibration.evidenceSessionIds, [fixture.summary.external_session_id]);

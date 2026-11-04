@@ -99,7 +99,16 @@ export {
   FITNESS_STATE_SCHEMA_VERSION_V1,
   FITNESS_STATE_SCHEMA_VERSION_V2,
   FITNESS_STATE_SCHEMA_VERSION_V3,
+  FITNESS_STATE_SCHEMA_VERSION_V4,
   FITNESS_STATE_SCHEMA_VERSION,
+  RESTING_HR_SESSION_ALGORITHM_ID,
+  RESTING_HR_SESSION_ALGORITHM_VERSION,
+  RESTING_HR_SESSION_HISTORY_CAP,
+  RESTING_HR_SESSION_TOTAL_DURATION_SEC,
+  RESTING_HR_SESSION_SETTLE_DURATION_SEC,
+  RESTING_HR_SESSION_OBSERVATION_DURATION_SEC,
+  RESTING_HR_SESSION_MIN_BPM,
+  RESTING_HR_SESSION_MAX_BPM,
 } from "./contracts/fitnessState.js";
 export type {
   HrWorkloadCalibrationPoint,
@@ -111,6 +120,8 @@ export type {
   PassiveEvidenceSummary,
   PassiveAerobicObservation,
   PassiveAerobicObservationMetric,
+  RestingHeartRateSessionObservation,
+  RestingHeartRateSessionMetric,
   FitnessState,
   AthleteFitnessSnapshot,
 } from "./contracts/fitnessState.js";

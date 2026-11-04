@@ -46,6 +46,9 @@ function observationQualityText(metric) {
         return "Adequate consistency";
     return "Limited consistency";
 }
+function restingHeartRateQualityText(metric) {
+    return metric.quality === "high" ? "High" : "Moderate";
+}
 /** One ownership-safe read for everything shown in Settings -> Profile. */
 export function readProfileFitnessData(storage) {
     const athleteProfile = loadAthleteProfile(storage);
@@ -61,6 +64,7 @@ export function buildProfileFitnessPresentation(athleteProfile, fitnessState, op
     const assessmentMetric = fitnessState === null || fitnessState === void 0 ? void 0 : fitnessState.vo2Max;
     const calibration = (_a = fitnessState === null || fitnessState === void 0 ? void 0 : fitnessState.hrWorkloadCalibration) === null || _a === void 0 ? void 0 : _a.value;
     const observationMetric = fitnessState === null || fitnessState === void 0 ? void 0 : fitnessState.passiveAerobicObservation;
+    const restingMetric = fitnessState === null || fitnessState === void 0 ? void 0 : fitnessState.restingHeartRateSession;
     return {
         profileFields: {
             age: finiteText(demographics.ageYears),
@@ -91,6 +95,14 @@ export function buildProfileFitnessPresentation(athleteProfile, fitnessState, op
                 observedAt: formatDateTime(observationMetric.observedAt, options),
             }
             : null,
+        restingHeartRate: restingMetric
+            ? {
+                bpm: `${restingMetric.value.heartRateBpm} bpm`,
+                measuredAt: formatDateTime(restingMetric.observedAt, options),
+                source: "Chest-strap resting session",
+                quality: restingHeartRateQualityText(restingMetric),
+            }
+            : null,
         personalization: buildPersonalizationStatus(athleteProfile, fitnessState, options),
     };
 }
@@ -105,7 +117,7 @@ function setHidden(documentRef, id, hidden) {
         element.hidden = hidden;
 }
 export function renderProfileFitness(data, documentRef = document, options = {}) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const presentation = buildProfileFitnessPresentation(data.athleteProfile, data.fitnessState, options);
     const assessment = presentation.assessment;
     setHidden(documentRef, "fitnessAssessmentEmpty", assessment !== null);
@@ -120,6 +132,18 @@ export function renderProfileFitness(data, documentRef = document, options = {})
         setHidden(documentRef, "fitnessCalibrationRow", assessment.calibration === null);
         if (assessment.calibration)
             setText(documentRef, "fitnessCalibration", assessment.calibration);
+    }
+    const restingHeartRate = presentation.restingHeartRate;
+    const measuring = ((_a = documentRef.getElementById("restingHrSession")) === null || _a === void 0 ? void 0 : _a.hidden) === false;
+    if (!measuring) {
+        setHidden(documentRef, "restingHrEmpty", restingHeartRate !== null);
+        setHidden(documentRef, "restingHrContent", restingHeartRate === null);
+    }
+    if (restingHeartRate) {
+        setText(documentRef, "restingHrBpm", restingHeartRate.bpm);
+        setText(documentRef, "restingHrMeasuredAt", restingHeartRate.measuredAt);
+        setText(documentRef, "restingHrSource", restingHeartRate.source);
+        setText(documentRef, "restingHrQuality", restingHeartRate.quality);
     }
     const observation = presentation.observation;
     setHidden(documentRef, "trainingObservationEmpty", observation !== null);
@@ -136,9 +160,9 @@ export function renderProfileFitness(data, documentRef = document, options = {})
     setText(documentRef, "personalizationStatusBody", personalization.body);
     setHidden(documentRef, "personalizationEvidence", !personalization.personalizationEvaluationAvailable);
     if (personalization.personalizationEvaluationAvailable) {
-        setText(documentRef, "personalizationSource", (_a = personalization.source) !== null && _a !== void 0 ? _a : "");
-        setText(documentRef, "personalizationAssessedAt", (_b = personalization.assessedAt) !== null && _b !== void 0 ? _b : "");
-        setText(documentRef, "personalizationCalibration", (_c = personalization.workloadCalibration) !== null && _c !== void 0 ? _c : "");
+        setText(documentRef, "personalizationSource", (_b = personalization.source) !== null && _b !== void 0 ? _b : "");
+        setText(documentRef, "personalizationAssessedAt", (_c = personalization.assessedAt) !== null && _c !== void 0 ? _c : "");
+        setText(documentRef, "personalizationCalibration", (_d = personalization.workloadCalibration) !== null && _d !== void 0 ? _d : "");
     }
     setText(documentRef, "personalizationActivation", personalization.workoutPersonalization);
     return presentation;

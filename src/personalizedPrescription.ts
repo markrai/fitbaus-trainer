@@ -3,6 +3,7 @@ import {
   FITNESS_STATE_SCHEMA_VERSION_V1,
   FITNESS_STATE_SCHEMA_VERSION_V2,
   FITNESS_STATE_SCHEMA_VERSION_V3,
+  FITNESS_STATE_SCHEMA_VERSION_V4,
   PERSONALIZED_PRESCRIPTION_EVALUATION_SCHEMA_VERSION_V1,
   PERSONALIZED_PRESCRIPTION_RESOLVER_ID_V1,
   PERSONALIZED_PRESCRIPTION_RESOLVER_VERSION_V1,
@@ -95,6 +96,7 @@ const SUPPORTED_FITNESS_SCHEMAS = new Set<number>([
   FITNESS_STATE_SCHEMA_VERSION_V1,
   FITNESS_STATE_SCHEMA_VERSION_V2,
   FITNESS_STATE_SCHEMA_VERSION_V3,
+  FITNESS_STATE_SCHEMA_VERSION_V4,
 ]);
 const FALLBACK_REASONS = new Set<PersonalizedPrescriptionFallbackReasonV1>([
   "unsupported_activity",
@@ -705,7 +707,7 @@ function parseFitnessSnapshot(value: unknown): PersonalizedPrescriptionFitnessEv
       !isPositiveFinite(calibration.profileInputSnapshot.ageYears) ||
       !isPositiveFinite(calibration.profileInputSnapshot.bodyMassKg)) return undefined;
   return {
-    fitnessStateSchemaVersion: value.fitnessStateSchemaVersion as 1 | 2 | 3,
+    fitnessStateSchemaVersion: value.fitnessStateSchemaVersion as 1 | 2 | 3 | 4,
     fitnessUpdatedAt: value.fitnessUpdatedAt,
     metricObservedAt: value.metricObservedAt,
     metricUpdatedAt: value.metricUpdatedAt,

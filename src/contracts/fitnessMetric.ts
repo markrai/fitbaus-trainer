@@ -6,7 +6,8 @@ export type FitnessMetricSource =
   | "formal_assessment"
   | "user_entered"
   | "workout_observation"
-  | "demographic_estimate";
+  | "demographic_estimate"
+  | "resting_session";
 
 export type FitnessMetricQuality = "high" | "moderate" | "low" | "unverified";
 

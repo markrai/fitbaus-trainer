@@ -464,7 +464,8 @@ test("Phase D corrected persistence is strict and historical readers stay indepe
   const malformed = structuredClone(state);
   malformed.passiveAerobicObservation.evidence.distinctWorkoutDateCount = 1;
   assert.equal(parseFitnessState(malformed), null);
-  assert.equal(parseFitnessState({ ...state, schemaVersion: 4 }), null);
+  assert.deepEqual(parseFitnessState({ ...state, schemaVersion: 4 }), { ...state, schemaVersion: 4 });
+  assert.equal(parseFitnessState({ ...state, schemaVersion: 5 }), null);
   assert.equal(parseFitnessState({ ...state, schemaVersion: 2 }), null);
   assert.equal(FITNESS_REFINEMENT_ALGORITHM_V1.id, "fitness-refinement-v1");
 });

@@ -5,6 +5,7 @@ import type {
   BikeWattsProvenance,
   FitnessState,
   PassiveAerobicObservationMetric,
+  RestingHeartRateSessionMetric,
 } from "./types.js";
 import { formatVo2EstimateMlKgMin, vo2FitQualityText } from "./vo2AssessmentView.js";
 import { buildPersonalizationStatus, type PersonalizationStatus } from "./personalizationStatus.js";
@@ -35,6 +36,12 @@ export interface ProfileFitnessPresentation {
     trend: string;
     evidence: string;
     observedAt: string;
+  };
+  restingHeartRate: null | {
+    bpm: string;
+    measuredAt: string;
+    source: string;
+    quality: string;
   };
   personalization: PersonalizationStatus;
 }
@@ -90,6 +97,10 @@ function observationQualityText(metric: PassiveAerobicObservationMetric): string
   return "Limited consistency";
 }
 
+function restingHeartRateQualityText(metric: RestingHeartRateSessionMetric): string {
+  return metric.quality === "high" ? "High" : "Moderate";
+}
+
 /** One ownership-safe read for everything shown in Settings -> Profile. */
 export function readProfileFitnessData(storage?: FitnessStateStorage): ProfileFitnessData {
   const athleteProfile = loadAthleteProfile(storage);
@@ -109,6 +120,7 @@ export function buildProfileFitnessPresentation(
   const assessmentMetric = fitnessState?.vo2Max;
   const calibration = fitnessState?.hrWorkloadCalibration?.value;
   const observationMetric = fitnessState?.passiveAerobicObservation;
+  const restingMetric = fitnessState?.restingHeartRateSession;
 
   return {
     profileFields: {
@@ -138,6 +150,14 @@ export function buildProfileFitnessPresentation(
           trend: `${signedPercent(observationMetric.value.guardedTrendChangeFromBaselinePercent)} vs. the observed baseline`,
           evidence: `${observationMetric.evidence.sessionCount} workouts across ${observationMetric.evidence.distinctWorkoutDateCount} days · ${observationQualityText(observationMetric)} · ${workloadSourceText(observationMetric.value.workloadSourceClasses)}`,
           observedAt: formatDateTime(observationMetric.observedAt, options),
+        }
+      : null,
+    restingHeartRate: restingMetric
+      ? {
+          bpm: `${restingMetric.value.heartRateBpm} bpm`,
+          measuredAt: formatDateTime(restingMetric.observedAt, options),
+          source: "Chest-strap resting session",
+          quality: restingHeartRateQualityText(restingMetric),
         }
       : null,
     personalization: buildPersonalizationStatus(athleteProfile, fitnessState, options),
@@ -171,6 +191,19 @@ export function renderProfileFitness(
     if (assessment.predictedMaxPower) setText(documentRef, "predictedMaxPower", assessment.predictedMaxPower);
     setHidden(documentRef, "fitnessCalibrationRow", assessment.calibration === null);
     if (assessment.calibration) setText(documentRef, "fitnessCalibration", assessment.calibration);
+  }
+
+  const restingHeartRate = presentation.restingHeartRate;
+  const measuring = documentRef.getElementById("restingHrSession")?.hidden === false;
+  if (!measuring) {
+    setHidden(documentRef, "restingHrEmpty", restingHeartRate !== null);
+    setHidden(documentRef, "restingHrContent", restingHeartRate === null);
+  }
+  if (restingHeartRate) {
+    setText(documentRef, "restingHrBpm", restingHeartRate.bpm);
+    setText(documentRef, "restingHrMeasuredAt", restingHeartRate.measuredAt);
+    setText(documentRef, "restingHrSource", restingHeartRate.source);
+    setText(documentRef, "restingHrQuality", restingHeartRate.quality);
   }
 
   const observation = presentation.observation;

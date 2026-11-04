@@ -13,7 +13,17 @@ import type { Vo2WorkloadSource } from "./vo2Evidence.js";
 export const FITNESS_STATE_SCHEMA_VERSION_V1 = 1 as const;
 export const FITNESS_STATE_SCHEMA_VERSION_V2 = 2 as const;
 export const FITNESS_STATE_SCHEMA_VERSION_V3 = 3 as const;
-export const FITNESS_STATE_SCHEMA_VERSION = FITNESS_STATE_SCHEMA_VERSION_V3;
+export const FITNESS_STATE_SCHEMA_VERSION_V4 = 4 as const;
+export const FITNESS_STATE_SCHEMA_VERSION = FITNESS_STATE_SCHEMA_VERSION_V4;
+
+export const RESTING_HR_SESSION_ALGORITHM_ID = "resting-hr-session" as const;
+export const RESTING_HR_SESSION_ALGORITHM_VERSION = 1 as const;
+export const RESTING_HR_SESSION_HISTORY_CAP = 8 as const;
+export const RESTING_HR_SESSION_TOTAL_DURATION_SEC = 300 as const;
+export const RESTING_HR_SESSION_SETTLE_DURATION_SEC = 90 as const;
+export const RESTING_HR_SESSION_OBSERVATION_DURATION_SEC = 210 as const;
+export const RESTING_HR_SESSION_MIN_BPM = 35 as const;
+export const RESTING_HR_SESSION_MAX_BPM = 110 as const;
 
 export interface HrWorkloadCalibrationPoint {
   stageId: string;
@@ -130,11 +140,46 @@ export interface PassiveAerobicObservationMetric {
   evidence: PassiveEvidenceSummary;
 }
 
+/**
+ * One intentional seated resting-session observation. Not morning clinical RHR,
+ * not a longitudinal baseline, and not prescription-eligible HRR input.
+ */
+export interface RestingHeartRateSessionObservation {
+  metric: "resting_session_heart_rate";
+  interpretation: "resting_session_observation_only";
+  eligibleForPrescription: false;
+  heartRateBpm: number;
+  measurementDurationSec: typeof RESTING_HR_SESSION_TOTAL_DURATION_SEC;
+  settleDurationSec: typeof RESTING_HR_SESSION_SETTLE_DURATION_SEC;
+  observationDurationSec: typeof RESTING_HR_SESSION_OBSERVATION_DURATION_SEC;
+  acceptedSampleCount: number;
+  rejectedSampleCount: number;
+  expectedObservationSamples: number;
+  coverageRatio: number;
+  medianAbsoluteDeviationBpm: number;
+  observedMinBpm: number;
+  observedMaxBpm: number;
+}
+
+export interface RestingHeartRateSessionMetric {
+  value: RestingHeartRateSessionObservation;
+  source: "resting_session";
+  quality: "high" | "moderate";
+  observedAt: string;
+  updatedAt: string;
+  algorithm: {
+    id: typeof RESTING_HR_SESSION_ALGORITHM_ID;
+    version: typeof RESTING_HR_SESSION_ALGORITHM_VERSION;
+  };
+  measurementId: string;
+}
+
 export interface FitnessState {
   schemaVersion:
     | typeof FITNESS_STATE_SCHEMA_VERSION_V1
     | typeof FITNESS_STATE_SCHEMA_VERSION_V2
-    | typeof FITNESS_STATE_SCHEMA_VERSION_V3;
+    | typeof FITNESS_STATE_SCHEMA_VERSION_V3
+    | typeof FITNESS_STATE_SCHEMA_VERSION_V4;
   athleteId: string;
   vo2Max?: FitnessMetric<number>;
   /** Extrapolated by the named estimator; not directly measured maximal power. */
@@ -144,6 +189,10 @@ export interface FitnessState {
   passiveAerobicTrend?: FitnessMetric<PassiveAerobicTrend>;
   /** Current descriptive Phase D metric; explicitly unavailable to prescription resolution. */
   passiveAerobicObservation?: PassiveAerobicObservationMetric;
+  /** Current accepted resting-session HR; schema v4 only. Not prescription authority. */
+  restingHeartRateSession?: RestingHeartRateSessionMetric;
+  /** Prior accepted resting-session observations, newest-first, cap 8. Schema v4 only. */
+  restingHeartRateSessionHistory?: RestingHeartRateSessionMetric[];
   updatedAt: string;
 }
 
@@ -154,6 +203,7 @@ export interface AthleteFitnessSnapshot {
   fitnessStateSchemaVersion?:
     | typeof FITNESS_STATE_SCHEMA_VERSION_V1
     | typeof FITNESS_STATE_SCHEMA_VERSION_V2
-    | typeof FITNESS_STATE_SCHEMA_VERSION_V3;
+    | typeof FITNESS_STATE_SCHEMA_VERSION_V3
+    | typeof FITNESS_STATE_SCHEMA_VERSION_V4;
   fitnessUpdatedAt?: string;
 }

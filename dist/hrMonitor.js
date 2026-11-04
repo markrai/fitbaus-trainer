@@ -9,6 +9,7 @@ let batteryPollIntervalId = null;
 let currentBpm = null;
 let connectInProgress = false;
 const bpmCallbacks = [];
+const disconnectCallbacks = [];
 const rrCallbacks = [];
 const hrvCallbacks = [];
 const hrvSession = new HrvSession();
@@ -114,6 +115,16 @@ function handleMeasurement(value) {
         onClearOptionalFieldError: clearOptionalFieldErrorSilent,
     });
 }
+function notifyDisconnect() {
+    for (const cb of disconnectCallbacks) {
+        try {
+            cb();
+        }
+        catch (error) {
+            console.error("hrMonitor onDisconnect callback error:", error);
+        }
+    }
+}
 function onHrDisconnect() {
     if (batteryPollIntervalId !== null) {
         clearInterval(batteryPollIntervalId);
@@ -133,6 +144,7 @@ function onHrDisconnect() {
         window.updateDisplay();
     if (typeof window.updateHrDisplay === "function")
         window.updateHrDisplay(null);
+    notifyDisconnect();
 }
 function dataViewFromValue(value) {
     if (value instanceof DataView)
@@ -335,6 +347,10 @@ export function connect() {
 }
 export function onBpm(callback) {
     bpmCallbacks.push(callback);
+}
+/** Fired from the shared HR disconnect lifecycle (GATT / native BLE). */
+export function onDisconnect(callback) {
+    disconnectCallbacks.push(callback);
 }
 export function onRrInterval(callback) {
     rrCallbacks.push(callback);

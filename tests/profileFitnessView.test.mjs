@@ -144,6 +144,7 @@ test("blank profile and missing FitnessState produce safe empty presentation", (
   assert.deepEqual(presentation.profileFields, { age: "", weight: "", height: "", sex: "", enteredVo2: "" });
   assert.equal(presentation.assessment, null);
   assert.equal(presentation.observation, null);
+  assert.equal(presentation.restingHeartRate, null);
   assert.equal(presentation.personalization.kind, "assessment_missing");
   assert.equal(presentation.personalization.activePersonalizationEnabled, false);
   assert.equal(JSON.stringify(presentation).includes("undefined"), false);
@@ -272,16 +273,58 @@ test("passive aerobic evidence is presented as a descriptive workout observation
   assert.equal(state.passiveAerobicObservation.value.eligibleForPrescription, false);
 });
 
+test("resting-session HR is presented as measured, non-prescription evidence", () => {
+  const state = {
+    schemaVersion: 4,
+    athleteId: "athlete-profile",
+    restingHeartRateSession: {
+      value: {
+        metric: "resting_session_heart_rate",
+        interpretation: "resting_session_observation_only",
+        eligibleForPrescription: false,
+        heartRateBpm: 58,
+        measurementDurationSec: 300,
+        settleDurationSec: 90,
+        observationDurationSec: 210,
+        acceptedSampleCount: 210,
+        rejectedSampleCount: 0,
+        expectedObservationSamples: 210,
+        coverageRatio: 1,
+        medianAbsoluteDeviationBpm: 0,
+        observedMinBpm: 58,
+        observedMaxBpm: 58,
+      },
+      source: "resting_session",
+      quality: "high",
+      observedAt: "2026-11-03T12:05:00.000Z",
+      updatedAt: "2026-11-03T12:05:00.000Z",
+      algorithm: { id: "resting-hr-session", version: 1 },
+      measurementId: "measurement-ui",
+    },
+    updatedAt: "2026-11-03T12:05:00.000Z",
+  };
+  const presentation = buildProfileFitnessPresentation(athlete(), state, formatOptions);
+  assert.deepEqual(presentation.restingHeartRate, {
+    bpm: "58 bpm",
+    measuredAt: "Nov 3, 2026, 12:05 PM",
+    source: "Chest-strap resting session",
+    quality: "High",
+  });
+  assert.equal(state.restingHeartRateSession.value.eligibleForPrescription, false);
+});
+
 test("renderer selects empty and populated states without placeholder measurements", () => {
   const ids = [
     "fitnessAssessmentEmpty", "fitnessAssessmentContent", "assessedVo2", "fitnessAssessedAt",
     "fitnessAssessmentEvidence", "predictedMaxPowerRow", "predictedMaxPower", "fitnessCalibrationRow",
-    "fitnessCalibration", "trainingObservationEmpty", "trainingObservationContent", "trainingObservationContext",
+    "fitnessCalibration", "restingHrEmpty", "restingHrContent", "restingHrBpm", "restingHrMeasuredAt",
+    "restingHrSource", "restingHrQuality", "restingHrSession", "trainingObservationEmpty", "trainingObservationContent", "trainingObservationContext",
     "trainingObservationWorkload", "trainingObservationTrend", "trainingObservationEvidence", "trainingObservationAt",
     "personalizationStatusTitle", "personalizationStatusBody", "personalizationEvidence", "personalizationSource",
     "personalizationAssessedAt", "personalizationCalibration", "personalizationActivation",
   ];
   const elements = new Map(ids.map((id) => [id, { id, hidden: false, textContent: "" }]));
+  elements.get("restingHrSession").hidden = true;
   const documentRef = { getElementById: (id) => elements.get(id) ?? null };
   renderProfileFitness(
     { athleteProfile: athlete(), fitnessState: formalState() },
@@ -291,6 +334,8 @@ test("renderer selects empty and populated states without placeholder measuremen
   assert.equal(elements.get("fitnessAssessmentEmpty").hidden, true);
   assert.equal(elements.get("fitnessAssessmentContent").hidden, false);
   assert.equal(elements.get("assessedVo2").textContent, "46.8 ml/kg/min");
+  assert.equal(elements.get("restingHrEmpty").hidden, false);
+  assert.equal(elements.get("restingHrContent").hidden, true);
   assert.equal(elements.get("trainingObservationEmpty").hidden, false);
   assert.equal(elements.get("trainingObservationContent").hidden, true);
   assert.equal(elements.get("personalizationStatusTitle").textContent, "Personalization data available");
@@ -347,6 +392,9 @@ test("Profile markup labels provenance, empty states, and the non-prescription b
   assert.match(html, /FitBaus assessments/);
   assert.match(html, /No FitBaus VO₂ assessment yet/);
   assert.match(html, /Informational only\. Not currently used to change workout targets\./);
+  assert.match(html, /Resting heart rate/);
+  assert.match(html, /Measure Resting HR/);
+  assert.match(html, /resting-session observation/);
   assert.match(html, /Workout personalization/);
   assert.match(html, /Personalized workout control is not active\./);
   assert.doesNotMatch(html, /personalized targets enabled|adaptive workouts enabled|personalized resistance enabled|your workouts are personalized/i);

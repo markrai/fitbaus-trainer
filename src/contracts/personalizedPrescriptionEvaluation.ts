@@ -4,7 +4,7 @@
  */
 
 import type { ATHLETE_PROFILE_SCHEMA_VERSION_V1 } from "./athlete.js";
-import type { FITNESS_STATE_SCHEMA_VERSION_V1, FITNESS_STATE_SCHEMA_VERSION_V2, FITNESS_STATE_SCHEMA_VERSION_V3, HrWorkloadCalibrationPoint } from "./fitnessState.js";
+import type { FITNESS_STATE_SCHEMA_VERSION_V1, FITNESS_STATE_SCHEMA_VERSION_V2, FITNESS_STATE_SCHEMA_VERSION_V3, FITNESS_STATE_SCHEMA_VERSION_V4, HrWorkloadCalibrationPoint } from "./fitnessState.js";
 import type { Activity, PhaseIntensityId, ResolvedHeartRateTarget, WorkoutPhaseKind } from "./workoutPrescription.js";
 
 /**
@@ -72,7 +72,8 @@ export interface PersonalizedPrescriptionFitnessEvidenceSnapshotV1 {
   fitnessStateSchemaVersion:
     | typeof FITNESS_STATE_SCHEMA_VERSION_V1
     | typeof FITNESS_STATE_SCHEMA_VERSION_V2
-    | typeof FITNESS_STATE_SCHEMA_VERSION_V3;
+    | typeof FITNESS_STATE_SCHEMA_VERSION_V3
+    | typeof FITNESS_STATE_SCHEMA_VERSION_V4;
   fitnessUpdatedAt: string;
   metricObservedAt: string;
   metricUpdatedAt: string;

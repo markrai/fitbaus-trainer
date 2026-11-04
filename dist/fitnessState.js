@@ -1,4 +1,4 @@
-import { ATHLETE_PROFILE_SCHEMA_VERSION, ATHLETE_PROFILE_SCHEMA_VERSION_V1, FITNESS_STATE_SCHEMA_VERSION_V1, FITNESS_STATE_SCHEMA_VERSION_V2, FITNESS_STATE_SCHEMA_VERSION_V3, LEGACY_VO2_PROTOCOL_ID, LEGACY_VO2_PROTOCOL_VERSION, VO2_ASSESSMENT_SCHEMA_VERSION_V1, VO2_ASSESSMENT_SCHEMA_VERSION_V2, VO2_EVIDENCE_SCHEMA_VERSION_V1, VO2_EVIDENCE_SCHEMA_VERSION_V2, VO2_PROTOCOL_ID, VO2_PROTOCOL_VERSION, VO2_PROTOCOL_VERSION_V3, } from "./types.js";
+import { ATHLETE_PROFILE_SCHEMA_VERSION, ATHLETE_PROFILE_SCHEMA_VERSION_V1, FITNESS_STATE_SCHEMA_VERSION_V1, FITNESS_STATE_SCHEMA_VERSION_V2, FITNESS_STATE_SCHEMA_VERSION_V3, FITNESS_STATE_SCHEMA_VERSION_V4, RESTING_HR_SESSION_ALGORITHM_ID, RESTING_HR_SESSION_ALGORITHM_VERSION, RESTING_HR_SESSION_HISTORY_CAP, RESTING_HR_SESSION_MAX_BPM, RESTING_HR_SESSION_MIN_BPM, RESTING_HR_SESSION_OBSERVATION_DURATION_SEC, RESTING_HR_SESSION_SETTLE_DURATION_SEC, RESTING_HR_SESSION_TOTAL_DURATION_SEC, LEGACY_VO2_PROTOCOL_ID, LEGACY_VO2_PROTOCOL_VERSION, VO2_ASSESSMENT_SCHEMA_VERSION_V1, VO2_ASSESSMENT_SCHEMA_VERSION_V2, VO2_EVIDENCE_SCHEMA_VERSION_V1, VO2_EVIDENCE_SCHEMA_VERSION_V2, VO2_PROTOCOL_ID, VO2_PROTOCOL_VERSION, VO2_PROTOCOL_VERSION_V3, } from "./types.js";
 import { loadAthleteProfile, parseAthleteProfile, } from "./profile.js";
 import { LEGACY_VO2_ESTIMATOR_ID, LEGACY_VO2_ESTIMATOR_VERSION, VO2_ESTIMATOR_ID, VO2_ESTIMATOR_VERSION, } from "./vo2Estimator.js";
 import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
@@ -81,6 +81,12 @@ function isPositiveFinite(value) {
 }
 function isPositiveInteger(value) {
     return Number.isInteger(value) && value > 0;
+}
+function isNonNegativeInteger(value) {
+    return Number.isInteger(value) && value >= 0;
+}
+function isRestingBpm(value) {
+    return Number.isInteger(value) && value >= RESTING_HR_SESSION_MIN_BPM && value <= RESTING_HR_SESSION_MAX_BPM;
 }
 function isIsoTimestamp(value) {
     if (typeof value !== "string" || value === "")
@@ -819,7 +825,13 @@ function parsePassiveAerobicObservationMetric(value) {
     };
 }
 function latestMetricUpdatedAt(state) {
-    return [state.vo2Max, state.predictedMaxWatts, state.hrWorkloadCalibration, state.passiveAerobicObservation]
+    return [
+        state.vo2Max,
+        state.predictedMaxWatts,
+        state.hrWorkloadCalibration,
+        state.passiveAerobicObservation,
+        state.restingHeartRateSession,
+    ]
         .map((metric) => metric === null || metric === void 0 ? void 0 : metric.updatedAt)
         .filter((timestamp) => !!timestamp)
         .sort()
@@ -859,6 +871,160 @@ function parseFitnessStateV3(value) {
         return null;
     return state;
 }
+function parseRestingHeartRateSessionObservation(value) {
+    if (!isObject(value))
+        return null;
+    if (value.metric !== "resting_session_heart_rate")
+        return null;
+    if (value.interpretation !== "resting_session_observation_only")
+        return null;
+    if (value.eligibleForPrescription !== false)
+        return null;
+    if (!isRestingBpm(value.heartRateBpm))
+        return null;
+    if (value.measurementDurationSec !== RESTING_HR_SESSION_TOTAL_DURATION_SEC)
+        return null;
+    if (value.settleDurationSec !== RESTING_HR_SESSION_SETTLE_DURATION_SEC)
+        return null;
+    if (value.observationDurationSec !== RESTING_HR_SESSION_OBSERVATION_DURATION_SEC)
+        return null;
+    if (!isPositiveInteger(value.acceptedSampleCount))
+        return null;
+    if (!isNonNegativeInteger(value.rejectedSampleCount))
+        return null;
+    if (value.expectedObservationSamples !== RESTING_HR_SESSION_OBSERVATION_DURATION_SEC)
+        return null;
+    if (!isFiniteNumber(value.coverageRatio) ||
+        value.coverageRatio < 0 ||
+        value.coverageRatio > 1 ||
+        Number(value.coverageRatio.toFixed(3)) !== value.coverageRatio) {
+        return null;
+    }
+    if (!isNonNegativeInteger(value.medianAbsoluteDeviationBpm) || value.medianAbsoluteDeviationBpm > 20)
+        return null;
+    if (!isRestingBpm(value.observedMinBpm) || !isRestingBpm(value.observedMaxBpm))
+        return null;
+    if (value.observedMinBpm > value.heartRateBpm || value.heartRateBpm > value.observedMaxBpm)
+        return null;
+    if (value.acceptedSampleCount + value.rejectedSampleCount > value.expectedObservationSamples)
+        return null;
+    const expectedCoverage = Number((value.acceptedSampleCount / value.expectedObservationSamples).toFixed(3));
+    if (expectedCoverage !== value.coverageRatio)
+        return null;
+    return {
+        metric: "resting_session_heart_rate",
+        interpretation: "resting_session_observation_only",
+        eligibleForPrescription: false,
+        heartRateBpm: value.heartRateBpm,
+        measurementDurationSec: RESTING_HR_SESSION_TOTAL_DURATION_SEC,
+        settleDurationSec: RESTING_HR_SESSION_SETTLE_DURATION_SEC,
+        observationDurationSec: RESTING_HR_SESSION_OBSERVATION_DURATION_SEC,
+        acceptedSampleCount: value.acceptedSampleCount,
+        rejectedSampleCount: value.rejectedSampleCount,
+        expectedObservationSamples: RESTING_HR_SESSION_OBSERVATION_DURATION_SEC,
+        coverageRatio: value.coverageRatio,
+        medianAbsoluteDeviationBpm: value.medianAbsoluteDeviationBpm,
+        observedMinBpm: value.observedMinBpm,
+        observedMaxBpm: value.observedMaxBpm,
+    };
+}
+function parseRestingHeartRateSessionMetric(value) {
+    if (!isObject(value))
+        return null;
+    const parsedValue = parseRestingHeartRateSessionObservation(value.value);
+    if (!parsedValue)
+        return null;
+    if (value.source !== "resting_session")
+        return null;
+    if (value.quality !== "high" && value.quality !== "moderate")
+        return null;
+    if (!isIsoTimestamp(value.observedAt) || !isIsoTimestamp(value.updatedAt))
+        return null;
+    if (Date.parse(value.updatedAt) < Date.parse(value.observedAt))
+        return null;
+    if (!isObject(value.algorithm) ||
+        value.algorithm.id !== RESTING_HR_SESSION_ALGORITHM_ID ||
+        value.algorithm.version !== RESTING_HR_SESSION_ALGORITHM_VERSION) {
+        return null;
+    }
+    if (!isAthleteId(value.measurementId))
+        return null;
+    return {
+        value: parsedValue,
+        source: "resting_session",
+        quality: value.quality,
+        observedAt: value.observedAt,
+        updatedAt: value.updatedAt,
+        algorithm: { id: RESTING_HR_SESSION_ALGORITHM_ID, version: RESTING_HR_SESSION_ALGORITHM_VERSION },
+        measurementId: value.measurementId,
+    };
+}
+function parseRestingHeartRateSessionHistory(value, current) {
+    if (value == null)
+        return [];
+    if (!Array.isArray(value) || value.length > RESTING_HR_SESSION_HISTORY_CAP)
+        return null;
+    const history = [];
+    const seen = new Set([current.measurementId]);
+    for (const item of value) {
+        const parsed = parseRestingHeartRateSessionMetric(item);
+        if (!parsed || seen.has(parsed.measurementId))
+            return null;
+        seen.add(parsed.measurementId);
+        history.push(parsed);
+    }
+    return history;
+}
+function parseFitnessStateV4(value) {
+    if (value.schemaVersion !== FITNESS_STATE_SCHEMA_VERSION_V4 || value.passiveAerobicTrend !== undefined)
+        return null;
+    const formal = parseFitnessStateV1({
+        ...value,
+        schemaVersion: FITNESS_STATE_SCHEMA_VERSION_V1,
+        passiveAerobicTrend: undefined,
+        passiveAerobicObservation: undefined,
+        restingHeartRateSession: undefined,
+        restingHeartRateSessionHistory: undefined,
+    }, SUPPORTED_VO2_FITNESS_PROJECTIONS);
+    if (!formal)
+        return null;
+    const passive = value.passiveAerobicObservation == null
+        ? undefined
+        : parsePassiveAerobicObservationMetric(value.passiveAerobicObservation);
+    if (value.passiveAerobicObservation != null && !passive)
+        return null;
+    const resting = value.restingHeartRateSession == null
+        ? undefined
+        : parseRestingHeartRateSessionMetric(value.restingHeartRateSession);
+    if (value.restingHeartRateSession != null && !resting)
+        return null;
+    if (value.restingHeartRateSessionHistory != null && !resting)
+        return null;
+    const history = resting
+        ? parseRestingHeartRateSessionHistory(value.restingHeartRateSessionHistory, resting)
+        : value.restingHeartRateSessionHistory == null ? [] : null;
+    if (history == null)
+        return null;
+    const state = {
+        ...formal,
+        schemaVersion: FITNESS_STATE_SCHEMA_VERSION_V4,
+        ...(passive ? { passiveAerobicObservation: passive } : {}),
+        ...(resting ? { restingHeartRateSession: resting } : {}),
+        ...(history.length > 0 ? { restingHeartRateSessionHistory: history } : {}),
+    };
+    if (passive) {
+        const anchor = latestFormalAnchorIdentity(formal);
+        const hasPassiveAnchor = passive.value.formalAnchorObservedAt !== undefined;
+        if (Boolean(anchor) !== hasPassiveAnchor ||
+            (anchor && passive.value.formalAnchorObservedAt !== anchor.observedAt) ||
+            (anchor && passive.value.formalAnchorSessionId !== anchor.sessionId) ||
+            (anchor && Date.parse(anchor.observedAt) >= Date.parse(passive.evidence.earliestEvidenceAt)))
+            return null;
+    }
+    if (latestMetricUpdatedAt(state) !== value.updatedAt)
+        return null;
+    return state;
+}
 /** Dispatch persisted state by historical schema, never by the current writer alias. */
 export function parseFitnessState(value) {
     if (!isObject(value))
@@ -870,6 +1036,8 @@ export function parseFitnessState(value) {
             return parseFitnessStateV2(value);
         case FITNESS_STATE_SCHEMA_VERSION_V3:
             return parseFitnessStateV3(value);
+        case FITNESS_STATE_SCHEMA_VERSION_V4:
+            return parseFitnessStateV4(value);
         default:
             return null;
     }
@@ -886,7 +1054,8 @@ export function parseAthleteFitnessSnapshot(value) {
     if (hasFitnessVersion) {
         if (value.fitnessStateSchemaVersion !== FITNESS_STATE_SCHEMA_VERSION_V1 &&
             value.fitnessStateSchemaVersion !== FITNESS_STATE_SCHEMA_VERSION_V2 &&
-            value.fitnessStateSchemaVersion !== FITNESS_STATE_SCHEMA_VERSION_V3)
+            value.fitnessStateSchemaVersion !== FITNESS_STATE_SCHEMA_VERSION_V3 &&
+            value.fitnessStateSchemaVersion !== FITNESS_STATE_SCHEMA_VERSION_V4)
             return null;
         if (!isIsoTimestamp(value.fitnessUpdatedAt))
             return null;
@@ -902,22 +1071,36 @@ export function parseAthleteFitnessSnapshot(value) {
             : {}),
     };
 }
-export function readFitnessState(athleteId, storage) {
+/**
+ * Inspect durable FitnessState without treating unreadable or wrong-athlete
+ * records as an empty store. Callers that would write must refuse on
+ * unreadable / athlete_mismatch.
+ */
+export function inspectFitnessStateStorage(athleteId, storage) {
     if (!isAthleteId(athleteId))
-        return null;
+        return { status: "unreadable" };
     const store = storage !== null && storage !== void 0 ? storage : (typeof localStorage !== "undefined" ? localStorage : undefined);
     if (!store)
-        return null;
+        return { status: "absent" };
     const raw = store.getItem(FITNESS_STATE_STORAGE_KEY);
-    if (!raw)
-        return null;
+    if (raw == null)
+        return { status: "absent" };
     try {
         const parsed = parseFitnessState(JSON.parse(raw));
-        return (parsed === null || parsed === void 0 ? void 0 : parsed.athleteId) === athleteId ? parsed : null;
+        if (!parsed)
+            return { status: "unreadable" };
+        if (parsed.athleteId !== athleteId) {
+            return { status: "athlete_mismatch", storedAthleteId: parsed.athleteId };
+        }
+        return { status: "readable", state: parsed };
     }
     catch {
-        return null;
+        return { status: "unreadable" };
     }
+}
+export function readFitnessState(athleteId, storage) {
+    const inspection = inspectFitnessStateStorage(athleteId, storage);
+    return inspection.status === "readable" ? inspection.state : null;
 }
 export function storeFitnessState(state, storage) {
     const parsed = parseFitnessState(state);
@@ -931,6 +1114,119 @@ export function storeFitnessState(state, storage) {
     catch {
         return false;
     }
+}
+function restingQualityRank(quality) {
+    return quality === "high" ? 2 : 1;
+}
+function copyRestingHeartRateFields(state) {
+    var _a;
+    if (!(state === null || state === void 0 ? void 0 : state.restingHeartRateSession))
+        return {};
+    return {
+        restingHeartRateSession: state.restingHeartRateSession,
+        ...(((_a = state.restingHeartRateSessionHistory) === null || _a === void 0 ? void 0 : _a.length)
+            ? { restingHeartRateSessionHistory: state.restingHeartRateSessionHistory }
+            : {}),
+    };
+}
+/** Copy accepted resting-session evidence onto a rebuilt FitnessState. */
+export function attachRestingHeartRateSession(state, current) {
+    var _a;
+    const resting = copyRestingHeartRateFields(current);
+    if (!resting.restingHeartRateSession)
+        return state;
+    const athleteId = (_a = state === null || state === void 0 ? void 0 : state.athleteId) !== null && _a !== void 0 ? _a : current === null || current === void 0 ? void 0 : current.athleteId;
+    if (!athleteId)
+        return state;
+    const updatedAt = [
+        state === null || state === void 0 ? void 0 : state.updatedAt,
+        resting.restingHeartRateSession.updatedAt,
+    ]
+        .filter((timestamp) => !!timestamp)
+        .sort()
+        .slice(-1)[0];
+    if (!updatedAt)
+        return state;
+    if (!state) {
+        return {
+            schemaVersion: FITNESS_STATE_SCHEMA_VERSION_V4,
+            athleteId,
+            ...resting,
+            updatedAt,
+        };
+    }
+    return {
+        ...state,
+        schemaVersion: FITNESS_STATE_SCHEMA_VERSION_V4,
+        ...resting,
+        updatedAt,
+    };
+}
+/**
+ * Pure reducer: persist an accepted resting-session summary. Failed measurements
+ * must not call this. Lower-quality results do not replace higher-quality current
+ * evidence. Not prescription-eligible.
+ */
+export function applyRestingHeartRateSession(input) {
+    var _a, _b;
+    if (!isAthleteId(input.athleteId))
+        return { outcome: "invalid" };
+    const metric = parseRestingHeartRateSessionMetric(input.metric);
+    if (!metric || metric.value.eligibleForPrescription !== false)
+        return { outcome: "invalid" };
+    const current = input.currentState == null ? null : parseFitnessState(input.currentState);
+    if (input.currentState != null && !current)
+        return { outcome: "invalid" };
+    if (current && current.athleteId !== input.athleteId)
+        return { outcome: "athlete_mismatch" };
+    if ((current === null || current === void 0 ? void 0 : current.restingHeartRateSession) && restingQualityRank(metric.quality) < restingQualityRank(current.restingHeartRateSession.quality)) {
+        return { outcome: "retained_higher_quality", state: current };
+    }
+    const history = (current === null || current === void 0 ? void 0 : current.restingHeartRateSession)
+        ? [current.restingHeartRateSession, ...((_a = current.restingHeartRateSessionHistory) !== null && _a !== void 0 ? _a : [])]
+            .filter((item) => item.measurementId !== metric.measurementId)
+            .slice(0, RESTING_HR_SESSION_HISTORY_CAP)
+        : (_b = current === null || current === void 0 ? void 0 : current.restingHeartRateSessionHistory) !== null && _b !== void 0 ? _b : [];
+    const base = current
+        ? { ...current }
+        : { schemaVersion: FITNESS_STATE_SCHEMA_VERSION_V4, athleteId: input.athleteId, updatedAt: metric.updatedAt };
+    const next = {
+        ...base,
+        schemaVersion: FITNESS_STATE_SCHEMA_VERSION_V4,
+        athleteId: input.athleteId,
+        restingHeartRateSession: metric,
+        ...(history.length > 0 ? { restingHeartRateSessionHistory: history } : {}),
+        updatedAt: [base.updatedAt, metric.updatedAt].sort().slice(-1)[0],
+    };
+    if (!history.length)
+        delete next.restingHeartRateSessionHistory;
+    const parsed = parseFitnessState(next);
+    if (!parsed)
+        return { outcome: "invalid" };
+    return { outcome: "applied", state: parsed, replaced: Boolean(current === null || current === void 0 ? void 0 : current.restingHeartRateSession) };
+}
+export function storeRestingHeartRateSession(metric, storage, options) {
+    const store = storage !== null && storage !== void 0 ? storage : (typeof localStorage !== "undefined" ? localStorage : undefined);
+    if (!store)
+        return { outcome: "invalid" };
+    const athlete = loadAthleteProfile(store);
+    if ((options === null || options === void 0 ? void 0 : options.expectedAthleteId) && options.expectedAthleteId !== athlete.athleteId) {
+        return { outcome: "athlete_mismatch" };
+    }
+    const inspection = inspectFitnessStateStorage(athlete.athleteId, store);
+    if (inspection.status === "unreadable")
+        return { outcome: "storage_conflict" };
+    if (inspection.status === "athlete_mismatch")
+        return { outcome: "athlete_mismatch" };
+    const currentState = inspection.status === "readable" ? inspection.state : null;
+    const applied = applyRestingHeartRateSession({
+        currentState,
+        athleteId: athlete.athleteId,
+        metric,
+    });
+    if (applied.outcome !== "applied")
+        return applied;
+    return storeFitnessState(applied.state, store) ? applied : { outcome: "invalid" };
 }
 export function captureAthleteFitnessSnapshot(storage) {
     const athlete = loadAthleteProfile(storage);
@@ -1193,7 +1489,7 @@ export function promoteVo2AssessmentToFitnessState(input) {
             bodyMassKg: input.assessment.input_snapshot.weight_kg,
         },
     };
-    return {
+    return attachRestingHeartRateSession({
         schemaVersion: eligibility.projection.fitnessStateSchemaVersion,
         athleteId: athlete.athleteId,
         vo2Max: { value: input.assessment.estimate_ml_kg_min, ...metricBase },
@@ -1205,7 +1501,7 @@ export function promoteVo2AssessmentToFitnessState(input) {
         },
         hrWorkloadCalibration: { value: calibration, ...metricBase },
         updatedAt: input.updatedAt,
-    };
+    }, current);
 }
 /** Persistence wrapper. Workout history must already have been saved by the caller. */
 export function promoteVo2SummaryToStoredFitnessState(summary, storage, updatedAt = new Date().toISOString()) {
@@ -1215,7 +1511,11 @@ export function promoteVo2SummaryToStoredFitnessState(summary, storage, updatedA
     if (!store)
         return "persistence_failed";
     const athlete = loadAthleteProfile(store);
-    const currentState = readFitnessState(athlete.athleteId, store);
+    const inspection = inspectFitnessStateStorage(athlete.athleteId, store);
+    if (inspection.status === "unreadable" || inspection.status === "athlete_mismatch") {
+        return "persistence_failed";
+    }
+    const currentState = inspection.status === "readable" ? inspection.state : null;
     const promoted = promoteVo2AssessmentToFitnessState({
         currentState,
         athleteProfile: athlete,

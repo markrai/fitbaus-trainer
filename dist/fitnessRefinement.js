@@ -7,7 +7,7 @@
  * See docs/personalization-architecture.md.
  */
 import { FITNESS_STATE_SCHEMA_VERSION_V3, } from "./types.js";
-import { FITNESS_STATE_STORAGE_KEY, readFitnessState, storeFitnessState, } from "./fitnessState.js";
+import { FITNESS_STATE_STORAGE_KEY, attachRestingHeartRateSession, readFitnessState, storeFitnessState, } from "./fitnessState.js";
 import { loadAthleteProfile } from "./profile.js";
 import { parseWorkoutResponse } from "./workoutResponse.js";
 export const FITNESS_REFINEMENT_ALGORITHM_V1 = {
@@ -396,7 +396,7 @@ export function rebuildPassiveFitnessProjection(input) {
     if (!selection ||
         selected.length < minimumSessions ||
         distinctDates.length < FITNESS_REFINEMENT_ALGORITHM_V2.minimumDistinctDates) {
-        return { state: formalState, diagnostics: baseDiagnostics };
+        return { state: attachRestingHeartRateSession(formalState, input.currentState), diagnostics: baseDiagnostics };
     }
     const baselineSessions = selected.slice(0, minimumSessions);
     const baselineWatts = median(baselineSessions.map((observation) => observation.watts));
@@ -472,7 +472,7 @@ export function rebuildPassiveFitnessProjection(input) {
             },
         },
     };
-    const state = {
+    const state = attachRestingHeartRateSession({
         schemaVersion: FITNESS_STATE_SCHEMA_VERSION_V3,
         athleteId: input.athleteId,
         ...((formalState === null || formalState === void 0 ? void 0 : formalState.vo2Max) ? { vo2Max: formalState.vo2Max } : {}),
@@ -480,7 +480,7 @@ export function rebuildPassiveFitnessProjection(input) {
         ...((formalState === null || formalState === void 0 ? void 0 : formalState.hrWorkloadCalibration) ? { hrWorkloadCalibration: formalState.hrWorkloadCalibration } : {}),
         passiveAerobicObservation,
         updatedAt: [formalState === null || formalState === void 0 ? void 0 : formalState.updatedAt, latest].filter((value) => !!value).sort().slice(-1)[0],
-    };
+    }, input.currentState);
     return {
         state,
         diagnostics: {
@@ -494,11 +494,13 @@ export function rebuildPassiveFitnessProjection(input) {
 }
 /** Persistence wrapper; callers must save/delete immutable history first. */
 export function rebuildStoredPassiveFitnessProjection(summaries, storage) {
+    var _a, _b, _c, _d, _e;
     const store = storage !== null && storage !== void 0 ? storage : (typeof localStorage !== "undefined" ? localStorage : undefined);
     if (!store)
         return "persistence_failed";
     const athlete = loadAthleteProfile(store);
     const currentState = readFitnessState(athlete.athleteId, store);
+    // Unreadable or wrong-athlete durable state must not be treated as empty.
     if (store.getItem(FITNESS_STATE_STORAGE_KEY) !== null && !currentState) {
         return "persistence_failed";
     }
@@ -510,6 +512,34 @@ export function rebuildStoredPassiveFitnessProjection(summaries, storage) {
     if (!rebuilt.state) {
         if (!(currentState === null || currentState === void 0 ? void 0 : currentState.passiveAerobicTrend) && !(currentState === null || currentState === void 0 ? void 0 : currentState.passiveAerobicObservation)) {
             return "insufficient_evidence";
+        }
+        const hasFormal = !!(currentState === null || currentState === void 0 ? void 0 : currentState.vo2Max) ||
+            !!(currentState === null || currentState === void 0 ? void 0 : currentState.predictedMaxWatts) ||
+            !!(currentState === null || currentState === void 0 ? void 0 : currentState.hrWorkloadCalibration);
+        const hasResting = !!(currentState === null || currentState === void 0 ? void 0 : currentState.restingHeartRateSession);
+        // Clear passive projection without destroying formal or resting-session evidence.
+        if (hasFormal || hasResting) {
+            const preserved = attachRestingHeartRateSession({
+                schemaVersion: currentState.schemaVersion,
+                athleteId: currentState.athleteId,
+                ...(currentState.vo2Max ? { vo2Max: currentState.vo2Max } : {}),
+                ...(currentState.predictedMaxWatts ? { predictedMaxWatts: currentState.predictedMaxWatts } : {}),
+                ...(currentState.hrWorkloadCalibration
+                    ? { hrWorkloadCalibration: currentState.hrWorkloadCalibration }
+                    : {}),
+                updatedAt: (_e = [
+                    (_a = currentState.vo2Max) === null || _a === void 0 ? void 0 : _a.updatedAt,
+                    (_b = currentState.predictedMaxWatts) === null || _b === void 0 ? void 0 : _b.updatedAt,
+                    (_c = currentState.hrWorkloadCalibration) === null || _c === void 0 ? void 0 : _c.updatedAt,
+                    (_d = currentState.restingHeartRateSession) === null || _d === void 0 ? void 0 : _d.updatedAt,
+                ]
+                    .filter((value) => !!value)
+                    .sort()
+                    .slice(-1)[0]) !== null && _e !== void 0 ? _e : currentState.updatedAt,
+            }, currentState);
+            if (!preserved)
+                return "persistence_failed";
+            return storeFitnessState(preserved, store) ? "refined" : "persistence_failed";
         }
         if (typeof store.removeItem !== "function")
             return "persistence_failed";

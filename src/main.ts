@@ -1,6 +1,7 @@
 import { APP_VERSION, setVersionOnDom } from "./version.js";
 import { registerProfileGlobals, loadProfile } from "./profile.js";
 import { loadProfileFitness, registerProfileFitnessGlobals } from "./profileFitnessView.js";
+import { registerRestingHrSessionGlobals } from "./restingHrSessionUi.js";
 import { cleanupAbandonedOrdinaryBikeTelemetry, registerStorageGlobals } from "./workoutStorage.js";
 import { registerZoneGlobals } from "./zoneCalculator.js";
 import { registerSummaryGlobals } from "./workoutSummary.js";
@@ -92,6 +93,7 @@ async function recoverActiveOrFinalizingSession(): Promise<void> {
 async function bootstrap() {
   registerProfileGlobals();
   registerProfileFitnessGlobals();
+  registerRestingHrSessionGlobals();
   registerStorageGlobals();
   registerZoneGlobals();
   registerSummaryGlobals();

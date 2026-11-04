@@ -108,6 +108,9 @@ h1 { font-size: 1.8rem; text-align: center; margin: 16px 0 18px; }
 .profile-origin { flex-shrink: 0; padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.72); font-size: 0.68rem; line-height: 1.2; }
 .profile-origin-assessed { background: rgba(61,124,255,0.16); color: #9dbbff; }
 .profile-origin-observed { background: rgba(16,185,129,0.14); color: #77deb7; }
+.profile-origin-measured { background: rgba(14,165,233,0.16); color: #7dd3fc; }
+.resting-hr-session { margin: 10px 0; padding: 8px 0; border-top: 1px solid rgba(255,255,255,0.08); }
+.resting-hr-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .profile-helper { margin: -2px 0 14px; color: rgba(255,255,255,0.62); font-size: 0.78rem; line-height: 1.4; }
 .profile-card .modal-field:last-of-type { margin-bottom: 0; }
 .profile-card .modal-label { min-width: 118px; }
