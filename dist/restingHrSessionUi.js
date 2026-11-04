@@ -1,10 +1,12 @@
 /**
  * Profile-local resting-session HR measurement UI. Reuses hrMonitor BPM
  * notifications as the sole observation source; the 1 Hz timer refreshes UI
- * only. Does not own BLE or change workout control.
+ * only. Holds the shared screen wake lock for the measurement duration.
+ * Does not own BLE or change workout control.
  */
 import { onBpm, onDisconnect } from "./hrMonitor.js";
 import { abandonRestingHrOnDisconnect, cancelRestingHrAcquisition, createRestingHrAcquisition, evaluateRestingHrStartReadiness, finalizeRestingHrAcquisition, ingestRestingHrBpmNotification, refreshRestingHrAcquisitionUi, rejectReasonText, RESTING_HR_SESSION_POLICY_V1, } from "./restingHrAcquisition.js";
+import { acquireRestingHrWakeLock, forceReleaseRestingHrWakeLock, invalidateRestingHrWakeLockAcquire, releaseRestingHrWakeLock, runExclusiveRestingHrStart, } from "./restingHrWakeLock.js";
 import { loadProfileFitness } from "./profileFitnessView.js";
 import { storeRestingHeartRateSession } from "./fitnessState.js";
 import { loadAthleteProfile } from "./profile.js";
@@ -14,6 +16,12 @@ import { generateUUID } from "./utils/uuid.js";
 let acquisition = null;
 let tickTimer = null;
 let bpmUnsubscribeReady = false;
+/** True while the exclusive start body is awaiting wake lock / setup. */
+let startPending = false;
+/** Token for the active resting-HR wake-lock claim, if any. */
+let activeWakeLockToken = null;
+/** Bumped on cancel so an in-flight start body aborts after await. */
+let startEpoch = 0;
 function monoNow() {
     if (typeof performance !== "undefined" && typeof performance.now === "function") {
         return performance.now();
@@ -85,11 +93,35 @@ function setMeasuringUi(measuring) {
         setHidden("restingHrResult", true);
     }
 }
+function dropActiveWakeLock() {
+    const token = activeWakeLockToken;
+    activeWakeLockToken = null;
+    if (token != null) {
+        void releaseRestingHrWakeLock(token);
+    }
+}
 function endMeasurement() {
+    dropActiveWakeLock();
     stopTimer();
     acquisition = null;
     setMeasuringUi(false);
     loadProfileFitness();
+}
+function showWakeLockFailure() {
+    setHidden("restingHrResult", false);
+    setText("restingHrResult", "Could not keep the screen awake for the five-minute measurement. The attempt was not started and saved resting-session evidence was not changed.");
+    showToast("Could not keep the screen awake. Resting HR was not started.", "error");
+}
+function showReadinessChangedFailure(reason) {
+    setHidden("restingHrResult", false);
+    if (reason === "not_connected") {
+        setText("restingHrResult", "Chest strap disconnected before the measurement could start. Saved resting-session evidence was not changed.");
+        showToast("Chest strap disconnected. Resting HR was not started.", "error");
+    }
+    else {
+        setText("restingHrResult", "A workout became active before the measurement could start. Saved resting-session evidence was not changed.");
+        showToast("A workout is active. Resting HR was not started.", "error");
+    }
 }
 function interruptIfWorkoutBecameActive(monoMs) {
     if (!acquisition || acquisition.status !== "measuring")
@@ -129,6 +161,7 @@ function completeMeasurement(monoMs) {
         observedAt,
         updatedAt: observedAt,
     });
+    dropActiveWakeLock();
     stopTimer();
     setMeasuringUi(false);
     if (result.outcome === "cancelled") {
@@ -220,33 +253,94 @@ function onHrStrapDisconnect() {
         return;
     endForDisconnect(monoNow());
 }
-export function startRestingHrMeasurement() {
-    const readiness = evaluateRestingHrStartReadiness({
-        connected: strapConnected(),
-        workoutInProgress: workoutInProgress(),
-        measurementInProgress: acquisition != null,
-    });
-    if (readiness.ok === false) {
-        if (readiness.reason === "not_connected") {
-            showToast("Connect a chest strap before measuring resting HR.", "error");
+/** True only while this exact measurement is still actively measuring. */
+export function shouldInstallRestingHrTickTimer(state, expectedMeasurementId) {
+    return (state != null &&
+        state.measurementId === expectedMeasurementId &&
+        state.status === "measuring");
+}
+export async function startRestingHrMeasurement() {
+    await runExclusiveRestingHrStart(async () => {
+        const epoch = startEpoch;
+        const readiness = evaluateRestingHrStartReadiness({
+            connected: strapConnected(),
+            workoutInProgress: workoutInProgress(),
+            measurementInProgress: acquisition != null || startPending,
+        });
+        if (readiness.ok === false) {
+            if (readiness.reason === "not_connected") {
+                showToast("Connect a chest strap before measuring resting HR.", "error");
+            }
+            else if (readiness.reason === "workout_in_progress") {
+                showToast("Finish or discard the active workout before measuring resting HR.", "error");
+            }
+            return;
         }
-        else if (readiness.reason === "workout_in_progress") {
-            showToast("Finish or discard the active workout before measuring resting HR.", "error");
+        startPending = true;
+        try {
+            const wake = await acquireRestingHrWakeLock();
+            if (epoch !== startEpoch) {
+                if (wake.status === "acquired") {
+                    await releaseRestingHrWakeLock(wake.token);
+                }
+                return;
+            }
+            if (wake.status === "stale")
+                return;
+            if (wake.status === "failed") {
+                showWakeLockFailure();
+                return;
+            }
+            const postReadiness = evaluateRestingHrStartReadiness({
+                connected: strapConnected(),
+                workoutInProgress: workoutInProgress(),
+                measurementInProgress: false,
+            });
+            if (postReadiness.ok === false) {
+                await releaseRestingHrWakeLock(wake.token);
+                if (postReadiness.reason === "not_connected" || postReadiness.reason === "workout_in_progress") {
+                    showReadinessChangedFailure(postReadiness.reason);
+                }
+                return;
+            }
+            if (epoch !== startEpoch) {
+                await releaseRestingHrWakeLock(wake.token);
+                return;
+            }
+            activeWakeLockToken = wake.token;
+            const athleteId = loadAthleteProfile().athleteId;
+            const measurementId = generateUUID();
+            acquisition = createRestingHrAcquisition({
+                startedAtMonoMs: monoNow(),
+                measurementId,
+                athleteId,
+            });
+            setMeasuringUi(true);
+            setHidden("restingHrResult", true);
+            uiPulse();
+            // uiPulse may terminate immediately (disconnect / workout). Only then skip the interval.
+            if (shouldInstallRestingHrTickTimer(acquisition, measurementId)) {
+                tickTimer = setInterval(() => uiPulse(), 1000);
+            }
         }
-        return;
-    }
-    const athleteId = loadAthleteProfile().athleteId;
-    acquisition = createRestingHrAcquisition({
-        startedAtMonoMs: monoNow(),
-        measurementId: generateUUID(),
-        athleteId,
+        finally {
+            startPending = false;
+        }
     });
-    setMeasuringUi(true);
-    setHidden("restingHrResult", true);
-    uiPulse();
-    tickTimer = setInterval(() => uiPulse(), 1000);
 }
 export function cancelRestingHrMeasurement() {
+    startEpoch += 1;
+    invalidateRestingHrWakeLockAcquire();
+    const token = activeWakeLockToken;
+    activeWakeLockToken = null;
+    if (token != null) {
+        void releaseRestingHrWakeLock(token);
+    }
+    else {
+        // Pending acquire may already have added the shared owner before publishing a token.
+        void forceReleaseRestingHrWakeLock();
+    }
+    startPending = false;
     if (!acquisition)
         return;
     cancelRestingHrAcquisition(acquisition, monoNow(), "cancelled");
