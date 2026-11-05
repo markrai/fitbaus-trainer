@@ -125,6 +125,23 @@ export type {
   FitnessState,
   AthleteFitnessSnapshot,
 } from "./contracts/fitnessState.js";
+export {
+  HR_PERSONALIZATION_PROVISIONAL_FRESHNESS_DAYS,
+  HR_PERSONALIZATION_READINESS_ALGORITHM_ID,
+  HR_PERSONALIZATION_READINESS_ALGORITHM_VERSION,
+  HR_PERSONALIZATION_AUTHORITY_NOTICE,
+} from "./contracts/hrPersonalizationReadiness.js";
+export type {
+  HrPersonalizationReasonCode,
+  FitnessStorageStatusForHr,
+  HrPersonalizationReadinessInput,
+  RestingHrReadinessView,
+  HrMaxReadinessView,
+  ThresholdHrReadinessView,
+  ExploratoryHrrView,
+  ExploratoryTargetHrInterpretation,
+  HrPersonalizationReadinessEvaluation,
+} from "./contracts/hrPersonalizationReadiness.js";
 export type {
   FitnessMetricSource,
   FitnessMetricQuality,

@@ -26,6 +26,8 @@ import { listHrDynamics, resetHrDynamicsForMachine, } from "./machines/dynamics/
 import { listShadowPredictions, resetShadowPredictionsForMachine, shadowValidationStatusLabel, } from "./machines/prediction/index.js";
 import { buildMachineDiagnosticsSnapshot, prepareMachineDiagnosticsExport, } from "./machines/diagnostics/index.js";
 import { loadAthleteProfile } from "./profile.js";
+import { inspectFitnessStateStorage } from "./fitnessState.js";
+import { evaluateHrPersonalizationReadiness } from "./hrPersonalizationReadiness.js";
 import { buildPersonalizationHistoryDetail } from "./personalizationStatus.js";
 import { EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, buildPersonalizationDiagnosticsModel, extractTrustedPersonalizationAssessmentContexts, extractTrustedPersonalizationCharacterizations, extractTrustedPersonalizationPerformedLoadContexts, extractTrustedExecutionProvenanceContexts, extractTrustedPersonalizationWorkoutContexts, personalizationDiagnosticDetailHtml, personalizationDiagnosticsExportJson, personalizationDiagnosticsHtml, } from "./personalizationDiagnosticsView.js";
 import { PERFORMED_LOAD_DIAGNOSTICS_RECENT_LIMIT, buildPerformedLoadWorkoutView, } from "./performedLoad.js";
@@ -1454,6 +1456,42 @@ async function loadPerformedLoadDiagnostics() {
         content.innerHTML = '<div class="personalization-diagnostics-empty personalization-diagnostics-error"><strong>Performed-load diagnostics could not be loaded.</strong><span>Workout data was not changed.</span></div>';
     }
 }
+function buildDiagnosticsHrPersonalizationReadiness() {
+    var _a, _b, _c, _d, _e;
+    const profile = loadAthleteProfile(localStorage);
+    const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
+    const day = getSelectedDay();
+    let resolvedPrescription = null;
+    if (day &&
+        day !== "Downregulation" &&
+        !isVo2WorkoutSelector(day) &&
+        !isFreestyleWorkoutSelector(day)) {
+        const plan = typeof getPlan === "function" ? getPlan() : null;
+        const base = plan === null || plan === void 0 ? void 0 : plan[day];
+        if (base) {
+            const session = getSession(day);
+            const blocks = (_b = (_a = session.phasePlan) === null || _a === void 0 ? void 0 : _a.blocks) !== null && _b !== void 0 ? _b : adjustedBlockLengths(base, null);
+            resolvedPrescription = resolveWorkoutPrescription({
+                workoutSelector: day,
+                blocks,
+                hrTargets: session.phasePlan ? session.phasePlan.hrTargets : (_c = getHrTargets()[day]) !== null && _c !== void 0 ? _c : null,
+                resolvedAt: "diagnostics-readiness",
+            });
+        }
+    }
+    return evaluateHrPersonalizationReadiness({
+        athleteId: inspection.status === "readable" ? inspection.state.athleteId : profile.athleteId,
+        expectedAthleteId: profile.athleteId,
+        ageYears: (_e = (_d = profile.demographics) === null || _d === void 0 ? void 0 : _d.ageYears) !== null && _e !== void 0 ? _e : null,
+        fitnessStorageStatus: inspection.status,
+        fitnessState: inspection.status === "readable" ? inspection.state : null,
+        resolvedPrescription,
+        nowMs: Date.now(),
+    });
+}
+function buildCurrentPersonalizationDiagnosticsModel(filters = EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS) {
+    return buildPersonalizationDiagnosticsModel(personalizationDiagnosticsRecords, filters, personalizationAssessmentContexts, personalizationWorkoutContexts, personalizationPerformedLoadContexts, new Date().toISOString(), personalizationExecutionProvenanceContexts, personalizationScientificSessionContexts, buildDiagnosticsHrPersonalizationReadiness());
+}
 async function loadPersonalizationDiagnostics() {
     var _a;
     const content = document.getElementById("personalizationDiagnosticsContent");
@@ -1481,7 +1519,7 @@ async function loadPersonalizationDiagnostics() {
             rawBySession[summary.external_session_id] = { hrSamples, bikeSamples };
         }
         personalizationScientificSessionContexts = buildScientificSessionEvidenceV2Contexts(history, athleteId, rawBySession);
-        renderPersonalizationDiagnostics(buildPersonalizationDiagnosticsModel(personalizationDiagnosticsRecords, EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, personalizationAssessmentContexts, personalizationWorkoutContexts, personalizationPerformedLoadContexts, new Date().toISOString(), personalizationExecutionProvenanceContexts, personalizationScientificSessionContexts));
+        renderPersonalizationDiagnostics(buildCurrentPersonalizationDiagnosticsModel(EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS));
     }
     catch (error) {
         console.error("Error loading personalization diagnostics:", error);
@@ -1500,10 +1538,10 @@ function currentPersonalizationDiagnosticsFilters() {
     };
 }
 function applyPersonalizationDiagnosticsFilters() {
-    renderPersonalizationDiagnostics(buildPersonalizationDiagnosticsModel(personalizationDiagnosticsRecords, currentPersonalizationDiagnosticsFilters(), personalizationAssessmentContexts, personalizationWorkoutContexts, personalizationPerformedLoadContexts, new Date().toISOString(), personalizationExecutionProvenanceContexts, personalizationScientificSessionContexts));
+    renderPersonalizationDiagnostics(buildCurrentPersonalizationDiagnosticsModel(currentPersonalizationDiagnosticsFilters()));
 }
 function resetPersonalizationDiagnosticsFilters() {
-    renderPersonalizationDiagnostics(buildPersonalizationDiagnosticsModel(personalizationDiagnosticsRecords, EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, personalizationAssessmentContexts, personalizationWorkoutContexts, personalizationPerformedLoadContexts, new Date().toISOString(), personalizationExecutionProvenanceContexts, personalizationScientificSessionContexts));
+    renderPersonalizationDiagnostics(buildCurrentPersonalizationDiagnosticsModel(EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS));
 }
 function openPersonalizationDiagnostic(index) {
     const row = personalizationDiagnosticsModel === null || personalizationDiagnosticsModel === void 0 ? void 0 : personalizationDiagnosticsModel.rows[index];

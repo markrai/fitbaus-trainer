@@ -144,10 +144,66 @@ function scientificAssessmentsHtml(assessments) {
     }).join("");
     return `<section class="personalization-longitudinal" id="personalizationScientificAssessments"><h4>Scientific assessment (E4A)</h4>${note}<div class="personalization-cohorts">${cards}</div></section>`;
 }
+function formatExploratoryPercent(value) {
+    return value == null ? "n/a" : `${Math.round(value * 10) / 10}%`;
+}
+function formatLegacyHrBand(expected) {
+    if (!expected)
+        return "n/a";
+    if (expected.min != null && expected.max != null)
+        return `${expected.min}–${expected.max} bpm`;
+    if (expected.min != null)
+        return `≥${expected.min} bpm`;
+    if (expected.max != null)
+        return `≤${expected.max} bpm`;
+    return "n/a";
+}
+function hrPersonalizationReadinessHtml(readiness) {
+    var _a, _b, _c;
+    if (!readiness) {
+        return `<section class="personalization-longitudinal" id="personalizationHrReadiness"><h4>HR personalization readiness</h4><div class="personalization-diagnostics-empty"><strong>HR readiness was not evaluated.</strong><span>Open Equipment diagnostics after the athlete profile has loaded.</span></div></section>`;
+    }
+    const resting = readiness.resting;
+    const hrMax = readiness.hrMax;
+    const hrr = readiness.exploratoryHrr;
+    const restingLine = resting.available
+        ? `${resting.heartRateBpm} bpm · ${(_a = resting.quality) !== null && _a !== void 0 ? _a : "n/a"} quality · ${resting.ageDays == null ? "age n/a" : `${resting.ageDays} d old`} · ${resting.provisionalFreshness}`
+        : `unavailable (${escapeHtml(resting.reasonCodes.filter((code) => code !== "resting_session_ineligible_for_prescription").join(", ") || "missing")})`;
+    const hrMaxLine = hrMax.available
+        ? `${hrMax.predictedHrMaxBpm} bpm · ${hrMax.predictedLabel} · observed HRmax unavailable`
+        : `unavailable (${escapeHtml(hrMax.reasonCodes.join(", "))})`;
+    const hrrLine = hrr.available
+        ? `${hrr.heartRateReserveBpm} bpm exploratory reserve (predicted HRmax − resting-session HR)`
+        : `unavailable (${escapeHtml(hrr.reasonCodes.join(", "))})`;
+    const targetRows = readiness.exploratoryTargetInterpretations.length === 0
+        ? `<tr><td colspan="4">No resolved legacy HR targets for the selected workout.</td></tr>`
+        : readiness.exploratoryTargetInterpretations.map((row) => {
+            var _a;
+            const band = formatLegacyHrBand(row.expectedHeartRate);
+            const pct = row.minPercentOfHrr == null && row.maxPercentOfHrr == null
+                ? escapeHtml(row.reasonCodes.join(", ") || "unavailable")
+                : `${formatExploratoryPercent(row.minPercentOfHrr)}–${formatExploratoryPercent(row.maxPercentOfHrr)}`;
+            return `<tr><td>${escapeHtml((_a = row.detailName) !== null && _a !== void 0 ? _a : row.phaseId)}</td><td>${escapeHtml(band)}</td><td>${escapeHtml(pct)}</td><td>${escapeHtml(row.source)}</td></tr>`;
+        }).join("");
+    return `<section class="personalization-longitudinal" id="personalizationHrReadiness">
+    <h4>HR personalization readiness</h4>
+    <p class="developer-diagnostics-note"><strong>${escapeHtml(readiness.authorityNotice)}</strong> Resting-session HR is observation-only. Predicted HRmax is Tanaka age-predicted, not measured. Exploratory %HRR values interpret existing fixed BPM targets; they are not validated personalized zones and have no live authority.</p>
+    <div class="personalization-metric-grid">
+      <div><label>Resting-session HR</label><strong>${escapeHtml(restingLine)}</strong><span>source ${escapeHtml((_b = resting.source) !== null && _b !== void 0 ? _b : "none")} · eligibleForPrescription false</span></div>
+      <div><label>HRmax evidence</label><strong>${escapeHtml(hrMaxLine)}</strong><span>never inferred from ordinary workouts or submax VO₂ peaks</span></div>
+      <div><label>Candidate HRR</label><strong>${escapeHtml(hrrLine)}</strong><span>exploratory / provisional only</span></div>
+      <div><label>Threshold HR evidence</label><strong>absent</strong><span>${escapeHtml(readiness.thresholdHr.note)}</span></div>
+      <div><label>Selected workout</label><strong>${escapeHtml((_c = readiness.selectedWorkoutSelector) !== null && _c !== void 0 ? _c : "none")}</strong><span>legacy BPM targets only</span></div>
+      <div><label>Prescription authority</label><strong>legacy BPM</strong><span>personalizedHrTargetsActive = false</span></div>
+    </div>
+    <div class="personalization-table-scroll" tabindex="0"><table class="personalization-table"><thead><tr><th>Phase</th><th>Fixed BPM target</th><th>Exploratory %HRR</th><th>Source</th></tr></thead><tbody>${targetRows}</tbody></table></div>
+  </section>`;
+}
 /** Responsive developer presentation only; every number comes from E2 helpers or frozen fields. */
 export function personalizationDiagnosticsHtml(model) {
+    const hrReadinessSection = hrPersonalizationReadinessHtml(model.hrPersonalizationReadiness);
     if (model.sourceRecordCount === 0) {
-        return `<div class="personalization-diagnostics-empty"><strong>No personalization characterization data yet.</strong><span>Complete a qualifying bike threshold workout after a formal VO₂ assessment to begin collecting shadow workload validation data. Candidate watts do not control the workout.</span></div>`;
+        return `${hrReadinessSection}<div class="personalization-diagnostics-empty"><strong>No personalization characterization data yet.</strong><span>Complete a qualifying bike threshold workout after a formal VO₂ assessment to begin collecting shadow workload validation data. Candidate watts do not control the workout.</span></div>`;
     }
     const aggregate = model.aggregate;
     const evidence = model.evidenceCollectionSummary;
@@ -183,7 +239,7 @@ export function personalizationDiagnosticsHtml(model) {
     <td>${escapeHtml(personalizationDiagnosticLabel(row.calibrationProvenance))}</td><td>${escapeHtml(personalizationDiagnosticLabel(row.observedPowerProvenance))}</td><td>${escapeHtml(personalizationDiagnosticLabel(row.outcome))}</td><td>${escapeHtml(personalizationDiagnosticLabel(row.exclusion))}</td>
     <td><button type="button" class="button secondary personalization-detail-button" onclick="openPersonalizationDiagnostic(${row.index})">Inspect</button></td>
   </tr>`).join("");
-    return `<p class="developer-diagnostics-note">Active prescription is the legacy heart-rate band. Shadow athlete-relative prescription is candidate watts from formal VO₂ calibration. Bike work + threshold is the primary validated scope. These candidates have no live authority.</p>
+    return `${hrReadinessSection}<p class="developer-diagnostics-note">Active prescription is the legacy heart-rate band. Shadow athlete-relative prescription is candidate watts from formal VO₂ calibration. Bike work + threshold is the primary validated scope. These candidates have no live authority.</p>
     <section class="personalization-evidence-summary"><h4>All persisted E2 evidence</h4>
     <div class="personalization-count-grid">
       <div><strong>${evidence.completedWorkoutsWithE2}</strong><span>Completed workouts with E2</span></div>

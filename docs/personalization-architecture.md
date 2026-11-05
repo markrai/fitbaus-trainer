@@ -105,6 +105,32 @@ These are multi-session descriptive observations (`eligibleForPrescription: fals
 They do not replace formal calibration, do not feed E1, and do not control the
 machine.
 
+### Resting-session HR (schema v4)
+
+- `restingHeartRateSession` / `restingHeartRateSessionHistory`
+
+Intentional seated chest-strap resting-session observations
+(`interpretation: resting_session_observation_only`,
+`eligibleForPrescription: false`). They are **not** morning clinical RHR, not a
+longitudinal basal baseline, and **not** prescription-authority input for live
+HR targets. E1 does not consume them.
+
+### Diagnostic-only HR personalization readiness / exploratory %HRR
+
+`src/hrPersonalizationReadiness.ts` evaluates available resting-session HR,
+age-predicted HRmax (Tanaka via `predictedHrMaxBpm`), and the absence of
+validated threshold-HR evidence. When inputs are usable, it computes an
+**exploratory** heart-rate reserve and interprets the selected workout’s
+existing legacy BPM targets as provisional fractions of that reserve.
+
+- Displayed in Settings → Equipment → Personalization diagnostics only.
+- Never persisted as FitnessState authority.
+- Never sets `activationEligible` / personalized live targets.
+- Predicted HRmax is labeled age-predicted; observed HRmax is unavailable.
+- Ordinary-workout peaks and submax VO₂ peaks are never treated as observed HRmax.
+
+Live workouts continue to use frozen `ResolvedWorkoutPrescription` BPM bands.
+
 ---
 
 ## Personalization capability tables
@@ -246,6 +272,8 @@ These are **not** current product control:
 | **passive refinement** | Phase D history rebuild producing descriptive observation only |
 | **settled workload** | Ordinary-workout evidence kernel after load settling; design/shadow today |
 | **legacy HR control** | Still-authoritative resolved HR prescription / control mode (not “dead code”) |
+| **resting-session HR** | FitnessState v4 seated observation; not basal RHR; not prescription-eligible |
+| **exploratory %HRR** | Diagnostic interpretation of fixed BPM targets vs resting + predicted HRmax |
 | **workout intent** | Workout-level purpose (`aerobic_volume`, `threshold`, …); E1 routing dimension |
 | **phase intensity** | Phase-level intensity id (`aerobic_base`, `vo2_short`, …); separate from intent |
 | **machine guidance** | Live equipment advice driven by HR targets |

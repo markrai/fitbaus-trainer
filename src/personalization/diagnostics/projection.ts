@@ -286,7 +286,8 @@ export function buildPersonalizationDiagnosticsModel(
   performedLoadContexts: Readonly<Record<string, readonly PhasePerformedLoadView[]>> = {},
   scientificAssessmentEvaluatedAt: string | null = null,
   executionProvenanceContexts: Readonly<Record<string, WorkoutExecutionProvenanceV1>> = {},
-  scientificSessionEvidenceContexts: Readonly<Record<string, ScientificSessionEvidenceV2>> = {}
+  scientificSessionEvidenceContexts: Readonly<Record<string, ScientificSessionEvidenceV2>> = {},
+  hrPersonalizationReadiness: PersonalizationDiagnosticsModel["hrPersonalizationReadiness"] = null
 ): PersonalizationDiagnosticsModel {
   const normalizedFilters = { ...EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, ...filters };
   const filtered = filterPersonalizationCharacterizations(records, normalizedFilters);
@@ -329,6 +330,7 @@ export function buildPersonalizationDiagnosticsModel(
       ? []
       : buildDiagnosticScientificAssessments(records, assessmentContexts, workoutContexts,
         scientificAssessmentEvaluatedAt, scientificSessionEvidenceContexts),
+    hrPersonalizationReadiness,
   };
 }
 

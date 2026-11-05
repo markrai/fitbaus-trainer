@@ -8,7 +8,16 @@ import type { PersonalizedPrescriptionCharacterizationAggregateV2 } from "../../
 import type { PhasePerformedLoadView } from "../../performedLoad.js";
 import type { ScientificAssessment } from "../../personalizationScientificAssessment.js";
 import type { ScientificSessionEvidenceV2 } from "../../scientificSessionEvidence.js";
-import type { PersonalizedPrescriptionCharacterization, PersonalizedPrescriptionCharacterizationExclusionReasonV1, PersonalizedPrescriptionFormalAssessmentProvenanceV2, PersonalizedPrescriptionPhaseCharacterizationV1, PersonalizedPrescriptionWorkloadProvenanceV1, WorkoutExecutionProvenanceV1, WorkoutSummary } from "../../types.js";
+import type {
+  HrPersonalizationReadinessEvaluation,
+  PersonalizedPrescriptionCharacterization,
+  PersonalizedPrescriptionCharacterizationExclusionReasonV1,
+  PersonalizedPrescriptionFormalAssessmentProvenanceV2,
+  PersonalizedPrescriptionPhaseCharacterizationV1,
+  PersonalizedPrescriptionWorkloadProvenanceV1,
+  WorkoutExecutionProvenanceV1,
+  WorkoutSummary,
+} from "../../types.js";
 
 export const PERSONALIZATION_DIAGNOSTIC_EXCLUSIONS: readonly PersonalizedPrescriptionCharacterizationExclusionReasonV1[] = [
   "phase_too_short",
@@ -162,6 +171,11 @@ export interface PersonalizationDiagnosticsModel {
    * `runtimeAuthority: false`. Empty when no `evaluatedAt` was supplied.
    */
   scientificAssessments: ScientificAssessment[];
+  /**
+   * Runtime-only exploratory HR personalization readiness / %HRR interpretation.
+   * Never exported, never persisted, never activation-eligible.
+   */
+  hrPersonalizationReadiness: HrPersonalizationReadinessEvaluation | null;
 }
 
 export interface TrustedWorkoutHistoryRow {

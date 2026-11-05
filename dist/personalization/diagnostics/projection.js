@@ -199,7 +199,7 @@ export function filterPersonalizationCharacterizations(records, filters) {
         return phases.length > 0 ? [withPhases(record, phases)] : [];
     });
 }
-export function buildPersonalizationDiagnosticsModel(records, filters = EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, assessmentContexts = {}, workoutContexts = {}, performedLoadContexts = {}, scientificAssessmentEvaluatedAt = null, executionProvenanceContexts = {}, scientificSessionEvidenceContexts = {}) {
+export function buildPersonalizationDiagnosticsModel(records, filters = EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, assessmentContexts = {}, workoutContexts = {}, performedLoadContexts = {}, scientificAssessmentEvaluatedAt = null, executionProvenanceContexts = {}, scientificSessionEvidenceContexts = {}, hrPersonalizationReadiness = null) {
     const normalizedFilters = { ...EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, ...filters };
     const filtered = filterPersonalizationCharacterizations(records, normalizedFilters);
     const baseRows = personalizedPrescriptionDiagnosticRows(filtered);
@@ -241,6 +241,7 @@ export function buildPersonalizationDiagnosticsModel(records, filters = EMPTY_PE
         scientificAssessments: scientificAssessmentEvaluatedAt === null
             ? []
             : buildDiagnosticScientificAssessments(records, assessmentContexts, workoutContexts, scientificAssessmentEvaluatedAt, scientificSessionEvidenceContexts),
+        hrPersonalizationReadiness,
     };
 }
 /**
