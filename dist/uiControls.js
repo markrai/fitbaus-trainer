@@ -16,6 +16,7 @@ import { vo2ProtocolHoldForPhaseForRuntime, vo2ProtocolUiTargetsForRuntime } fro
 import { genericWorkoutBlocksText, vo2AssessmentPresentation, vo2CancelModalBody, vo2CancelModalTitle, vo2EndWorkoutButtonLabel, vo2HistoryOutcomeText, vo2LimitReachedButtonVisible, vo2SelectorOptionText, vo2WorkoutBlocksText, } from "./vo2AssessmentView.js";
 import { buildFreestyleHistoryCompact, renderFreestyleWorkoutSummaryPanel, } from "./freestyleRideAnalyticsView.js";
 import { startDownregulationView, stopDownregulationView } from "./downregulation/index.js";
+import { setWorkoutMainSectionDownregulationActive } from "./downregulationPointerPassThrough.js";
 import { listMachinesForActivity, isMachineId } from "./machines/registry.js";
 import { formatBikeBridgeControl, formatBikeBridgeNumber, formatBikeBridgeReadiness, getBikeBridgeSession, } from "./platform/bikeBridgeRuntime.js";
 import { getEquipmentSelection, setSelectedMachine } from "./machines/selection.js";
@@ -116,7 +117,7 @@ function ensureWorkoutDayDropdown() {
             const opt = document.createElement("option");
             opt.value = day;
             const meta = metadata[day];
-            opt.textContent = meta && meta.type ? day + ": " + meta.type : day;
+            opt.textContent = meta && meta.type ? meta.type : day;
             select.appendChild(opt);
         });
         const freestyleOpt = document.createElement("option");
@@ -910,6 +911,7 @@ function renderWorkout(state) {
         if (mainSection) {
             mainSection.style.background = "transparent";
         }
+        setWorkoutMainSectionDownregulationActive(mainSection, true);
         if (downregEl) {
             downregEl.style.display = "block";
             const canvas = document.getElementById("downregulationCanvas");
@@ -931,6 +933,7 @@ function renderWorkout(state) {
     if (mainSection) {
         mainSection.style.background = "";
     }
+    setWorkoutMainSectionDownregulationActive(mainSection, false);
     ensureWorkoutDayDropdown();
     const activityIcon = document.getElementById("activityIcon");
     const dayMeta = state.workoutMetadata[state.day];

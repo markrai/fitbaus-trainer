@@ -19,6 +19,16 @@ h1 { font-size: 1.8rem; text-align: center; margin: 16px 0 18px; }
 
 .metric { font-size: 1rem; margin-top: 6px; text-align: center; }
 .workout-day-row { margin-top: 6px; }
+
+/* Downregulation sits under #workoutMainSection (z-index 10 vs 5). Pass touches
+   through the expanded inactive section while keeping the workout selector usable. */
+.workout-main-section.downregulation-active {
+  pointer-events: none;
+}
+
+.workout-main-section.downregulation-active .workout-day-row {
+  pointer-events: auto;
+}
 .workout-day-select { width: 100%; max-width: 100%; font-size: 1rem; padding: 8px 12px; border-radius: 10px; border: 1px solid #333; background: #232323; color: #fff; cursor: pointer; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px; box-sizing: border-box; }
 .workout-day-select:focus { outline: none; border-color: #3d7cff; }
 .phase-box { display: flex; justify-content: space-between; align-items: center; font-size: 1.5rem; padding: 14px; background: #232323; border-radius: 12px; margin-top: 18px; }

@@ -84,6 +84,7 @@ import {
   renderFreestyleWorkoutSummaryPanel,
 } from "./freestyleRideAnalyticsView.js";
 import { startDownregulationView, stopDownregulationView } from "./downregulation/index.js";
+import { setWorkoutMainSectionDownregulationActive } from "./downregulationPointerPassThrough.js";
 import { listMachinesForActivity, isMachineId } from "./machines/registry.js";
 import {
   formatBikeBridgeControl,
@@ -1098,6 +1099,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     if (mainSection) {
       (mainSection as HTMLElement).style.background = "transparent";
     }
+    setWorkoutMainSectionDownregulationActive(mainSection, true);
     if (downregEl) {
       (downregEl as HTMLElement).style.display = "block";
       const canvas = document.getElementById("downregulationCanvas") as HTMLCanvasElement | null;
@@ -1117,6 +1119,7 @@ function renderWorkout(state: WorkoutDisplayState) {
   if (mainSection) {
     (mainSection as HTMLElement).style.background = "";
   }
+  setWorkoutMainSectionDownregulationActive(mainSection, false);
 
   ensureWorkoutDayDropdown();
 
