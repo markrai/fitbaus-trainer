@@ -28,6 +28,7 @@ import { buildMachineDiagnosticsSnapshot, prepareMachineDiagnosticsExport, } fro
 import { loadAthleteProfile } from "./profile.js";
 import { inspectFitnessStateStorage } from "./fitnessState.js";
 import { evaluateHrPersonalizationReadiness, isHrReadinessDiagnosticSessionActive, selectHrReadinessPrescription, } from "./hrPersonalizationReadiness.js";
+import { evaluateHrIntensityCandidates } from "./hrIntensityCandidate.js";
 import { buildPersonalizationHistoryDetail } from "./personalizationStatus.js";
 import { EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, buildPersonalizationDiagnosticsModel, extractTrustedPersonalizationAssessmentContexts, extractTrustedPersonalizationCharacterizations, extractTrustedPersonalizationPerformedLoadContexts, extractTrustedExecutionProvenanceContexts, extractTrustedPersonalizationWorkoutContexts, personalizationDiagnosticDetailHtml, personalizationDiagnosticsExportJson, personalizationDiagnosticsHtml, } from "./personalizationDiagnosticsView.js";
 import { PERFORMED_LOAD_DIAGNOSTICS_RECENT_LIMIT, buildPerformedLoadWorkoutView, } from "./performedLoad.js";
@@ -1456,10 +1457,8 @@ async function loadPerformedLoadDiagnostics() {
         content.innerHTML = '<div class="personalization-diagnostics-empty personalization-diagnostics-error"><strong>Performed-load diagnostics could not be loaded.</strong><span>Workout data was not changed.</span></div>';
     }
 }
-function buildDiagnosticsHrPersonalizationReadiness() {
-    var _a, _b, _c, _d, _e, _f, _g;
-    const profile = loadAthleteProfile(localStorage);
-    const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
+function selectDiagnosticsResolvedPrescription() {
+    var _a, _b, _c, _d, _e;
     const day = getSelectedDay();
     let resolvedPrescription = null;
     let resolvedPrescriptionProvenance = "none";
@@ -1497,10 +1496,33 @@ function buildDiagnosticsHrPersonalizationReadiness() {
             resolvedPrescriptionProvenance = selected.provenance;
         }
     }
+    return { resolvedPrescription, resolvedPrescriptionProvenance };
+}
+function buildDiagnosticsHrPersonalizationReadiness() {
+    var _a, _b;
+    const profile = loadAthleteProfile(localStorage);
+    const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
+    const { resolvedPrescription, resolvedPrescriptionProvenance } = selectDiagnosticsResolvedPrescription();
     return evaluateHrPersonalizationReadiness({
         athleteId: inspection.status === "readable" ? inspection.state.athleteId : profile.athleteId,
         expectedAthleteId: profile.athleteId,
-        ageYears: (_g = (_f = profile.demographics) === null || _f === void 0 ? void 0 : _f.ageYears) !== null && _g !== void 0 ? _g : null,
+        ageYears: (_b = (_a = profile.demographics) === null || _a === void 0 ? void 0 : _a.ageYears) !== null && _b !== void 0 ? _b : null,
+        fitnessStorageStatus: inspection.status,
+        fitnessState: inspection.status === "readable" ? inspection.state : null,
+        resolvedPrescription,
+        resolvedPrescriptionProvenance,
+        nowMs: Date.now(),
+    });
+}
+function buildDiagnosticsHrIntensityShadowCandidates() {
+    var _a, _b;
+    const profile = loadAthleteProfile(localStorage);
+    const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
+    const { resolvedPrescription, resolvedPrescriptionProvenance } = selectDiagnosticsResolvedPrescription();
+    return evaluateHrIntensityCandidates({
+        athleteId: inspection.status === "readable" ? inspection.state.athleteId : profile.athleteId,
+        expectedAthleteId: profile.athleteId,
+        ageYears: (_b = (_a = profile.demographics) === null || _a === void 0 ? void 0 : _a.ageYears) !== null && _b !== void 0 ? _b : null,
         fitnessStorageStatus: inspection.status,
         fitnessState: inspection.status === "readable" ? inspection.state : null,
         resolvedPrescription,
@@ -1509,7 +1531,7 @@ function buildDiagnosticsHrPersonalizationReadiness() {
     });
 }
 function buildCurrentPersonalizationDiagnosticsModel(filters = EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS) {
-    return buildPersonalizationDiagnosticsModel(personalizationDiagnosticsRecords, filters, personalizationAssessmentContexts, personalizationWorkoutContexts, personalizationPerformedLoadContexts, new Date().toISOString(), personalizationExecutionProvenanceContexts, personalizationScientificSessionContexts, buildDiagnosticsHrPersonalizationReadiness());
+    return buildPersonalizationDiagnosticsModel(personalizationDiagnosticsRecords, filters, personalizationAssessmentContexts, personalizationWorkoutContexts, personalizationPerformedLoadContexts, new Date().toISOString(), personalizationExecutionProvenanceContexts, personalizationScientificSessionContexts, buildDiagnosticsHrPersonalizationReadiness(), buildDiagnosticsHrIntensityShadowCandidates());
 }
 async function loadPersonalizationDiagnostics() {
     var _a;

@@ -125,6 +125,7 @@ import {
   isHrReadinessDiagnosticSessionActive,
   selectHrReadinessPrescription,
 } from "./hrPersonalizationReadiness.js";
+import { evaluateHrIntensityCandidates } from "./hrIntensityCandidate.js";
 import { buildPersonalizationHistoryDetail } from "./personalizationStatus.js";
 import {
   EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS,
@@ -1636,9 +1637,10 @@ async function loadPerformedLoadDiagnostics() {
   }
 }
 
-function buildDiagnosticsHrPersonalizationReadiness() {
-  const profile = loadAthleteProfile(localStorage);
-  const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
+function selectDiagnosticsResolvedPrescription(): {
+  resolvedPrescription: ReturnType<typeof resolveWorkoutPrescription> | null;
+  resolvedPrescriptionProvenance: "frozen_session" | "inactive_template_preview" | "none";
+} {
   const day = getSelectedDay();
   let resolvedPrescription: ReturnType<typeof resolveWorkoutPrescription> | null = null;
   let resolvedPrescriptionProvenance: "frozen_session" | "inactive_template_preview" | "none" = "none";
@@ -1678,7 +1680,30 @@ function buildDiagnosticsHrPersonalizationReadiness() {
       resolvedPrescriptionProvenance = selected.provenance;
     }
   }
+  return { resolvedPrescription, resolvedPrescriptionProvenance };
+}
+
+function buildDiagnosticsHrPersonalizationReadiness() {
+  const profile = loadAthleteProfile(localStorage);
+  const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
+  const { resolvedPrescription, resolvedPrescriptionProvenance } = selectDiagnosticsResolvedPrescription();
   return evaluateHrPersonalizationReadiness({
+    athleteId: inspection.status === "readable" ? inspection.state.athleteId : profile.athleteId,
+    expectedAthleteId: profile.athleteId,
+    ageYears: profile.demographics?.ageYears ?? null,
+    fitnessStorageStatus: inspection.status,
+    fitnessState: inspection.status === "readable" ? inspection.state : null,
+    resolvedPrescription,
+    resolvedPrescriptionProvenance,
+    nowMs: Date.now(),
+  });
+}
+
+function buildDiagnosticsHrIntensityShadowCandidates() {
+  const profile = loadAthleteProfile(localStorage);
+  const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
+  const { resolvedPrescription, resolvedPrescriptionProvenance } = selectDiagnosticsResolvedPrescription();
+  return evaluateHrIntensityCandidates({
     athleteId: inspection.status === "readable" ? inspection.state.athleteId : profile.athleteId,
     expectedAthleteId: profile.athleteId,
     ageYears: profile.demographics?.ageYears ?? null,
@@ -1702,7 +1727,8 @@ function buildCurrentPersonalizationDiagnosticsModel(
     new Date().toISOString(),
     personalizationExecutionProvenanceContexts,
     personalizationScientificSessionContexts,
-    buildDiagnosticsHrPersonalizationReadiness()
+    buildDiagnosticsHrPersonalizationReadiness(),
+    buildDiagnosticsHrIntensityShadowCandidates()
   );
 }
 

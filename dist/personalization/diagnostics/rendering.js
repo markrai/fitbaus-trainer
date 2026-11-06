@@ -196,6 +196,72 @@ function prescriptionProvenanceLabel(provenance) {
         return "inactive template preview";
     return "none";
 }
+function formatShadowCandidateBpm(candidate) {
+    if (candidate.status === "candidate" && candidate.candidateHeartRate) {
+        return `${candidate.candidateHeartRate.minBpm}–${candidate.candidateHeartRate.maxBpm} bpm`;
+    }
+    const reasons = candidate.reasonCodes.filter((code) => code !== "activation_ineligible_shadow_only");
+    return `withheld (${reasons.join(", ") || "unsupported"})`;
+}
+function formatShadowDifference(candidate) {
+    const cmp = candidate.legacyComparison;
+    if (candidate.status !== "candidate" || !candidate.candidateHeartRate) {
+        if (cmp.reasonCodes.includes("legacy_comparison_open_ended")) {
+            return "open-ended legacy · endpoint deltas n/a";
+        }
+        return "n/a";
+    }
+    if (cmp.minDeltaBpm == null && cmp.maxDeltaBpm == null) {
+        if (cmp.reasonCodes.includes("legacy_comparison_open_ended")) {
+            return "open-ended legacy · endpoint deltas n/a";
+        }
+        return "n/a";
+    }
+    const parts = [];
+    if (cmp.minDeltaBpm != null) {
+        parts.push(`min ${cmp.minDeltaBpm > 0 ? "+" : ""}${cmp.minDeltaBpm}`);
+    }
+    else if (cmp.reasonCodes.includes("legacy_comparison_open_ended")) {
+        parts.push("min n/a");
+    }
+    if (cmp.maxDeltaBpm != null) {
+        parts.push(`max ${cmp.maxDeltaBpm > 0 ? "+" : ""}${cmp.maxDeltaBpm}`);
+    }
+    else if (cmp.reasonCodes.includes("legacy_comparison_open_ended")) {
+        parts.push("max n/a");
+    }
+    return parts.join(" · ");
+}
+function hrIntensityShadowCandidatesHtml(evaluation) {
+    var _a, _b, _c, _d;
+    if (!evaluation) {
+        return `<section class="personalization-longitudinal" id="personalizationHrIntensityCandidates"><h4>Shadow HR intensity candidates (H2)</h4><div class="personalization-diagnostics-empty"><strong>Shadow HR candidates were not evaluated.</strong><span>Open Equipment diagnostics after the athlete profile has loaded.</span></div></section>`;
+    }
+    const policyLine = `${evaluation.policy.id}@${evaluation.policy.version} · ${evaluation.policy.sourceLabel}`;
+    const evidenceLine = evaluation.restingHrBpm == null || evaluation.predictedHrMaxBpm == null || evaluation.heartRateReserveBpm == null
+        ? `evidence incomplete · resting ${(_a = evaluation.restingHrBpm) !== null && _a !== void 0 ? _a : "n/a"} · HRmax ${(_b = evaluation.predictedHrMaxBpm) !== null && _b !== void 0 ? _b : "n/a"}`
+        : `resting ${evaluation.restingHrBpm} bpm (${(_c = evaluation.restingQuality) !== null && _c !== void 0 ? _c : "n/a"}, ${evaluation.restingProvisionalFreshness}) · predicted HRmax ${evaluation.predictedHrMaxBpm} · HRR ${evaluation.heartRateReserveBpm}`;
+    const rows = evaluation.phases.length === 0
+        ? `<tr><td colspan="5">No resolved phases for the selected workout.</td></tr>`
+        : evaluation.phases
+            .map((phase) => {
+            var _a;
+            const current = formatLegacyHrBand(phase.legacyComparison.expectedHeartRate, phase.legacyComparison.displayTargetHrBpm);
+            return `<tr><td>${escapeHtml((_a = phase.detailName) !== null && _a !== void 0 ? _a : phase.phaseId)}</td><td>${escapeHtml(current)}</td><td>${escapeHtml(formatShadowCandidateBpm(phase))}</td><td>${escapeHtml(formatShadowDifference(phase))}</td><td>${escapeHtml(phase.status)}</td></tr>`;
+        })
+            .join("");
+    return `<section class="personalization-longitudinal" id="personalizationHrIntensityCandidates">
+    <h4>Shadow HR intensity candidates (H2)</h4>
+    <p class="developer-diagnostics-note"><strong>${escapeHtml(evaluation.authorityNotice)}</strong> Candidates use population ACSM moderate %HRR guidance with athlete resting-session HR and Tanaka age-predicted HRmax. They are independent of legacy BPM targets, are not individually measured thresholds, and have no live authority. mode=${escapeHtml(evaluation.mode)} · activationEligible=${String(evaluation.activationEligible)}</p>
+    <div class="personalization-metric-grid">
+      <div><label>Policy</label><strong>${escapeHtml(policyLine)}</strong><span>${escapeHtml(evaluation.policy.interpretation)}</span></div>
+      <div><label>Evidence</label><strong>${escapeHtml(evidenceLine)}</strong><span>eligibleForPrescription remains false on resting-session evidence</span></div>
+      <div><label>Selected workout</label><strong>${escapeHtml((_d = evaluation.selectedWorkoutSelector) !== null && _d !== void 0 ? _d : "none")}</strong><span>${escapeHtml(prescriptionProvenanceLabel(evaluation.resolvedPrescriptionProvenance))}</span></div>
+      <div><label>Authority</label><strong>shadow only</strong><span>algorithm ${escapeHtml(evaluation.algorithm.id)}@${evaluation.algorithm.version}</span></div>
+    </div>
+    <div class="personalization-table-scroll" tabindex="0"><table class="personalization-table"><thead><tr><th>Phase</th><th>Current BPM</th><th>Shadow candidate BPM</th><th>Difference</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></div>
+  </section>`;
+}
 function hrPersonalizationReadinessHtml(readiness) {
     var _a, _b, _c;
     if (!readiness) {
@@ -238,8 +304,10 @@ function hrPersonalizationReadinessHtml(readiness) {
 /** Responsive developer presentation only; every number comes from E2 helpers or frozen fields. */
 export function personalizationDiagnosticsHtml(model) {
     const hrReadinessSection = hrPersonalizationReadinessHtml(model.hrPersonalizationReadiness);
+    const hrIntensitySection = hrIntensityShadowCandidatesHtml(model.hrIntensityShadowCandidates);
+    const hrDiagnosticSections = `${hrReadinessSection}${hrIntensitySection}`;
     if (model.sourceRecordCount === 0) {
-        return `${hrReadinessSection}<div class="personalization-diagnostics-empty"><strong>No personalization characterization data yet.</strong><span>Complete a qualifying bike threshold workout after a formal VO₂ assessment to begin collecting shadow workload validation data. Candidate watts do not control the workout.</span></div>`;
+        return `${hrDiagnosticSections}<div class="personalization-diagnostics-empty"><strong>No personalization characterization data yet.</strong><span>Complete a qualifying bike threshold workout after a formal VO₂ assessment to begin collecting shadow workload validation data. Candidate watts do not control the workout.</span></div>`;
     }
     const aggregate = model.aggregate;
     const evidence = model.evidenceCollectionSummary;
@@ -275,7 +343,7 @@ export function personalizationDiagnosticsHtml(model) {
     <td>${escapeHtml(personalizationDiagnosticLabel(row.calibrationProvenance))}</td><td>${escapeHtml(personalizationDiagnosticLabel(row.observedPowerProvenance))}</td><td>${escapeHtml(personalizationDiagnosticLabel(row.outcome))}</td><td>${escapeHtml(personalizationDiagnosticLabel(row.exclusion))}</td>
     <td><button type="button" class="button secondary personalization-detail-button" onclick="openPersonalizationDiagnostic(${row.index})">Inspect</button></td>
   </tr>`).join("");
-    return `${hrReadinessSection}<p class="developer-diagnostics-note">Active prescription is the legacy heart-rate band. Shadow athlete-relative prescription is candidate watts from formal VO₂ calibration. Bike work + threshold is the primary validated scope. These candidates have no live authority.</p>
+    return `${hrDiagnosticSections}<p class="developer-diagnostics-note">Active prescription is the legacy heart-rate band. Shadow athlete-relative prescription is candidate watts from formal VO₂ calibration. Bike work + threshold is the primary validated scope. These candidates have no live authority.</p>
     <section class="personalization-evidence-summary"><h4>All persisted E2 evidence</h4>
     <div class="personalization-count-grid">
       <div><strong>${evidence.completedWorkoutsWithE2}</strong><span>Completed workouts with E2</span></div>

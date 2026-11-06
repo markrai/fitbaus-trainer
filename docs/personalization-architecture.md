@@ -141,6 +141,28 @@ no clamping).
 
 Live workouts continue to use frozen `ResolvedWorkoutPrescription` BPM bands.
 
+### H2 shadow athlete-specific HR intensity candidates
+
+`src/hrIntensityCandidate.ts` derives an **independent** provisional HR band
+for carefully qualified sustained `aerobic_base` **work** phases, using:
+
+- resting-session HR (FitnessState v4; still `eligibleForPrescription: false`)
+- Tanaka age-predicted HRmax
+- versioned population policy `hr-intensity-aerobic-base-hrr-acsm-moderate@1`
+  (ACSM moderate-intensity **40–59% HRR**, Karvonen)
+
+Candidates are **not** reverse-engineered from legacy BPM targets. Legacy bands
+appear only as diagnostic comparison. Other intensities (threshold, VO₂,
+warmup/cooldown/recovery, strength, ambiguous aerobic-base kinds) are
+explicitly withheld.
+
+- Diagnostics-only comparison table in Equipment → Personalization diagnostics.
+- `mode: "shadow"`, `activationEligible: false`.
+- No live resolver, feature flag, or FitnessState persistence of candidate HR.
+- Not an individually measured AeT/VT1/LT or validated zone prescription.
+
+See `docs/draft/hr-intensity-candidate-h2-slice.md`.
+
 ---
 
 ## Personalization capability tables
@@ -284,6 +306,7 @@ These are **not** current product control:
 | **legacy HR control** | Still-authoritative resolved HR prescription / control mode (not “dead code”) |
 | **resting-session HR** | FitnessState v4 seated observation; not basal RHR; not prescription-eligible |
 | **exploratory %HRR** | Diagnostic interpretation of fixed BPM targets vs resting + predicted HRmax |
+| **H2 HR intensity candidate** | Shadow athlete-specific HR band from resting + predicted HRmax + versioned %HRR policy; independent of legacy BPM; not live |
 | **workout intent** | Workout-level purpose (`aerobic_volume`, `threshold`, …); E1 routing dimension |
 | **phase intensity** | Phase-level intensity id (`aerobic_base`, `vo2_short`, …); separate from intent |
 | **machine guidance** | Live equipment advice driven by HR targets |

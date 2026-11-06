@@ -10,6 +10,7 @@ import type { ScientificAssessment } from "../../personalizationScientificAssess
 import type { ScientificSessionEvidenceV2 } from "../../scientificSessionEvidence.js";
 import type {
   HrPersonalizationReadinessEvaluation,
+  HrIntensityShadowEvaluation,
   PersonalizedPrescriptionCharacterization,
   PersonalizedPrescriptionCharacterizationExclusionReasonV1,
   PersonalizedPrescriptionFormalAssessmentProvenanceV2,
@@ -176,6 +177,11 @@ export interface PersonalizationDiagnosticsModel {
    * Never exported, never persisted, never activation-eligible.
    */
   hrPersonalizationReadiness: HrPersonalizationReadinessEvaluation | null;
+  /**
+   * Runtime-only H2 shadow athlete-specific HR intensity candidates.
+   * Never exported, never persisted, never activation-eligible.
+   */
+  hrIntensityShadowCandidates: HrIntensityShadowEvaluation | null;
 }
 
 export interface TrustedWorkoutHistoryRow {

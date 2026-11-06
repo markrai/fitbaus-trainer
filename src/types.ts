@@ -144,6 +144,15 @@ export type {
   HrPersonalizationReadinessEvaluation,
 } from "./contracts/hrPersonalizationReadiness.js";
 export type {
+  HrIntensityCandidateBand,
+  HrIntensityCandidateInput,
+  HrIntensityCandidatePolicyV1,
+  HrIntensityCandidateReasonCode,
+  HrIntensityLegacyComparison,
+  HrIntensityPhaseCandidate,
+  HrIntensityShadowEvaluation,
+} from "./contracts/hrIntensityCandidate.js";
+export type {
   FitnessMetricSource,
   FitnessMetricQuality,
   FitnessMetric,
