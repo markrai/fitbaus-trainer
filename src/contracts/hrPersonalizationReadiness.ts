@@ -56,6 +56,12 @@ export type FitnessStorageStatusForHr =
   | "unreadable"
   | "athlete_mismatch";
 
+/** How the diagnostic obtained the prescription it interprets. */
+export type HrReadinessPrescriptionProvenance =
+  | "frozen_session"
+  | "inactive_template_preview"
+  | "none";
+
 export interface HrPersonalizationReadinessInput {
   athleteId: string;
   expectedAthleteId: string;
@@ -64,6 +70,11 @@ export interface HrPersonalizationReadinessInput {
   fitnessState: FitnessState | null;
   /** Selected workout's resolved legacy prescription; null when none/rest/special. */
   resolvedPrescription: ResolvedWorkoutPrescription | null;
+  /**
+   * Provenance of `resolvedPrescription`. Defaults to `"none"` when omitted.
+   * Distinguishes a frozen session prescription from an inactive template preview.
+   */
+  resolvedPrescriptionProvenance?: HrReadinessPrescriptionProvenance;
   /** Evaluation clock for measurement age (epoch ms). */
   nowMs: number;
 }
@@ -141,6 +152,7 @@ export interface HrPersonalizationReadinessEvaluation {
   thresholdHr: ThresholdHrReadinessView;
   exploratoryHrr: ExploratoryHrrView;
   selectedWorkoutSelector: string | null;
+  resolvedPrescriptionProvenance: HrReadinessPrescriptionProvenance;
   exploratoryTargetInterpretations: ExploratoryTargetHrInterpretation[];
   /** Always false — this slice cannot activate personalized HR. */
   personalizedHrTargetsActive: false;

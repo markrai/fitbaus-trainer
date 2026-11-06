@@ -27,7 +27,7 @@ import { listShadowPredictions, resetShadowPredictionsForMachine, shadowValidati
 import { buildMachineDiagnosticsSnapshot, prepareMachineDiagnosticsExport, } from "./machines/diagnostics/index.js";
 import { loadAthleteProfile } from "./profile.js";
 import { inspectFitnessStateStorage } from "./fitnessState.js";
-import { evaluateHrPersonalizationReadiness } from "./hrPersonalizationReadiness.js";
+import { evaluateHrPersonalizationReadiness, isHrReadinessDiagnosticSessionActive, selectHrReadinessPrescription, } from "./hrPersonalizationReadiness.js";
 import { buildPersonalizationHistoryDetail } from "./personalizationStatus.js";
 import { EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS, buildPersonalizationDiagnosticsModel, extractTrustedPersonalizationAssessmentContexts, extractTrustedPersonalizationCharacterizations, extractTrustedPersonalizationPerformedLoadContexts, extractTrustedExecutionProvenanceContexts, extractTrustedPersonalizationWorkoutContexts, personalizationDiagnosticDetailHtml, personalizationDiagnosticsExportJson, personalizationDiagnosticsHtml, } from "./personalizationDiagnosticsView.js";
 import { PERFORMED_LOAD_DIAGNOSTICS_RECENT_LIMIT, buildPerformedLoadWorkoutView, } from "./performedLoad.js";
@@ -1457,11 +1457,12 @@ async function loadPerformedLoadDiagnostics() {
     }
 }
 function buildDiagnosticsHrPersonalizationReadiness() {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g;
     const profile = loadAthleteProfile(localStorage);
     const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
     const day = getSelectedDay();
     let resolvedPrescription = null;
+    let resolvedPrescriptionProvenance = "none";
     if (day &&
         day !== "Downregulation" &&
         !isVo2WorkoutSelector(day) &&
@@ -1470,22 +1471,40 @@ function buildDiagnosticsHrPersonalizationReadiness() {
         const base = plan === null || plan === void 0 ? void 0 : plan[day];
         if (base) {
             const session = getSession(day);
+            const owner = readActiveSessionOwner();
+            // Lifecycle markers + ownership — a leftover phasePlan alone is not an active workout.
+            const sessionActive = isHrReadinessDiagnosticSessionActive({
+                workoutSelector: day,
+                sessionId: session.sessionId,
+                startTime: session.startTime,
+                activeOwner: owner,
+            });
             const blocks = (_b = (_a = session.phasePlan) === null || _a === void 0 ? void 0 : _a.blocks) !== null && _b !== void 0 ? _b : adjustedBlockLengths(base, null);
-            resolvedPrescription = resolveWorkoutPrescription({
+            // Template preview only — never used when a frozen session prescription exists or fails validation.
+            const templatePrescription = resolveWorkoutPrescription({
                 workoutSelector: day,
                 blocks,
-                hrTargets: session.phasePlan ? session.phasePlan.hrTargets : (_c = getHrTargets()[day]) !== null && _c !== void 0 ? _c : null,
-                resolvedAt: "diagnostics-readiness",
+                hrTargets: (_c = getHrTargets()[day]) !== null && _c !== void 0 ? _c : null,
+                resolvedAt: "diagnostics-readiness-preview",
             });
+            const selected = selectHrReadinessPrescription({
+                workoutSelector: day,
+                sessionActive,
+                frozenPrescription: (_e = (_d = session.phasePlan) === null || _d === void 0 ? void 0 : _d.resolvedPrescription) !== null && _e !== void 0 ? _e : null,
+                templatePrescription,
+            });
+            resolvedPrescription = selected.prescription;
+            resolvedPrescriptionProvenance = selected.provenance;
         }
     }
     return evaluateHrPersonalizationReadiness({
         athleteId: inspection.status === "readable" ? inspection.state.athleteId : profile.athleteId,
         expectedAthleteId: profile.athleteId,
-        ageYears: (_e = (_d = profile.demographics) === null || _d === void 0 ? void 0 : _d.ageYears) !== null && _e !== void 0 ? _e : null,
+        ageYears: (_g = (_f = profile.demographics) === null || _f === void 0 ? void 0 : _f.ageYears) !== null && _g !== void 0 ? _g : null,
         fitnessStorageStatus: inspection.status,
         fitnessState: inspection.status === "readable" ? inspection.state : null,
         resolvedPrescription,
+        resolvedPrescriptionProvenance,
         nowMs: Date.now(),
     });
 }

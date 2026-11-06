@@ -134,6 +134,7 @@ export {
 export type {
   HrPersonalizationReasonCode,
   FitnessStorageStatusForHr,
+  HrReadinessPrescriptionProvenance,
   HrPersonalizationReadinessInput,
   RestingHrReadinessView,
   HrMaxReadinessView,

@@ -16,10 +16,16 @@ import {
   type HrPersonalizationReadinessEvaluation,
   type HrPersonalizationReadinessInput,
   type HrPersonalizationReasonCode,
+  type HrReadinessPrescriptionProvenance,
   type RestingHrReadinessView,
   type ThresholdHrReadinessView,
 } from "./contracts/hrPersonalizationReadiness.js";
-import type { ResolvedWorkoutPhaseTarget } from "./contracts/workoutPrescription.js";
+import type {
+  ResolvedHeartRateTarget,
+  ResolvedWorkoutPhaseTarget,
+  ResolvedWorkoutPrescription,
+} from "./contracts/workoutPrescription.js";
+import { parseResolvedWorkoutPrescription } from "./workoutPrescription.js";
 import {
   predictedHrMaxBpm,
   VO2_AGE_YEARS_MAX,
@@ -43,6 +49,7 @@ export type {
   HrPersonalizationReadinessEvaluation,
   HrPersonalizationReadinessInput,
   HrPersonalizationReasonCode,
+  HrReadinessPrescriptionProvenance,
   RestingHrReadinessView,
   ThresholdHrReadinessView,
 } from "./contracts/hrPersonalizationReadiness.js";
@@ -285,6 +292,7 @@ function evaluateExploratoryHrr(
 /**
  * Pure fraction-of-HRR for one BPM against exploratory reserve.
  * Returns null when the calculation is out of domain (no clamping).
+ * Valid domain is inclusive [0, 1].
  */
 export function exploratoryFractionOfHrr(
   targetBpm: number,
@@ -296,8 +304,40 @@ export function exploratoryFractionOfHrr(
   }
   if (!(heartRateReserveBpm > 0)) return null;
   const fraction = (targetBpm - restingHrBpm) / heartRateReserveBpm;
-  if (!Number.isFinite(fraction)) return null;
+  if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1) return null;
   return round3(fraction);
+}
+
+/**
+ * Decide which resolved endpoints are physiologically meaningful for exploratory
+ * %HRR. Legacy `<N` encodes `{ min: 0, max: N-1 }`; uncapped `≥N` encodes
+ * `{ min: N, max: 200 }`. Those synthetic bounds are not interpreted as HRR ends.
+ */
+export function meaningfulHrTargetEndpoints(
+  expected: ResolvedHeartRateTarget,
+  displayTargetHrBpm: string | number | undefined
+): { interpretMin: boolean; interpretMax: boolean } {
+  const text = displayTargetHrBpm != null ? String(displayTargetHrBpm).trim() : "";
+  if (/^</.test(text)) {
+    return { interpretMin: false, interpretMax: expected.max != null && Number.isFinite(expected.max) };
+  }
+  if (/^≥/.test(text) && !/\(\s*cap\s*\d+\s*\)/i.test(text)) {
+    return { interpretMin: expected.min != null && Number.isFinite(expected.min) && expected.min > 0, interpretMax: false };
+  }
+  if (/^≥/.test(text) && /\(\s*cap\s*\d+\s*\)/i.test(text)) {
+    return {
+      interpretMin: expected.min != null && Number.isFinite(expected.min) && expected.min > 0,
+      interpretMax: expected.max != null && Number.isFinite(expected.max) && expected.max > 0,
+    };
+  }
+  // Missing display: treat legacy synthetic zero floor as open-ended upper bound only.
+  if (expected.min === 0 && expected.max != null && expected.max > 0) {
+    return { interpretMin: false, interpretMax: true };
+  }
+  return {
+    interpretMin: expected.min != null && Number.isFinite(expected.min) && expected.min > 0,
+    interpretMax: expected.max != null && Number.isFinite(expected.max) && expected.max > 0,
+  };
 }
 
 function interpretPhaseTarget(
@@ -326,21 +366,40 @@ function interpretPhaseTarget(
   if (!expected || (expected.min == null && expected.max == null)) {
     return { ...base, reasonCodes: ["target_interpretation_unavailable"] };
   }
+
+  const endpoints = meaningfulHrTargetEndpoints(expected, phase.displayTargetHrBpm);
+  if (!endpoints.interpretMin && !endpoints.interpretMax) {
+    return { ...base, reasonCodes: ["target_interpretation_unavailable"] };
+  }
+
+  // Reversed meaningful bounds are invalid; synthetic open-ended encodings are not.
   if (
-    (expected.min != null && expected.max != null && expected.min > expected.max) ||
-    (expected.min != null && !isFinitePositiveBpm(expected.min)) ||
-    (expected.max != null && !isFinitePositiveBpm(expected.max))
+    endpoints.interpretMin &&
+    endpoints.interpretMax &&
+    expected.min != null &&
+    expected.max != null &&
+    expected.min > expected.max
+  ) {
+    return { ...base, reasonCodes: ["target_range_invalid"] };
+  }
+  if (
+    (endpoints.interpretMin && (expected.min == null || !Number.isFinite(expected.min) || expected.min <= 0)) ||
+    (endpoints.interpretMax && (expected.max == null || !Number.isFinite(expected.max) || expected.max <= 0))
   ) {
     return { ...base, reasonCodes: ["target_range_invalid"] };
   }
 
-  const minFraction =
-    expected.min == null ? null : exploratoryFractionOfHrr(expected.min, hrr.restingHrBpm, hrr.heartRateReserveBpm);
-  const maxFraction =
-    expected.max == null ? null : exploratoryFractionOfHrr(expected.max, hrr.restingHrBpm, hrr.heartRateReserveBpm);
+  const minFraction = endpoints.interpretMin
+    ? exploratoryFractionOfHrr(expected.min as number, hrr.restingHrBpm, hrr.heartRateReserveBpm)
+    : null;
+  const maxFraction = endpoints.interpretMax
+    ? exploratoryFractionOfHrr(expected.max as number, hrr.restingHrBpm, hrr.heartRateReserveBpm)
+    : null;
 
   const reasons: HrPersonalizationReasonCode[] = [];
-  if ((expected.min != null && minFraction == null) || (expected.max != null && maxFraction == null)) {
+  const attemptedMin = endpoints.interpretMin;
+  const attemptedMax = endpoints.interpretMax;
+  if ((attemptedMin && minFraction == null) || (attemptedMax && maxFraction == null)) {
     reasons.push("target_out_of_domain");
   }
   if (minFraction != null || maxFraction != null) {
@@ -360,6 +419,64 @@ function interpretPhaseTarget(
 }
 
 /**
+ * Diagnostic-only active-session check using existing lifecycle markers.
+ * A frozen phasePlan is not evidence of an active workout — require sessionId
+ * and startTime, and when an active owner record exists it must match this day.
+ */
+export function isHrReadinessDiagnosticSessionActive(input: {
+  workoutSelector: string;
+  sessionId: string | null | undefined;
+  startTime: string | null | undefined;
+  activeOwner: { selector: string; sessionId: string } | null | undefined;
+}): boolean {
+  if (typeof input.sessionId !== "string" || input.sessionId.length === 0) return false;
+  if (typeof input.startTime !== "string" || input.startTime.length === 0) return false;
+  const owner = input.activeOwner ?? null;
+  if (!owner) return true;
+  return owner.selector === input.workoutSelector && owner.sessionId === input.sessionId;
+}
+
+/**
+ * Choose which resolved prescription diagnostics should interpret.
+ * Prefers a strict-validated frozen session prescription; never substitutes the
+ * current template when a frozen prescription was present but unusable; allows
+ * an inactive template preview only when no frozen prescription applies.
+ */
+export function selectHrReadinessPrescription(input: {
+  workoutSelector: string;
+  sessionActive: boolean;
+  frozenPrescription: unknown;
+  templatePrescription: ResolvedWorkoutPrescription | null;
+}): {
+  prescription: ResolvedWorkoutPrescription | null;
+  provenance: HrReadinessPrescriptionProvenance;
+} {
+  const hasFrozenField = input.frozenPrescription != null;
+  if (hasFrozenField) {
+    const validated = parseResolvedWorkoutPrescription(input.frozenPrescription);
+    if (validated && validated.workoutSelector === input.workoutSelector) {
+      // Reuse the session object when it already validates; parse confirms safety.
+      const frozen =
+        typeof input.frozenPrescription === "object" &&
+        !Array.isArray(input.frozenPrescription) &&
+        (input.frozenPrescription as ResolvedWorkoutPrescription).workoutSelector === input.workoutSelector
+          ? (input.frozenPrescription as ResolvedWorkoutPrescription)
+          : validated;
+      return { prescription: frozen, provenance: "frozen_session" };
+    }
+    // Malformed or wrong-workout frozen prescription: never fall back to template.
+    return { prescription: null, provenance: "none" };
+  }
+  if (input.sessionActive) {
+    return { prescription: null, provenance: "none" };
+  }
+  if (input.templatePrescription && input.templatePrescription.workoutSelector === input.workoutSelector) {
+    return { prescription: input.templatePrescription, provenance: "inactive_template_preview" };
+  }
+  return { prescription: null, provenance: "none" };
+}
+
+/**
  * Deterministic, read-only evaluation of athlete HR evidence and exploratory
  * %HRR interpretation of existing legacy BPM targets.
  */
@@ -372,6 +489,7 @@ export function evaluateHrPersonalizationReadiness(
   const exploratoryHrr = evaluateExploratoryHrr(resting, hrMax);
 
   const prescription = input.resolvedPrescription;
+  const provenance = input.resolvedPrescriptionProvenance ?? (prescription ? "frozen_session" : "none");
   const exploratoryTargetInterpretations =
     prescription && Array.isArray(prescription.phases)
       ? prescription.phases.map((phase) => interpretPhaseTarget(phase, exploratoryHrr))
@@ -397,6 +515,7 @@ export function evaluateHrPersonalizationReadiness(
     thresholdHr,
     exploratoryHrr,
     selectedWorkoutSelector: prescription?.workoutSelector ?? null,
+    resolvedPrescriptionProvenance: provenance,
     exploratoryTargetInterpretations,
     personalizedHrTargetsActive: false,
     prescriptionAuthority: "legacy_bpm_only",

@@ -120,7 +120,11 @@ import {
 } from "./machines/diagnostics/index.js";
 import { loadAthleteProfile } from "./profile.js";
 import { inspectFitnessStateStorage } from "./fitnessState.js";
-import { evaluateHrPersonalizationReadiness } from "./hrPersonalizationReadiness.js";
+import {
+  evaluateHrPersonalizationReadiness,
+  isHrReadinessDiagnosticSessionActive,
+  selectHrReadinessPrescription,
+} from "./hrPersonalizationReadiness.js";
 import { buildPersonalizationHistoryDetail } from "./personalizationStatus.js";
 import {
   EMPTY_PERSONALIZATION_DIAGNOSTICS_FILTERS,
@@ -1637,6 +1641,7 @@ function buildDiagnosticsHrPersonalizationReadiness() {
   const inspection = inspectFitnessStateStorage(profile.athleteId, localStorage);
   const day = getSelectedDay();
   let resolvedPrescription: ReturnType<typeof resolveWorkoutPrescription> | null = null;
+  let resolvedPrescriptionProvenance: "frozen_session" | "inactive_template_preview" | "none" = "none";
   if (
     day &&
     day !== "Downregulation" &&
@@ -1647,13 +1652,30 @@ function buildDiagnosticsHrPersonalizationReadiness() {
     const base = plan?.[day];
     if (base) {
       const session = getSession(day);
+      const owner = readActiveSessionOwner();
+      // Lifecycle markers + ownership — a leftover phasePlan alone is not an active workout.
+      const sessionActive = isHrReadinessDiagnosticSessionActive({
+        workoutSelector: day,
+        sessionId: session.sessionId,
+        startTime: session.startTime,
+        activeOwner: owner,
+      });
       const blocks = session.phasePlan?.blocks ?? adjustedBlockLengths(base, null);
-      resolvedPrescription = resolveWorkoutPrescription({
+      // Template preview only — never used when a frozen session prescription exists or fails validation.
+      const templatePrescription = resolveWorkoutPrescription({
         workoutSelector: day,
         blocks,
-        hrTargets: session.phasePlan ? session.phasePlan.hrTargets : getHrTargets()[day] ?? null,
-        resolvedAt: "diagnostics-readiness",
+        hrTargets: getHrTargets()[day] ?? null,
+        resolvedAt: "diagnostics-readiness-preview",
       });
+      const selected = selectHrReadinessPrescription({
+        workoutSelector: day,
+        sessionActive,
+        frozenPrescription: session.phasePlan?.resolvedPrescription ?? null,
+        templatePrescription,
+      });
+      resolvedPrescription = selected.prescription;
+      resolvedPrescriptionProvenance = selected.provenance;
     }
   }
   return evaluateHrPersonalizationReadiness({
@@ -1663,6 +1685,7 @@ function buildDiagnosticsHrPersonalizationReadiness() {
     fitnessStorageStatus: inspection.status,
     fitnessState: inspection.status === "readable" ? inspection.state : null,
     resolvedPrescription,
+    resolvedPrescriptionProvenance,
     nowMs: Date.now(),
   });
 }

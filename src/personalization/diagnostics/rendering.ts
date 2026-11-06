@@ -178,12 +178,51 @@ function formatExploratoryPercent(value: number | null): string {
   return value == null ? "n/a" : `${Math.round(value * 10) / 10}%`;
 }
 
-function formatLegacyHrBand(expected: { min?: number; max?: number } | null): string {
+/**
+ * Present exploratory %HRR. One-sided ≤/≥ is reserved for genuinely open-ended
+ * targets (evaluator did not mark target_out_of_domain). Bounded ranges with a
+ * single valid endpoint keep an explicit partial / out-of-domain label instead.
+ */
+function formatExploratoryPercentBand(minPercent: number | null, maxPercent: number | null, reasonCodes: string[]): string {
+  if (minPercent == null && maxPercent == null) {
+    return reasonCodes.join(", ") || "unavailable";
+  }
+  if (minPercent != null && maxPercent != null) {
+    return `${formatExploratoryPercent(minPercent)}–${formatExploratoryPercent(maxPercent)}`;
+  }
+  const partialOutOfDomain = reasonCodes.includes("target_out_of_domain");
+  if (partialOutOfDomain) {
+    if (minPercent != null) {
+      return `${formatExploratoryPercent(minPercent)} lower · partial / out-of-domain`;
+    }
+    return `${formatExploratoryPercent(maxPercent)} upper · partial / out-of-domain`;
+  }
+  if (minPercent != null) return `≥${formatExploratoryPercent(minPercent)}`;
+  return `≤${formatExploratoryPercent(maxPercent)}`;
+}
+
+function formatLegacyHrBand(
+  expected: { min?: number; max?: number } | null,
+  displayTargetHrBpm?: string | number
+): string {
+  if (displayTargetHrBpm !== undefined && displayTargetHrBpm !== null && String(displayTargetHrBpm).trim() !== "") {
+    return `${displayTargetHrBpm} bpm`;
+  }
   if (!expected) return "n/a";
-  if (expected.min != null && expected.max != null) return `${expected.min}–${expected.max} bpm`;
+  if (expected.min != null && expected.max != null && expected.min > 0) return `${expected.min}–${expected.max} bpm`;
+  if (expected.min != null && expected.min > 0 && (expected.max == null || expected.max >= 200)) {
+    return `≥${expected.min} bpm`;
+  }
+  if (expected.max != null && (expected.min == null || expected.min === 0)) return `<${expected.max + 1} bpm`;
   if (expected.min != null) return `≥${expected.min} bpm`;
   if (expected.max != null) return `≤${expected.max} bpm`;
   return "n/a";
+}
+
+function prescriptionProvenanceLabel(provenance: HrPersonalizationReadinessEvaluation["resolvedPrescriptionProvenance"]): string {
+  if (provenance === "frozen_session") return "frozen session prescription";
+  if (provenance === "inactive_template_preview") return "inactive template preview";
+  return "none";
 }
 
 function hrPersonalizationReadinessHtml(readiness: HrPersonalizationReadinessEvaluation | null): string {
@@ -205,11 +244,8 @@ function hrPersonalizationReadinessHtml(readiness: HrPersonalizationReadinessEva
   const targetRows = readiness.exploratoryTargetInterpretations.length === 0
     ? `<tr><td colspan="4">No resolved legacy HR targets for the selected workout.</td></tr>`
     : readiness.exploratoryTargetInterpretations.map((row) => {
-      const band = formatLegacyHrBand(row.expectedHeartRate);
-      const pct =
-        row.minPercentOfHrr == null && row.maxPercentOfHrr == null
-          ? escapeHtml(row.reasonCodes.join(", ") || "unavailable")
-          : `${formatExploratoryPercent(row.minPercentOfHrr)}–${formatExploratoryPercent(row.maxPercentOfHrr)}`;
+      const band = formatLegacyHrBand(row.expectedHeartRate, row.displayTargetHrBpm);
+      const pct = formatExploratoryPercentBand(row.minPercentOfHrr, row.maxPercentOfHrr, row.reasonCodes);
       return `<tr><td>${escapeHtml(row.detailName ?? row.phaseId)}</td><td>${escapeHtml(band)}</td><td>${escapeHtml(pct)}</td><td>${escapeHtml(row.source)}</td></tr>`;
     }).join("");
   return `<section class="personalization-longitudinal" id="personalizationHrReadiness">
@@ -220,7 +256,7 @@ function hrPersonalizationReadinessHtml(readiness: HrPersonalizationReadinessEva
       <div><label>HRmax evidence</label><strong>${escapeHtml(hrMaxLine)}</strong><span>never inferred from ordinary workouts or submax VO₂ peaks</span></div>
       <div><label>Candidate HRR</label><strong>${escapeHtml(hrrLine)}</strong><span>exploratory / provisional only</span></div>
       <div><label>Threshold HR evidence</label><strong>absent</strong><span>${escapeHtml(readiness.thresholdHr.note)}</span></div>
-      <div><label>Selected workout</label><strong>${escapeHtml(readiness.selectedWorkoutSelector ?? "none")}</strong><span>legacy BPM targets only</span></div>
+      <div><label>Selected workout</label><strong>${escapeHtml(readiness.selectedWorkoutSelector ?? "none")}</strong><span>${escapeHtml(prescriptionProvenanceLabel(readiness.resolvedPrescriptionProvenance))}</span></div>
       <div><label>Prescription authority</label><strong>legacy BPM</strong><span>personalizedHrTargetsActive = false</span></div>
     </div>
     <div class="personalization-table-scroll" tabindex="0"><table class="personalization-table"><thead><tr><th>Phase</th><th>Fixed BPM target</th><th>Exploratory %HRR</th><th>Source</th></tr></thead><tbody>${targetRows}</tbody></table></div>

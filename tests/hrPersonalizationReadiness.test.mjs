@@ -6,10 +6,17 @@ import {
   HR_PERSONALIZATION_PROVISIONAL_FRESHNESS_DAYS,
   evaluateHrPersonalizationReadiness,
   exploratoryFractionOfHrr,
+  isHrReadinessDiagnosticSessionActive,
+  meaningfulHrTargetEndpoints,
+  selectHrReadinessPrescription,
 } from "../dist/hrPersonalizationReadiness.js";
 import { bpmNotificationsAround, runRestingHrSession } from "../dist/restingHrAcquisition.js";
 import { predictedHrMaxBpm } from "../dist/vo2Estimator.js";
-import { resolveWorkoutPrescription } from "../dist/workoutPrescription.js";
+import {
+  machineHeartRateTargetFromResolved,
+  parseLegacyHeartRateTarget,
+  resolveWorkoutPrescription,
+} from "../dist/workoutPrescription.js";
 import { evaluatePersonalizedPrescription, PHASE_E1_SHADOW_POLICY } from "../dist/personalizedPrescription.js";
 import { mapHrToZone } from "../dist/zoneCalculator.js";
 import { LEGACY_HR_TARGET_RESOLVER_ID } from "../dist/types.js";
@@ -291,7 +298,235 @@ test("fixed target ranges translate correctly into exploratory %HRR", () => {
   assert.equal(work.minPercentOfHrr, Math.round(work.minFractionOfHrr * 100 * 1000) / 1000);
 });
 
-test("invalid target ranges or out-of-domain calculations fail closed", () => {
+test("open-ended <115 from data.json preserves upper-bound interpretation only", () => {
+  const restingBpm = 60;
+  const ageYears = 40;
+  const predicted = predictedHrMaxBpm(ageYears);
+  const reserve = predicted - restingBpm;
+  const display = "<115";
+  const expected = parseLegacyHeartRateTarget(display);
+  assert.deepEqual(expected, { min: 0, max: 114 });
+  assert.deepEqual(meaningfulHrTargetEndpoints(expected, display), { interpretMin: false, interpretMax: true });
+
+  const evaluation = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(restingBpm)),
+    resolvedPrescription: {
+      schemaVersion: 1,
+      resolver: { id: LEGACY_HR_TARGET_RESOLVER_ID, version: 1 },
+      workoutSelector: "Tuesday",
+      resolvedAt: "2026-11-05T12:00:00.000Z",
+      phases: [
+        {
+          phaseId: "cooldown",
+          kind: "cooldown",
+          displayTargetHrBpm: display,
+          expectedHeartRate: expected,
+          source: "legacy_fallback",
+          quality: "unverified",
+          explanationCode: "legacy_target_hr_bpm",
+        },
+      ],
+    },
+    resolvedPrescriptionProvenance: "inactive_template_preview",
+    nowMs: NOW_MS,
+  });
+  const row = evaluation.exploratoryTargetInterpretations[0];
+  assert.equal(row.displayTargetHrBpm, "<115");
+  assert.equal(row.minFractionOfHrr, null);
+  assert.equal(row.maxFractionOfHrr, exploratoryFractionOfHrr(114, restingBpm, reserve));
+  assert.ok(row.reasonCodes.includes("target_interpretation_available"));
+  assert.ok(!row.reasonCodes.includes("target_range_invalid"));
+});
+
+test("open-ended ≥160 (cap 170) from data.json preserves lower bound and explicit cap", () => {
+  const restingBpm = 60;
+  const ageYears = 40;
+  const predicted = predictedHrMaxBpm(ageYears);
+  const reserve = predicted - restingBpm;
+  const display = "≥160 (cap 170)";
+  const expected = parseLegacyHeartRateTarget(display);
+  assert.deepEqual(expected, { min: 160, max: 170 });
+  assert.deepEqual(meaningfulHrTargetEndpoints(expected, display), { interpretMin: true, interpretMax: true });
+
+  const evaluation = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(restingBpm)),
+    resolvedPrescription: {
+      schemaVersion: 1,
+      resolver: { id: LEGACY_HR_TARGET_RESOLVER_ID, version: 1 },
+      workoutSelector: "Monday",
+      resolvedAt: "2026-11-05T12:00:00.000Z",
+      phases: [
+        {
+          phaseId: "interval-work",
+          kind: "work",
+          displayTargetHrBpm: display,
+          expectedHeartRate: expected,
+          source: "legacy_fallback",
+          quality: "unverified",
+          explanationCode: "legacy_target_hr_bpm",
+        },
+      ],
+    },
+    nowMs: NOW_MS,
+  });
+  const row = evaluation.exploratoryTargetInterpretations[0];
+  assert.equal(row.displayTargetHrBpm, "≥160 (cap 170)");
+  assert.equal(row.expectedHeartRate?.min, 160);
+  assert.equal(row.expectedHeartRate?.max, 170);
+  assert.equal(row.minFractionOfHrr, exploratoryFractionOfHrr(160, restingBpm, reserve));
+  assert.equal(row.maxFractionOfHrr, exploratoryFractionOfHrr(170, restingBpm, reserve));
+  assert.ok(row.minFractionOfHrr != null && row.maxFractionOfHrr != null);
+});
+
+test("target below resting HR is unavailable with target_out_of_domain", () => {
+  const restingBpm = 70;
+  const ageYears = 40;
+  const predicted = predictedHrMaxBpm(ageYears);
+  const reserve = predicted - restingBpm;
+  assert.equal(exploratoryFractionOfHrr(50, restingBpm, reserve), null);
+
+  const evaluation = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(restingBpm)),
+    resolvedPrescription: {
+      schemaVersion: 1,
+      resolver: { id: LEGACY_HR_TARGET_RESOLVER_ID, version: 1 },
+      workoutSelector: "Monday",
+      resolvedAt: "2026-11-05T12:00:00.000Z",
+      phases: [
+        {
+          phaseId: "below-resting",
+          kind: "cooldown",
+          displayTargetHrBpm: "40–50",
+          expectedHeartRate: { min: 40, max: 50 },
+          source: "legacy_fallback",
+          quality: "unverified",
+          explanationCode: "legacy_target_hr_bpm",
+        },
+      ],
+    },
+    nowMs: NOW_MS,
+  });
+  const row = evaluation.exploratoryTargetInterpretations[0];
+  assert.equal(row.minFractionOfHrr, null);
+  assert.equal(row.maxFractionOfHrr, null);
+  assert.ok(row.reasonCodes.includes("target_out_of_domain"));
+});
+
+test("target above predicted HRmax is unavailable with target_out_of_domain", () => {
+  const restingBpm = 60;
+  const ageYears = 40;
+  const predicted = predictedHrMaxBpm(ageYears);
+  const reserve = predicted - restingBpm;
+  const aboveMax = Math.ceil(predicted) + 5;
+  assert.equal(exploratoryFractionOfHrr(aboveMax, restingBpm, reserve), null);
+
+  const evaluation = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(restingBpm)),
+    resolvedPrescription: {
+      schemaVersion: 1,
+      resolver: { id: LEGACY_HR_TARGET_RESOLVER_ID, version: 1 },
+      workoutSelector: "Monday",
+      resolvedAt: "2026-11-05T12:00:00.000Z",
+      phases: [
+        {
+          phaseId: "above-hrmax",
+          kind: "work",
+          displayTargetHrBpm: `${aboveMax}–${aboveMax + 10}`,
+          expectedHeartRate: { min: aboveMax, max: aboveMax + 10 },
+          source: "legacy_fallback",
+          quality: "unverified",
+          explanationCode: "legacy_target_hr_bpm",
+        },
+      ],
+    },
+    nowMs: NOW_MS,
+  });
+  const row = evaluation.exploratoryTargetInterpretations[0];
+  assert.equal(row.minFractionOfHrr, null);
+  assert.equal(row.maxFractionOfHrr, null);
+  assert.ok(row.reasonCodes.includes("target_out_of_domain"));
+});
+
+test("fractions exactly 0 and 1 are accepted without clamping", () => {
+  const restingBpm = 60;
+  const ageYears = 40;
+  const predicted = predictedHrMaxBpm(ageYears);
+  const reserve = predicted - restingBpm;
+  assert.equal(exploratoryFractionOfHrr(restingBpm, restingBpm, reserve), 0);
+  assert.equal(exploratoryFractionOfHrr(predicted, restingBpm, reserve), 1);
+  assert.equal(exploratoryFractionOfHrr(restingBpm - 1, restingBpm, reserve), null);
+  assert.equal(exploratoryFractionOfHrr(predicted + 1, restingBpm, reserve), null);
+});
+
+test("open-ended target with one valid endpoint does not fail as an entire range", () => {
+  const restingBpm = 60;
+  const ageYears = 40;
+  const predicted = predictedHrMaxBpm(ageYears);
+  const reserve = predicted - restingBpm;
+  // Upper bound in domain; synthetic min:0 is not interpreted as a %HRR lower end.
+  const evaluation = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(restingBpm)),
+    resolvedPrescription: {
+      schemaVersion: 1,
+      resolver: { id: LEGACY_HR_TARGET_RESOLVER_ID, version: 1 },
+      workoutSelector: "Tuesday",
+      resolvedAt: "2026-11-05T12:00:00.000Z",
+      phases: [
+        {
+          phaseId: "cooldown-open",
+          kind: "cooldown",
+          displayTargetHrBpm: "<120",
+          expectedHeartRate: parseLegacyHeartRateTarget("<120"),
+          source: "legacy_fallback",
+          quality: "unverified",
+          explanationCode: "legacy_target_hr_bpm",
+        },
+        {
+          phaseId: "partial-ood",
+          kind: "work",
+          displayTargetHrBpm: "50–140",
+          expectedHeartRate: { min: 50, max: 140 },
+          source: "legacy_fallback",
+          quality: "unverified",
+          explanationCode: "legacy_target_hr_bpm",
+        },
+      ],
+    },
+    nowMs: NOW_MS,
+  });
+  const open = evaluation.exploratoryTargetInterpretations[0];
+  assert.equal(open.minFractionOfHrr, null);
+  assert.equal(open.maxFractionOfHrr, exploratoryFractionOfHrr(119, restingBpm, reserve));
+  assert.ok(open.reasonCodes.includes("target_interpretation_available"));
+
+  const partial = evaluation.exploratoryTargetInterpretations[1];
+  assert.equal(partial.minFractionOfHrr, null);
+  assert.equal(partial.maxFractionOfHrr, exploratoryFractionOfHrr(140, restingBpm, reserve));
+  assert.ok(partial.reasonCodes.includes("target_out_of_domain"));
+  assert.ok(partial.reasonCodes.includes("target_interpretation_available"));
+});
+
+test("malformed or reversed target range fails closed", () => {
   const metric = acceptedRestingMetric(58);
   const evaluation = evaluateHrPersonalizationReadiness({
     athleteId: "athlete-a",
@@ -308,6 +543,7 @@ test("invalid target ranges or out-of-domain calculations fail closed", () => {
         {
           phaseId: "bad-range",
           kind: "work",
+          displayTargetHrBpm: "160–140",
           expectedHeartRate: { min: 160, max: 140 },
           source: "legacy_fallback",
           quality: "unverified",
@@ -326,7 +562,79 @@ test("invalid target ranges or out-of-domain calculations fail closed", () => {
   });
   assert.ok(evaluation.exploratoryTargetInterpretations[0].reasonCodes.includes("target_range_invalid"));
   assert.equal(evaluation.exploratoryTargetInterpretations[0].minFractionOfHrr, null);
+  assert.equal(evaluation.exploratoryTargetInterpretations[0].maxFractionOfHrr, null);
   assert.ok(evaluation.exploratoryTargetInterpretations[1].reasonCodes.includes("target_interpretation_unavailable"));
+});
+
+test("valid frozen active-session prescription is reused without reconstruction", () => {
+  const frozen = samplePrescription("Monday");
+  const template = samplePrescription("Monday");
+  template.resolvedAt = "diagnostics-should-not-win";
+  const selected = selectHrReadinessPrescription({
+    workoutSelector: "Monday",
+    sessionActive: true,
+    frozenPrescription: frozen,
+    templatePrescription: template,
+  });
+  assert.equal(selected.provenance, "frozen_session");
+  assert.equal(selected.prescription, frozen);
+  assert.notEqual(selected.prescription?.resolvedAt, "diagnostics-should-not-win");
+});
+
+test("malformed or wrong-workout frozen prescription does not fall back to current template", () => {
+  const template = samplePrescription("Monday");
+  const malformed = selectHrReadinessPrescription({
+    workoutSelector: "Monday",
+    sessionActive: true,
+    frozenPrescription: { schemaVersion: 1, resolver: { id: "not-legacy", version: 1 } },
+    templatePrescription: template,
+  });
+  assert.equal(malformed.provenance, "none");
+  assert.equal(malformed.prescription, null);
+
+  const wrongWorkout = selectHrReadinessPrescription({
+    workoutSelector: "Monday",
+    sessionActive: true,
+    frozenPrescription: samplePrescription("Wednesday"),
+    templatePrescription: template,
+  });
+  assert.equal(wrongWorkout.provenance, "none");
+  assert.equal(wrongWorkout.prescription, null);
+
+  const missingFrozenActive = selectHrReadinessPrescription({
+    workoutSelector: "Monday",
+    sessionActive: true,
+    frozenPrescription: null,
+    templatePrescription: template,
+  });
+  assert.equal(missingFrozenActive.provenance, "none");
+  assert.equal(missingFrozenActive.prescription, null);
+});
+
+test("inactive workout can display current-template diagnostic preview", () => {
+  const template = samplePrescription("Tuesday");
+  const selected = selectHrReadinessPrescription({
+    workoutSelector: "Tuesday",
+    sessionActive: false,
+    frozenPrescription: null,
+    templatePrescription: template,
+  });
+  assert.equal(selected.provenance, "inactive_template_preview");
+  assert.equal(selected.prescription, template);
+
+  const evaluation = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears: 40,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(60)),
+    resolvedPrescription: selected.prescription,
+    resolvedPrescriptionProvenance: selected.provenance,
+    nowMs: NOW_MS,
+  });
+  assert.equal(evaluation.resolvedPrescriptionProvenance, "inactive_template_preview");
+  assert.equal(evaluation.selectedWorkoutSelector, "Tuesday");
+  assert.ok(evaluation.exploratoryTargetInterpretations.length >= 3);
 });
 
 test("different athletes produce different exploratory interpretations from the same legacy BPM target", () => {
@@ -356,7 +664,7 @@ test("different athletes produce different exploratory interpretations from the 
   assert.notEqual(younger.exploratoryHrr.heartRateReserveBpm, older.exploratoryHrr.heartRateReserveBpm);
 });
 
-test("frozen active HR prescriptions and zone classification remain unchanged", () => {
+test("exploratory interpretation cannot change active resolved prescription, zones, or machine guidance", () => {
   const hrTargets = {
     warmup: "95–115",
     warmup_intensity_id: "warmup_easy",
@@ -373,15 +681,30 @@ test("frozen active HR prescriptions and zone classification remain unchanged", 
     hrTargets,
     resolvedAt: "2026-11-05T12:00:00.000Z",
   });
-  evaluateHrPersonalizationReadiness({
+  const beforeZones = {
+    z100: mapHrToZone(100),
+    z140: mapHrToZone(140),
+    z170: mapHrToZone(170),
+  };
+  const workPhase = before.phases.find((phase) => phase.kind === "work");
+  assert.ok(workPhase);
+  const beforeMachine = machineHeartRateTargetFromResolved(workPhase);
+  const beforeFrozen = structuredClone(before);
+
+  const evaluation = evaluateHrPersonalizationReadiness({
     athleteId: "athlete-a",
     expectedAthleteId: "athlete-a",
     ageYears: 40,
     fitnessStorageStatus: "readable",
     fitnessState: fitnessStateWithResting(acceptedRestingMetric(58)),
     resolvedPrescription: before,
+    resolvedPrescriptionProvenance: "frozen_session",
     nowMs: NOW_MS,
   });
+  assert.equal(evaluation.personalizedHrTargetsActive, false);
+  assert.equal(evaluation.prescriptionAuthority, "legacy_bpm_only");
+  assert.deepEqual(before, beforeFrozen);
+
   const after = resolveWorkoutPrescription({
     workoutSelector: "Wednesday",
     blocks: { warm: 8, sustain: 25, cool: 7 },
@@ -390,7 +713,15 @@ test("frozen active HR prescriptions and zone classification remain unchanged", 
   });
   assert.deepEqual(after, before);
   assert.equal(after.resolver.id, LEGACY_HR_TARGET_RESOLVER_ID);
-  assert.equal(mapHrToZone(140), mapHrToZone(140));
+  assert.deepEqual(
+    {
+      z100: mapHrToZone(100),
+      z140: mapHrToZone(140),
+      z170: mapHrToZone(170),
+    },
+    beforeZones
+  );
+  assert.deepEqual(machineHeartRateTargetFromResolved(after.phases.find((phase) => phase.kind === "work")), beforeMachine);
 });
 
 test("E1 shadow behavior remains activationEligible false with resting evidence present", () => {
@@ -425,6 +756,7 @@ test("diagnostics HTML surfaces readiness authority notice and exploratory %HRR"
     fitnessStorageStatus: "readable",
     fitnessState: fitnessStateWithResting(metric),
     resolvedPrescription: samplePrescription(),
+    resolvedPrescriptionProvenance: "inactive_template_preview",
     nowMs: NOW_MS,
   });
   const html = personalizationDiagnosticsHtml(
@@ -435,4 +767,302 @@ test("diagnostics HTML surfaces readiness authority notice and exploratory %HRR"
   assert.match(html, /age-predicted \(Tanaka 2001\)/);
   assert.match(html, /Exploratory %HRR/);
   assert.match(html, /eligibleForPrescription false/);
+  assert.match(html, /inactive template preview/);
+});
+
+function readinessHtml(readiness) {
+  return personalizationDiagnosticsHtml(
+    buildPersonalizationDiagnosticsModel([], undefined, {}, {}, {}, null, {}, {}, readiness)
+  );
+}
+
+function prescriptionWithPhases(selector, phases) {
+  return {
+    schemaVersion: 1,
+    resolver: { id: LEGACY_HR_TARGET_RESOLVER_ID, version: 1 },
+    workoutSelector: selector,
+    resolvedAt: "2026-11-05T12:00:00.000Z",
+    phases,
+  };
+}
+
+test("active legacy session without phasePlan does not fall back to template targets", () => {
+  // phasePlan absence must not mark the session inactive when lifecycle markers exist.
+  assert.equal(
+    isHrReadinessDiagnosticSessionActive({
+      workoutSelector: "Monday",
+      sessionId: "session-active-legacy",
+      startTime: "1730822400000",
+      activeOwner: { selector: "Monday", sessionId: "session-active-legacy" },
+    }),
+    true
+  );
+  assert.equal(
+    isHrReadinessDiagnosticSessionActive({
+      workoutSelector: "Monday",
+      sessionId: null,
+      startTime: null,
+      activeOwner: null,
+    }),
+    false
+  );
+
+  const template = samplePrescription("Monday");
+  const selected = selectHrReadinessPrescription({
+    workoutSelector: "Monday",
+    sessionActive: true, // lifecycle active, no phasePlan / frozen prescription
+    frozenPrescription: null,
+    templatePrescription: template,
+  });
+  assert.equal(selected.provenance, "none");
+  assert.equal(selected.prescription, null);
+
+  const readiness = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears: 40,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(60)),
+    resolvedPrescription: selected.prescription,
+    resolvedPrescriptionProvenance: selected.provenance,
+    nowMs: NOW_MS,
+  });
+  const html = readinessHtml(readiness);
+  assert.match(html, />none</);
+  assert.doesNotMatch(html, /inactive template preview/);
+  assert.match(html, /No resolved legacy HR targets for the selected workout/);
+});
+
+test("active session with malformed frozen prescription stays fail-closed in HTML", () => {
+  const template = samplePrescription("Monday");
+  const selected = selectHrReadinessPrescription({
+    workoutSelector: "Monday",
+    sessionActive: isHrReadinessDiagnosticSessionActive({
+      workoutSelector: "Monday",
+      sessionId: "session-malformed",
+      startTime: "1730822400000",
+      activeOwner: { selector: "Monday", sessionId: "session-malformed" },
+    }),
+    frozenPrescription: { schemaVersion: 1, resolver: { id: "not-legacy", version: 1 } },
+    templatePrescription: template,
+  });
+  assert.equal(selected.provenance, "none");
+  assert.equal(selected.prescription, null);
+
+  const html = readinessHtml(
+    evaluateHrPersonalizationReadiness({
+      athleteId: "athlete-a",
+      expectedAthleteId: "athlete-a",
+      ageYears: 40,
+      fitnessStorageStatus: "readable",
+      fitnessState: fitnessStateWithResting(acceptedRestingMetric(60)),
+      resolvedPrescription: null,
+      resolvedPrescriptionProvenance: "none",
+      nowMs: NOW_MS,
+    })
+  );
+  assert.match(html, />none</);
+  assert.doesNotMatch(html, /inactive template preview/);
+  assert.doesNotMatch(html, /140–155/);
+});
+
+test("valid active frozen prescription provenance is shown in HTML", () => {
+  const frozen = samplePrescription("Monday");
+  const template = samplePrescription("Monday");
+  template.resolvedAt = "diagnostics-should-not-win";
+  const selected = selectHrReadinessPrescription({
+    workoutSelector: "Monday",
+    sessionActive: isHrReadinessDiagnosticSessionActive({
+      workoutSelector: "Monday",
+      sessionId: "session-frozen",
+      startTime: "1730822400000",
+      activeOwner: { selector: "Monday", sessionId: "session-frozen" },
+    }),
+    frozenPrescription: frozen,
+    templatePrescription: template,
+  });
+  assert.equal(selected.provenance, "frozen_session");
+  assert.equal(selected.prescription, frozen);
+
+  const html = readinessHtml(
+    evaluateHrPersonalizationReadiness({
+      athleteId: "athlete-a",
+      expectedAthleteId: "athlete-a",
+      ageYears: 40,
+      fitnessStorageStatus: "readable",
+      fitnessState: fitnessStateWithResting(acceptedRestingMetric(60)),
+      resolvedPrescription: selected.prescription,
+      resolvedPrescriptionProvenance: selected.provenance,
+      nowMs: NOW_MS,
+    })
+  );
+  assert.match(html, /frozen session prescription/);
+  assert.match(html, /140–155 bpm/);
+  assert.doesNotMatch(html, /inactive template preview/);
+});
+
+test("inactive template preview provenance is shown in HTML", () => {
+  assert.equal(
+    isHrReadinessDiagnosticSessionActive({
+      workoutSelector: "Tuesday",
+      sessionId: null,
+      startTime: null,
+      activeOwner: null,
+    }),
+    false
+  );
+  // Leftover phasePlan markers alone are not modeled here; inactive = no sessionId/startTime.
+  const template = samplePrescription("Tuesday");
+  const selected = selectHrReadinessPrescription({
+    workoutSelector: "Tuesday",
+    sessionActive: false,
+    frozenPrescription: null,
+    templatePrescription: template,
+  });
+  assert.equal(selected.provenance, "inactive_template_preview");
+
+  const html = readinessHtml(
+    evaluateHrPersonalizationReadiness({
+      athleteId: "athlete-a",
+      expectedAthleteId: "athlete-a",
+      ageYears: 40,
+      fitnessStorageStatus: "readable",
+      fitnessState: fitnessStateWithResting(acceptedRestingMetric(60)),
+      resolvedPrescription: selected.prescription,
+      resolvedPrescriptionProvenance: selected.provenance,
+      nowMs: NOW_MS,
+    })
+  );
+  assert.match(html, /inactive template preview/);
+  assert.match(html, /140–155 bpm/);
+});
+
+test("HTML preserves open-ended ≤ and ≥ for genuine <115 and uncapped ≥160", () => {
+  const restingBpm = 60;
+  const ageYears = 40;
+  const predicted = predictedHrMaxBpm(ageYears);
+  const reserve = predicted - restingBpm;
+  const lessThan = parseLegacyHeartRateTarget("<115");
+  const atLeast = parseLegacyHeartRateTarget("≥160");
+  assert.deepEqual(meaningfulHrTargetEndpoints(lessThan, "<115"), { interpretMin: false, interpretMax: true });
+  assert.deepEqual(meaningfulHrTargetEndpoints(atLeast, "≥160"), { interpretMin: true, interpretMax: false });
+
+  const readiness = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(restingBpm)),
+    resolvedPrescription: prescriptionWithPhases("Monday", [
+      {
+        phaseId: "cooldown-open",
+        kind: "cooldown",
+        displayTargetHrBpm: "<115",
+        expectedHeartRate: lessThan,
+        source: "legacy_fallback",
+        quality: "unverified",
+        explanationCode: "legacy_target_hr_bpm",
+      },
+      {
+        phaseId: "work-open",
+        kind: "work",
+        displayTargetHrBpm: "≥160",
+        expectedHeartRate: atLeast,
+        source: "legacy_fallback",
+        quality: "unverified",
+        explanationCode: "legacy_target_hr_bpm",
+      },
+    ]),
+    resolvedPrescriptionProvenance: "inactive_template_preview",
+    nowMs: NOW_MS,
+  });
+  const openUpper = readiness.exploratoryTargetInterpretations[0];
+  const openLower = readiness.exploratoryTargetInterpretations[1];
+  assert.equal(openUpper.minPercentOfHrr, null);
+  assert.ok(openUpper.maxPercentOfHrr != null);
+  assert.equal(openLower.maxPercentOfHrr, null);
+  assert.ok(openLower.minPercentOfHrr != null);
+  const upperPct = Math.round(openUpper.maxPercentOfHrr * 10) / 10;
+  const lowerPct = Math.round(openLower.minPercentOfHrr * 10) / 10;
+  const html = readinessHtml(readiness);
+  assert.match(html, /&lt;115 bpm/);
+  assert.match(html, new RegExp(`≤${upperPct}%`.replace(".", "\\.")));
+  assert.match(html, /≥160 bpm/);
+  assert.match(html, new RegExp(`≥${lowerPct}%`.replace(".", "\\.")));
+  assert.doesNotMatch(html, /partial \/ out-of-domain/);
+});
+
+test("HTML marks bounded 50–140 with one out-of-domain endpoint as partial, not open-ended", () => {
+  const restingBpm = 60;
+  const ageYears = 40;
+  const predicted = predictedHrMaxBpm(ageYears);
+  const reserve = predicted - restingBpm;
+  const readiness = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(restingBpm)),
+    resolvedPrescription: prescriptionWithPhases("Monday", [
+      {
+        phaseId: "partial-ood",
+        kind: "work",
+        displayTargetHrBpm: "50–140",
+        expectedHeartRate: { min: 50, max: 140 },
+        source: "legacy_fallback",
+        quality: "unverified",
+        explanationCode: "legacy_target_hr_bpm",
+      },
+    ]),
+    resolvedPrescriptionProvenance: "inactive_template_preview",
+    nowMs: NOW_MS,
+  });
+  const row = readiness.exploratoryTargetInterpretations[0];
+  assert.equal(row.minFractionOfHrr, null);
+  assert.equal(row.maxFractionOfHrr, exploratoryFractionOfHrr(140, restingBpm, reserve));
+  assert.ok(row.reasonCodes.includes("target_out_of_domain"));
+
+  const upperPct = Math.round(row.maxPercentOfHrr * 10) / 10;
+  const html = readinessHtml(readiness);
+  assert.match(html, /50–140 bpm/);
+  assert.match(html, new RegExp(`${String(upperPct).replace(".", "\\.")}% upper · partial / out-of-domain`));
+  assert.doesNotMatch(html, new RegExp(`≤${String(upperPct).replace(".", "\\.")}%`));
+  assert.doesNotMatch(html, new RegExp(`≥${String(upperPct).replace(".", "\\.")}%`));
+});
+
+test("HTML keeps both out-of-domain endpoints unavailable", () => {
+  const restingBpm = 70;
+  const ageYears = 40;
+  const readiness = evaluateHrPersonalizationReadiness({
+    athleteId: "athlete-a",
+    expectedAthleteId: "athlete-a",
+    ageYears,
+    fitnessStorageStatus: "readable",
+    fitnessState: fitnessStateWithResting(acceptedRestingMetric(restingBpm)),
+    resolvedPrescription: prescriptionWithPhases("Monday", [
+      {
+        phaseId: "both-ood",
+        kind: "cooldown",
+        displayTargetHrBpm: "40–50",
+        expectedHeartRate: { min: 40, max: 50 },
+        source: "legacy_fallback",
+        quality: "unverified",
+        explanationCode: "legacy_target_hr_bpm",
+      },
+    ]),
+    resolvedPrescriptionProvenance: "inactive_template_preview",
+    nowMs: NOW_MS,
+  });
+  const row = readiness.exploratoryTargetInterpretations[0];
+  assert.equal(row.minFractionOfHrr, null);
+  assert.equal(row.maxFractionOfHrr, null);
+  assert.ok(row.reasonCodes.includes("target_out_of_domain"));
+
+  const html = readinessHtml(readiness);
+  assert.match(html, /40–50 bpm/);
+  assert.match(html, /target_out_of_domain/);
+  assert.doesNotMatch(html, /≤\d/);
+  assert.doesNotMatch(html, /≥\d/);
+  assert.doesNotMatch(html, /\d+\.\d+% upper/);
+  assert.doesNotMatch(html, /\d+\.\d+% lower/);
 });

@@ -121,13 +121,23 @@ HR targets. E1 does not consume them.
 age-predicted HRmax (Tanaka via `predictedHrMaxBpm`), and the absence of
 validated threshold-HR evidence. When inputs are usable, it computes an
 **exploratory** heart-rate reserve and interprets the selected workout’s
-existing legacy BPM targets as provisional fractions of that reserve.
+existing legacy BPM targets as provisional fractions of that reserve
+(`fraction = (targetBpm − resting) / HRR`, valid inclusive domain `[0, 1]`,
+no clamping).
 
 - Displayed in Settings → Equipment → Personalization diagnostics only.
 - Never persisted as FitnessState authority.
 - Never sets `activationEligible` / personalized live targets.
 - Predicted HRmax is labeled age-predicted; observed HRmax is unavailable.
 - Ordinary-workout peaks and submax VO₂ peaks are never treated as observed HRmax.
+- Open-ended legacy encodings such as `<120` → `{ min: 0, max: 119 }` and
+  uncapped `≥160` → `{ min: 160, max: 200 }` keep their controller semantics;
+  diagnostics interpret only the physiologically meaningful endpoint(s), using
+  `displayTargetHrBpm` together with the resolved range (see draft readiness
+  slice). Explicit caps such as `≥160 (cap 170)` interpret both ends.
+- Diagnostics prefer a strict-validated frozen session prescription; inactive
+  days may show an explicitly labeled template preview. Malformed or
+  wrong-workout frozen prescriptions do not fall back to the current template.
 
 Live workouts continue to use frozen `ResolvedWorkoutPrescription` BPM bands.
 
