@@ -1,0 +1,70 @@
+Fitbaus Equipment Protocol core
+(equipment-bridges/proform-smart-power-10/native/equipment-protocol)
+
+Fitbaus-owned source in this module is distributed under the parent Fitbaus
+Trainer repository's GNU Affero General Public License v3.0 only
+(AGPL-3.0-only). See the repository root LICENSE.
+
+================================================================================
+Third-party attribution: STRIDE
+================================================================================
+
+Portions of this module adapt protocol logic from STRIDE:
+
+    STRIDE
+    Copyright 2026 The Idea Works — https://theidea.works
+
+    This product includes software developed as part of the STRIDE project,
+    licensed under the Apache License, Version 2.0. You may obtain a copy of
+    the License at:
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+Source: https://github.com/keranm/strideApp, commit
+d9e1b5363e9a146493ea43b86512bd54738cb23f (2026-09-09).
+A copy of the STRIDE LICENSE is included at
+licenses/STRIDE-LICENSE-Apache-2.0.txt.
+
+Referenced STRIDE files (upstream paths retained for provenance):
+
+    protocol/FITPRO_PROTOCOL.md
+    protocol/bitfields.json
+    console/stride/app/src/main/java/dev/stride/hud/FitPro.kt
+    console/stride/app/src/main/java/dev/stride/hud/FitProConnection.kt
+
+Adapted elements: equipment frame layout and checksum; ReadWriteData section
+bitmap layout; status, command, device and WorkoutMode code tables; converter
+names and access flags for the bike field subset; DeviceInfo / SystemInfo /
+VersionInfo identity offsets; the part-number fix-up; the VerifySecurity
+payload layout; the 32-byte security-hash algorithm; and the unlock retry
+spacing used as a default reauthentication policy. Fixtures in
+src/test/kotlin/.../Fixtures.kt labelled STRIDE_* are quoted byte sequences
+from protocol/FITPRO_PROTOCOL.md.
+
+Changes made by Fitbaus (Apache-2.0 section 4(b)): the code is a new Kotlin
+implementation rather than a copy of STRIDE source files. It restricts the
+command set to a read-only/authentication allowlist; removes all treadmill
+speed/grade/fan fields and every write path from the public API; adds strict
+frame, length, device, command and status validation; reports sentinel and
+invalid values per field; implements a Fitbaus-owned resistance codec from
+F2.3 physical samples rather than leaving encoding unresolved; uses Int32
+arithmetic right-shift on the security-hash part operand to match the locally
+observed Legacy helper (STRIDE's published mix uses unsigned shifts); adds a
+bounded reauthentication state machine; and contains no USB, Android, or
+network I/O.
+
+STRIDE's notices state that it is not affiliated with or endorsed by iFIT
+Health & Fitness, ICON Health & Fitness, NordicTrack or ProForm. Neither is
+Fitbaus. Trademarks belong to their owners and are used only to identify
+compatible hardware.
+
+No proprietary iFIT/ICON proprietary-runtime source code or binaries are
+included in this module.
+
+================================================================================
+Build tooling
+================================================================================
+
+native/gradle/wrapper/gradle-wrapper.jar is part of the Gradle build tool,
+Copyright Gradle Inc., licensed under the Apache License, Version 2.0. It is
+build tooling and is not part of any installed Fitbaus application.

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  trainer:
+    name: Trainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check
+      - run: npm test
+      - run: git diff --exit-code
+
+  bike-bridge:
+    name: Native Bike Bridge
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        working-directory: equipment-bridges/proform-smart-power-10/native
+        run: |
+          chmod +x gradlew
+          ./gradlew :equipment-protocol:test :bridge-app:testReleaseUnitTest :equipment-usb-probe:testDebugUnitTest :arcade:testDebugUnitTest --no-daemon --stacktrace
+      - name: Unlock qualification Gradle gates
+        working-directory: equipment-bridges/proform-smart-power-10/native
+        run: |
+          set -euo pipefail
+          expected='cannot be combined with bridgeIdentity=production'
+          ./gradlew :bridge-app:help -PbridgeIdentity=staging -PunlockQualification=off --no-daemon
+          reject() {
+            local flag="$1"
+            local log
+            local code
+            log="$(mktemp)"
+            set +e
+            ./gradlew :bridge-app:help -PbridgeIdentity=production -PunlockQualification="$flag" --no-daemon >"$log" 2>&1
+            code=$?
+            set -e
+            if [ "$code" -eq 0 ]; then
+              echo "production+$flag unexpectedly succeeded"
+              cat "$log"
+              exit 1
+            fi
+            if ! grep -F "$expected" "$log"; then
+              echo "production+$flag failed without expected guard: $expected"
+              cat "$log"
+              exit 1
+            fi
+            echo "production+$flag rejected with expected guard"
+          }
+          reject auth
+          reject lockout

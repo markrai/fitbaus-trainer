@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Fitbaus Equipment USB Probe</string>
+    <string name="run_basic_probe">Run Read-Only Probe</string>
+    <string name="run_dynamic">Run Dynamic Observation (F2.4)</string>
+    <string name="run_extended">Run Extended Observation</string>
+    <string name="stage_start_next">Start Next Planned Stage</string>
+    <string name="stage_end">End Current Stage</string>
+    <string name="stage_finish">Finish Dynamic Session</string>
+    <string name="stage_status_label">Dynamic stage</string>
+    <string name="usb_status_label">USB detection</string>
+    <string name="qualification_label">Descriptor qualification</string>
+    <string name="permission_label">USB permission</string>
+    <string name="outcome_label">Last diagnostic outcome</string>
+    <string name="report_label">Diagnostic report</string>
+</resources>

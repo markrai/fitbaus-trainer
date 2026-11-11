@@ -1,0 +1,85 @@
+{
+  "measuredWatts": {
+    "schemaVersion": 3,
+    "characterizer": { "id": "personalized-prescription-characterization", "version": 3 },
+    "mode": "diagnostic",
+    "activationEligible": false,
+    "sourceShadow": { "resolverId": "personalized-prescription-resolver", "resolverVersion": 1, "shadowSchemaVersion": 1, "resolvedAt": "2026-09-20T12:00:00.000Z" },
+    "athleteId": "athlete-held",
+    "workoutSessionId": "held-session",
+    "workoutSelector": "Tuesday",
+    "workoutIntent": "aerobic_base",
+    "activity": "bike",
+    "formalAssessmentQuality": "high",
+    "calibrationWorkloadProvenance": "measured_watts",
+    "formalAssessmentProvenance": { "algorithm": { "id": "bike-submax-linear-hr-workload", "version": 1 }, "protocol": { "id": "bike-submax-70rpm", "version": 1 } },
+    "policy": { "id": "e2-characterization-policy", "version": 1, "minObservedPhaseDurationSec": 60, "minHrCoverageRatio": 0.8, "minPowerCoverageRatio": 0.8, "minJointCoverageRatio": 0.75, "settlingSeconds": 30, "minSettledInBandSeconds": 15, "heartRateChangeWindowSeconds": 60, "minHeartRateChangeWindowSamples": 30, "domainEdgeFraction": 0.1 },
+    "heldWorkloadPolicy": { "id": "e2-held-workload-forward-response-policy", "version": 1, "settlingSeconds": 120, "maxObservationGapSec": 2, "maxWallClockExcessSec": 2, "minQualifyingSeconds": 30 },
+    "heldWorkloadForwardModel": { "interceptBpm": 60, "slopeBpmPerWatt": 0.5, "observedMinWatts": 100, "observedMaxWatts": 200 },
+    "phases": [{
+      "phaseId": "sustain", "kind": "work", "intensityId": "aerobic_base", "activeStartSec": 0, "activeEndSec": 300, "shadowOutcome": "candidate",
+      "legacyHeartRate": { "min": 115, "max": 130 }, "candidatePower": { "minWatts": 110, "maxWatts": 140 },
+      "evidenceCoverage": { "plannedDurationSec": 300, "observedDurationSec": 300, "hrCoveredSeconds": 300, "powerCoveredSeconds": 300, "jointCoveredSeconds": 300, "hrCoverageRatio": 1, "powerCoverageRatio": 1, "jointCoverageRatio": 1 },
+      "observedPowerProvenance": "measured_watts",
+      "controllerContext": { "available": true, "observed": { "coveredSeconds": 300, "lowerBoundSeconds": 0, "upperBoundSeconds": 0 }, "desired": { "coveredSeconds": 300, "lowerBoundSeconds": 0, "upperBoundSeconds": 0 }, "commanded": { "coveredSeconds": 300, "lowerBoundSeconds": 0, "upperBoundSeconds": 0 }, "anyBoundarySaturationSeconds": 0, "saturationRatio": 0, "lowerBoundaryDecisionCount": 0, "upperBoundaryDecisionCount": 0 },
+      "characterizationOutcome": "insufficient_evidence",
+      "observedHeartRate": { "sampleCount": 300, "meanBpm": 146.5, "medianBpm": 146.5, "minBpm": 145, "maxBpm": 148, "belowBandSeconds": 0, "insideBandSeconds": 0, "aboveBandSeconds": 300, "insideBandRatio": 0, "earlyWindowMedianBpm": 146.5, "lateWindowMedianBpm": 146.5, "heartRateChangeLateVsEarlyBpm": 0 },
+      "observedPower": { "provenance": "measured_watts", "sampleCount": 300, "medianWatts": 130, "q1Watts": 120, "q3Watts": 140, "minWatts": 120, "maxWatts": 140, "belowCandidateSeconds": 0, "insideCandidateSeconds": 300, "aboveCandidateSeconds": 0, "insideCandidateRatio": 1 },
+      "candidateDomainMargins": { "heartRateToLowerBoundaryBpm": 5, "heartRateToUpperBoundaryBpm": 30, "wattsToLowerBoundary": 10, "wattsToUpperBoundary": 60, "bucket": "edge" },
+      "exclusionReason": "insufficient_settled_in_band_evidence",
+      "heldWorkloadForwardResponse": { "outcome": "characterized", "observedPowerProvenance": "measured_watts", "stableResistance": { "observedResistanceChangeCount": 0, "stableWindowCount": 1, "qualifyingWindowCount": 1, "stableDurationSec": 300, "postSettlingDurationSec": 180, "qualifyingDurationSec": 180, "excludedPostSettlingSeconds": { "observationGap": 0, "wattsUnavailable": 0, "outsideCalibrationDomain": 0, "heartRateUnavailable": 0 } }, "forwardHeartRate": { "observedHeartRateMedianBpm": 146.5, "predictedHeartRateMedianBpm": 125, "signedErrorBpm": { "median": 21.5, "q1": 17.75, "q3": 25.25, "min": 15, "max": 28 }, "absoluteErrorBpm": { "median": 21.5, "q1": 17.75, "q3": 25.25, "min": 15, "max": 28 } }, "cadenceRpm": { "observationCount": 180, "median": 70, "q1": 70, "q3": 70 } }
+    }],
+    "createdAt": "2026-09-20T12:10:00.000Z"
+  },
+  "calibratedWatts": {
+    "schemaVersion": 3,
+    "characterizer": { "id": "personalized-prescription-characterization", "version": 3 },
+    "mode": "diagnostic",
+    "activationEligible": false,
+    "sourceShadow": { "resolverId": "personalized-prescription-resolver", "resolverVersion": 1, "shadowSchemaVersion": 1, "resolvedAt": "2026-09-20T12:00:00.000Z" },
+    "athleteId": "athlete-held",
+    "workoutSessionId": "held-session",
+    "workoutSelector": "Tuesday",
+    "workoutIntent": "aerobic_base",
+    "activity": "bike",
+    "formalAssessmentQuality": "high",
+    "calibrationWorkloadProvenance": "calibrated_at_verified_cadence",
+    "formalAssessmentProvenance": { "algorithm": { "id": "bike-submax-linear-hr-workload", "version": 1 }, "protocol": { "id": "bike-submax-70rpm", "version": 1 } },
+    "policy": { "id": "e2-characterization-policy", "version": 1, "minObservedPhaseDurationSec": 60, "minHrCoverageRatio": 0.8, "minPowerCoverageRatio": 0.8, "minJointCoverageRatio": 0.75, "settlingSeconds": 30, "minSettledInBandSeconds": 15, "heartRateChangeWindowSeconds": 60, "minHeartRateChangeWindowSamples": 30, "domainEdgeFraction": 0.1 },
+    "heldWorkloadPolicy": { "id": "e2-held-workload-forward-response-policy", "version": 1, "settlingSeconds": 120, "maxObservationGapSec": 2, "maxWallClockExcessSec": 2, "minQualifyingSeconds": 30 },
+    "heldWorkloadForwardModel": { "interceptBpm": 60, "slopeBpmPerWatt": 0.5, "observedMinWatts": 100, "observedMaxWatts": 200 },
+    "phases": [{
+      "phaseId": "sustain", "kind": "work", "intensityId": "aerobic_base", "activeStartSec": 0, "activeEndSec": 300, "shadowOutcome": "candidate",
+      "legacyHeartRate": { "min": 115, "max": 130 }, "candidatePower": { "minWatts": 110, "maxWatts": 140 },
+      "evidenceCoverage": { "plannedDurationSec": 300, "observedDurationSec": 300, "hrCoveredSeconds": 300, "powerCoveredSeconds": 300, "jointCoveredSeconds": 300, "hrCoverageRatio": 1, "powerCoverageRatio": 1, "jointCoverageRatio": 1 },
+      "observedPowerProvenance": "calibrated_watts",
+      "controllerContext": { "available": true, "observed": { "coveredSeconds": 300, "lowerBoundSeconds": 0, "upperBoundSeconds": 0 }, "desired": { "coveredSeconds": 300, "lowerBoundSeconds": 0, "upperBoundSeconds": 0 }, "commanded": { "coveredSeconds": 300, "lowerBoundSeconds": 0, "upperBoundSeconds": 0 }, "anyBoundarySaturationSeconds": 0, "saturationRatio": 0, "lowerBoundaryDecisionCount": 0, "upperBoundaryDecisionCount": 0 },
+      "characterizationOutcome": "insufficient_evidence",
+      "observedHeartRate": { "sampleCount": 300, "meanBpm": 141, "medianBpm": 141, "minBpm": 140, "maxBpm": 142, "belowBandSeconds": 0, "insideBandSeconds": 0, "aboveBandSeconds": 300, "insideBandRatio": 0, "earlyWindowMedianBpm": 141, "lateWindowMedianBpm": 141, "heartRateChangeLateVsEarlyBpm": 0 },
+      "observedPower": { "provenance": "calibrated_watts", "sampleCount": 300, "medianWatts": 140, "q1Watts": 130, "q3Watts": 150, "minWatts": 130, "maxWatts": 150, "belowCandidateSeconds": 0, "insideCandidateSeconds": 150, "aboveCandidateSeconds": 150, "insideCandidateRatio": 0.5 },
+      "candidateDomainMargins": { "heartRateToLowerBoundaryBpm": 5, "heartRateToUpperBoundaryBpm": 30, "wattsToLowerBoundary": 10, "wattsToUpperBoundary": 60, "bucket": "edge" },
+      "exclusionReason": "insufficient_settled_in_band_evidence",
+      "heldWorkloadForwardResponse": { "outcome": "characterized", "observedPowerProvenance": "calibrated_watts", "stableResistance": { "observedResistanceChangeCount": 0, "stableWindowCount": 1, "qualifyingWindowCount": 1, "stableDurationSec": 300, "postSettlingDurationSec": 180, "qualifyingDurationSec": 180, "excludedPostSettlingSeconds": { "observationGap": 0, "wattsUnavailable": 0, "outsideCalibrationDomain": 0, "heartRateUnavailable": 0 } }, "forwardHeartRate": { "observedHeartRateMedianBpm": 141, "predictedHeartRateMedianBpm": 130, "signedErrorBpm": { "median": 11, "q1": 6, "q3": 16, "min": 5, "max": 17 }, "absoluteErrorBpm": { "median": 11, "q1": 6, "q3": 16, "min": 5, "max": 17 } }, "cadenceRpm": { "observationCount": 180, "median": 70, "q1": 68, "q3": 72 } }
+    }],
+    "createdAt": "2026-09-20T12:10:00.000Z"
+  },
+  "complexStableWindows": {
+    "held": {
+      "outcome": "characterized",
+      "observedPowerProvenance": "calibrated_watts",
+      "stableResistance": { "observedResistanceChangeCount": 2, "stableWindowCount": 5, "qualifyingWindowCount": 3, "stableDurationSec": 595, "postSettlingDurationSec": 205, "qualifyingDurationSec": 189, "excludedPostSettlingSeconds": { "observationGap": 1, "wattsUnavailable": 5, "outsideCalibrationDomain": 5, "heartRateUnavailable": 5 } },
+      "forwardHeartRate": { "observedHeartRateMedianBpm": 140, "predictedHeartRateMedianBpm": 135, "signedErrorBpm": { "median": 5, "q1": 5, "q3": 5, "min": 5, "max": 5 }, "absoluteErrorBpm": { "median": 5, "q1": 5, "q3": 5, "min": 5, "max": 5 } },
+      "cadenceRpm": { "observationCount": 189, "median": 70, "q1": 70, "q3": 70 }
+    },
+    "analysis": {
+      "phaseId": "sustain", "kind": "work", "activeStartSec": 0, "outcome": "characterized",
+      "windows": [
+        { "firstActiveSec": 0, "lastActiveSec": 179, "observedResistance": 8, "provenance": "calibrated_watts", "settledFromActiveSec": 120, "qualifyingDurationSec": 60, "qualifyingFirstActiveSec": 120, "qualifyingLastActiveSec": 179 },
+        { "firstActiveSec": 180, "lastActiveSec": 339, "observedResistance": 9, "provenance": "calibrated_watts", "settledFromActiveSec": 300, "qualifyingDurationSec": 40, "qualifyingFirstActiveSec": 300, "qualifyingLastActiveSec": 339 },
+        { "firstActiveSec": 340, "lastActiveSec": 359, "observedResistance": 9, "provenance": "calibrated_watts", "settledFromActiveSec": 460, "qualifyingDurationSec": 0 },
+        { "firstActiveSec": 360, "lastActiveSec": 369, "observedResistance": 10, "provenance": "calibrated_watts", "settledFromActiveSec": 480, "qualifyingDurationSec": 0 },
+        { "firstActiveSec": 375, "lastActiveSec": 599, "observedResistance": 10, "provenance": "calibrated_watts", "settledFromActiveSec": 495, "qualifyingDurationSec": 89, "qualifyingFirstActiveSec": 495, "qualifyingLastActiveSec": 599 }
+      ]
+    }
+  }
+}

@@ -1,0 +1,48 @@
+# Build
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+*.userprefs
+
+# Android
+*.apk
+*.ap_
+*.aab
+*.dex
+*.apks
+*.idsig
+*.unaligned
+*.keystore
+*.jks
+local.properties
+
+# Test / coverage
+TestResults/
+*.trx
+*.coverage
+coverage/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Leftover local vendor copies (not used; do not commit)
+third_party/shire-runtime/
+third_party/shire-pack-deps/
+
+# Compile-check output
+artifacts/
+
+# Native Kotlin/Gradle build (native/)
+native/.gradle/
+native/.kotlin/
+native/**/build/
+native/local.properties

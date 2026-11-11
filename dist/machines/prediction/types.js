@@ -1,0 +1,10 @@
+import { DURABLE_LOCAL_STORAGE_KEYS } from "../../persistence/localStorageKeys.js";
+export const SHADOW_PREDICTION_STORAGE_KEY = DURABLE_LOCAL_STORAGE_KEYS.shadowResistancePredictions;
+export const SHADOW_PREDICTION_STORE_VERSION = 1;
+export const SHADOW_PREDICTION_LIMIT = 20;
+export const MIN_SHADOW_DOSE_SAMPLES = 5;
+export const MAX_SHADOW_DOSE_MAD_BPM = 5;
+export const MIN_SHADOW_DIRECTION_CONSISTENCY = 0.7;
+export const MAX_SHADOW_SUGGESTED_LEVELS = 3;
+export const MIN_SHADOW_RESISTANCE = 1;
+export const MAX_SHADOW_RESISTANCE = 15;

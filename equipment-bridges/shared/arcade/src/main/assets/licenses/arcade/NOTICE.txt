@@ -1,0 +1,22 @@
+Fitbaus Arcade (equipment-bridges/shared/arcade)
+
+Fitbaus-owned source in this module is distributed under the parent Fitbaus
+Trainer repository's GNU Affero General Public License v3.0 only.
+
+Third-party components bundled by this module:
+
+MediaPipe hand and face models
+  arcade/palm_detection_lite.tflite
+    sha256 e9a4aaddf90dda56a87235303cf00e4c2d3fb28725f68fd88772997dac905c18
+  arcade/hand_landmark_lite.tflite
+    sha256 d7fde8ac11f8ce03f8663775bfc323f4fc9f2a38062b4f4efa142874ef5b2a48
+  arcade/face_detection_short_range.tflite
+    sha256 3bc182eb9f33925d9e58b5c8d59308a760f4adea8f282370e428c51212c26633
+  Source: https://storage.googleapis.com/mediapipe-assets/
+  Copyright Google LLC. Licensed under the Apache License, Version 2.0.
+
+TensorFlow Lite runtime
+  lib/<abi>/libtensorflowlite_jni.so from org.tensorflow:tensorflow-lite:2.16.1
+  Copyright The TensorFlow Authors. Licensed under the Apache License, Version 2.0.
+
+The Apache License, Version 2.0 text is included as Apache-2.0.txt.

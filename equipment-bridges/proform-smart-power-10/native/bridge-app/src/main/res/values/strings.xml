@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="service_running">Bike Bridge is running</string>
+    <string name="pairing_heading">PAIRING</string>
+    <string name="pairing_note">Enter this token in FitBaus Trainer under Bike bridge settings. Resistance, heart rate, and brightness requests require it. Telemetry and status do not.</string>
+    <string name="pairing_regenerate">Regenerate</string>
+    <string name="pairing_done">Done</string>
+    <string name="pairing_regenerate_title">Regenerate pairing token?</string>
+    <string name="pairing_regenerate_message">Paired clients will lose control access until the new token is entered.</string>
+</resources>
