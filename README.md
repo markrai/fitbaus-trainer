@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="github.png" alt="FitBaus Trainer" width="720" />
+</p>
+
 # FitBaus Trainer
 
 **Smarter rides. Open-source software. Your fitness data, under your control.**
