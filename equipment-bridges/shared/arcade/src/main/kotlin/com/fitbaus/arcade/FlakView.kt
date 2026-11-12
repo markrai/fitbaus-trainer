@@ -16,10 +16,11 @@ import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.sin
 
-internal enum class FlakHold { None, CameraStarting, CameraUnavailable, FaceLost, Calibrating, NoTelemetry, NotPedaling, Resuming }
+internal enum class FlakHold { None, CameraStarting, CameraUnavailable, Calibrating, NoTelemetry, NotPedaling, Resuming }
 
 /**
  * Decides whether the simulation may run. Any missing controller holds the game; nothing is lost while held.
+ * Losing the face after calibration is not a hold: the game keeps running and the jet keeps its last steering.
  * Game over is not a hold: its 3-2-1 restart countdown runs in game time, so it pauses with any other hold.
  */
 internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
@@ -29,11 +30,10 @@ internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
         val hold = when {
             camera == CameraState.Unavailable || camera == CameraState.PermissionDenied -> FlakHold.CameraUnavailable
             camera != CameraState.Ready -> FlakHold.CameraStarting
-            face.state == FaceControlState.Lost -> FlakHold.FaceLost
-            face.state == FaceControlState.Calibrating -> FlakHold.Calibrating
+            face.state == FaceControlState.Calibrating || (face.state == FaceControlState.Lost && face.neutralY.isNaN()) -> FlakHold.Calibrating
             cadence.state == CadenceState.NoTelemetry || cadence.state == CadenceState.Stale -> FlakHold.NoTelemetry
             cadence.state == CadenceState.Stopped -> FlakHold.NotPedaling
-            !running && face.stableMs < resumeStableMs -> FlakHold.Resuming
+            !running && face.state == FaceControlState.Tracking && face.stableMs < resumeStableMs -> FlakHold.Resuming
             else -> FlakHold.None
         }
         running = hold == FlakHold.None
@@ -44,8 +44,7 @@ internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
         FlakHold.None -> null
         FlakHold.CameraUnavailable -> "CAMERA UNAVAILABLE - FLAK RUN NEEDS FACE STEERING"
         FlakHold.CameraStarting -> "STARTING CAMERA..."
-        FlakHold.FaceLost -> "FACE LOST - LOOK AT THE SCREEN"
-        FlakHold.Calibrating -> "HOLD YOUR HEAD STILL - CALIBRATING"
+        FlakHold.Calibrating -> null
         FlakHold.NoTelemetry -> if (cadence.state == CadenceState.Stale) "BIKE DATA STALE - WAITING FOR RPM" else "NO BIKE DATA - WAITING FOR RPM"
         FlakHold.NotPedaling -> "PEDAL TO FLY"
         FlakHold.Resuming -> "GET READY..."
@@ -155,6 +154,8 @@ public class FlakView(context: Context) : View(context) {
     private var simulatedSample = 0L
     private var hold = FlakHold.CameraStarting
     private var faceReading = FaceControlReading(FaceControlState.Lost, 0.5f, Float.NaN, 0.5f, -1L, 0L)
+    private var steerY = 0.5f
+    private var steerX = 0.5f
     private var cadenceReading = CadenceReading(CadenceState.NoTelemetry, null, -1L, Float.NaN, Float.NaN, 0L, 0, false)
     private var diagnosticsText = ""
     private var info: ArcadeCameraInfo? = null
@@ -228,9 +229,13 @@ public class FlakView(context: Context) : View(context) {
         faceReading = face.update(position, now)
         cadenceReading = if (simulatedCadence) simulate(now) else cadence.update(connected, initialized, rpm, rpmCurrent, rpmObservedAt, now)
         hold = supervisor.hold(camera, faceReading, cadenceReading)
+        if (faceReading.state == FaceControlState.Tracking) {
+            steerY = faceReading.target
+            steerX = faceReading.targetX
+        }
         val start = System.nanoTime()
         if (hold == FlakHold.None) {
-            lastSteps = game.advance(now, faceReading.target, cadenceReading.boosting, faceReading.targetX)
+            lastSteps = game.advance(now, steerY, cadenceReading.boosting, steerX)
         } else {
             game.resetClock()
             lastSteps = 0
@@ -276,8 +281,7 @@ public class FlakView(context: Context) : View(context) {
 
     private fun simulate(now: Long): CadenceReading {
         if (now - simulatedSample >= SIM_SAMPLE_NANOS) simulatedSample = now
-        val base = cadenceReading.baseline.takeIf { !it.isNaN() } ?: SIM_RPM.toFloat()
-        val rpm = if (simulatedPress) (base + DELTAS[deltaIndex] + 4).toInt() else SIM_RPM
+        val rpm = if (simulatedPress) SIM_RPM + DELTAS[deltaIndex] + 4 else SIM_RPM
         return cadence.update(true, true, rpm, true, "sim-$simulatedSample", now, simulated = true)
     }
 
@@ -383,6 +387,8 @@ public class FlakView(context: Context) : View(context) {
         val holdText = supervisor.message(hold, cadenceReading)
         if (holdText != null) {
             banner(canvas, holdText, w / 2f, top + dh * 0.45f, 7f * scale, scale)
+        } else if (faceReading.state == FaceControlState.Lost && game.phase == FlakPhase.Playing) {
+            banner(canvas, "FACE LOST - LOOK AT THE SCREEN TO STEER", w / 2f, top + dh * 0.12f, 4f * scale, scale)
         } else if (game.phase == FlakPhase.GameOver) {
             banner(canvas, String.format(Locale.US, "GAME OVER  -  SCORE %06d", game.score), w / 2f, top + dh * 0.32f, 7f * scale, scale)
             val count = ceil(game.restartIn.toDouble()).toInt().coerceIn(1, 3)
@@ -415,18 +421,24 @@ public class FlakView(context: Context) : View(context) {
         meterRect.set(meterLeft, baseline - 14f * density, meterLeft + meterW, baseline)
         px.color = Color.rgb(40, 40, 40)
         canvas.drawRect(meterRect, px)
-        val fill = if (c.baseline.isNaN() || c.rpm == null) 0f else ((c.rpm - c.baseline) / (c.threshold - c.baseline)).coerceIn(0f, 1f)
+        val shown = when (c.state) {
+            CadenceState.Boosting -> 1f
+            CadenceState.Cruising -> if (c.baseline.isNaN() || c.rpm == null) 0f else ((c.rpm - c.baseline) / (c.threshold - c.baseline)).coerceIn(0f, 1f)
+            CadenceState.Establishing, CadenceState.Recovering -> c.steadyProgress
+            else -> 0f
+        }
         px.color = when (c.state) {
             CadenceState.Boosting -> Color.rgb(252, 160, 68)
             CadenceState.Cruising -> Color.rgb(0, 200, 90)
+            CadenceState.Establishing, CadenceState.Recovering -> Color.rgb(60, 140, 200)
             else -> Color.rgb(110, 110, 110)
         }
-        val shown = if (c.state == CadenceState.Boosting) 1f else fill
         canvas.drawRect(meterRect.left, meterRect.top, meterRect.left + meterW * shown, meterRect.bottom, px)
         val label = when (c.state) {
             CadenceState.Boosting -> "DASH!"
             CadenceState.Establishing -> "LEARNING PACE"
-            CadenceState.Cruising -> if (c.armed) "SURGE TO DASH" else "EASE OFF TO REARM"
+            CadenceState.Cruising -> "SURGE TO DASH"
+            CadenceState.Recovering -> "STABILIZE PACE"
             else -> "DASH --"
         }
         hudPaint.textSize = 12f * density
@@ -462,11 +474,15 @@ public class FlakView(context: Context) : View(context) {
                 d?.processedHz ?: Float.NaN, f.state, f.noseY, if (f.neutralY.isNaN()) "-" else String.format(Locale.US, "%.3f", f.neutralY),
                 f.ageMs, f.stableMs, face.config.gain),
             String.format(Locale.US, "jet y %.1f (target %.2f)  x %.1f (target %.2f)  hold %s", game.jetY, f.target, game.jetX, f.targetX, hold),
-            String.format(Locale.US, "rpm %s%s  age %d ms  baseline %s  threshold %s  %s  dash %d ms  dashes %d  armed %s",
-                c.rpm?.toString() ?: "-", if (c.simulated) " (SIMULATED)" else "", c.sampleAgeMs,
+            String.format(Locale.US, "rpm %s%s  age %d ms  %s  armed %s  baseline %s  threshold %s  pace %s +/-%s n %d steady %d%%  confirm %d  near-baseline %s ago  dash %d ms  dashes %d",
+                c.rpm?.toString() ?: "-", if (c.simulated) " (SIMULATED)" else "", c.sampleAgeMs, c.state, if (c.armed) "yes" else "no",
                 if (c.baseline.isNaN()) "-" else String.format(Locale.US, "%.1f", c.baseline),
                 if (c.threshold.isNaN()) "-" else String.format(Locale.US, "%.1f", c.threshold),
-                c.state, c.boostRemainingMs, c.activations, if (c.armed) "yes" else "no"),
+                if (c.pace.isNaN()) "-" else String.format(Locale.US, "%.1f", c.pace),
+                if (c.paceSpread.isNaN()) "-" else String.format(Locale.US, "%.1f", c.paceSpread),
+                c.paceSamples, (c.steadyProgress * 100f).toInt(), c.confirming,
+                if (c.sinceNearMs < 0) "-" else "${c.sinceNearMs} ms",
+                c.boostRemainingMs, c.activations),
             String.format(Locale.US, "frame p50 %.0f / p90 %.0f ms  update p50 %.2f / p90 %.2f ms  steps %d  cpu %s  %s",
                 frameWindow.percentile(0.5f), frameWindow.percentile(0.9f), updateWindow.percentile(0.5f), updateWindow.percentile(0.9f), lastSteps,
                 d?.processCpuPercent?.let { if (it.isNaN()) "-" else String.format(Locale.US, "%.0f%%", it) } ?: "-", memoryText),

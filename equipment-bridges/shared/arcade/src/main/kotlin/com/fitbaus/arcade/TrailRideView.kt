@@ -367,8 +367,7 @@ public class TrailRideView(context: Context) : View(context) {
         val start = System.nanoTime()
         if (simulatedCadence) {
             if (now - simulatedSample >= SIM_SAMPLE_NANOS) simulatedSample = now
-            val base = session.cadenceReading.baseline.takeIf { !it.isNaN() } ?: SIM_RPM.toFloat()
-            val simRpm = if (simulatedPress) (base + DELTAS[deltaIndex] + 4).toInt() else SIM_RPM
+            val simRpm = if (simulatedPress) SIM_RPM + DELTAS[deltaIndex] + 4 else SIM_RPM
             session.update(position, camera, true, true, simRpm, true, "sim-$simulatedSample", now, simulated = true)
         } else {
             session.update(position, camera, connected, initialized, rpm, rpmCurrent, rpmObservedAt, now)
@@ -801,7 +800,7 @@ public class TrailRideView(context: Context) : View(context) {
         if (ditch != null && g.phase == TrailPhase.Riding && ditch.start > g.distance) {
             val t = g.timeTo(ditch)
             if (t <= g.config.jumpEarlySeconds + g.config.surgeCueLead && t >= g.config.jumpLateSeconds) {
-                return (if (cadenceReading.armed) "SURGE NOW!" else "EASE OFF, THEN SURGE!") to (if (blink) PROMPT_TEXT else WHITE)
+                return (if (cadenceReading.armed) "SURGE NOW!" else "STEADY PACE, THEN SURGE!") to (if (blink) PROMPT_TEXT else WHITE)
             }
             if (t <= DITCH_WARN_SECONDS) return "DITCH AHEAD - GET READY TO SURGE" to PROMPT_TEXT
         }
@@ -842,18 +841,24 @@ public class TrailRideView(context: Context) : View(context) {
         meterRect.set(meterLeft, baseline - 14f * density, meterLeft + meterW, baseline)
         px.color = METER_BACK
         canvas.drawRect(meterRect, px)
-        val fill = if (c.baseline.isNaN() || c.rpm == null) 0f else ((c.rpm - c.baseline) / (c.threshold - c.baseline)).coerceIn(0f, 1f)
+        val shown = when (c.state) {
+            CadenceState.Boosting -> 1f
+            CadenceState.Cruising -> if (c.baseline.isNaN() || c.rpm == null) 0f else ((c.rpm - c.baseline) / (c.threshold - c.baseline)).coerceIn(0f, 1f)
+            CadenceState.Establishing, CadenceState.Recovering -> c.steadyProgress
+            else -> 0f
+        }
         px.color = when (c.state) {
             CadenceState.Boosting -> METER_BOOST
-            CadenceState.Cruising -> if (c.armed) METER_READY else METER_IDLE
+            CadenceState.Cruising -> METER_READY
+            CadenceState.Establishing, CadenceState.Recovering -> METER_STEADY
             else -> METER_IDLE
         }
-        val shown = if (c.state == CadenceState.Boosting) 1f else fill
         canvas.drawRect(meterRect.left, meterRect.top, meterRect.left + meterW * shown, meterRect.bottom, px)
         val label = when (c.state) {
             CadenceState.Boosting -> "SURGE!"
             CadenceState.Establishing -> "LEARNING PACE"
-            CadenceState.Cruising -> if (c.armed) "SURGE TO JUMP" else "EASE OFF TO REARM"
+            CadenceState.Cruising -> "SURGE TO JUMP"
+            CadenceState.Recovering -> "STABILIZE PACE"
             else -> "JUMP --"
         }
         hudPaint.textSize = 12f * density
@@ -905,11 +910,15 @@ public class TrailRideView(context: Context) : View(context) {
                 g.riderVx, g.speed, g.phase, hold,
             ),
             String.format(
-                Locale.US, "rpm %s%s  age %d ms  baseline %s  threshold %s  %s  boost %d ms  surges %d  armed %s",
-                c.rpm?.toString() ?: "-", if (c.simulated) " (SIMULATED)" else "", c.sampleAgeMs,
+                Locale.US, "rpm %s%s  age %d ms  %s  armed %s  baseline %s  threshold %s  pace %s +/-%s n %d steady %d%%  confirm %d  near-baseline %s ago  boost %d ms  surges %d",
+                c.rpm?.toString() ?: "-", if (c.simulated) " (SIMULATED)" else "", c.sampleAgeMs, c.state, if (c.armed) "yes" else "no",
                 if (c.baseline.isNaN()) "-" else String.format(Locale.US, "%.1f", c.baseline),
                 if (c.threshold.isNaN()) "-" else String.format(Locale.US, "%.1f", c.threshold),
-                c.state, c.boostRemainingMs, c.activations, if (c.armed) "yes" else "no",
+                if (c.pace.isNaN()) "-" else String.format(Locale.US, "%.1f", c.pace),
+                if (c.paceSpread.isNaN()) "-" else String.format(Locale.US, "%.1f", c.paceSpread),
+                c.paceSamples, (c.steadyProgress * 100f).toInt(), c.confirming,
+                if (c.sinceNearMs < 0) "-" else "${c.sinceNearMs} ms",
+                c.boostRemainingMs, c.activations,
             ),
             String.format(
                 Locale.US, "jump %s  air %.2f s  last %s (%.2f s to ditch)  next ditch %s",
@@ -1054,6 +1063,7 @@ public class TrailRideView(context: Context) : View(context) {
         val METER_BOOST = TrailSprites.rgb(252, 160, 68)
         val METER_READY = TrailSprites.rgb(0, 200, 90)
         val METER_IDLE = TrailSprites.rgb(110, 110, 110)
+        val METER_STEADY = TrailSprites.rgb(60, 140, 200)
         val SIM_BUTTON = TrailSprites.rgb(60, 60, 60) and 0x00FFFFFF or (200 shl 24)
         val WARN_TEXT = TrailSprites.rgb(252, 140, 60)
         val GOOD_TEXT = TrailSprites.rgb(120, 240, 120)

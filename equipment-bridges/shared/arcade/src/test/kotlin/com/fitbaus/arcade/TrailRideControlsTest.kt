@@ -250,11 +250,72 @@ class TrailRideControlsTest {
         d.rpm = 90
         d.run(10f)
         assertEquals(1, d.session.jumpRequests, "held cadence cannot retrigger")
+        assertTrue(d.session.cadenceReading.armed, "but it does rearm against the held pace")
         d.rpm = 70
-        d.run(2f)
+        d.run(3f)
         d.rpm = 90
         d.run(2f)
-        assertEquals(2, d.session.jumpRequests, "a genuine drop rearms the next surge")
+        assertEquals(2, d.session.jumpRequests, "a steady lower pace rearms the next surge from there")
+    }
+
+    @Test
+    fun oneJumpPerSurgeWhileThePaceKeepsClimbing() {
+        val d = steadySession()
+        assertEquals(0, d.session.jumpRequests)
+        d.rpm = 90
+        d.run(1.2f)
+        assertEquals(1, d.session.jumpRequests)
+        d.run(8f) { assertTrue(it.session.live, "recovering never holds the ride") }
+        assertEquals(1, d.session.jumpRequests, "holding 90 does not jump again")
+        assertTrue(d.session.cadenceReading.armed)
+        assertEquals(90f, d.session.cadenceReading.baseline, 0.01f)
+        d.rpm = 106
+        d.run(1.2f)
+        assertEquals(2, d.session.jumpRequests, "a second surge from the stabilized 90 pace")
+        d.run(8f)
+        assertEquals(2, d.session.jumpRequests)
+        assertEquals(d.session.cadenceReading.activations, d.session.jumpRequests)
+    }
+
+    @Test
+    fun steadyPaceChangesNeverFabricateJumps() {
+        val d = steadySession()
+        for (pace in intArrayOf(80, 74, 85, 66, 76, 70, 81)) {
+            d.rpm = pace
+            d.run(4f)
+        }
+        assertEquals(0, d.session.cadenceReading.activations, "every step is under +12 from the pace before it")
+        assertEquals(0, d.session.jumpRequests)
+        assertEquals(81f, d.session.cadenceReading.baseline, 0.01f)
+    }
+
+    @Test
+    fun aSurgeAtAStabilizedPaceDuringAHoldIsNeverReplayed() {
+        val d = steadySession()
+        d.rpm = 90
+        d.run(1.2f)
+        d.run(6f)
+        assertEquals(1, d.session.jumpRequests)
+        d.face = HandSource.Lost
+        d.rpm = 106
+        d.run(2f)
+        assertEquals(2, d.session.cadenceReading.activations, "the detector saw the second surge")
+        assertEquals(1, d.session.jumpRequests, "but the ride was held")
+        d.face = HandSource.Camera
+        d.run(5f)
+        assertEquals(1, d.session.jumpRequests, "and it is not replayed when the ride resumes")
+        d.session.pause()
+        d.nowNanos += 5_000_000_000L
+        d.run(5f)
+        assertEquals(TrailHold.None, d.session.hold)
+        assertEquals(1, d.session.jumpRequests, "a host pause and a high-cadence return do not jump")
+        d.rpm = 90
+        d.run(3f)
+        d.rpm = 106
+        d.run(1.2f)
+        assertEquals(2, d.session.jumpRequests, "the next real surge jumps exactly once")
+        d.run(4f)
+        assertEquals(2, d.session.jumpRequests)
     }
 
     @Test

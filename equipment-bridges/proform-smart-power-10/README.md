@@ -135,11 +135,15 @@ gates and slaloms).
 - **Jump ditches with a pedal surge.** Ditches span the whole trail, marked
   by orange flags; steering cannot avoid them. When `SURGE NOW!` appears
   (about 1.7 s before the ditch), pedal clearly faster: by default 12 RPM
-  above the pace the game learned at the start. The surge must be confirmed
-  by fresh samples (about 0.5-0.75 s), and the jump only counts if it is
-  confirmed between 1.25 s and 0.12 s before the ditch. A surge that is too
-  early or too late fails. Each jump needs a new surge: ease off to rearm
-  (`EASE OFF TO REARM` on the meter).
+  above your current steady pace. The game keeps re-learning that pace
+  whenever you hold a cadence steady (within about ±3 RPM for 2 s), faster
+  or slower than before. The surge must climb there within about 2 s (a slow
+  drift in cadence is not a surge) and be confirmed by fresh samples (about
+  0.5-0.75 s), and the jump only counts if it is confirmed between 1.25 s and
+  0.12 s before the ditch. A surge that is too early or too late fails.
+  Each jump needs a new surge: after one, hold any steady pace for about 2 s
+  to rearm (`STABILIZE PACE` on the meter). You never have to slow down, and
+  holding a fast cadence never jumps again by itself.
 - **Holds.** Starting the camera, a lost face, missing or stale bike data,
   stopping pedaling, and the first ~3 s while it learns your pace all
   freeze the game; nothing advances and no life is lost while held. After
@@ -154,13 +158,13 @@ gates and slaloms).
 | --- | --- |
 | Face 10 Hz / 15 Hz | Face tracker preset. TRAIL RIDE keeps its own preference, separate from FLAK RUN. Default 10 Hz, 1 thread. |
 | Head sensitivity | Low / Medium / High / Very high steering gain. |
-| Jump surge threshold | +8 to +18 RPM above the learned baseline (default +12). |
+| Jump surge threshold | +8 to +18 RPM above the current steady-pace baseline (default +12). |
 | Recenter head now | Re-learns the neutral head position. |
 | Ditch timing guide | Draws the takeoff window on the trail. |
 | World seed | Random each ride, or a fixed seed for reproducible layouts (restarts). |
 | Simulated cadence | Developer-only fake RPM with an on-screen `SIMULATED SURGE` button. The HUD is labeled `SIMULATED`, and simulated input never reaches the bike. |
 | Restart ride now | Starts a new ride. |
-| Diagnostics overlay | Shared with the other games. Shows face age and x, steering target vs rider x, trail center and lateral error, RPM age/baseline/threshold/boost, jump state and time to the next ditch, last crash reason, frame/update/draw timings, sprite count, memory and world sizes. |
+| Diagnostics overlay | Shared with the other games. Shows face age and x, steering target vs rider x, trail center and lateral error, RPM age, detector state, armed, baseline/threshold, current pace and spread, steady progress, pending confirmations, time since the last near-baseline sample and boost, jump state and time to the next ditch, last crash reason, frame/update/draw timings, sprite count, memory and world sizes. |
 
 TRAIL RIDE has not yet been qualified on the physical console. Use the
 diagnostics overlay (frame, update and draw p50/p90) with face tracking
