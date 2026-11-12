@@ -57,6 +57,24 @@ internal object NativeHandBridge {
     external fun nativeDestroy(handle: Long)
 }
 
+/** JNI endpoint for the UVC source. The callback is synchronous, so native owns its reusable
+ * NV21 buffer until [onFrame] returns. */
+internal object UvcNative {
+    interface Sink {
+        fun onFrame(nv21: ByteArray, width: Int, height: Int)
+    }
+
+    @JvmStatic
+    external fun open(fileDescriptor: Int, sink: Sink): Long
+
+    @JvmStatic
+    external fun close(handle: Long)
+
+    fun ensureLoaded() {
+        System.loadLibrary(NativeHandModels.LIBRARY)
+    }
+}
+
 internal class NativeHandModels private constructor(private var handle: Long) : HandModelBackend {
     override fun detectPalms(frame: ByteArray, width: Int, height: Int, minScore: Float, out: FloatArray, maxOut: Int, times: FloatArray): Int =
         if (handle == 0L) CLOSED else NativeHandBridge.nativeDetectPalms(handle, frame, width, height, minScore, out, maxOut, times)
