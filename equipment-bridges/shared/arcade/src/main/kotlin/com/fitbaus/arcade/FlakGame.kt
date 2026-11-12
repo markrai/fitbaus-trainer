@@ -41,9 +41,28 @@ internal data class FlakConfig(
     val firstMissileAt: Float = 4f,
     val firstTurretAt: Float = 6f,
     val conflictSeconds: Float = 1.0f,
+    val bomberTopFraction: Float = 0.1f,
+    val bomberSpeed: Float = 150f,
+    val bomberHalfWidth: Float = 8f,
+    val bomberHalfHeight: Float = 3f,
+    val bomberWarnSeconds: Float = 1.0f,
+    val bombSpeedX: Float = 55f,
+    val bombSpeedY: Float = 75f,
+    val bombHalfSize: Float = 2f,
+    val bombAimJitter: Float = 14f,
+    val firstBomberAt: Float = 12f,
+    val restartCountdownSeconds: Float = 3f,
     val step: Float = 1f / 60f,
     val maxFrame: Float = 0.1f,
-)
+) {
+    init {
+        require(bomberSpeed > sideSpeed && bomberSpeed > boostScrollSpeed) { "the black bomber must always outrun the jet" }
+    }
+
+    /** The bomber always flies 10% down from the top of the playfield. */
+    val bomberY: Float
+        get() = height * bomberTopFraction
+}
 
 internal enum class FlakPhase { Playing, GameOver }
 
@@ -69,6 +88,18 @@ internal class Shell(val startX: Float, val startY: Float, val flight: Float) {
     var resolved = false
 }
 
+/**
+ * Black bomber: crosses from left to right at [FlakConfig.bomberY], faster than the jet can move,
+ * drops one bomb when it passes [dropX], and is gone once it leaves the right edge.
+ */
+internal class Bomber(var x: Float, val y: Float, val speed: Float, var warn: Float, val dropX: Float) {
+    var dropped = false
+    var resolved = false
+}
+
+/** Bomb falling in a straight diagonal line until it hits the jet or the ground. */
+internal class Bomb(var x: Float, var y: Float, val vx: Float, val vy: Float)
+
 internal class Blast(val x: Float, val y: Float, var age: Float, val flak: Boolean = false)
 
 internal class FlakEvent(val atSeconds: Float, val text: String)
@@ -77,6 +108,7 @@ internal class FlakEvent(val atSeconds: Float, val text: String)
  * FLAK RUN simulation in a 256x144 logical playfield, advanced in fixed steps. Missiles arrive
  * from the right, sometimes in pairs with a gap between them: change altitude to dodge. Ground
  * turrets fire tracking shells: only a timed dash's extra speed makes a shell fall behind.
+ * Black bombers streak across the top from the left and drop a diagonal bomb: avoid both.
  * Head position steers the jet up/down and left/right.
  */
 internal class FlakGame(
@@ -88,6 +120,8 @@ internal class FlakGame(
     val missiles = ArrayList<Missile>()
     val turrets = ArrayList<Turret>()
     val shells = ArrayList<Shell>()
+    val bombers = ArrayList<Bomber>()
+    val bombs = ArrayList<Bomb>()
     val blasts = ArrayList<Blast>()
     val events = ArrayList<FlakEvent>()
 
@@ -117,9 +151,18 @@ internal class FlakGame(
         private set
     var hits: Int = 0
         private set
+
+    /** Seconds left in the 3-2-1 countdown after game over; the game restarts by itself at zero. */
+    var restartIn: Float = 0f
+        private set
+    var bombsDodged: Int = 0
+        private set
+    var bombersPassed: Int = 0
+        private set
     private var scoreFraction = 0f
     private var nextMissile = config.firstMissileAt
     private var nextTurret = config.firstTurretAt
+    private var nextBomber = config.firstBomberAt
     private var accumulator = 0f
     private var lastFrameNanos = Long.MIN_VALUE
 
@@ -157,7 +200,14 @@ internal class FlakGame(
     }
 
     fun step(dt: Float, targetY: Float, boost: Boolean, targetX: Float = 0.3f) {
-        if (phase != FlakPhase.Playing) return
+        if (phase == FlakPhase.GameOver) {
+            restartIn -= dt
+            if (restartIn <= 0f) {
+                reset()
+                log("auto restart after countdown")
+            }
+            return
+        }
         elapsed += dt
         boosting = boost
         moveJet(dt, targetY, targetX, boost)
@@ -174,6 +224,8 @@ internal class FlakGame(
         updateMissiles(dt)
         updateTurrets(dt, speed)
         updateShells(dt, speed)
+        updateBombers(dt)
+        updateBombs(dt)
         val iterator = blasts.iterator()
         while (iterator.hasNext()) {
             val b = iterator.next()
@@ -198,10 +250,33 @@ internal class FlakGame(
         turrets += Turret(config.width + 8f, fireIn)
     }
 
+    /** Sends a black bomber in from the left; by default it aims its bomb at where the jet is now. */
+    fun spawnBomber(dropX: Float = aimBomb(), warn: Float = config.bomberWarnSeconds, speed: Float = config.bomberSpeed) {
+        bombers += Bomber(-config.bomberHalfWidth - 2f, config.bomberY, speed, warn, dropX.coerceIn(BOMB_DROP_MIN, config.width - BOMB_DROP_MARGIN))
+    }
+
+    /** Drop point whose diagonal passes near the jet's current position, with some random spread. */
+    fun aimBomb(): Float {
+        val fall = ((jetY - config.bomberY - config.bomberHalfHeight) / config.bombSpeedY).coerceAtLeast(0f)
+        return jetX - config.bombSpeedX * fall + (rng.nextFloat() * 2f - 1f) * config.bombAimJitter
+    }
+
+    /** Seconds until a bomber's bomb reaches the jet's current height. */
+    fun bomberImpact(b: Bomber): Float = b.warn.coerceAtLeast(0f) + ((b.dropX - b.x) / b.speed).coerceAtLeast(0f) +
+        ((jetY - b.y - config.bomberHalfHeight) / config.bombSpeedY).coerceAtLeast(0f)
+
     fun restart() {
+        reset()
+        resetClock()
+        log("restart")
+    }
+
+    private fun reset() {
         missiles.clear()
         turrets.clear()
         shells.clear()
+        bombers.clear()
+        bombs.clear()
         blasts.clear()
         events.clear()
         phase = FlakPhase.Playing
@@ -216,10 +291,12 @@ internal class FlakGame(
         missilesDodged = 0
         shellsDodged = 0
         hits = 0
+        bombsDodged = 0
+        bombersPassed = 0
         nextMissile = config.firstMissileAt
         nextTurret = config.firstTurretAt
-        resetClock()
-        log("restart")
+        nextBomber = config.firstBomberAt
+        restartIn = 0f
     }
 
     fun bandY(target: Float): Float = config.bandTop + target.coerceIn(0f, 1f) * (config.bandBottom - config.bandTop)
@@ -238,16 +315,26 @@ internal class FlakGame(
     }
 
     private fun pendingImpacts(): List<Float> {
-        val out = ArrayList<Float>(turrets.size + shells.size)
+        val out = ArrayList<Float>(turrets.size + shells.size + bombers.size + bombs.size)
         for (t in turrets) if (!t.fired) out += t.fireIn + config.shellFlightSeconds
         for (s in shells) if (!s.resolved) out += s.flight - s.age
+        out += bombImpacts()
+        return out
+    }
+
+    private fun bombImpacts(): List<Float> {
+        val out = ArrayList<Float>(bombers.size + bombs.size)
+        for (b in bombers) if (!b.dropped) out += bomberImpact(b)
+        for (b in bombs) if (b.y < jetY) out += (jetY - b.y) / b.vy
         return out
     }
 
     private fun schedule() {
         if (elapsed >= nextTurret) {
             val impact = config.turretFireSeconds + config.shellFlightSeconds
-            if (missiles.any { !it.resolved && abs(missileArrival(it) - impact) < config.conflictSeconds }) {
+            if (missiles.any { !it.resolved && abs(missileArrival(it) - impact) < config.conflictSeconds } ||
+                bombImpacts().any { abs(it - impact) < config.conflictSeconds }
+            ) {
                 nextTurret = elapsed + 0.5f
             } else {
                 spawnTurret()
@@ -267,6 +354,19 @@ internal class FlakGame(
                     spawnMissile(y, speed)
                 }
                 nextMissile = elapsed + (3.2f - 0.3f * level).coerceAtLeast(1.8f) + rng.nextFloat()
+            }
+        }
+        if (elapsed >= nextBomber) {
+            val dropX = aimBomb().coerceIn(BOMB_DROP_MIN, config.width - BOMB_DROP_MARGIN)
+            val probe = Bomber(-config.bomberHalfWidth - 2f, config.bomberY, config.bomberSpeed, config.bomberWarnSeconds, dropX)
+            val impact = bomberImpact(probe)
+            val clash = pendingImpacts().any { abs(it - impact) < config.conflictSeconds } ||
+                missiles.any { !it.resolved && abs(missileArrival(it) - impact) < config.conflictSeconds }
+            if (clash) {
+                nextBomber = elapsed + 0.5f
+            } else {
+                bombers += probe
+                nextBomber = elapsed + (13f - level).coerceAtLeast(7f) + rng.nextFloat() * 4f
             }
         }
     }
@@ -334,6 +434,55 @@ internal class FlakGame(
         }
     }
 
+    private fun updateBombers(dt: Float) {
+        val iterator = bombers.iterator()
+        while (iterator.hasNext()) {
+            val b = iterator.next()
+            if (b.warn > 0f) {
+                b.warn -= dt
+                continue
+            }
+            b.x += b.speed * dt
+            if (!b.dropped && b.x >= b.dropX) {
+                b.dropped = true
+                bombs += Bomb(b.x, b.y + config.bomberHalfHeight, config.bombSpeedX, config.bombSpeedY)
+            }
+            if (!b.resolved && abs(b.x - jetX) < config.bomberHalfWidth + config.jetHalfWidth && abs(b.y - jetY) < config.bomberHalfHeight + config.jetHalfHeight) {
+                b.resolved = true
+                hit("bomber")
+            }
+            if (b.x - config.bomberHalfWidth > config.width + 2f) {
+                if (!b.resolved) {
+                    b.resolved = true
+                    bombersPassed += 1
+                    score += BOMBER_POINTS
+                }
+                iterator.remove()
+            }
+        }
+    }
+
+    private fun updateBombs(dt: Float) {
+        val iterator = bombs.iterator()
+        while (iterator.hasNext()) {
+            val b = iterator.next()
+            b.x += b.vx * dt
+            b.y += b.vy * dt
+            if (abs(b.x - jetX) < config.bombHalfSize + config.jetHalfWidth && abs(b.y - jetY) < config.bombHalfSize + config.jetHalfHeight) {
+                blasts += Blast(b.x, b.y, 0f)
+                iterator.remove()
+                hit("bomb")
+                continue
+            }
+            if (b.y >= config.groundTop) {
+                blasts += Blast(b.x, config.groundTop - 3f, 0f)
+                iterator.remove()
+                bombsDodged += 1
+                score += BOMB_POINTS
+            }
+        }
+    }
+
     private fun hit(what: String) {
         if (invulnerable > 0f) return
         lives -= 1
@@ -343,6 +492,7 @@ internal class FlakGame(
         log("hit by $what, lives $lives")
         if (lives <= 0) {
             phase = FlakPhase.GameOver
+            restartIn = config.restartCountdownSeconds
             log("game over, score $score")
         }
     }
@@ -356,6 +506,10 @@ internal class FlakGame(
     companion object {
         const val MISSILE_POINTS = 25
         const val SHELL_POINTS = 40
+        const val BOMB_POINTS = 30
+        const val BOMBER_POINTS = 15
+        const val BOMB_DROP_MIN = 12f
+        const val BOMB_DROP_MARGIN = 60f
         const val BLAST_SECONDS = 0.4f
         const val MAX_EVENTS = 6
     }

@@ -4,6 +4,7 @@ package com.fitbaus.arcade
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -112,6 +113,132 @@ class FlakGameTest {
     }
 
     @Test
+    fun theBlackBomberCrossesLeftToRightAtTenPercentFasterThanTheJetAndIsGone() {
+        val g = manual()
+        val cfg = g.config
+        assertEquals(cfg.height * 0.1f, cfg.bomberY, 1e-4f)
+        assertTrue(cfg.bomberSpeed > cfg.sideSpeed && cfg.bomberSpeed > cfg.boostScrollSpeed, "always faster than our plane")
+        g.spawnBomber(dropX = 200f, warn = 0f)
+        val b = g.bombers.single()
+        assertTrue(b.x < 0f, "enters from the left edge")
+        var lastX = b.x
+        var lead = Float.NaN
+        var everAhead = false
+        while (g.bombers.isNotEmpty()) {
+            g.step(cfg.step, 0.9f, true, 1f)
+            if (g.bombers.isEmpty()) break
+            assertEquals(cfg.bomberY, b.y, 0f, "flies straight and level")
+            assertTrue(b.x > lastX)
+            lastX = b.x
+            if (b.x > g.jetX) {
+                everAhead = true
+                val gap = b.x - g.jetX
+                if (!lead.isNaN()) assertTrue(gap > lead, "the jet cannot keep up, even flying right on a dash")
+                lead = gap
+            }
+        }
+        assertTrue(everAhead)
+        assertTrue(lastX > cfg.width, "leaves past the right edge, then is removed")
+        assertEquals(1, g.bombersPassed)
+        assertEquals(3, g.lives)
+    }
+
+    @Test
+    fun theBombFallsDiagonallyAndExplodesOnTheGround() {
+        val g = manual()
+        g.spawnBomber(dropX = 180f, warn = 0f)
+        var first: Bomb? = null
+        var startX = 0f
+        var startY = 0f
+        var lastBlasts = 0
+        var groundBlast: Blast? = null
+        repeat((4f / g.config.step).toInt()) {
+            g.step(g.config.step, 0.95f, false, 0f)
+            val bomb = g.bombs.firstOrNull()
+            if (first == null && bomb != null) {
+                first = bomb
+                startX = bomb.x
+                startY = bomb.y
+                assertEquals(180f, bomb.x, g.config.bomberSpeed * g.config.step + 0.01f, "dropped as the bomber passes its drop point")
+            }
+            if (bomb != null && bomb.y > startY + 10f) {
+                assertEquals(g.config.bombSpeedX / g.config.bombSpeedY, (bomb.x - startX) / (bomb.y - startY), 1e-3f, "a straight diagonal line")
+            }
+            if (g.blasts.size > lastBlasts) groundBlast = g.blasts.last()
+            lastBlasts = g.blasts.size
+        }
+        assertTrue(first != null)
+        assertTrue(g.bombs.isEmpty())
+        assertEquals(1, g.bombsDodged)
+        assertEquals(g.config.groundTop - 3f, groundBlast!!.y, 0.01f, "it bursts on the ground")
+        assertTrue(groundBlast!!.x > startX + 50f, "well to the right of where it was dropped")
+        assertEquals(3, g.lives)
+    }
+
+    private fun aimedDrop(g: FlakGame): Float =
+        g.jetX - g.config.bombSpeedX * (g.jetY - g.config.bomberY - g.config.bomberHalfHeight) / g.config.bombSpeedY
+
+    @Test
+    fun aBombAimedAtTheJetExplodesOnItUnlessTheJetMoves() {
+        val hit = manual()
+        hit.spawnBomber(dropX = aimedDrop(hit), warn = 0f)
+        run(hit, 4f)
+        assertEquals(2, hit.lives, "the bomb bursts on the jet")
+        assertEquals(1, hit.hits)
+        assertEquals(0, hit.bombsDodged)
+        assertTrue(hit.bombs.isEmpty())
+        assertEquals(1, hit.bombersPassed, "the bomber itself flew high above")
+
+        val dodge = manual()
+        dodge.spawnBomber(dropX = aimedDrop(dodge), warn = 0f)
+        run(dodge, 4f, targetX = { t -> if (t < 0.4f) 0.3f else 1f })
+        assertEquals(3, dodge.lives, "sliding away after the drop avoids it")
+        assertEquals(1, dodge.bombsDodged)
+    }
+
+    @Test
+    fun flyingIntoTheBomberCostsALifeAndItKeepsGoing() {
+        val g = manual()
+        g.spawnBomber(dropX = 999f, warn = 1f)
+        run(g, 4f, targetY = { 0f })
+        assertEquals(2, g.lives, "the jet at the top of its band meets the bomber")
+        assertEquals(1, g.hits)
+        assertTrue(g.bombers.isEmpty(), "it still leaves the screen")
+        assertEquals(0, g.bombersPassed)
+        assertEquals(1, g.bombsDodged, "its bomb, dropped far right, lands harmlessly")
+    }
+
+    @Test
+    fun aSlowBomberIsRejected() {
+        assertThrows(IllegalArgumentException::class.java) { FlakConfig(bomberSpeed = 70f) }
+    }
+
+    @Test
+    fun bombersArriveAtRandomIntervalsWithVaryingDrops() {
+        val g = FlakGame(FlakConfig(lives = 1000), random = Random(3))
+        val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Bomber, Boolean>())
+        val drops = HashSet<Int>()
+        val spawnTimes = ArrayList<Float>()
+        repeat((150f / g.config.step).toInt()) {
+            g.step(g.config.step, 0.5f, false, 0.3f)
+            for (b in g.bombers) {
+                assertEquals(g.config.bomberY, b.y, 0f)
+                if (seen.add(b)) {
+                    drops += b.dropX.toInt()
+                    spawnTimes += g.elapsed
+                }
+            }
+            if (g.phase == FlakPhase.GameOver) g.restart()
+        }
+        assertTrue(spawnTimes.size >= 7, "bombers keep coming: ${spawnTimes.size} in 150 s")
+        assertTrue(spawnTimes.first() >= g.config.firstBomberAt - 0.1f)
+        val gaps = spawnTimes.zipWithNext { a, b -> b - a }
+        assertTrue(gaps.all { it >= 6.9f }, "spaced out: $gaps")
+        assertTrue(gaps.toSet().size > 3, "not on a fixed beat: $gaps")
+        assertTrue(drops.size > 3, "drop points vary: $drops")
+    }
+
+    @Test
     fun boostingDoesNotDodgeMissiles() {
         val g = manual()
         g.spawnMissile(g.jetY)
@@ -148,17 +275,41 @@ class FlakGameTest {
         assertEquals(1, g.hits)
     }
 
-    @Test
-    fun threeHitsEndTheGameAndRestartResets() {
+    /** Steps until the third hit, so the game is exactly at the start of its countdown. */
+    private fun gameJustOver(): FlakGame {
         val g = manual()
-        repeat(3) {
+        repeat(2) {
             g.spawnMissile(g.jetY)
             run(g, 6f)
         }
-        assertEquals(FlakPhase.GameOver, g.phase)
+        g.spawnMissile(g.jetY)
+        var steps = 0
+        while (g.phase == FlakPhase.Playing) {
+            g.step(g.config.step, 0.5f, false)
+            steps += 1
+            assertTrue(steps < 600, "third hit")
+        }
+        return g
+    }
+
+    @Test
+    fun threeHitsEndTheGameThenACountdownRestartsItByItself() {
+        val g = gameJustOver()
+        assertEquals(0, g.lives)
+        assertEquals(3f, g.restartIn, 1e-4f, "a 3-2-1 countdown starts")
         val score = g.score
-        run(g, 2f)
-        assertEquals(score, g.score, "nothing advances after game over")
+        val elapsed = g.elapsed
+        run(g, 2.9f)
+        assertEquals(FlakPhase.GameOver, g.phase, "still counting down")
+        assertEquals(score, g.score, "nothing else advances during the countdown")
+        assertEquals(elapsed, g.elapsed)
+        assertTrue(g.restartIn > 0f && g.restartIn < 0.2f)
+        run(g, 0.2f)
+        assertEquals(FlakPhase.Playing, g.phase, "restarted without a tap")
+        assertEquals(3, g.lives)
+        assertTrue(g.score <= 2, "fresh score")
+        assertTrue(g.missiles.isEmpty())
+        assertEquals(0f, g.restartIn)
         g.restart()
         assertEquals(FlakPhase.Playing, g.phase)
         assertEquals(3, g.lives)
@@ -237,6 +388,27 @@ class FlakGameTest {
     }
 
     @Test
+    fun theCountdownRunsOnTheGameClockAtAnyFrameRate() {
+        fun framesToRestart(frameMs: Long): Float {
+            val g = gameJustOver()
+            var now = 0L
+            g.advance(now, 0.5f, false)
+            var waited = 0f
+            while (g.phase == FlakPhase.GameOver) {
+                now += frameMs * 1_000_000L
+                waited += frameMs / 1000f
+                g.advance(now, 0.5f, false)
+                assertTrue(waited < 10f)
+            }
+            return waited
+        }
+        for (ms in listOf(16L, 33L, 50L)) {
+            val waited = framesToRestart(ms)
+            assertTrue(waited in 0f..3.2f, "restarted after $waited s at $ms ms frames")
+        }
+    }
+
+    @Test
     fun resumingNeverCatchesUpOnMissedTime() {
         val g = manual()
         g.advance(0L, 0.5f, false)
@@ -268,18 +440,18 @@ class FlakGameTest {
         val calibrating = FaceControlReading(FaceControlState.Calibrating, 0.4f, Float.NaN, 0.5f, 10L, 300L)
         fun cad(state: CadenceState) = CadenceReading(state, 60, 100L, 60f, 72f, 0L, 0, false)
         val cruising = cad(CadenceState.Cruising)
-        assertEquals(FlakHold.None, s.hold(FlakPhase.Playing, CameraState.Ready, tracking, cruising))
-        assertEquals(FlakHold.FaceLost, s.hold(FlakPhase.Playing, CameraState.Ready, lost, cruising))
-        assertEquals(FlakHold.Resuming, s.hold(FlakPhase.Playing, CameraState.Ready, unstable, cruising), "fresh but not yet stable")
-        assertEquals(FlakHold.None, s.hold(FlakPhase.Playing, CameraState.Ready, tracking, cruising))
-        assertEquals(FlakHold.None, s.hold(FlakPhase.Playing, CameraState.Ready, unstable, cruising), "already running: no extra hold")
-        assertEquals(FlakHold.Calibrating, s.hold(FlakPhase.Playing, CameraState.Ready, calibrating, cruising))
-        assertEquals(FlakHold.NoTelemetry, s.hold(FlakPhase.Playing, CameraState.Ready, tracking, cad(CadenceState.Stale)))
-        assertEquals(FlakHold.NoTelemetry, s.hold(FlakPhase.Playing, CameraState.Ready, tracking, cad(CadenceState.NoTelemetry)))
-        assertEquals(FlakHold.NotPedaling, s.hold(FlakPhase.Playing, CameraState.Ready, tracking, cad(CadenceState.Stopped)))
-        assertEquals(FlakHold.CameraUnavailable, s.hold(FlakPhase.Playing, CameraState.Unavailable, tracking, cruising))
-        assertEquals(FlakHold.CameraStarting, s.hold(FlakPhase.Playing, CameraState.Starting, tracking, cruising))
-        assertEquals(FlakHold.GameOver, s.hold(FlakPhase.GameOver, CameraState.Ready, tracking, cruising))
+        assertEquals(FlakHold.None, s.hold(CameraState.Ready, tracking, cruising))
+        assertEquals(FlakHold.FaceLost, s.hold(CameraState.Ready, lost, cruising))
+        assertEquals(FlakHold.Resuming, s.hold(CameraState.Ready, unstable, cruising), "fresh but not yet stable")
+        assertEquals(FlakHold.None, s.hold(CameraState.Ready, tracking, cruising))
+        assertEquals(FlakHold.None, s.hold(CameraState.Ready, unstable, cruising), "already running: no extra hold")
+        assertEquals(FlakHold.Calibrating, s.hold(CameraState.Ready, calibrating, cruising))
+        assertEquals(FlakHold.NoTelemetry, s.hold(CameraState.Ready, tracking, cad(CadenceState.Stale)))
+        assertEquals(FlakHold.NoTelemetry, s.hold(CameraState.Ready, tracking, cad(CadenceState.NoTelemetry)))
+        assertEquals(FlakHold.NotPedaling, s.hold(CameraState.Ready, tracking, cad(CadenceState.Stopped)))
+        assertEquals(FlakHold.CameraUnavailable, s.hold(CameraState.Unavailable, tracking, cruising))
+        assertEquals(FlakHold.CameraStarting, s.hold(CameraState.Starting, tracking, cruising))
+        assertEquals(FlakHold.None, s.hold(CameraState.Ready, tracking, cruising), "game over is a countdown, not a hold")
         assertEquals("PEDAL TO FLY", s.message(FlakHold.NotPedaling, cruising))
         assertTrue(s.message(FlakHold.NoTelemetry, cad(CadenceState.Stale))!!.contains("STALE"))
         assertEquals(null, s.message(FlakHold.None, cruising))

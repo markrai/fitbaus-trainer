@@ -13,17 +13,20 @@ import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
 import java.util.Locale
+import kotlin.math.ceil
 import kotlin.math.sin
 
-internal enum class FlakHold { None, CameraStarting, CameraUnavailable, FaceLost, Calibrating, NoTelemetry, NotPedaling, Resuming, GameOver }
+internal enum class FlakHold { None, CameraStarting, CameraUnavailable, FaceLost, Calibrating, NoTelemetry, NotPedaling, Resuming }
 
-/** Decides whether the simulation may run. Any missing controller holds the game; nothing is lost while held. */
+/**
+ * Decides whether the simulation may run. Any missing controller holds the game; nothing is lost while held.
+ * Game over is not a hold: its 3-2-1 restart countdown runs in game time, so it pauses with any other hold.
+ */
 internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
     private var running = false
 
-    fun hold(phase: FlakPhase, camera: CameraState, face: FaceControlReading, cadence: CadenceReading): FlakHold {
+    fun hold(camera: CameraState, face: FaceControlReading, cadence: CadenceReading): FlakHold {
         val hold = when {
-            phase == FlakPhase.GameOver -> FlakHold.GameOver
             camera == CameraState.Unavailable || camera == CameraState.PermissionDenied -> FlakHold.CameraUnavailable
             camera != CameraState.Ready -> FlakHold.CameraStarting
             face.state == FaceControlState.Lost -> FlakHold.FaceLost
@@ -39,7 +42,6 @@ internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
 
     fun message(hold: FlakHold, cadence: CadenceReading): String? = when (hold) {
         FlakHold.None -> null
-        FlakHold.GameOver -> "GAME OVER - TAP TO FLY AGAIN"
         FlakHold.CameraUnavailable -> "CAMERA UNAVAILABLE - FLAK RUN NEEDS FACE STEERING"
         FlakHold.CameraStarting -> "STARTING CAMERA..."
         FlakHold.FaceLost -> "FACE LOST - LOOK AT THE SCREEN"
@@ -95,7 +97,23 @@ internal object FlakSprites {
         ".Y..O..Y",
         "O.......",
     )
+    val BOMBER = arrayOf(
+        "NN................",
+        "NNN......NN.......",
+        "NNNNNNNNNNNNNNN...",
+        "DNNNNNNNNNNNNNNRN.",
+        "NNNNNNNNNNNNNNNNNN",
+        "NNN......NN.......",
+        "NN................",
+    )
+    val BOMB = arrayOf(
+        ".NN.",
+        "NNNN",
+        "NRRN",
+        ".NN.",
+    )
     val COLORS = mapOf(
+        'N' to Color.rgb(16, 16, 20),
         'W' to Color.rgb(252, 252, 252),
         'G' to Color.rgb(188, 188, 188),
         'D' to Color.rgb(116, 116, 116),
@@ -157,6 +175,8 @@ public class FlakView(context: Context) : View(context) {
     private val turret = FlakSprites.bitmap(FlakSprites.TURRET)
     private val puff = FlakSprites.bitmap(FlakSprites.PUFF)
     private val blast = FlakSprites.bitmap(FlakSprites.BLAST)
+    private val bomber = FlakSprites.bitmap(FlakSprites.BOMBER)
+    private val bomb = FlakSprites.bitmap(FlakSprites.BOMB)
     private val farHeights = IntArray(LOGICAL_W * 2) { i -> (18 + 10 * sin(i * 0.045) + 6 * sin(i * 0.13 + 1.7)).toInt() / 2 * 2 }
     private val px = Paint()
     private val scaledPaint = Paint().apply { isFilterBitmap = false }
@@ -207,7 +227,7 @@ public class FlakView(context: Context) : View(context) {
         diagnosticsText = if (failure != null && camera != CameraState.Ready) failure else diagnostics
         faceReading = face.update(position, now)
         cadenceReading = if (simulatedCadence) simulate(now) else cadence.update(connected, initialized, rpm, rpmCurrent, rpmObservedAt, now)
-        hold = supervisor.hold(game.phase, camera, faceReading, cadenceReading)
+        hold = supervisor.hold(camera, faceReading, cadenceReading)
         val start = System.nanoTime()
         if (hold == FlakHold.None) {
             lastSteps = game.advance(now, faceReading.target, cadenceReading.boosting, faceReading.targetX)
@@ -311,6 +331,26 @@ public class FlakView(context: Context) : View(context) {
                 c.drawBitmap(missile, m.x - missile.width / 2f, m.y - missile.height / 2f, null)
             }
         }
+        for (b in game.bombers) {
+            if (b.warn > 0f) {
+                if (blink) {
+                    px.color = WARN
+                    c.drawRect(2f, b.y - 3f, 6f, b.y + 3f, px)
+                    c.drawRect(6f, b.y - 1f, 9f, b.y + 1f, px)
+                }
+            } else {
+                c.drawBitmap(bomber, b.x - bomber.width / 2f, b.y - bomber.height / 2f, null)
+            }
+        }
+        for (b in game.bombs) {
+            px.color = SHELL_TRAIL
+            for (k in 1..3) {
+                val tx = b.x - b.vx * 0.05f * k
+                val ty = b.y - b.vy * 0.05f * k
+                c.drawRect(tx - 0.5f, ty - 0.5f, tx + 0.5f, ty + 0.5f, px)
+            }
+            c.drawBitmap(bomb, b.x - bomb.width / 2f, b.y - bomb.height / 2f, null)
+        }
         val visible = game.invulnerable <= 0f || (game.elapsed * 12f).toInt() % 2 == 0
         if (visible && game.phase == FlakPhase.Playing) {
             val jx = game.jetX - jet.width / 2f
@@ -340,15 +380,23 @@ public class FlakView(context: Context) : View(context) {
         fbDst.set(left, top, left + dw, top + dh)
         canvas.drawBitmap(fb, fbSrc, fbDst, scaledPaint)
         drawHud(canvas, left.toFloat(), top.toFloat(), dw.toFloat())
-        supervisor.message(hold, cadenceReading)?.let { text ->
-            bannerPaint.textSize = 7f * scale
-            val cy = top + dh * 0.45f
-            val half = bannerPaint.measureText(text) / 2f + 4f * scale
-            canvas.drawRect(w / 2f - half, cy - bannerPaint.textSize, w / 2f + half, cy + 4f * scale, backPaint)
-            canvas.drawText(text, w / 2f, cy, bannerPaint)
+        val holdText = supervisor.message(hold, cadenceReading)
+        if (holdText != null) {
+            banner(canvas, holdText, w / 2f, top + dh * 0.45f, 7f * scale, scale)
+        } else if (game.phase == FlakPhase.GameOver) {
+            banner(canvas, String.format(Locale.US, "GAME OVER  -  SCORE %06d", game.score), w / 2f, top + dh * 0.32f, 7f * scale, scale)
+            val count = ceil(game.restartIn.toDouble()).toInt().coerceIn(1, 3)
+            banner(canvas, count.toString(), w / 2f, top + dh * 0.62f, 22f * scale, scale)
         }
         if (simulatedCadence) drawSimButton(canvas, left + dw.toFloat(), top + dh.toFloat(), scale)
         if (diagnosticsOverlay) drawOverlay(canvas, left.toFloat() + 4f * density, top.toFloat() + 14f * scale)
+    }
+
+    private fun banner(canvas: Canvas, text: String, cx: Float, cy: Float, size: Float, scale: Int) {
+        bannerPaint.textSize = size
+        val half = bannerPaint.measureText(text) / 2f + 4f * scale
+        canvas.drawRect(cx - half, cy - size, cx + half, cy + size * 0.25f + 2f * scale, backPaint)
+        canvas.drawText(text, cx, cy, bannerPaint)
     }
 
     private fun drawHud(canvas: Canvas, left: Float, top: Float, width: Float) {
@@ -422,8 +470,9 @@ public class FlakView(context: Context) : View(context) {
             String.format(Locale.US, "frame p50 %.0f / p90 %.0f ms  update p50 %.2f / p90 %.2f ms  steps %d  cpu %s  %s",
                 frameWindow.percentile(0.5f), frameWindow.percentile(0.9f), updateWindow.percentile(0.5f), updateWindow.percentile(0.9f), lastSteps,
                 d?.processCpuPercent?.let { if (it.isNaN()) "-" else String.format(Locale.US, "%.0f%%", it) } ?: "-", memoryText),
-            String.format(Locale.US, "level %d  missiles %d dodged  shells %d dodged  hits %d  t %.0f s  on screen: %d missiles %d shells",
-                game.level, game.missilesDodged, game.shellsDodged, game.hits, game.elapsed, game.missiles.size, game.shells.size),
+            String.format(Locale.US, "level %d  missiles %d dodged  shells %d dodged  bombs %d dodged  bombers %d passed  hits %d  t %.0f s  on screen: %d missiles %d shells %d bombers %d bombs",
+                game.level, game.missilesDodged, game.shellsDodged, game.bombsDodged, game.bombersPassed, game.hits, game.elapsed,
+                game.missiles.size, game.shells.size, game.bombers.size, game.bombs.size),
             "events: " + game.events.takeLast(3).joinToString(" | ") { String.format(Locale.US, "%.0fs %s", it.atSeconds, it.text) },
             diagnosticsText,
         )
@@ -449,7 +498,6 @@ public class FlakView(context: Context) : View(context) {
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) simulatedPress = false
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             simulatedPress = false
-            if (game.phase == FlakPhase.GameOver) restartGame()
             performClick()
         }
         return true
