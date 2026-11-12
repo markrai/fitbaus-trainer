@@ -521,7 +521,7 @@ public class FlakView(context: Context) : View(context) {
         val SENSITIVITIES = floatArrayOf(4f, 6f, 8f, 11f)
         val SENSITIVITY_LABELS = arrayOf("Low", "Medium", "High", "Very high")
         val DELTAS = intArrayOf(8, 10, 12, 15, 18)
-        val SKY = Color.rgb(104, 136, 252)
+        val SKY = Color.rgb(18, 44, 130)
         val MOUNTAIN = Color.rgb(136, 20, 0)
         val SAND = Color.rgb(240, 188, 60)
         val SAND_DARK = Color.rgb(228, 92, 16)
