@@ -12,6 +12,7 @@ import android.widget.TextView
 import com.fitbaus.arcade.FingerMathView
 import com.fitbaus.arcade.FlakView
 import com.fitbaus.arcade.PlaygroundView
+import com.fitbaus.arcade.TrailRideView
 import com.fitbaus.bikebridge.host.BridgeUiStateMapper
 
 internal object HudPalette {
@@ -99,6 +100,7 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
     val playground: PlaygroundView = PlaygroundView(context)
     val math: FingerMathView = FingerMathView(context)
     val flak: FlakView = FlakView(context)
+    val trail: TrailRideView = TrailRideView(context)
 
     init {
         orientation = VERTICAL
@@ -109,6 +111,7 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
         addView(playground, playLp)
         addView(math, LayoutParams(playLp))
         addView(flak, LayoutParams(playLp))
+        addView(trail, LayoutParams(playLp))
         show(ArcadeMode.Bricks)
     }
 
@@ -116,5 +119,6 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
         playground.visibility = if (game == ArcadeMode.Bricks) VISIBLE else GONE
         math.visibility = if (game == ArcadeMode.Math) VISIBLE else GONE
         flak.visibility = if (game == ArcadeMode.Flak) VISIBLE else GONE
+        trail.visibility = if (game == ArcadeMode.TrailRide) VISIBLE else GONE
     }
 }

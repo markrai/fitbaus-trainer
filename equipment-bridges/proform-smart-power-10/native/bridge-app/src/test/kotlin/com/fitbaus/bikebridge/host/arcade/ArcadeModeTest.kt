@@ -90,12 +90,71 @@ class ArcadeModeTest {
     }
 
     @Test
+    fun switchingToTrailRideStopsTheFlakPipelineFirstAndBack() {
+        val hooks = RecordingHooks()
+        val controller = ArcadeModeController(hooks)
+        controller.onHostResume()
+        controller.select(ArcadeMode.Flak)
+        controller.select(ArcadeMode.TrailRide)
+        controller.onHostPause()
+        controller.onHostResume()
+        controller.select(ArcadeMode.Dashboard)
+        assertEquals(
+            listOf(
+                "show:Flak", "activate:Flak", "deactivate:ExitArcade", "show:TrailRide", "activate:TrailRide",
+                "deactivate:HostPaused", "activate:TrailRide", "deactivate:ExitArcade", "show:Dashboard",
+            ),
+            hooks.events(),
+        )
+        assertFalse(controller.isActive)
+    }
+
+    @Test
+    fun onlyOnePipelineIsEverActiveAcrossAllGames() {
+        var active = 0
+        var maxActive = 0
+        val hooks = RecordingHooks()
+        hooks.onActivate = {
+            active += 1
+            maxActive = maxOf(maxActive, active)
+        }
+        hooks.onDeactivate = { active -= 1 }
+        val controller = ArcadeModeController(hooks)
+        controller.onHostResume()
+        for (mode in listOf(ArcadeMode.TrailRide, ArcadeMode.Bricks, ArcadeMode.TrailRide, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide)) {
+            controller.select(mode)
+        }
+        controller.onHostDestroy()
+        assertEquals(1, maxActive)
+        assertEquals(0, active)
+    }
+
+    @Test
+    fun trailRideHasItsOwnFaceTrackerPreferenceAndStaysReadOnly() {
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(source.contains("ArcadeMode.TrailRide -> savedTrailSettings()"))
+        assertTrue(source.contains("ArcadeMode.TrailRide -> ARCADE_TRAIL_TRACKER_KEY"))
+        assertTrue(source.contains("const val ARCADE_TRAIL_TRACKER_KEY = \"trail_tracker\""))
+        assertTrue(source.contains("ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_TRAIL_TRACKER_KEY, null))"))
+        val start = source.indexOf("if (modeController.mode == ArcadeMode.TrailRide) {")
+        assertTrue(start > 0)
+        val trailBranch = source.substring(start, source.indexOf("val position = handInput.latest(now)", start))
+        assertTrue(trailBranch.contains("arcadeContent.trail.render("))
+        for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager", "session()", "startService")) {
+            assertFalse(trailBranch.contains(forbidden), forbidden)
+        }
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ExerciseHud.kt").readText()
+        assertTrue(content.contains("trail.visibility = if (game == ArcadeMode.TrailRide) VISIBLE else GONE"))
+    }
+
+    @Test
     fun onlyGameModesActivate() {
         assertFalse(ArcadeMode.Dashboard.isGame)
         assertTrue(ArcadeMode.Bricks.isGame)
         assertTrue(ArcadeMode.Math.isGame)
         assertTrue(ArcadeMode.Flak.isGame)
-        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN"), ArcadeMode.values().map { it.caption })
+        assertTrue(ArcadeMode.TrailRide.isGame)
+        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN", "TRAIL RIDE"), ArcadeMode.values().map { it.caption })
     }
 
     @Test
@@ -148,7 +207,7 @@ class ArcadeModeTest {
             assertFalse(hooksBody.contains(forbidden), forbidden)
         }
         assertTrue(source.contains("tabGroup(ArcadeMode.Dashboard)"))
-        assertTrue(source.contains("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak)"))
+        assertTrue(source.contains("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide)"))
         assertFalse(source.contains("\"ARCADE\""))
         assertNotNull(Regex("""setOnLongClickListener""").find(source), "long-press FITBAUS still opens pairing")
         assertTrue(source.contains("PairingActivity::class.java"))

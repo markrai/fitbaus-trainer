@@ -96,6 +96,7 @@ class PassiveArcadeTest {
                 "HandSource",
                 "PlaygroundView",
                 "RateMeter",
+                "TrailRideView",
             ),
             exposed,
         )

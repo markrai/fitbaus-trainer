@@ -104,6 +104,67 @@ bootloader, relative ± resistance, ramping, or workout-control APIs.
 Arcade lives in `equipment-bridges/shared/arcade/` and is linked from Native.
 It does not own USB or resistance.
 
+## Arcade games
+
+The console title bar has a DASHBOARD tab and four game tabs: BRICKS, MATH,
+FLAK RUN and TRAIL RIDE. The exercise HUD (RPM, watts, resistance, HR) stays
+above every game. Games only **read** cadence telemetry. They never send
+resistance, change workouts or bike modes, or touch the USB session, and
+switching games never restarts the bridge service. Only one camera pipeline
+runs at a time.
+
+### TRAIL RIDE
+
+A first-person mountain-bike ride through an endless forest. The trail
+winds procedurally and gets gradually harder (sharper bends, then tree
+gates and slaloms).
+
+- **Steer with your head.** Look at the screen and hold still for about a
+  second while it centers, then lean your head slightly left or right. The
+  bike moves toward that side at a limited speed. Holding your head still
+  does **not** follow the bends: you steer through every curve.
+- **Pedal to ride.** The world only moves while fresh RPM shows you
+  pedaling (20 RPM or more). Speed varies modestly with cadence (about
+  40-100 RPM); a faster baseline is never required. If you stop, the game
+  shows `PEDAL TO RIDE` and waits.
+- **Stay on the trail and miss the trees.** Riding past the trail edge for
+  about 0.3 s, hitting a trunk or rock, or falling into a ditch costs one of
+  three lives, followed by a short recovery with two seconds of protection.
+  Orange edges and `STEER LEFT` / `STEER RIGHT` warn you near the edge.
+- **Jump ditches with a pedal surge.** Ditches span the whole trail, marked
+  by orange flags; steering cannot avoid them. When `SURGE NOW!` appears
+  (about 1.7 s before the ditch), pedal clearly faster: by default 12 RPM
+  above the pace the game learned at the start. The surge must be confirmed
+  by fresh samples (about 0.5-0.75 s), and the jump only counts if it is
+  confirmed between 1.25 s and 0.12 s before the ditch. A surge that is too
+  early or too late fails. Each jump needs a new surge: ease off to rearm
+  (`EASE OFF TO REARM` on the meter).
+- **Holds.** Starting the camera, a lost face, missing or stale bike data,
+  stopping pedaling, and the first ~3 s while it learns your pace all
+  freeze the game; nothing advances and no life is lost while held. After
+  the face returns it waits about 0.6 s for a stable view.
+- **Score.** Points for distance, each obstacle passed, each ditch cleared
+  (+150) and each new level. On game over, tap the screen to ride again.
+  Scores are session-only.
+
+**Developer options** (long-press the TRAIL RIDE tab):
+
+| Option | Effect |
+| --- | --- |
+| Face 10 Hz / 15 Hz | Face tracker preset. TRAIL RIDE keeps its own preference, separate from FLAK RUN. Default 10 Hz, 1 thread. |
+| Head sensitivity | Low / Medium / High / Very high steering gain. |
+| Jump surge threshold | +8 to +18 RPM above the learned baseline (default +12). |
+| Recenter head now | Re-learns the neutral head position. |
+| Ditch timing guide | Draws the takeoff window on the trail. |
+| World seed | Random each ride, or a fixed seed for reproducible layouts (restarts). |
+| Simulated cadence | Developer-only fake RPM with an on-screen `SIMULATED SURGE` button. The HUD is labeled `SIMULATED`, and simulated input never reaches the bike. |
+| Restart ride now | Starts a new ride. |
+| Diagnostics overlay | Shared with the other games. Shows face age and x, steering target vs rider x, trail center and lateral error, RPM age/baseline/threshold/boost, jump state and time to the next ditch, last crash reason, frame/update/draw timings, sprite count, memory and world sizes. |
+
+TRAIL RIDE has not yet been qualified on the physical console. Use the
+diagnostics overlay (frame, update and draw p50/p90) with face tracking
+active to confirm it holds about 30 FPS on the Atom Z3735G.
+
 ## Build and test
 
 JDK **21**, Android SDK Platform **34**, NDK **26.1.10909125**, CMake **3.22.1**.
