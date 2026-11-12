@@ -2,8 +2,13 @@
 
 package com.fitbaus.arcade
 
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 internal data class FlakConfig(
@@ -32,6 +37,12 @@ internal data class FlakConfig(
     val turretFireSeconds: Float = 2.6f,
     val turretWarnSeconds: Float = 1.2f,
     val shellFlightSeconds: Float = 1.6f,
+    val shellTurnRate: Float = 2.0f,
+    val shellSpeedMargin: Float = 1.5f,
+    val shellMinSpeed: Float = 45f,
+    val shellArmFraction: Float = 1.0f,
+    val shellFuzeMargin: Float = 4f,
+    val shellSeekerHalfAngle: Float = 1.0f,
     val burstHalfWidth: Float = 12f,
     val burstHalfHeight: Float = 8f,
     val invulnerableSeconds: Float = 2f,
@@ -57,7 +68,12 @@ internal data class FlakConfig(
 ) {
     init {
         require(bomberSpeed > sideSpeed && bomberSpeed > boostScrollSpeed) { "the black bomber must always outrun the jet" }
+        require(shellArmFraction in 0f..1f && shellSpeedMargin >= 1f) { "a shell fuze must arm by its predicted intercept, within its flight" }
     }
+
+    /** When a shell meets a jet that keeps cruising: [shellFlightSeconds] / [shellSpeedMargin] after launch. */
+    val shellInterceptSeconds: Float
+        get() = shellFlightSeconds / shellSpeedMargin
 
     /** The bomber always flies 10% down from the top of the playfield. */
     val bomberY: Float
@@ -75,17 +91,41 @@ internal class Turret(var x: Float, var fireIn: Float) {
 }
 
 /**
- * A tracking flak shell. It homes on the jet's current screen position, so steering cannot shake
- * it, but it is aimed for normal flight speed: [debt] is the extra distance the jet has flown on
- * the dash since launch, and the shell's aim point trails the jet by exactly that much. It
- * bursts when its flight time runs out.
+ * A guided flak shell. It flies at a constant ground [speed] along [heading], which turns toward a
+ * collision course with the jet no faster than [FlakConfig.shellTurnRate]. The course assumes the
+ * jet keeps cruising, so the extra ground a dashing jet covers is never compensated. Its seeker
+ * loses lock for good once the jet is more than [FlakConfig.shellSeekerHalfAngle] off its nose.
+ * The fuze arms at [armAt] (the predicted [intercept] times [FlakConfig.shellArmFraction]); while
+ * armed it bursts when the jet comes within [FlakConfig.shellFuzeMargin] of contact, otherwise it
+ * bursts wherever it is when [flight] runs out.
  */
-internal class Shell(val startX: Float, val startY: Float, val flight: Float) {
+internal class Shell(
+    val startX: Float,
+    val startY: Float,
+    val flight: Float,
+    var heading: Float,
+    val speed: Float,
+    val intercept: Float = flight,
+    val armAt: Float = 0f,
+) {
     var x = startX
     var y = startY
     var age = 0f
-    var debt = 0f
     var resolved = false
+    val trailX = FloatArray(TRAIL_POINTS) { Float.NaN }
+    val trailY = FloatArray(TRAIL_POINTS) { Float.NaN }
+    var trailHead = 0
+    var trailClock = 0f
+    var locked = true
+
+    val terminal: Boolean
+        get() = locked && age >= armAt - TERMINAL_LEAD_SECONDS
+
+    companion object {
+        const val TRAIL_POINTS = 4
+        const val TRAIL_SPACING_SECONDS = 0.05f
+        const val TERMINAL_LEAD_SECONDS = 0.3f
+    }
 }
 
 /**
@@ -107,7 +147,8 @@ internal class FlakEvent(val atSeconds: Float, val text: String)
 /**
  * FLAK RUN simulation in a 256x144 logical playfield, advanced in fixed steps. Missiles arrive
  * from the right, sometimes in pairs with a gap between them: change altitude to dodge. Ground
- * turrets fire tracking shells: only a timed dash's extra speed makes a shell fall behind.
+ * turrets fire guided shells: a timed dash carries the jet past a shell before its fuze arms,
+ * and a sharp, well-timed maneuver can out-turn one, but steady flight is hit.
  * Black bombers streak across the top from the left and drop a diagonal bomb: avoid both.
  * Head position steers the jet up/down and left/right.
  */
@@ -165,6 +206,8 @@ internal class FlakGame(
     private var nextBomber = config.firstBomberAt
     private var accumulator = 0f
     private var lastFrameNanos = Long.MIN_VALUE
+    private var prevJetX = jetX
+    private var prevJetY = jetY
 
     val level: Int
         get() = min(config.maxLevel, (elapsed / config.levelSeconds).toInt())
@@ -210,6 +253,8 @@ internal class FlakGame(
         }
         elapsed += dt
         boosting = boost
+        prevJetX = jetX
+        prevJetY = jetY
         moveJet(dt, targetY, targetX, boost)
         val speed = if (boost) config.boostScrollSpeed else config.scrollSpeed
         scroll += speed * dt
@@ -316,8 +361,8 @@ internal class FlakGame(
 
     private fun pendingImpacts(): List<Float> {
         val out = ArrayList<Float>(turrets.size + shells.size + bombers.size + bombs.size)
-        for (t in turrets) if (!t.fired) out += t.fireIn + config.shellFlightSeconds
-        for (s in shells) if (!s.resolved) out += s.flight - s.age
+        for (t in turrets) if (!t.fired) out += t.fireIn + config.shellInterceptSeconds
+        for (s in shells) if (!s.resolved) out += s.intercept - s.age
         out += bombImpacts()
         return out
     }
@@ -331,7 +376,7 @@ internal class FlakGame(
 
     private fun schedule() {
         if (elapsed >= nextTurret) {
-            val impact = config.turretFireSeconds + config.shellFlightSeconds
+            val impact = config.turretFireSeconds + config.shellInterceptSeconds
             if (missiles.any { !it.resolved && abs(missileArrival(it) - impact) < config.conflictSeconds } ||
                 bombImpacts().any { abs(it - impact) < config.conflictSeconds }
             ) {
@@ -405,33 +450,125 @@ internal class FlakGame(
                 t.fireIn -= dt
                 if (t.fireIn <= 0f) {
                     t.fired = true
-                    shells += Shell(t.x - 4f, config.groundTop - 8f, config.shellFlightSeconds)
+                    shells += launchShell(t.x - 4f, config.groundTop - 8f)
                 }
             }
             if (t.x < -20f) iterator.remove()
         }
     }
 
+    fun launchShell(x: Float, y: Float): Shell {
+        val dx = jetX - x
+        val dy = jetY - y
+        val range = sqrt(dx * dx + dy * dy)
+        val cruise = config.scrollSpeed
+        val rate = config.shellSpeedMargin / config.shellFlightSeconds
+        val vx = dx * rate + cruise
+        val vy = dy * rate
+        val speed = maxOf(config.shellMinSpeed, sqrt(vx * vx + vy * vy))
+        val closing = if (range > 0f) closingSpeed(dx / range, speed) else speed
+        val intercept = if (closing > 0f) (range / closing).coerceAtMost(config.shellFlightSeconds) else config.shellFlightSeconds
+        return Shell(x, y, config.shellFlightSeconds, atan2(vy, vx), speed, intercept, (config.shellArmFraction * intercept).coerceAtMost(config.shellFlightSeconds))
+    }
+
+    private fun closingSpeed(losX: Float, speed: Float): Float {
+        val cruise = config.scrollSpeed
+        val along = cruise * losX
+        val disc = along * along - cruise * cruise + speed * speed
+        return if (disc > 0f) -along + sqrt(disc) else 0f
+    }
+
+    private fun steerShell(s: Shell, dt: Float) {
+        if (!s.locked) return
+        val dx = jetX - s.x
+        val dy = jetY - s.y
+        val range = sqrt(dx * dx + dy * dy)
+        if (range <= 0f) return
+        val lx = dx / range
+        val ly = dy / range
+        val closing = closingSpeed(lx, s.speed)
+        val desired = if (closing > 0f) atan2(ly * closing, lx * closing + config.scrollSpeed) else atan2(ly, lx)
+        if (abs(wrap(atan2(ly, lx) - s.heading)) > config.shellSeekerHalfAngle) {
+            s.locked = false
+            return
+        }
+        val turn = wrap(desired - s.heading)
+        val limit = config.shellTurnRate * dt
+        s.heading += turn.coerceIn(-limit, limit)
+    }
+
+    private fun wrap(angle: Float): Float {
+        var a = angle
+        while (a > PI_F) a -= 2f * PI_F
+        while (a < -PI_F) a += 2f * PI_F
+        return a
+    }
+
     private fun updateShells(dt: Float, scrollSpeed: Float) {
         val iterator = shells.iterator()
         while (iterator.hasNext()) {
             val s = iterator.next()
-            s.age += dt
-            s.debt += (scrollSpeed - config.scrollSpeed) * dt
-            val p = (s.age / s.flight).coerceAtMost(1f)
-            s.x = s.startX + (jetX - s.debt - s.startX) * p
-            s.y = s.startY + (jetY - s.startY) * p
-            if (s.age < s.flight) continue
+            val move = min(dt, s.flight - s.age)
+            val x0 = s.x
+            val y0 = s.y
+            val age0 = s.age
+            steerShell(s, move)
+            s.x += (cos(s.heading) * s.speed - scrollSpeed) * move
+            s.y += sin(s.heading) * s.speed * move
+            s.age += move
+            s.trailClock += move
+            if (s.trailClock >= Shell.TRAIL_SPACING_SECONDS) {
+                s.trailClock -= Shell.TRAIL_SPACING_SECONDS
+                s.trailX[s.trailHead] = s.x + scroll
+                s.trailY[s.trailHead] = s.y
+                s.trailHead = (s.trailHead + 1) % Shell.TRAIL_POINTS
+            }
+            val fuze = if (s.age < s.armAt) {
+                -1f
+            } else {
+                proximity(x0, y0, s.x, s.y, if (move > 0f) ((s.armAt - age0) / move).coerceIn(0f, 1f) else 0f, config.jetHalfWidth + config.shellFuzeMargin, config.jetHalfHeight + config.shellFuzeMargin)
+            }
+            if (fuze < 0f && s.age < s.flight) continue
             s.resolved = true
-            blasts += Blast(s.x, s.y, 0f, flak = true)
             iterator.remove()
-            if (abs(s.x - jetX) < config.burstHalfWidth + config.jetHalfWidth && abs(s.y - jetY) < config.burstHalfHeight + config.jetHalfHeight) {
+            val bx = if (fuze >= 0f) x0 + (s.x - x0) * fuze else s.x
+            val by = if (fuze >= 0f) y0 + (s.y - y0) * fuze else s.y
+            val jx = if (fuze >= 0f) prevJetX + (jetX - prevJetX) * fuze else jetX
+            val jy = if (fuze >= 0f) prevJetY + (jetY - prevJetY) * fuze else jetY
+            blasts += Blast(bx, by, 0f, flak = true)
+            if (abs(bx - jx) < config.burstHalfWidth + config.jetHalfWidth && abs(by - jy) < config.burstHalfHeight + config.jetHalfHeight) {
                 hit("flak")
             } else {
                 shellsDodged += 1
                 score += SHELL_POINTS
             }
         }
+    }
+
+    private fun proximity(x0: Float, y0: Float, x1: Float, y1: Float, from: Float, w: Float, h: Float): Float {
+        val rx = x0 - prevJetX
+        val ry = y0 - prevJetY
+        val dx = (x1 - jetX) - rx
+        val dy = (y1 - jetY) - ry
+        var lo = from
+        var hi = 1f
+        if (dx == 0f) {
+            if (abs(rx) >= w) return -1f
+        } else {
+            val a = (-w - rx) / dx
+            val b = (w - rx) / dx
+            lo = maxOf(lo, min(a, b))
+            hi = min(hi, maxOf(a, b))
+        }
+        if (dy == 0f) {
+            if (abs(ry) >= h) return -1f
+        } else {
+            val a = (-h - ry) / dy
+            val b = (h - ry) / dy
+            lo = maxOf(lo, min(a, b))
+            hi = min(hi, maxOf(a, b))
+        }
+        return if (lo <= hi) lo else -1f
     }
 
     private fun updateBombers(dt: Float) {
@@ -512,5 +649,6 @@ internal class FlakGame(
         const val BOMB_DROP_MARGIN = 60f
         const val BLAST_SECONDS = 0.4f
         const val MAX_EVENTS = 6
+        const val PI_F = PI.toFloat()
     }
 }

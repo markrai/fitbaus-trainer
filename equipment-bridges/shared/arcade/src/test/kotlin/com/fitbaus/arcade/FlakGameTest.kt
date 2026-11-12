@@ -29,53 +29,264 @@ class FlakGameTest {
         }
     }
 
-    @Test
-    fun aShellHitsInNormalFlightButATimedDashEscapesIt() {
-        val plain = manual()
-        plain.spawnTurret(fireIn = 0.1f)
-        run(plain, 2.5f)
-        assertEquals(2, plain.lives, "the shell is on course for the jet")
-        assertEquals(0, plain.shellsDodged)
+    private val bandXs = floatArrayOf(0f, 0.3f, 0.6f, 1f)
+    private val bandYs = floatArrayOf(0f, 0.5f, 1f)
 
-        val dashed = manual()
-        dashed.spawnTurret(fireIn = 0.1f)
-        run(dashed, 2.5f, boost = { t -> t in 0.4f..1.4f })
-        assertEquals(3, dashed.lives, "a one-second dash during the flight leaves the shell behind")
-        assertEquals(1, dashed.shellsDodged)
+    private fun settled(x0: Float, y0: Float, config: FlakConfig = FlakConfig()): FlakGame {
+        val g = FlakGame(config, autoSpawn = false)
+        repeat((2f / config.step).toInt()) { g.step(config.step, y0, false, x0) }
+        return g
+    }
+
+    /** One default turret attack on a jet settled at ([x0], [y0]); inputs are given in seconds after launch. */
+    private fun encounter(
+        x0: Float,
+        y0: Float,
+        config: FlakConfig = FlakConfig(),
+        steer: (Float) -> Pair<Float, Float> = { y0 to x0 },
+        dash: (Float) -> Boolean = { false },
+        onLaunch: (Shell) -> Unit = {},
+    ): FlakGame {
+        val g = settled(x0, y0, config)
+        g.spawnTurret()
+        var t = 0f
+        var launched: Shell? = null
+        while (t < config.turretFireSeconds + config.shellFlightSeconds + 0.3f) {
+            val tl = t - config.turretFireSeconds
+            val (ty, tx) = steer(tl)
+            g.step(config.step, ty, dash(tl), tx)
+            if (launched == null && g.shells.isNotEmpty()) {
+                launched = g.shells.first()
+                onLaunch(launched)
+            }
+            t += config.step
+        }
+        return g
+    }
+
+    private fun hit(g: FlakGame) = g.lives < g.config.lives
+
+    private fun dashFrom(start: Float): (Float) -> Boolean = { tl -> tl >= start && tl < start + 1f }
+
+    @Test
+    fun steadyFlightIsHitFromEveryPartOfTheBand() {
+        for (x0 in bandXs) for (y0 in bandYs) {
+            assertTrue(hit(encounter(x0, y0)), "steady flight at x $x0 y $y0")
+            val wiggle = encounter(x0, y0, steer = { tl -> (y0 + 0.05f * kotlin.math.sin(tl * 9.4f)).coerceIn(0f, 1f) to x0 })
+            assertTrue(hit(wiggle), "small head movements at x $x0 y $y0 are followed")
+        }
     }
 
     @Test
-    fun steeringCannotShakeATrackingShell() {
-        val g = manual()
-        g.spawnTurret(fireIn = 0.1f)
-        run(g, 2.5f, targetY = { t -> if (t < 1f) 0.1f else 0.9f }, targetX = { t -> if (t < 1f) 0.9f else 0.0f })
-        assertEquals(2, g.lives, "up/down and left/right are tracked; only extra speed escapes")
+    fun aShellHitsInNormalFlightButATimedDashEscapesIt() {
+        val plain = encounter(0.3f, 0.5f)
+        assertEquals(2, plain.lives, "the shell pursues the jet and bursts on it")
+        assertEquals(0, plain.shellsDodged)
+        val dashed = encounter(0.3f, 0.5f, dash = dashFrom(0.5f))
+        assertEquals(3, dashed.lives, "a dash shortly after launch carries the jet past the shell before its fuze arms")
+        assertEquals(1, dashed.shellsDodged)
+        assertEquals(FlakGame.SHELL_POINTS, dashed.score - plain.score, "a dodged shell scores, a hit does not")
     }
 
     @Test
     fun aOneSecondDashMustBeTimedAgainstTheShellFlight() {
-        val flight = FlakConfig().shellFlightSeconds
-        fun dodges(fireIn: Float, dashStart: Float): Boolean {
-            val g = manual()
-            g.spawnTurret(fireIn = fireIn)
-            run(g, fireIn + flight + 1.2f, boost = { t -> t >= dashStart && t < dashStart + 1f })
-            return g.lives == 3
+        fun dodges(start: Float) = !hit(encounter(0.3f, 0.5f, dash = dashFrom(start)))
+        for (start in floatArrayOf(0f, 0.2f, 0.4f, 0.6f, 0.8f)) assertTrue(dodges(start), "dash starting $start s after launch")
+        assertFalse(dodges(-1.1f), "a dash that ends before launch gives no immunity")
+        assertFalse(dodges(1.2f), "a dash after the fuze has armed is too late")
+        assertFalse(dodges(FlakConfig().shellFlightSeconds + 0.1f), "a dash after the burst cannot save the jet")
+    }
+
+    @Test
+    fun aWellTimedDashIsTheMostReliableEscapeAcrossTheBand() {
+        var reactive = 0
+        var reactiveTries = 0
+        var preLaunch = 0
+        var preLaunchTries = 0
+        var steering = 0
+        var steeringTries = 0
+        for (x0 in bandXs) for (y0 in bandYs) {
+            val modY = if (y0 >= 0.5f) y0 - 0.35f else y0 + 0.35f
+            val modX = if (x0 >= 0.5f) x0 - 0.35f else x0 + 0.35f
+            var window = false
+            for (k in 0..9) {
+                val start = k / 10f
+                val dodged = !hit(encounter(x0, y0, dash = dashFrom(start)))
+                window = window || dodged
+                if (start in 0.39f..0.81f) {
+                    reactiveTries += 1
+                    if (dodged) reactive += 1
+                }
+            }
+            if (!(x0 == 1f && y0 == 1f)) assertTrue(window, "x $x0 y $y0 has a dash window")
+            for (start in floatArrayOf(-1.0f, -0.9f, -0.8f, -0.7f, -0.6f)) {
+                preLaunchTries += 1
+                if (!hit(encounter(x0, y0, dash = dashFrom(start)))) preLaunch += 1
+            }
+            for (k in 5..10) {
+                val tau = k / 10f
+                steeringTries += 2
+                if (!hit(encounter(x0, y0, steer = { tl -> (if (tl >= tau) modY else y0) to x0 }))) steering += 1
+                if (!hit(encounter(x0, y0, steer = { tl -> y0 to (if (tl >= tau) modX else x0) }))) steering += 1
+            }
         }
-        assertTrue(dodges(0.1f, 0.1f), "dash at launch")
-        assertTrue(dodges(0.1f, 0.6f), "dash mid-flight")
-        assertFalse(dodges(1.2f, 0f), "a dash that ends before launch does not count")
-        assertFalse(dodges(0.1f, 0.1f + flight + 0.1f), "after the burst is too late")
+        val dashRate = reactive.toFloat() / reactiveTries
+        val steerRate = steering.toFloat() / steeringTries
+        assertTrue(dashRate >= 0.7f, "a dash triggered 0.4-0.8 s after launch escapes ${(dashRate * 100).toInt()}%")
+        assertTrue(preLaunch.toFloat() / preLaunchTries <= 0.25f, "an early dash escapes only $preLaunch/$preLaunchTries")
+        assertTrue(steerRate in 0.25f..0.65f, "moderate mid-flight maneuvers escape ${(steerRate * 100).toInt()}%: possible, not guaranteed")
+        assertTrue(dashRate > steerRate + 0.15f, "the dash is clearly more reliable than steering")
+    }
+
+    @Test
+    fun steeringOutTurnsAShellOnlyWithAWellTimedSharpManeuver() {
+        var sharpMid = 0
+        var sharpMidTries = 0
+        var earlyHits = 0
+        var earlyTries = 0
+        for (x0 in bandXs) for (y0 in bandYs) {
+            val oppY = if (y0 >= 0.5f) 0f else 1f
+            val modY = if (y0 >= 0.5f) y0 - 0.35f else y0 + 0.35f
+            val modX = if (x0 >= 0.5f) x0 - 0.35f else x0 + 0.35f
+            var intercept = 0f
+            encounter(x0, y0, onLaunch = { intercept = it.intercept })
+            if (intercept < 0.3f) {
+                assertTrue(x0 == 1f && y0 == 1f, "only the point-blank corner meets the jet right at launch")
+            } else {
+                val late = intercept - 0.05f
+                assertTrue(hit(encounter(x0, y0, steer = { tl -> (if (tl >= late) oppY else y0) to x0 })), "x $x0 y $y0: a reversal at the last moment is too late")
+                assertTrue(hit(encounter(x0, y0, steer = { tl -> y0 to (if (tl >= late) 1f - x0 else x0) })), "x $x0 y $y0: a sideways break at the last moment is too late")
+            }
+            for (k in 5..10) {
+                val tau = k / 10f
+                sharpMidTries += 1
+                if (!hit(encounter(x0, y0, steer = { tl -> (if (tl >= tau) oppY else y0) to x0 }))) sharpMid += 1
+            }
+            for (k in 0..3) {
+                val tau = k / 10f
+                earlyTries += 2
+                if (hit(encounter(x0, y0, steer = { tl -> (if (tl >= tau) modY else y0) to x0 }))) earlyHits += 1
+                if (hit(encounter(x0, y0, steer = { tl -> y0 to (if (tl >= tau) modX else x0) }))) earlyHits += 1
+            }
+        }
+        assertTrue(sharpMid.toFloat() / sharpMidTries >= 0.4f, "a sharp mid-flight altitude reversal escapes $sharpMid/$sharpMidTries")
+        assertTrue(earlyHits.toFloat() / earlyTries >= 0.4f, "after an early move the shell often reacquires: $earlyHits/$earlyTries")
+        val gradual = bandXs.sumOf { x0 -> bandYs.count { y0 -> hit(encounter(x0, y0, steer = { tl -> (y0 + ((if (y0 >= 0.5f) 0f else 1f) - y0) * (tl / 3f).coerceIn(0f, 1f)) to x0 })) } }
+        assertTrue(gradual >= 6, "a slow altitude change is usually tracked ($gradual/12)")
+    }
+
+    @Test
+    fun theShellKeepsMomentumAndTurnsNoFasterThanItsTurnRate() {
+        val g = settled(0.3f, 0.5f)
+        val s = g.launchShell(160f, g.config.groundTop - 8f)
+        g.shells += s
+        val speed = s.speed
+        var heading = s.heading
+        var x = s.x
+        var y = s.y
+        var maxTurn = 0f
+        var maxStep = 0f
+        var t = 0f
+        while (g.shells.isNotEmpty()) {
+            g.step(g.config.step, if (t < 0.5f) 0.5f else 0f, false, if ((t * 4).toInt() % 2 == 0) 0.9f else 0.1f)
+            t += g.config.step
+            if (g.shells.isEmpty()) break
+            assertEquals(speed, s.speed, "constant speed")
+            var turn = s.heading - heading
+            while (turn > Math.PI) turn -= (2 * Math.PI).toFloat()
+            while (turn < -Math.PI) turn += (2 * Math.PI).toFloat()
+            maxTurn = maxOf(maxTurn, abs(turn))
+            maxStep = maxOf(maxStep, kotlin.math.hypot(s.x - x, s.y - y))
+            heading = s.heading
+            x = s.x
+            y = s.y
+        }
+        assertTrue(maxTurn <= g.config.shellTurnRate * g.config.step + 1e-4f, "turned $maxTurn rad in one step")
+        assertTrue(maxStep <= (speed + g.config.scrollSpeed) * g.config.step + 1e-3f, "moved $maxStep in one step: no teleporting")
+    }
+
+    @Test
+    fun aStationaryJetIsMetOnTimeWithoutTheShellWeaving() {
+        var shell: Shell? = null
+        var startHeading = 0f
+        val g = encounter(0.3f, 0.5f, onLaunch = { shell = it; startHeading = it.heading })
+        val s = shell!!
+        assertTrue(abs(s.heading - startHeading) < 0.2f, "already on a collision course: barely turned (${s.heading - startHeading} rad)")
+        assertTrue(hit(g))
+        assertEquals(g.config.shellInterceptSeconds, s.intercept, 0.05f, "met at the planned intercept")
+        assertTrue(s.age < s.flight, "the proximity fuze burst before the flight ran out (${s.age} s)")
+    }
+
+    @Test
+    fun aSuddenManeuverIsFollowedOnlyGradually() {
+        val g = settled(0.3f, 0.5f)
+        g.spawnTurret(fireIn = 0f)
+        g.step(g.config.step, 0.5f, false, 0.3f)
+        val shell = g.shells.single()
+        val before = shell.heading
+        repeat(6) { g.step(g.config.step, 0f, false, 1f) }
+        val turned = abs(shell.heading - before)
+        assertTrue(turned <= g.config.shellTurnRate * 6 * g.config.step + 1e-4f, "0.1 s after a sharp break the shell turned only $turned rad")
+        assertTrue(turned > 0f, "but it does start to turn")
+    }
+
+    @Test
+    fun anOvershotShellLosesLockAndBurstsWhereItIs() {
+        var shell: Shell? = null
+        val g = encounter(0.3f, 0.5f, dash = dashFrom(0.5f), onLaunch = { shell = it })
+        val s = shell!!
+        assertFalse(s.locked, "once the jet is behind its nose the seeker gives up")
+        assertEquals(s.flight, s.age, 1e-4f, "no proximity burst: it ran out of flight time")
+        val blast = g.blasts.last { it.flak }
+        assertEquals(s.x, blast.x, 1e-4f, "the burst is at the shell, not snapped to the jet")
+        assertEquals(s.y, blast.y, 1e-4f)
+        assertTrue(abs(s.x - g.jetX) >= g.config.burstHalfWidth + g.config.jetHalfWidth || abs(s.y - g.jetY) >= g.config.burstHalfHeight + g.config.jetHalfHeight)
+        assertEquals(1, g.shellsDodged)
+    }
+
+    @Test
+    fun theFuzeCannotTunnelThroughTheJetAtLargeSteps() {
+        for (step in floatArrayOf(1f / 120f, 1f / 60f, 1f / 30f, 1f / 15f)) {
+            val config = FlakConfig(step = step)
+            assertTrue(hit(encounter(0.3f, 0.5f, config)), "steady flight is hit at step $step")
+            assertFalse(hit(encounter(0.3f, 0.5f, config, dash = dashFrom(0.5f))), "and a timed dash still escapes at step $step")
+        }
+    }
+
+    @Test
+    fun shellOutcomesAreDeterministic() {
+        fun play(): List<Float> {
+            val g = encounter(0.6f, 0.2f, steer = { tl -> (if (tl > 0.6f) 0.9f else 0.2f) to 0.6f }, dash = dashFrom(0.3f))
+            return listOf(g.lives.toFloat(), g.score.toFloat(), g.jetX, g.jetY) + g.blasts.flatMap { listOf(it.x, it.y) }
+        }
+        assertEquals(play(), play())
+    }
+
+    @Test
+    fun aShellBurstingDuringProtectionCostsNothingAndScoresNothing() {
+        val g = settled(0.3f, 0.5f)
+        g.spawnMissile(g.jetY, warn = 0f)
+        while (g.lives == 3) g.step(g.config.step, 0.5f, false, 0.3f)
+        g.spawnTurret(fireIn = 0f)
+        var steps = 0
+        while (g.shells.isNotEmpty() || steps == 0) {
+            g.step(g.config.step, 0.5f, false, 0.3f)
+            steps += 1
+        }
+        assertEquals(1, g.hits)
+        assertEquals(2, g.lives, "the burst met the jet while it was protected")
+        assertEquals(0, g.shellsDodged, "a burst on the jet is not a dodge")
     }
 
     @Test
     fun aDashOnOneShellDoesNotSaveTheNextWithoutAnotherDash() {
-        val g = manual()
-        g.spawnTurret(fireIn = 0.1f)
-        run(g, 2.5f, boost = { t -> t in 0.4f..1.4f })
+        val g = settled(0.3f, 0.5f)
+        g.spawnTurret()
+        run(g, g.config.turretFireSeconds + 2.5f, boost = { t -> t >= g.config.turretFireSeconds + 0.5f && t < g.config.turretFireSeconds + 1.5f })
         assertEquals(3, g.lives)
         assertEquals(1, g.shellsDodged)
-        g.spawnTurret(fireIn = 0.1f)
-        run(g, 2.5f)
+        g.spawnTurret()
+        run(g, g.config.turretFireSeconds + 2.5f)
         assertEquals(2, g.lives, "the next shell still requires a timed dash")
         assertEquals(1, g.shellsDodged)
     }
@@ -338,7 +549,7 @@ class FlakGameTest {
 
     @Test
     fun attacksAreFrequentWithPairsAndManyTurrets() {
-        val g = FlakGame(random = Random(21))
+        val g = FlakGame(FlakConfig(lives = 1_000), random = Random(21))
         var maxActiveMissiles = 0
         var turretsSeen = 0
         var lastTurrets = 0
@@ -360,7 +571,7 @@ class FlakGameTest {
         repeat((600f / g.config.step).toInt()) {
             g.step(g.config.step, 0.5f, false, 0.3f)
             for (s in g.shells) {
-                val burst = s.flight - s.age
+                val burst = s.intercept - s.age
                 for (m in g.missiles) {
                     if (!m.resolved && m.warn > 0f && abs(g.missileArrival(m) - burst) < 0.5f) conflicts += "t=${g.elapsed}"
                 }

@@ -312,17 +312,18 @@ public class FlakView(context: Context) : View(context) {
                 c.drawRect(t.x - 6f, cfg.groundTop - turret.height - 1f, t.x - 3f, cfg.groundTop - turret.height + 2f, px)
             }
         }
+        val fastBlink = (game.elapsed * 12f).toInt() % 2 == 0
         for (sh in game.shells) {
             px.color = SHELL_TRAIL
-            val p = (sh.age / sh.flight).coerceIn(0f, 1f)
-            for (k in 1..3) {
-                val q = (p - k * 0.06f).coerceAtLeast(0f)
-                val tx = sh.startX + (sh.x - sh.startX) * (if (p > 0f) q / p else 0f)
-                val ty = sh.startY + (sh.y - sh.startY) * (if (p > 0f) q / p else 0f)
+            for (k in 0 until Shell.TRAIL_POINTS) {
+                val tx = sh.trailX[k] - game.scroll
+                val ty = sh.trailY[k]
+                if (ty.isNaN()) continue
                 c.drawRect(tx - 1f, ty - 1f, tx + 1f, ty + 1f, px)
             }
-            px.color = if (blink) WARN else SHELL
-            c.drawRect(sh.x - 2f, sh.y - 2f, sh.x + 2f, sh.y + 2f, px)
+            val half = if (sh.terminal) 3f else 2f
+            px.color = if (if (sh.terminal) fastBlink else blink) WARN else SHELL
+            c.drawRect(sh.x - half, sh.y - half, sh.x + half, sh.y + half, px)
         }
         for (m in game.missiles) {
             if (m.warn > 0f) {
