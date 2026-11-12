@@ -129,3 +129,50 @@ kotlin {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 }
+
+// Host-side deterministic fixtures for YUYV→NV21 (no Android device required).
+val yuyvNv21HostTest by tasks.registering {
+    val outDir = layout.buildDirectory.dir("yuyv-nv21-host-test")
+    val isWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+    val exeName = if (isWindows) "yuyv_nv21_test.exe" else "yuyv_nv21_test"
+    val exe = outDir.map { it.file(exeName) }
+    inputs.files(
+        "src/main/cpp/yuyv_nv21.c",
+        "src/main/cpp/yuyv_nv21.h",
+        "src/test/cpp/yuyv_nv21_test.c",
+    )
+    outputs.file(exe)
+    doLast {
+        val out = outDir.get().asFile
+        out.mkdirs()
+        val binary = File(out, exeName)
+        fun resolveCc(name: String): String? {
+            val probe = if (isWindows) listOf("where.exe", name) else listOf("which", name)
+            val proc = ProcessBuilder(probe).redirectErrorStream(true).start()
+            val text = proc.inputStream.bufferedReader().readText().trim()
+            return if (proc.waitFor() == 0 && text.isNotEmpty()) text.lineSequence().first() else null
+        }
+        val cc = sequenceOf("clang", "gcc", "cl").mapNotNull(::resolveCc).firstOrNull()
+            ?: throw GradleException("No host C compiler (clang/gcc/cl) found for yuyv_nv21_test")
+        val include = file("src/main/cpp").absolutePath
+        val srcs = listOf(
+            file("src/main/cpp/yuyv_nv21.c").absolutePath,
+            file("src/test/cpp/yuyv_nv21_test.c").absolutePath,
+        )
+        val compile = if (File(cc).name.startsWith("cl")) {
+            listOf(cc, "/nologo", "/W3", "/Fe${binary.absolutePath}", "/I$include") + srcs
+        } else {
+            listOf(cc, "-O2", "-Wall", "-Wextra", "-Werror", "-o", binary.absolutePath, "-I$include") + srcs
+        }
+        exec {
+            commandLine(compile)
+        }
+        exec {
+            commandLine(binary.absolutePath)
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(yuyvNv21HostTest)
+}

@@ -70,7 +70,7 @@ class PassiveArcadeTest {
 
     @Test
     fun publicApiIsLimitedToHostIntegrationTypes() {
-        val declaration = Regex("""^public\s+(?:data\s+|enum\s+|sealed\s+)?(?:class|object|interface)\s+(\w+)""", RegexOption.MULTILINE)
+        val declaration = Regex("""^public\s+(?:data\s+|enum\s+|sealed\s+|fun\s+)?(?:class|object|interface)\s+(\w+)""", RegexOption.MULTILINE)
         val exposed = sources().flatMap { file -> declaration.findAll(file.readText()).map { it.groupValues[1] }.toList() }.toSortedSet()
         assertEquals(
             sortedSetOf(
@@ -84,10 +84,12 @@ class PassiveArcadeTest {
                 "ArcadeTrackerDiagnostics",
                 "ArcadeTrackerMode",
                 "ArcadeTrackerSettings",
+                "AuthorizedCameraFd",
                 "BikeMotion",
                 "BikeMotionMonitor",
                 "CameraRegion",
                 "CameraState",
+                "ExternalCameraProvider",
                 "FingerCountInput",
                 "FingerMathView",
                 "FlakView",
@@ -173,11 +175,27 @@ class PassiveArcadeTest {
     fun nativeSourcesStayEquipmentIndependent() {
         val cpp = File("src/main/cpp")
         val files = cpp.walkTopDown().filter { it.isFile && (it.extension == "c" || it.extension == "h" || it.name == "CMakeLists.txt") }.toList()
-        assertEquals(setOf("CMakeLists.txt", "arcade_jni.c", "hand_pipeline.c", "hand_pipeline.h"), files.map { it.name }.toSet())
+        assertEquals(
+            setOf(
+                "CMakeLists.txt",
+                "arcade_jni.c",
+                "hand_pipeline.c",
+                "hand_pipeline.h",
+                "uvc_jni.c",
+                "yuyv_nv21.c",
+                "yuyv_nv21.h",
+            ),
+            files.map { it.name }.toSet(),
+        )
         val offenders = files.flatMap { f -> forbidden.filter { f.readText().contains(it) }.map { "${f.name}: $it" } }
         assertEquals(emptyList<String>(), offenders)
         val jni = File(cpp, "arcade_jni.c").readText()
         assertEquals(7, Regex("""JNICALL Java_com_fitbaus_arcade_NativeHandBridge_native\w+""").findAll(jni).count())
+        val uvc = File(cpp, "uvc_jni.c").readText()
+        assertTrue(uvc.contains("Java_com_fitbaus_arcade_UvcNative_open"))
+        assertTrue(uvc.contains("Java_com_fitbaus_arcade_UvcNative_close"))
+        assertTrue(uvc.contains("LIBUSB_OPTION_NO_DEVICE_DISCOVERY"))
+        assertTrue(File(cpp, "yuyv_nv21.c").readText().contains("yuyv_to_nv21"))
     }
 
     @Test
@@ -196,6 +214,11 @@ class PassiveArcadeTest {
         assertTrue(notice.contains("Apache License, Version 2.0"))
         expected.values.forEach { assertTrue(notice.contains(it)) }
         assertTrue(File("src/main/assets/licenses/arcade/Apache-2.0.txt").readText().contains("END OF TERMS AND CONDITIONS"))
+        assertTrue(notice.contains("libusb 1.0.30"))
+        assertTrue(notice.contains("libuvc"))
+        assertTrue(notice.contains("LGPL-2.1"))
+        assertTrue(File("src/main/assets/licenses/arcade/LGPL-2.1.txt").readText().contains("GNU LESSER GENERAL PUBLIC LICENSE"))
+        assertTrue(File("src/main/assets/licenses/arcade/BSD-libuvc.txt").readText().contains("BSD License"))
     }
 
     @Test

@@ -355,6 +355,7 @@ public class ArcadeCameraSession internal constructor(
             permissionRequestCode: Int,
             settings: ArcadeTrackerSettings = ArcadeTrackerSettings.DEFAULT,
             detectionRegion: CameraRegion = CameraRegion.DEFAULT_DETECTION,
+            externalCamera: ExternalCameraProvider? = null,
         ): ArcadeCameraSession {
             val appContext = activity.applicationContext
             return ArcadeCameraSession(
@@ -363,7 +364,13 @@ public class ArcadeCameraSession internal constructor(
                 TrackerConfig(region = detectionRegion),
                 initialSettings = settings,
                 landmarkBackendFactory = { s -> NativeHandModels.open(appContext, s.landmarkThreads, face = s.mode == ArcadeTrackerMode.Face) },
-            ) { sink -> SerialCameraFrameSource(ArcadeCameraThread, Camera1Driver(sink)) }
+            ) { sink ->
+                PreferExternalCameraFrameSource(
+                    worker = ArcadeCameraThread,
+                    sink = sink,
+                    external = externalCamera,
+                )
+            }
         }
     }
 }
