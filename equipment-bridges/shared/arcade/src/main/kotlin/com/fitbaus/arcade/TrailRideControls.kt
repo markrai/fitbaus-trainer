@@ -93,7 +93,7 @@ internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
     }
 }
 
-internal enum class TrailHold { None, CameraStarting, CameraUnavailable, FaceLost, Calibrating, NoTelemetry, NotPedaling, LearningPace, Resuming, GameOver }
+internal enum class TrailHold { None, CameraStarting, CameraUnavailable, FaceLost, Calibrating, NoTelemetry, NotPedaling, LearningPace, Resuming }
 
 /**
  * Decides whether the TRAIL RIDE simulation may run. Any missing controller holds the game and
@@ -107,9 +107,8 @@ internal class TrailRideSupervisor(private val resumeStableMs: Long = 600L) {
         running = false
     }
 
-    fun hold(gameOver: Boolean, camera: CameraState, steer: SteerReading, cadence: CadenceReading): TrailHold {
+    fun hold(camera: CameraState, steer: SteerReading, cadence: CadenceReading): TrailHold {
         val hold = when {
-            gameOver -> TrailHold.GameOver
             camera == CameraState.Unavailable || camera == CameraState.PermissionDenied -> TrailHold.CameraUnavailable
             camera != CameraState.Ready -> TrailHold.CameraStarting
             steer.state == FaceControlState.Lost -> TrailHold.FaceLost
@@ -126,7 +125,6 @@ internal class TrailRideSupervisor(private val resumeStableMs: Long = 600L) {
 
     fun message(hold: TrailHold, cadence: CadenceReading): String? = when (hold) {
         TrailHold.None -> null
-        TrailHold.GameOver -> "GAME OVER - TAP TO RIDE AGAIN"
         TrailHold.CameraUnavailable -> "CAMERA UNAVAILABLE - TRAIL RIDE NEEDS HEAD STEERING"
         TrailHold.CameraStarting -> "STARTING CAMERA..."
         TrailHold.FaceLost -> "FACE LOST - LOOK AT THE SCREEN"
@@ -141,7 +139,7 @@ internal class TrailRideSupervisor(private val resumeStableMs: Long = 600L) {
 /**
  * One TRAIL RIDE frame without Android: read head steering and cadence, decide the hold, turn a
  * new confirmed surge into a jump request, and advance the fixed-step game only while live.
- * While held the game clock is reset, so nothing (hazards, jump timers, lives) advances.
+ * While held the game clock is reset, so nothing (hazards, jump timers, crashes) advances.
  */
 internal class TrailRideSession(
     val game: TrailRideGame,
@@ -177,7 +175,7 @@ internal class TrailRideSession(
     ): TrailHold {
         steer = steering.update(position, nowNanos)
         cadenceReading = cadence.update(connected, initialized, rpm, rpmCurrent, rpmObservedAt, nowNanos, simulated)
-        hold = supervisor.hold(game.phase == TrailPhase.GameOver, camera, steer, cadenceReading)
+        hold = supervisor.hold(camera, steer, cadenceReading)
         if (edge.update(cadenceReading, live)) {
             jumpRequests += 1
             game.requestJump()

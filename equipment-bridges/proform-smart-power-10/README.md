@@ -128,8 +128,9 @@ gates and slaloms).
   40-100 RPM); a faster baseline is never required. If you stop, the game
   shows `PEDAL TO RIDE` and waits.
 - **Stay on the trail and miss the trees.** Riding past the trail edge for
-  about 0.3 s, hitting a trunk or rock, or falling into a ditch costs one of
-  three lives, followed by a short recovery with two seconds of protection.
+  about 0.3 s, hitting a trunk or rock, or falling into a ditch is a crash:
+  a short pause, a slow restart and two seconds of protection, then the ride
+  carries on. There is no game over; the HUD counts your crashes.
   Orange edges and `STEER LEFT` / `STEER RIGHT` warn you near the edge.
 - **Jump ditches with a pedal surge.** Ditches span the whole trail, marked
   by orange flags; steering cannot avoid them. When `SURGE NOW!` appears
@@ -144,8 +145,8 @@ gates and slaloms).
   freeze the game; nothing advances and no life is lost while held. After
   the face returns it waits about 0.6 s for a stable view.
 - **Score.** Points for distance, each obstacle passed, each ditch cleared
-  (+150) and each new level. On game over, tap the screen to ride again.
-  Scores are session-only.
+  (+150) and each new level. The ride is endless; scores are session-only.
+  `Restart ride now` in the developer options starts a fresh ride.
 
 **Developer options** (long-press the TRAIL RIDE tab):
 

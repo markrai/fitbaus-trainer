@@ -35,12 +35,11 @@ internal data class TrailRideConfig(
     val crashSeconds: Float = 1.2f,
     val invulnerableSeconds: Float = 2f,
     val readySeconds: Float = 2f,
-    val lives: Int = 3,
     val step: Float = 1f / 60f,
     val maxFrame: Float = 0.1f,
 )
 
-internal enum class TrailPhase { Ready, Riding, Crashed, GameOver }
+internal enum class TrailPhase { Ready, Riding, Crashed }
 
 internal enum class TrailCrash { None, Obstacle, OffTrail, Ditch }
 
@@ -58,6 +57,7 @@ internal class TrailEvent(val atSeconds: Float, val text: String)
  * ditch's takeoff window ([TrailRideConfig.jumpLateSeconds]..[TrailRideConfig.jumpEarlySeconds]
  * before the near edge at the current speed) and the rider stays airborne over the whole ditch.
  * Hazards are resolved by sweeping the distance covered in each step, so no step can skip one.
+ * The ride is endless: a crash costs a short recovery and momentum, never the game.
  */
 internal class TrailRideGame(
     val config: TrailRideConfig = TrailRideConfig(),
@@ -79,7 +79,7 @@ internal class TrailRideGame(
         private set
     var speed: Float = 0f
         private set
-    var lives: Int = config.lives
+    var crashes: Int = 0
         private set
     var score: Int = 0
         private set
@@ -187,7 +187,7 @@ internal class TrailRideGame(
         riderVx = 0f
         targetX = 0f
         speed = 0f
-        lives = config.lives
+        crashes = 0
         score = 0
         scoreFraction = 0f
         elapsed = 0f
@@ -233,7 +233,6 @@ internal class TrailRideGame(
     }
 
     fun step(dt: Float, steer: Float, rpm: Float) {
-        if (phase == TrailPhase.GameOver) return
         elapsed += dt
         targetX = steer.coerceIn(-1f, 1f) * config.steerRange
         when (phase) {
@@ -254,7 +253,6 @@ internal class TrailRideGame(
                 if (crashLeft <= 0f) recover()
             }
             TrailPhase.Riding -> ride(dt, rpm)
-            TrailPhase.GameOver -> Unit
         }
     }
 
@@ -396,7 +394,7 @@ internal class TrailRideGame(
     }
 
     private fun crash(reason: TrailCrash, detail: String) {
-        lives -= 1
+        crashes += 1
         lastCrash = reason
         lastCrashAt = elapsed
         airLeft = 0f
@@ -404,12 +402,7 @@ internal class TrailRideGame(
         pendingJump = false
         offTrailFor = 0f
         riderVx = 0f
-        log("$detail, lives $lives")
-        if (lives <= 0) {
-            phase = TrailPhase.GameOver
-            log("game over, score $score")
-            return
-        }
+        log("$detail (crash $crashes)")
         phase = TrailPhase.Crashed
         crashLeft = config.crashSeconds
     }

@@ -250,6 +250,8 @@ public class TrailRideView(context: Context) : View(context) {
     private var memoryAtNanos = Long.MIN_VALUE
     private var animSeconds = 0f
     private var hudScore = -1
+    private var hudCrashes = -1
+    private var hudCrashText = ""
     private var hudScoreText = ""
     private var hudDistanceKey = -1
     private var hudDistanceText = ""
@@ -819,12 +821,15 @@ public class TrailRideView(context: Context) : View(context) {
         }
         canvas.drawText(hudScoreText, left, baseline, hudPaint)
         var x = left + hudPaint.measureText(hudScoreText) + hudPaint.measureText("  ")
-        for (i in 0 until game.config.lives) {
-            px.color = if (i < game.lives) LIFE else LIFE_LOST
-            canvas.drawRect(x + i * 22f * density, baseline - 12f * density, x + i * 22f * density + 16f * density, baseline - 2f * density, px)
-        }
-        x += game.config.lives * 22f * density + 12f * density
         hudPaint.textSize = 13f * density
+        if (game.crashes != hudCrashes) {
+            hudCrashes = game.crashes
+            hudCrashText = "CRASHES $hudCrashes"
+        }
+        hudPaint.color = if (hudCrashes > 0) CRASH_TEXT else WHITE
+        canvas.drawText(hudCrashText, x, baseline - 1f * density, hudPaint)
+        hudPaint.color = WHITE
+        x += hudPaint.measureText(hudCrashText) + 14f * density
         val tens = (game.distance / 10f).toInt() * 100 + game.level
         if (tens != hudDistanceKey) {
             hudDistanceKey = tens
@@ -912,8 +917,8 @@ public class TrailRideView(context: Context) : View(context) {
                 g.airLeft, g.lastJump, g.jumpTimeToDitch, ditchText,
             ),
             String.format(
-                Locale.US, "last crash %s  hits %d  off-trail %d  ditch misses %d  jumps %d  dodged %d  level %d  %.0f m  t %.0f s",
-                g.lastCrash, g.obstacleHits, g.offTrails, g.ditchesMissed, g.jumpsCleared, g.dodged, g.level + 1, g.distance, g.elapsed,
+                Locale.US, "last crash %s  crashes %d (hits %d  off-trail %d  ditch misses %d)  jumps %d  dodged %d  level %d  %.0f m  t %.0f s",
+                g.lastCrash, g.crashes, g.obstacleHits, g.offTrails, g.ditchesMissed, g.jumpsCleared, g.dodged, g.level + 1, g.distance, g.elapsed,
             ),
             String.format(
                 Locale.US, "frame p50 %.0f / p90 %.0f ms  update p50 %.2f / p90 %.2f ms  draw p50 %.1f / p90 %.1f ms  steps %d  sprites %d  cpu %s  %s",
@@ -950,7 +955,6 @@ public class TrailRideView(context: Context) : View(context) {
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) simulatedPress = false
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             simulatedPress = false
-            if (game.phase == TrailPhase.GameOver) restartGame()
             performClick()
         }
         return true
@@ -1045,8 +1049,7 @@ public class TrailRideView(context: Context) : View(context) {
         val COMPUTER = TrailSprites.rgb(20, 20, 24)
         val COMPUTER_SCREEN = TrailSprites.rgb(110, 150, 100)
         val COMPUTER_DIGIT = TrailSprites.rgb(20, 40, 20)
-        val LIFE = TrailSprites.rgb(0, 200, 90)
-        val LIFE_LOST = TrailSprites.rgb(80, 80, 80)
+        val CRASH_TEXT = TrailSprites.rgb(236, 170, 150)
         val METER_BACK = TrailSprites.rgb(40, 40, 40)
         val METER_BOOST = TrailSprites.rgb(252, 160, 68)
         val METER_READY = TrailSprites.rgb(0, 200, 90)

@@ -54,7 +54,7 @@ class TrailRideGameTest {
         val steered = TrailWorlds.riding(TrailRideConfig(world = TrailWorlds.curvyEmpty()), seed = 12L)
         TrailPilots.run(steered, 300f, steer = { TrailPilots.follow(it) })
         assertEquals(0, steered.offTrails, "steering with the trail keeps the rider on it")
-        assertEquals(steered.config.lives, steered.lives)
+        assertEquals(0, steered.crashes)
         assertTrue(steered.distance > 1500f, "and the ride keeps going (${steered.distance} m)")
     }
 
@@ -120,13 +120,13 @@ class TrailRideGameTest {
     fun invulnerabilityStopsRepeatedDamage() {
         val dense = TrailWorlds.straight(firstDitch = TrailWorlds.NEVER, obstacles = true)
             .copy(obstacleSpacing = 4f, minObstacleSpacing = 4f, obstacleSpacingJitter = 0f, obstacleSpacingPerLevel = 0f)
-        val g = TrailWorlds.riding(TrailRideConfig(world = dense, lives = 50))
+        val g = TrailWorlds.riding(TrailRideConfig(world = dense))
         val crashes = ArrayList<Float>()
-        var lives = g.lives
+        var count = g.crashes
         TrailPilots.run(g, 60f, steer = { TrailPilots.aim(it) }) {
-            if (it.lives != lives) {
-                assertEquals(lives - 1, it.lives, "one life per crash")
-                lives = it.lives
+            if (it.crashes != count) {
+                assertEquals(count + 1, it.crashes, "one crash at a time")
+                count = it.crashes
                 crashes += it.lastCrashAt
             }
         }
@@ -146,7 +146,7 @@ class TrailRideGameTest {
             TrailPilots.run(g, 25f, steer = { steer })
             assertEquals(1, g.ditchesMissed, "steer $steer")
             assertEquals(TrailCrash.Ditch, g.lastCrash)
-            assertEquals(g.config.lives - 1, g.lives)
+            assertEquals(1, g.crashes)
             assertTrue(g.distance > ditch.end, "recovery continues past the ditch")
             TrailPilots.run(g, 5f, steer = { steer })
             assertEquals(1, g.ditchesMissed, "the same ditch is never replayed")
@@ -159,7 +159,7 @@ class TrailRideGameTest {
             val g = jumpAt(lead)
             assertEquals(1, g.jumpsCleared, "lead $lead s")
             assertEquals(0, g.ditchesMissed)
-            assertEquals(g.config.lives, g.lives)
+            assertEquals(0, g.crashes)
             assertEquals(JumpResult.Clean, g.lastJump)
             assertTrue(g.score >= TrailRideGame.JUMP_POINTS)
         }
@@ -257,7 +257,7 @@ class TrailRideGameTest {
         assertEquals((g.config.maxFrame / g.config.step).toInt(), steps, "a 5 s stall advances at most maxFrame")
     }
 
-    private class Outcome(val distance: Float, val lives: Int, val cleared: Int, val missed: Int, val hits: Int, val offTrail: Int, val dodged: Int, val score: Int)
+    private class Outcome(val distance: Float, val crashes: Int, val cleared: Int, val missed: Int, val hits: Int, val offTrail: Int, val dodged: Int, val score: Int)
 
     private fun rideAtFrameRate(frames: (Random) -> Long): Outcome {
         val g = TrailWorlds.riding(TrailRideConfig(), seed = 31L)
@@ -273,7 +273,7 @@ class TrailRideGameTest {
             }
             g.advance(now, TrailPilots.avoid(g), 72f)
         }
-        return Outcome(g.distance, g.lives, g.jumpsCleared, g.ditchesMissed, g.obstacleHits, g.offTrails, g.dodged, g.score)
+        return Outcome(g.distance, g.crashes, g.jumpsCleared, g.ditchesMissed, g.obstacleHits, g.offTrails, g.dodged, g.score)
     }
 
     @Test
@@ -282,7 +282,7 @@ class TrailRideGameTest {
         val normal = rideAtFrameRate { 33_333_333L }
         val jittery = rideAtFrameRate { r -> (20 + r.nextInt(60)) * 1_000_000L }
         for (o in listOf(normal, jittery)) {
-            assertEquals(fast.lives, o.lives)
+            assertEquals(fast.crashes, o.crashes)
             assertEquals(fast.cleared, o.cleared)
             assertEquals(fast.missed, o.missed)
             assertEquals(fast.hits, o.hits)
@@ -308,19 +308,20 @@ class TrailRideGameTest {
     }
 
     @Test
-    fun threeLivesThenGameOverAndRestartClearsEverything() {
+    fun crashesNeverEndTheRideAndRestartClearsEverything() {
         val g = straightGame(firstDitch = TrailWorlds.NEVER)
-        TrailPilots.run(g, 30f, steer = { 1f })
-        assertEquals(TrailPhase.GameOver, g.phase)
-        assertEquals(0, g.lives)
-        assertEquals(3, g.offTrails)
-        val before = g.distance
+        TrailPilots.run(g, 60f, steer = { 1f })
+        assertTrue(g.crashes >= 8, "riding off the trail again and again (${g.crashes} crashes)")
+        assertEquals(g.crashes, g.offTrails)
+        assertTrue(g.phase == TrailPhase.Riding || g.phase == TrailPhase.Crashed, "there is no game over")
         TrailPilots.run(g, 2f)
-        assertEquals(before, g.distance, "nothing moves after game over")
+        val before = g.distance
+        TrailPilots.run(g, 5f, steer = { TrailPilots.follow(it) })
+        assertTrue(g.distance > before + 20f, "the ride keeps going after any number of crashes")
         g.requestJump()
         g.restart(7L)
         assertEquals(TrailPhase.Ready, g.phase)
-        assertEquals(g.config.lives, g.lives)
+        assertEquals(0, g.crashes)
         assertEquals(0, g.score)
         assertEquals(0f, g.distance)
         assertEquals(0f, g.riderX)
@@ -371,7 +372,7 @@ class TrailRideGameTest {
         val d = surgeRide(surgeLead = cue)
         assertEquals(1, d.session.jumpRequests)
         assertEquals(1, d.game.jumpsCleared, "jump ${d.game.lastJump} at ${d.game.jumpTimeToDitch} s")
-        assertEquals(d.game.config.lives, d.game.lives)
+        assertEquals(0, d.game.crashes)
     }
 
     @Test
