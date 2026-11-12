@@ -1,0 +1,209 @@
+name: Release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Inspection-only packaging. Never publishes, tags, pushes, or deploys. Must stay true; false is reserved and currently fails closed."
+        type: boolean
+        default: true
+      package_production_bridge:
+        description: "Explicit opt-in to package a production-identity Bike Bridge APK. Requires signing secrets. Not physical-device qualification."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package inspection artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      ARTIFACT_DIR: release-artifacts
+    steps:
+      - name: Enforce inspection-only workflow
+        run: |
+          set -euo pipefail
+          echo "dry_run=${{ inputs.dry_run }}"
+          echo "package_production_bridge=${{ inputs.package_production_bridge }}"
+          if [ "${{ inputs.dry_run }}" != "true" ]; then
+            echo "dry_run=false is reserved for a future publish path."
+            echo "This workflow never creates tags, GitHub Releases, pushes, or external deployments."
+            echo "Re-run with dry_run=true to build inspection artifacts."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-36" "platforms;android-34" "build-tools;34.0.0" "build-tools;35.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check
+      - run: npm run check:version
+      - run: npm test
+
+      - name: Record product version
+        id: version
+        run: |
+          node -e "const fs=require('fs'); const v=require('./scripts/fitbaus-version.cjs').readAppVersion('version.js'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'name='+v.name+'\ncode='+String(v.versionCode)+'\n'); console.log('Product version '+v.name+' (versionCode '+v.versionCode+')');"
+
+      - name: Package PWA zip
+        run: |
+          mkdir -p "$ARTIFACT_DIR"
+          node scripts/package-web-deploy.cjs --zip "$ARTIFACT_DIR/fitbaus-trainer-web-${{ steps.version.outputs.name }}.zip"
+
+      - name: Sync Capacitor Android web assets
+        run: npm run cap:sync:android
+
+      - name: Verify native web assets and Capacitor copy
+        run: |
+          set -euo pipefail
+          node scripts/verify-native-version.cjs --www www
+          node scripts/verify-native-version.cjs --assets android/app/src/main/assets/public
+
+      - name: Assemble Trainer Android unsigned release APK
+        working-directory: android
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease :app:printFitbausVersion --no-daemon --stacktrace | tee "$RUNNER_TEMP/trainer-version.txt"
+          grep -F "FITBAUS_VERSION_NAME=${{ steps.version.outputs.name }}" "$RUNNER_TEMP/trainer-version.txt"
+          grep -F "FITBAUS_VERSION_CODE=${{ steps.version.outputs.code }}" "$RUNNER_TEMP/trainer-version.txt"
+
+      - name: Label Trainer Android artifact
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR"
+          apk="$(node -e "const {findSoleApk}=require('./scripts/verify-native-version.cjs'); process.stdout.write(findSoleApk('android/app/build/outputs/apk/release'))")"
+          dest="$ARTIFACT_DIR/fitbaus-trainer-android-${{ steps.version.outputs.name }}-unsigned-release.apk"
+          cp "$apk" "$dest"
+          node scripts/verify-native-version.cjs --apk "$dest"
+          echo "TRAINER_UNSIGNED_RELEASE=$dest" >> "$GITHUB_ENV"
+          ls -lh "$dest"
+
+      - name: Assemble Bike Bridge staging APKs
+        working-directory: equipment-bridges/proform-smart-power-10/native
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew :bridge-app:assembleRelease :bridge-app:assembleDebug :bridge-app:printFitbausVersion :printFitbausVersion -PbridgeIdentity=staging --no-daemon --stacktrace | tee "$RUNNER_TEMP/bridge-version.txt"
+          grep -F "FITBAUS_VERSION_NAME=${{ steps.version.outputs.name }}" "$RUNNER_TEMP/bridge-version.txt"
+          grep -F "FITBAUS_VERSION_CODE=${{ steps.version.outputs.code }}" "$RUNNER_TEMP/bridge-version.txt"
+
+      - name: Label Bike Bridge staging artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$ARTIFACT_DIR"
+          release_apk="$(node -e "const {findSoleApk}=require('./scripts/verify-native-version.cjs'); process.stdout.write(findSoleApk('equipment-bridges/proform-smart-power-10/native/bridge-app/build/outputs/apk/release'))")"
+          debug_apk="$(node -e "const {findSoleApk}=require('./scripts/verify-native-version.cjs'); process.stdout.write(findSoleApk('equipment-bridges/proform-smart-power-10/native/bridge-app/build/outputs/apk/debug'))")"
+          unzip -l "$release_apk" | grep -E 'lib/x86/'
+          if unzip -l "$release_apk" | grep -E 'lib/(armeabi|arm64|x86_64)/'; then
+            echo "Bike Bridge staging release APK contains a non-x86 native library"
+            exit 1
+          fi
+          cp "$release_apk" "$ARTIFACT_DIR/fitbaus-bikebridge-staging-${{ steps.version.outputs.name }}-unsigned-release.apk"
+          cp "$debug_apk" "$ARTIFACT_DIR/fitbaus-bikebridge-staging-${{ steps.version.outputs.name }}-debug-signed.apk"
+          ls -lh "$ARTIFACT_DIR"/fitbaus-bikebridge-staging-*.apk
+
+      - name: Package production Bike Bridge APK
+        if: ${{ inputs.package_production_bridge }}
+        env:
+          BIKEBRIDGE_SIGNING_STORE_BASE64: ${{ secrets.BIKEBRIDGE_SIGNING_STORE_BASE64 }}
+          BIKEBRIDGE_SIGNING_STORE_PASSWORD: ${{ secrets.BIKEBRIDGE_SIGNING_STORE_PASSWORD }}
+          BIKEBRIDGE_SIGNING_KEY_ALIAS: ${{ secrets.BIKEBRIDGE_SIGNING_KEY_ALIAS }}
+          BIKEBRIDGE_SIGNING_KEY_PASSWORD: ${{ secrets.BIKEBRIDGE_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BIKEBRIDGE_SIGNING_STORE_BASE64}" ] || [ -z "${BIKEBRIDGE_SIGNING_STORE_PASSWORD}" ] || [ -z "${BIKEBRIDGE_SIGNING_KEY_ALIAS}" ] || [ -z "${BIKEBRIDGE_SIGNING_KEY_PASSWORD}" ]; then
+            echo "package_production_bridge=true but one or more bikebridge.signing secrets are missing."
+            echo "Required: BIKEBRIDGE_SIGNING_STORE_BASE64, BIKEBRIDGE_SIGNING_STORE_PASSWORD, BIKEBRIDGE_SIGNING_KEY_ALIAS, BIKEBRIDGE_SIGNING_KEY_PASSWORD."
+            echo "This is not physical-device qualification."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/bikebridge-release.jks"
+          echo "$BIKEBRIDGE_SIGNING_STORE_BASE64" | base64 --decode > "$keystore"
+          cd equipment-bridges/proform-smart-power-10/native
+          ./gradlew :bridge-app:assembleRelease \
+            -PbridgeIdentity=production \
+            -Pbikebridge.signing.storeFile="$keystore" \
+            -Pbikebridge.signing.storePassword="$BIKEBRIDGE_SIGNING_STORE_PASSWORD" \
+            -Pbikebridge.signing.keyAlias="$BIKEBRIDGE_SIGNING_KEY_ALIAS" \
+            -Pbikebridge.signing.keyPassword="$BIKEBRIDGE_SIGNING_KEY_PASSWORD" \
+            --no-daemon --stacktrace
+          apk="$(node -e "const {findSoleApk}=require('$GITHUB_WORKSPACE/scripts/verify-native-version.cjs'); process.stdout.write(findSoleApk('bridge-app/build/outputs/apk/release'))")"
+          dest="$GITHUB_WORKSPACE/$ARTIFACT_DIR/fitbaus-bikebridge-production-${{ steps.version.outputs.name }}-production-signed.apk"
+          cp "$apk" "$dest"
+          ls -lh "$dest"
+          echo "Production packaging is not physical-device qualification."
+
+      - name: Version consistency including Gradle metadata
+        run: node scripts/check-version-consistency.cjs --require-gradle=all
+
+      - name: Write artifact notes and checksums
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.name }}"
+          code="${{ steps.version.outputs.code }}"
+          cat > "$ARTIFACT_DIR/ARTIFACTS.md" <<EOF
+          # FitBaus $version inspection artifacts
+
+          These files are GitHub Actions artifacts for inspection. This workflow does not
+          create a Git tag, GitHub Release, push, or external deployment.
+
+          Product version: $version
+          Numeric build / Android versionCode / iOS CURRENT_PROJECT_VERSION: $code
+
+          | File | Signing class | Installability |
+          | --- | --- | --- |
+          | fitbaus-trainer-web-$version.zip | n/a | Host as static files |
+          | fitbaus-trainer-android-$version-unsigned-release.apk | unsigned release | Not normally installable; sign locally before install/upgrade |
+          | fitbaus-bikebridge-staging-$version-unsigned-release.apk | unsigned staging release | Not normally installable |
+          | fitbaus-bikebridge-staging-$version-debug-signed.apk | debug-signed staging | Sideloadable only if the debug certificate matches any already-installed staging build (\`adb install -r\` requires certificate continuity) |
+
+          iOS IPA: not produced. There is no macOS CI runner or App Store signing in this workflow.
+
+          USB probe APK: not a product surface; not packaged.
+
+          Production Bike Bridge APK is included only when package_production_bridge=true and
+          signing secrets are present. A successful production package is not physical-device
+          qualification.
+          EOF
+          (
+            cd "$ARTIFACT_DIR"
+            shopt -s nullglob
+            files=(fitbaus-*.apk fitbaus-*.zip ARTIFACTS.md)
+            if [ ${#files[@]} -eq 0 ]; then
+              echo "No inspection artifacts to checksum"
+              exit 1
+            fi
+            sha256sum "${files[@]}" > SHA256SUMS.txt
+          )
+          cat "$ARTIFACT_DIR/ARTIFACTS.md"
+          cat "$ARTIFACT_DIR/SHA256SUMS.txt"
+
+      - name: Upload inspection artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fitbaus-${{ steps.version.outputs.name }}-inspection
+          path: release-artifacts/
+          if-no-files-found: error

@@ -26,6 +26,7 @@ deploy-upload.bat
 docs/*
 !docs/adaptive-training-architecture-review.md
 !docs/personalization-architecture.md
+!docs/NATIVE-DEVELOPMENT.MD
 
 # Temporary architecture/research audit drafts — never commit
 docs/draft/

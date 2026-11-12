@@ -91,7 +91,7 @@ function getCacheName() {
   _cacheNamePromise = self.fetch('/dist/version.js')
     .then((r) => r.text())
     .then((text) => {
-      const m = text.match(/APP_VERSION\\s*=\\s*['\"]([^'\"]+)['\"]/);
+      const m = text.match(/APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
       const version = (m && m[1]) ? m[1] : '0';
       return 'fitbaus-trainer-' + version;
     })

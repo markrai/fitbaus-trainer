@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.10.14";
+export const APP_VERSION = "1.0.0";
 export function setVersionOnDom() {
     const versionEl = document.getElementById("appVersion");
     if (versionEl) {

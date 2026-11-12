@@ -1,7 +1,7 @@
 # Bike Bridge architecture
 
 Production Bike Bridge is the Kotlin Native app under `native/`. Package
-`com.fitbaus.bikebridge` (versionName `0.2.0`) claims the ProForm Smart Power
+`com.fitbaus.bikebridge` (versionName from repo-root `version.js`, currently `1.0.0`) claims the ProForm Smart Power
 10.0 brainboard USB, authenticates when DeviceInfo requires unlock, streams
 Resistance / RPM / Watts, and serves a trusted-LAN HTTP API for FitBaus
 Trainer.

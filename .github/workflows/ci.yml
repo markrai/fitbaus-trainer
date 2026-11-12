@@ -21,6 +21,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run check
+      - run: npm run check:version
       - run: npm test
       - run: git diff --exit-code
 
@@ -30,6 +31,9 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -45,6 +49,13 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :equipment-protocol:test :bridge-app:testReleaseUnitTest :equipment-usb-probe:testDebugUnitTest :arcade:testDebugUnitTest --no-daemon --stacktrace
+      - name: Resolved Bike Bridge versions
+        working-directory: equipment-bridges/proform-smart-power-10/native
+        run: |
+          chmod +x gradlew
+          ./gradlew :printFitbausVersion :bridge-app:printFitbausVersion :equipment-protocol:printFitbausVersion --no-daemon --stacktrace
+      - name: Version consistency with Gradle metadata
+        run: node scripts/check-version-consistency.cjs --require-gradle=bridge
       - name: Unlock qualification Gradle gates
         working-directory: equipment-bridges/proform-smart-power-10/native
         run: |

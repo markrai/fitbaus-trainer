@@ -2,13 +2,68 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-12
+
+First unified FitBaus product release. Trainer web/PWA, Capacitor Android and
+iOS, Native Bike Bridge, and arcade (inside the Bridge APK) all report
+**1.0.0**. Historical `0.x` changelog entries below are unchanged development
+records; they are not rewritten as 1.x releases.
+
+### Added
+
+- Authoritative product version in `version.js`, with Node and Gradle helpers
+  that reject missing, malformed, or out-of-range versions (minor/patch must
+  be 0–99; Android `versionCode` stays in `1..2100000000`).
+- Version-consistency check (`npm run check:version`) in CI, including
+  Gradle-resolved Bike Bridge metadata.
+- Shared web deploy packaging (`scripts/package-web-deploy.cjs`) used by
+  `build-deploy.bat` and the inspection artifact zip.
+- Manual **Release artifacts** workflow: inspection-only `workflow_dispatch`
+  packaging with SHA-256 checksums. It does not tag, push, or publish.
+
 ### Changed
 
-- **Bike Bridge CI and tree match Native.** The retired Xamarin/C# host, Legacy
-  build scaffolding, and migration scripts are removed. The former
-  `dotnet test` bridge-core job is replaced by Native Gradle unit tests
-  (`equipment-protocol`, `bridge-app`, USB probe) so automated validation
-  covers the architecture that ships.
+- **Unified versioning.** Android Trainer `versionName`, iOS
+  `MARKETING_VERSION`, Bike Bridge `versionName`, and HTTP `bridgeVersion`
+  now derive from `version.js`. Numeric codes use
+  `major * 10000 + minor * 100 + patch` (`1.0.0` → `10000`).
+- **PWA cache identity.** `sw.js` now parses `dist/version.js` correctly, so
+  the release cache name is `fitbaus-trainer-1.0.0`. Persisted workout and
+  athlete data are unchanged.
+- **Bike Bridge CI and tree match Native.** The retired Xamarin/C# host,
+  Legacy build scaffolding, and migration scripts are removed. Automated
+  validation uses Native Gradle unit tests (`equipment-protocol`,
+  `bridge-app`, USB probe, arcade).
+
+### Platforms in this release
+
+- Hosted/self-hosted PWA (static files)
+- Capacitor Android Trainer (`com.markrai.fitbaus.trainer`, min API 24)
+- Capacitor iOS Trainer (`com.markrai.fitbaus.trainer`) — source and Xcode
+  project; CI does not produce an IPA
+- Native Bike Bridge for **ProForm Smart Power 10.0 only** (Android 5.1.1 /
+  API 22 / x86), staging and production package IDs unchanged
+
+### Install and upgrade
+
+- Web: replace hosted files from the deploy zip; PWA cache busts via the
+  versioned cache name.
+- Android/iOS apps keep their package/bundle IDs. Local workout history,
+  profiles, pairing, and equipment configuration are not reset.
+- Unsigned release APKs are inspection artifacts, not installers.
+- `adb install -r` requires the same signing certificate as the installed
+  app. A CI debug-signed Bridge APK will not upgrade a locally debug-signed
+  install that used a different keystore.
+
+### Release gates still open
+
+- Trainer Android signing for sideload/Play
+- iOS signing and App Store / TestFlight distribution
+- Production Bike Bridge physical-device qualification on the console
+- Explicit opt-in plus signing secrets to package a production Bridge APK
+
+See [VERSIONING.md](VERSIONING.md) for bump steps and the GitHub release
+procedure.
 
 ## [0.10.14] - 2026-11-10
 

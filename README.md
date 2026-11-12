@@ -62,17 +62,20 @@ Browser and native app storage are separate, and local storage is not a backup. 
 
 ## Build and contribute
 
-FitBaus includes a TypeScript PWA and Capacitor Android/iOS projects. For development:
+FitBaus includes a TypeScript PWA and Capacitor Android/iOS projects. The current product version is **1.0.0**. For development:
 
 ```bash
 npm run build
 npm run check
+npm run check:version
 npm test
 ```
 
 Edit TypeScript in `src/`, then commit the matching generated `dist/` output. Do not hand-edit `dist/`. Treat persisted schemas and version identifiers as compatibility contracts.
 
-See [Native Development](NATIVE-DEVELOPMENT.md) for platform toolchains and device testing, and [Personalization Architecture](docs/personalization-architecture.md) for the distinction between live control and experimental research.
+Product versioning is centralized in `version.js`. See [VERSIONING.md](VERSIONING.md) for how Android, iOS, Bike Bridge, and the PWA cache stay aligned, and for the GitHub release-candidate procedure. Signing and physical-device qualification are separate gates from version consistency.
+
+See [Native Development](docs/NATIVE-DEVELOPMENT.MD) for platform toolchains and device testing, and [Personalization Architecture](docs/personalization-architecture.md) for the distinction between live control and experimental research.
 
 ## License
 

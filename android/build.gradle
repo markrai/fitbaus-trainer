@@ -17,6 +17,16 @@ buildscript {
 
 apply from: "variables.gradle"
 
+ext.fitbausVersionJs = rootProject.file("../version.js")
+apply from: "../scripts/fitbaus-version.gradle"
+
+tasks.register("printFitbausVersion") {
+    doLast {
+        println "FITBAUS_VERSION_NAME=${rootProject.ext.fitbausVersionName}"
+        println "FITBAUS_VERSION_CODE=${rootProject.ext.fitbausVersionCode}"
+    }
+}
+
 allprojects {
     repositories {
         google()

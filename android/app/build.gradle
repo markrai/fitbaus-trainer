@@ -7,8 +7,8 @@ android {
         applicationId "com.markrai.fitbaus.trainer"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode rootProject.ext.fitbausVersionCode
+        versionName rootProject.ext.fitbausVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -40,6 +40,14 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+}
+
+tasks.register("printFitbausVersion") {
+    doLast {
+        println "FITBAUS_VERSION_NAME=${android.defaultConfig.versionName}"
+        println "FITBAUS_VERSION_CODE=${android.defaultConfig.versionCode}"
+        println "FITBAUS_APPLICATION_ID=${android.defaultConfig.applicationId}"
+    }
 }
 
 apply from: 'capacitor.build.gradle'
