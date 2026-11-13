@@ -14,7 +14,7 @@ const { resolveSourceRef } = require("../scripts/release/resolve-source-ref.cjs"
 const { assertCertMatchesPolicy } = require("../scripts/release/check-signing-policy.cjs");
 const { assertBridgeQualified } = require("../scripts/release/check-physical-qualification.cjs");
 const { preparePublicArtifacts } = require("../scripts/release/prepare-public-artifacts.cjs");
-const { verifyApk } = require("../scripts/release/verify-apk.cjs");
+const { verifyApk, findTool } = require("../scripts/release/verify-apk.cjs");
 const { signApk } = require("../scripts/release/sign-apk.cjs");
 const { publicArtifactNames, redactArg, sha256File } = require("../scripts/release/common.cjs");
 const {
@@ -260,23 +260,59 @@ test("preparePublicArtifacts writes canonical names and separates qualification 
   assert.equal(validated.versionName, "1.0.0");
 });
 
-test("verifyApk sidecar fallback is opt-in only", () => {
-  const dir = tempDir("fitbaus-apk-meta-");
-  const apk = path.join(dir, "app.apk");
-  fs.writeFileSync(apk, "PK\u0005\u0006" + "0".repeat(64));
+/** Empty ZIP (EOCD only) — listable by unzip/tar without being a signed APK. */
+function writeEmptyZipApk(apkPath) {
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  fs.writeFileSync(apkPath, eocd);
+}
+
+function writeVerifySidecars(apkPath, { applicationId, signed = true, certSha256 = "D".repeat(64) }) {
   fs.writeFileSync(
-    `${apk}.meta.json`,
+    `${apkPath}.meta.json`,
     JSON.stringify({
-      applicationId: "com.example.wrong",
+      applicationId,
       versionName: "1.0.0",
       versionCode: 10000,
       minSdk: 22,
     }),
   );
   fs.writeFileSync(
-    `${apk}.cert.json`,
-    JSON.stringify({ signed: true, v1: true, v2: true, certSha256: "D".repeat(64) }),
+    `${apkPath}.cert.json`,
+    JSON.stringify({
+      signed,
+      v1: signed,
+      v2: signed,
+      certSha256: signed ? certSha256 : null,
+    }),
   );
+}
+
+/** Simulate host with no Android SDK build-tools / PATH entries. */
+const absentSdkFindTool = () => null;
+
+/**
+ * Simulate discoverable SDK tools. runTool rejects malformed APKs the same way
+ * real apksigner does on CI (ApkFormatException), without requiring a local SDK.
+ */
+function presentSdkHarness() {
+  return {
+    findTool: (name) => `/fake-sdk/build-tools/35.0.0/${name}`,
+    runTool: (command, args) => {
+      throw new Error(
+        `${command} ${args.join(" ")} failed\n` +
+          `Exception in thread "main" com.android.apksig.apk.ApkFormatException: ` +
+          `Malformed APK: not a ZIP archive`,
+      );
+    },
+  };
+}
+
+test("verifyApk fails closed when SDK tools are absent and sidecar is disabled", () => {
+  const dir = tempDir("fitbaus-apk-no-sdk-");
+  const apk = path.join(dir, "app.apk");
+  writeEmptyZipApk(apk);
+  writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge" });
   assert.throws(
     () =>
       verifyApk({
@@ -284,9 +320,39 @@ test("verifyApk sidecar fallback is opt-in only", () => {
         expectedApplicationId: "com.fitbaus.bikebridge",
         expectedVersionName: "1.0.0",
         expectedMinSdk: 22,
+        findTool: absentSdkFindTool,
       }),
-    /apksigner unavailable|aapt\/aapt2 unavailable/,
+    /apksigner unavailable/,
   );
+});
+
+test("verifyApk uses sidecar metadata when SDK tools are absent and fallback is enabled", () => {
+  const dir = tempDir("fitbaus-apk-sidecar-ok-");
+  const apk = path.join(dir, "app.apk");
+  writeEmptyZipApk(apk);
+  const cert = "E".repeat(64);
+  writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge", certSha256: cert });
+  const result = verifyApk({
+    apkPath: apk,
+    expectedApplicationId: "com.fitbaus.bikebridge",
+    expectedVersionName: "1.0.0",
+    expectedVersionCode: 10000,
+    expectedMinSdk: 22,
+    allowSidecarFallback: true,
+    findTool: absentSdkFindTool,
+  });
+  assert.equal(result.applicationId, "com.fitbaus.bikebridge");
+  assert.equal(result.certSha256, cert);
+  assert.equal(result.v1, true);
+});
+
+test("verifyApk ignores sidecars and rejects malformed APK when SDK tools are present", () => {
+  const dir = tempDir("fitbaus-apk-sdk-present-");
+  const apk = path.join(dir, "app.apk");
+  // Deliberately not a ZIP — matches the CI failure mode for the old test fixture.
+  fs.writeFileSync(apk, "not-a-zip-apk");
+  writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge" });
+  const harness = presentSdkHarness();
   assert.throws(
     () =>
       verifyApk({
@@ -295,25 +361,37 @@ test("verifyApk sidecar fallback is opt-in only", () => {
         expectedVersionName: "1.0.0",
         expectedMinSdk: 22,
         allowSidecarFallback: true,
+        findTool: harness.findTool,
+        runTool: harness.runTool,
       }),
-    /applicationId/,
+    /Malformed APK|not a ZIP archive/,
   );
+
+  // When the host actually has SDK tools, the production discovery path must behave the same.
+  const realApksigner = findTool("apksigner", "APKSIGNER");
+  if (realApksigner) {
+    assert.throws(
+      () =>
+        verifyApk({
+          apkPath: apk,
+          expectedApplicationId: "com.fitbaus.bikebridge",
+          expectedVersionName: "1.0.0",
+          expectedMinSdk: 22,
+          allowSidecarFallback: true,
+        }),
+      /Malformed APK|not a ZIP archive|failed/,
+    );
+  }
 });
 
-test("verifyApk rejects unsigned sidecar when explicitly allowed", () => {
+test("verifyApk rejects unsigned sidecar when fallback is explicitly allowed", () => {
   const dir = tempDir("fitbaus-apk-unsigned-");
   const apk = path.join(dir, "app.apk");
-  fs.writeFileSync(apk, "unsigned");
-  fs.writeFileSync(
-    `${apk}.meta.json`,
-    JSON.stringify({
-      applicationId: "com.markrai.fitbaus.trainer",
-      versionName: "1.0.0",
-      versionCode: 10000,
-      minSdk: 24,
-    }),
-  );
-  fs.writeFileSync(`${apk}.cert.json`, JSON.stringify({ signed: false, certSha256: null }));
+  writeEmptyZipApk(apk);
+  writeVerifySidecars(apk, {
+    applicationId: "com.markrai.fitbaus.trainer",
+    signed: false,
+  });
   assert.throws(
     () =>
       verifyApk({
@@ -321,8 +399,28 @@ test("verifyApk rejects unsigned sidecar when explicitly allowed", () => {
         expectedApplicationId: "com.markrai.fitbaus.trainer",
         expectedVersionName: "1.0.0",
         allowSidecarFallback: true,
+        findTool: absentSdkFindTool,
       }),
     /unsigned/,
+  );
+});
+
+test("verifyApk rejects wrong application ID from an allowed sidecar", () => {
+  const dir = tempDir("fitbaus-apk-wrong-id-");
+  const apk = path.join(dir, "app.apk");
+  writeEmptyZipApk(apk);
+  writeVerifySidecars(apk, { applicationId: "com.example.wrong" });
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.fitbaus.bikebridge",
+        expectedVersionName: "1.0.0",
+        expectedMinSdk: 22,
+        allowSidecarFallback: true,
+        findTool: absentSdkFindTool,
+      }),
+    /applicationId/,
   );
 });
 

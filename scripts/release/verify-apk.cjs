@@ -5,6 +5,10 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { fail, normalizeCertSha256, run, which } = require("./common.cjs");
 
+/**
+ * Discover Android SDK CLI tools from env, PATH, or ANDROID_HOME/build-tools.
+ * Tests may inject a replacement via verifyApk({ findTool }) without touching the host PATH.
+ */
 function findTool(name, envName) {
   if (process.env[envName]) return process.env[envName];
   const fromPath = which(name);
@@ -57,8 +61,8 @@ function parseBadging(text) {
   };
 }
 
-function readMetadata(apkPath, { allowSidecarFallback = false } = {}) {
-  const aapt = findTool("aapt", "AAPT") || findTool("aapt2", "AAPT2");
+function readMetadata(apkPath, { allowSidecarFallback = false, findTool: resolveTool = findTool } = {}) {
+  const aapt = resolveTool("aapt", "AAPT") || resolveTool("aapt2", "AAPT2");
   if (aapt) {
     const result = spawnSync(aapt, ["dump", "badging", apkPath], { encoding: "utf8" });
     if (result.status === 0) return parseBadging(String(result.stdout || ""));
@@ -86,8 +90,17 @@ function parseVerifyText(text) {
   };
 }
 
-function assertSigned(apkPath, { minSdkVersion = null, allowSidecarFallback = false, requireV1 = false } = {}) {
-  const apksigner = findTool("apksigner", "APKSIGNER");
+function assertSigned(
+  apkPath,
+  {
+    minSdkVersion = null,
+    allowSidecarFallback = false,
+    requireV1 = false,
+    findTool: resolveTool = findTool,
+    runTool = run,
+  } = {},
+) {
+  const apksigner = resolveTool("apksigner", "APKSIGNER");
   if (!apksigner) {
     if (allowSidecar(allowSidecarFallback)) {
       const sidecar = `${apkPath}.cert.json`;
@@ -107,7 +120,8 @@ function assertSigned(apkPath, { minSdkVersion = null, allowSidecarFallback = fa
   const args = ["verify", "--verbose", "--print-certs"];
   if (minSdkVersion != null) args.push("--min-sdk-version", String(minSdkVersion));
   args.push(apkPath);
-  const result = run(apksigner, args);
+  // Production path: execute real apksigner. Sidecars are never consulted when the tool exists.
+  const result = runTool(apksigner, args);
   const parsed = parseVerifyText(`${result.stdout || ""}\n${result.stderr || ""}`);
   if (requireV1 && !parsed.v1) {
     fail(`APK lacks verified APK Signature Scheme v1 (needed for minSdk ${minSdkVersion}): ${apkPath}`);
@@ -127,14 +141,18 @@ function verifyApk({
   forbidNonX86 = false,
   requireV1 = false,
   allowSidecarFallback = false,
+  findTool: resolveTool = findTool,
+  runTool = run,
 }) {
   if (!fs.existsSync(apkPath)) fail(`APK missing: ${apkPath}`);
   const signature = assertSigned(apkPath, {
     minSdkVersion: expectedMinSdk,
     allowSidecarFallback,
     requireV1: requireV1 || expectedMinSdk === 22,
+    findTool: resolveTool,
+    runTool,
   });
-  const meta = readMetadata(apkPath, { allowSidecarFallback });
+  const meta = readMetadata(apkPath, { allowSidecarFallback, findTool: resolveTool });
   if (meta.applicationId !== expectedApplicationId) {
     fail(`applicationId ${meta.applicationId} != ${expectedApplicationId}`);
   }
@@ -217,4 +235,4 @@ if (require.main === module) {
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-module.exports = { verifyApk, readMetadata, assertSigned, parseVerifyText };
+module.exports = { verifyApk, readMetadata, assertSigned, parseVerifyText, findTool };
