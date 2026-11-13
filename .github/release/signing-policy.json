@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "description": "Pinned Android signing identities for public FitBaus installers. Publish fails closed when an expectedCertSha256 is null or mismatches the built APK. Never rotate production certificates silently.",
+  "packages": {
+    "com.markrai.fitbaus.trainer": {
+      "role": "trainer",
+      "expectedCertSha256": null,
+      "notes": "No prior public Trainer release installer. Create a persistent TRAINER_SIGNING_* keystore once, back it up offline, set GitHub secrets, then record the certificate SHA-256 (uppercase hex, no colons) here before publish."
+    },
+    "com.fitbaus.bikebridge": {
+      "role": "bikebridge-production",
+      "expectedCertSha256": null,
+      "notes": "Must be the established production Bike Bridge certificate already used on ProForm Smart Power 10.0 consoles. Export the fingerprint from that keystore and record it here before publish. Do not create a replacement production certificate."
+    }
+  }
+}

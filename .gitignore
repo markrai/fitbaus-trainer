@@ -27,6 +27,7 @@ docs/*
 !docs/adaptive-training-architecture-review.md
 !docs/personalization-architecture.md
 !docs/NATIVE-DEVELOPMENT.MD
+!docs/RELEASE.md
 
 # Temporary architecture/research audit drafts — never commit
 docs/draft/
