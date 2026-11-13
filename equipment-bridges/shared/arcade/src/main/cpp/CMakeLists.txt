@@ -42,6 +42,7 @@ add_library(fitbaus_arcade_hand SHARED
   hand_pipeline.c
   arcade_jni.c
   yuyv_nv21.c
+  uvc_negotiate.c
   uvc_jni.c
 )
 target_compile_options(fitbaus_arcade_hand PRIVATE -O2 -Wall -Wextra -Werror -fvisibility=hidden)

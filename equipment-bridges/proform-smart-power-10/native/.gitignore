@@ -4,3 +4,17 @@ local.properties
 *.iml
 .idea/
 **/build/
+
+# Generated APK inspection / local deploy artifacts (never source)
+_apk_check/
+*.apk
+*.ap_
+*.aab
+*.dex
+
+# Physical camera-test screenshots dropped at the native/ module root only.
+# Do not use recursive *.png — that would hide legitimate res/drawable assets.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp

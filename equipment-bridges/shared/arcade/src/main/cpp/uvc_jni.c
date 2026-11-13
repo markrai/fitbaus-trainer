@@ -7,15 +7,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "uvc_negotiate.h"
 #include "yuyv_nv21.h"
 
 #define TAG "FitbausUvc"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 
-#define UVC_PROBE_WIDTH 320
-#define UVC_PROBE_HEIGHT 240
-#define UVC_PROBE_FPS 30
+#define UVC_NEG_MAX_CANDIDATES 64
 
 typedef struct {
   JavaVM *vm;
@@ -25,6 +25,7 @@ typedef struct {
   jsize nv21_len;
   int width;
   int height;
+  int fps;
   uvc_context_t *ctx;
   uvc_device_handle_t *device;
   atomic_int alive;
@@ -43,11 +44,93 @@ static void release_java_refs(JNIEnv *env, Uvc *u) {
   }
 }
 
+static void append_candidate(UvcNegMode *modes, int *count, int format, int w, int h,
+                             uint32_t interval_100ns) {
+  if (!modes || !count || *count >= UVC_NEG_MAX_CANDIDATES) return;
+  /* Never feed fps=0 into libuvc continuous negotiation (divides by fps). */
+  if (!uvc_negotiate_interval_usable(interval_100ns)) return;
+  modes[*count].format = format;
+  modes[*count].width = w;
+  modes[*count].height = h;
+  modes[*count].interval_100ns = interval_100ns;
+  (*count)++;
+}
+
+static void collect_yuyv_modes(uvc_device_handle_t *device, UvcNegMode *modes, int *count) {
+  const uvc_format_desc_t *fmt;
+
+  if (!device || !modes || !count) return;
+  for (fmt = uvc_get_format_descs(device); fmt; fmt = fmt->next) {
+    enum uvc_frame_format parsed;
+    const uvc_frame_desc_t *frame;
+
+    parsed = uvc_frame_format_for_guid((uint8_t *)fmt->guidFormat);
+    if (parsed != UVC_FRAME_FORMAT_YUYV) continue;
+
+    for (frame = fmt->frame_descs; frame; frame = frame->next) {
+      if (frame->intervals) {
+        uint32_t *iv;
+        for (iv = frame->intervals; *iv != 0; iv++) {
+          append_candidate(modes, count, UVC_NEG_FORMAT_YUYV, (int)frame->wWidth, (int)frame->wHeight,
+                           *iv);
+        }
+      } else {
+        uint32_t derived = uvc_negotiate_derive_interval(
+            frame->dwDefaultFrameInterval, frame->dwMinFrameInterval, frame->dwMaxFrameInterval,
+            frame->dwFrameIntervalStep);
+        if (derived != 0) {
+          append_candidate(modes, count, UVC_NEG_FORMAT_YUYV, (int)frame->wWidth, (int)frame->wHeight,
+                           derived);
+        }
+      }
+    }
+  }
+}
+
+static void log_mode_list(const UvcNegMode *modes, const int *order, int n) {
+  int i;
+  for (i = 0; i < n && i < 12; i++) {
+    const UvcNegMode *m = &modes[order[i]];
+    LOGI("candidate[%d] %dx%d libuvc_fps=%d approx_fps=%d interval=%u", i, m->width, m->height,
+         uvc_negotiate_libuvc_fps(m->interval_100ns), uvc_negotiate_approx_fps(m->interval_100ns),
+         (unsigned)m->interval_100ns);
+  }
+}
+
+static int try_probe_mode(uvc_device_handle_t *device, const UvcNegMode *mode, uvc_stream_ctrl_t *ctrl) {
+  int fps = uvc_negotiate_libuvc_fps(mode->interval_100ns);
+  /* fps<=0 would hit libuvc's continuous path as 10000000/fps — refuse. */
+  if (fps <= 0) return 0;
+  return uvc_get_stream_ctrl_format_size(device, ctrl, UVC_FRAME_FORMAT_YUYV, mode->width, mode->height,
+                                         fps) == UVC_SUCCESS;
+}
+
+static int alloc_nv21(JNIEnv *env, Uvc *u, int width, int height) {
+  size_t nv21_need;
+  jbyteArray local_nv21;
+
+  if (u->nv21) {
+    (*env)->DeleteGlobalRef(env, u->nv21);
+    u->nv21 = NULL;
+    u->nv21_len = 0;
+  }
+  nv21_need = yuyv_nv21_size(width, height);
+  if (nv21_need == 0 || nv21_need > (size_t)0x7fffffff) return -1;
+  local_nv21 = (*env)->NewByteArray(env, (jsize)nv21_need);
+  if (!local_nv21) return -1;
+  u->nv21 = (*env)->NewGlobalRef(env, local_nv21);
+  (*env)->DeleteLocalRef(env, local_nv21);
+  if (!u->nv21) return -1;
+  u->nv21_len = (jsize)nv21_need;
+  u->width = width;
+  u->height = height;
+  return 0;
+}
+
 /*
  * Lifecycle contract (no callback↔close mutex):
  * - frame_cb observes alive and must never call UvcNative.close (host posts close elsewhere).
  * - close sets alive=0, then uvc_stop_streaming (joins in-flight callbacks), then frees.
- * Holding a mutex across Sink.onFrame previously deadlocked when onFrame triggered close.
  */
 static void frame_cb(uvc_frame_t *in, void *opaque) {
   Uvc *u = (Uvc *)opaque;
@@ -109,12 +192,17 @@ static void frame_cb(uvc_frame_t *in, void *opaque) {
   if (attached) (*u->vm)->DetachCurrentThread(u->vm);
 }
 
-static void shutdown_usb(Uvc *u) {
+static void ensure_not_streaming(Uvc *u) {
   if (!u) return;
   atomic_store(&u->alive, 0);
   if (atomic_exchange(&u->streaming, 0) && u->device) {
     uvc_stop_streaming(u->device);
   }
+}
+
+static void shutdown_usb(Uvc *u) {
+  if (!u) return;
+  ensure_not_streaming(u);
   if (u->device) {
     uvc_close(u->device);
     u->device = NULL;
@@ -125,27 +213,61 @@ static void shutdown_usb(Uvc *u) {
   }
 }
 
+static int start_ranked_modes(JNIEnv *env, Uvc *u, const UvcNegMode *modes, const int *order, int n) {
+  int i;
+
+  for (i = 0; i < n; i++) {
+    const UvcNegMode *mode = &modes[order[i]];
+    uvc_stream_ctrl_t ctrl;
+    int approx = uvc_negotiate_approx_fps(mode->interval_100ns);
+    int lib_fps = uvc_negotiate_libuvc_fps(mode->interval_100ns);
+
+    memset(&ctrl, 0, sizeof(ctrl));
+    ensure_not_streaming(u);
+
+    if (!try_probe_mode(u->device, mode, &ctrl)) {
+      LOGW("probe failed %dx%d libuvc_fps=%d", mode->width, mode->height, lib_fps);
+      continue;
+    }
+    if (alloc_nv21(env, u, mode->width, mode->height) != 0) {
+      LOGW("nv21 alloc failed %dx%d", mode->width, mode->height);
+      continue;
+    }
+
+    atomic_store(&u->alive, 1);
+    if (uvc_start_streaming(u->device, &ctrl, frame_cb, u, 0) < 0) {
+      LOGW("start_streaming failed %dx%d@%d", mode->width, mode->height, approx);
+      atomic_store(&u->alive, 0);
+      atomic_store(&u->streaming, 0);
+      /* uvc_start_streaming closes its stream handle on failure; ensure no live callback path. */
+      continue;
+    }
+    atomic_store(&u->streaming, 1);
+    u->fps = approx;
+    LOGI("open ok %dx%d@%d YUYV (libuvc_fps=%d interval=%u try=%d/%d)", u->width, u->height, u->fps,
+         lib_fps, (unsigned)mode->interval_100ns, i + 1, n);
+    return 0;
+  }
+  return -1;
+}
+
 JNIEXPORT jlong JNICALL Java_com_fitbaus_arcade_UvcNative_open(JNIEnv *env, jclass cls, jint fd,
                                                               jobject sink) {
   Uvc *u;
-  uvc_stream_ctrl_t ctrl;
-  size_t nv21_need;
-  jbyteArray local_nv21;
+  UvcNegMode modes[UVC_NEG_MAX_CANDIDATES];
+  int order[UVC_NEG_MAX_CANDIDATES];
+  int count = 0;
+  int ranked;
   jobject local_sink_ref;
   jclass sink_class;
 
   (void)cls;
   if (!env || fd < 0 || !sink) return 0;
 
-  nv21_need = yuyv_nv21_size(UVC_PROBE_WIDTH, UVC_PROBE_HEIGHT);
-  if (nv21_need == 0 || nv21_need > (size_t)0x7fffffff) return 0;
-
   u = calloc(1, sizeof(*u));
   if (!u) return 0;
   atomic_init(&u->alive, 0);
   atomic_init(&u->streaming, 0);
-  u->width = UVC_PROBE_WIDTH;
-  u->height = UVC_PROBE_HEIGHT;
 
   if ((*env)->GetJavaVM(env, &u->vm) != 0) goto bad;
 
@@ -161,28 +283,19 @@ JNIEXPORT jlong JNICALL Java_com_fitbaus_arcade_UvcNative_open(JNIEnv *env, jcla
 
   if (uvc_init(&u->ctx, NULL) < 0) goto bad;
   if (uvc_wrap(fd, u->ctx, &u->device) < 0) goto bad;
-  if (uvc_get_stream_ctrl_format_size(u->device, &ctrl, UVC_FRAME_FORMAT_YUYV, UVC_PROBE_WIDTH,
-                                     UVC_PROBE_HEIGHT, UVC_PROBE_FPS) < 0) {
+
+  collect_yuyv_modes(u->device, modes, &count);
+  ranked = uvc_negotiate_rank(modes, count, order, UVC_NEG_MAX_CANDIDATES);
+  LOGI("enumerated %d YUYV candidates, %d usable", count, ranked);
+  log_mode_list(modes, order, ranked);
+  if (ranked <= 0) {
+    LOGE("no suitable YUYV mode");
     goto bad;
   }
-
-  local_nv21 = (*env)->NewByteArray(env, (jsize)nv21_need);
-  if (!local_nv21) goto bad;
-  u->nv21 = (*env)->NewGlobalRef(env, local_nv21);
-  (*env)->DeleteLocalRef(env, local_nv21);
-  if (!u->nv21) goto bad;
-  u->nv21_len = (jsize)nv21_need;
-
-  /* Publish Java objects before start so an early callback never sees null sinks. */
-  atomic_store(&u->alive, 1);
-  if (uvc_start_streaming(u->device, &ctrl, frame_cb, u, 0) < 0) {
-    /* start_streaming failure must not leave transfers or a live callback path. */
-    atomic_store(&u->alive, 0);
-    atomic_store(&u->streaming, 0);
+  if (start_ranked_modes(env, u, modes, order, ranked) != 0) {
+    LOGE("all %d ranked modes failed", ranked);
     goto bad;
   }
-  atomic_store(&u->streaming, 1);
-  LOGI("open ok fd=%d %dx%d", fd, u->width, u->height);
   return (jlong)(intptr_t)u;
 
 bad:
@@ -195,11 +308,26 @@ bad:
   return 0;
 }
 
+JNIEXPORT jint JNICALL Java_com_fitbaus_arcade_UvcNative_negotiatedWidth(JNIEnv *env, jclass cls,
+                                                                        jlong handle) {
+  Uvc *u = (Uvc *)(intptr_t)handle;
+  (void)env;
+  (void)cls;
+  return u ? u->width : 0;
+}
+
+JNIEXPORT jint JNICALL Java_com_fitbaus_arcade_UvcNative_negotiatedHeight(JNIEnv *env, jclass cls,
+                                                                         jlong handle) {
+  Uvc *u = (Uvc *)(intptr_t)handle;
+  (void)env;
+  (void)cls;
+  return u ? u->height : 0;
+}
+
 JNIEXPORT void JNICALL Java_com_fitbaus_arcade_UvcNative_close(JNIEnv *env, jclass cls, jlong handle) {
   Uvc *u = (Uvc *)(intptr_t)handle;
   (void)cls;
   if (!u) return;
-  /* Joins any in-flight frame_cb before Java globals are released. */
   shutdown_usb(u);
   release_java_refs(env, u);
   free(u);

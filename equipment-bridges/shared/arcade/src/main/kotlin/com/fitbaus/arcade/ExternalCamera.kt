@@ -27,16 +27,35 @@ public fun interface ExternalCameraProvider {
     public fun openAuthorizedCamera(): AuthorizedCameraFd?
 }
 
+/** Result of a native UVC open; [handle] 0 means failure. */
+internal data class UvcOpenResult(val handle: Long, val width: Int, val height: Int)
+
 /** Native UVC open/close seam; default delegates to [UvcNative]. */
 internal interface UvcStreamEngine {
-    fun open(fileDescriptor: Int, sink: UvcNative.Sink): Long
+    fun open(fileDescriptor: Int, sink: UvcNative.Sink): UvcOpenResult
     fun close(handle: Long)
 
     companion object {
         val DEFAULT: UvcStreamEngine = object : UvcStreamEngine {
-            override fun open(fileDescriptor: Int, sink: UvcNative.Sink): Long {
+            override fun open(fileDescriptor: Int, sink: UvcNative.Sink): UvcOpenResult {
                 UvcNative.ensureLoaded()
-                return UvcNative.open(fileDescriptor, sink)
+                val handle = UvcNative.open(fileDescriptor, sink)
+                if (handle == 0L) return UvcOpenResult(0L, 0, 0)
+                try {
+                    val width = UvcNative.negotiatedWidth(handle)
+                    val height = UvcNative.negotiatedHeight(handle)
+                    if (width <= 0 || height <= 0) {
+                        UvcNative.close(handle)
+                        return UvcOpenResult(0L, 0, 0)
+                    }
+                    return UvcOpenResult(handle, width, height)
+                } catch (t: Throwable) {
+                    try {
+                        UvcNative.close(handle)
+                    } catch (_: Throwable) {
+                    }
+                    throw t
+                }
             }
 
             override fun close(handle: Long) {
@@ -150,29 +169,35 @@ internal class PreferExternalCameraFrameSource(
             return false
         }
 
-        val handle = try {
+        val opened = try {
             uvcEngine.open(fd.fileDescriptor(), uvcSink)
         } catch (t: Throwable) {
             Log.e(TAG, "UvcNative.open failed", t)
+            // Engine must release any nonzero handle before throwing; only the FD remains.
             closeFd(fd, "native-open-exception")
             return false
         }
 
-        if (handle == 0L) {
+        if (opened.handle == 0L) {
             closeFd(fd, "native-open-zero")
+            return false
+        }
+        if (opened.width <= 0 || opened.height <= 0) {
+            closeNativeThenFd(opened.handle, fd, "native-bad-dims")
             return false
         }
 
         if (stopped) {
-            closeNativeThenFd(handle, fd, "stop-after-native")
+            closeNativeThenFd(opened.handle, fd, "stop-after-native")
             return false
         }
 
-        uvcHandle = handle
+        uvcHandle = opened.handle
         uvcFd = fd
         usedExternal = true
         sink.mirror = false
-        listener.onCameraReady(320, 240, false)
+        Log.i(TAG, "using external UVC ${opened.width}x${opened.height}")
+        listener.onCameraReady(opened.width, opened.height, false)
         return true
     }
 

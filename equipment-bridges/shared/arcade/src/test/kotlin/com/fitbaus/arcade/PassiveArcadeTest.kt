@@ -182,6 +182,8 @@ class PassiveArcadeTest {
                 "hand_pipeline.c",
                 "hand_pipeline.h",
                 "uvc_jni.c",
+                "uvc_negotiate.c",
+                "uvc_negotiate.h",
                 "yuyv_nv21.c",
                 "yuyv_nv21.h",
             ),
@@ -194,8 +196,19 @@ class PassiveArcadeTest {
         val uvc = File(cpp, "uvc_jni.c").readText()
         assertTrue(uvc.contains("Java_com_fitbaus_arcade_UvcNative_open"))
         assertTrue(uvc.contains("Java_com_fitbaus_arcade_UvcNative_close"))
+        assertTrue(uvc.contains("Java_com_fitbaus_arcade_UvcNative_negotiatedWidth"))
+        assertTrue(uvc.contains("Java_com_fitbaus_arcade_UvcNative_negotiatedHeight"))
+        assertTrue(uvc.contains("uvc_get_format_descs"))
         assertTrue(uvc.contains("LIBUSB_OPTION_NO_DEVICE_DISCOVERY"))
+        assertFalse(uvc.contains("046d") || uvc.contains("0825") || uvc.contains("0990"), "no webcam VID/PID whitelist in native")
         assertTrue(File(cpp, "yuyv_nv21.c").readText().contains("yuyv_to_nv21"))
+        assertTrue(File(cpp, "uvc_negotiate.c").readText().contains("uvc_negotiate_pick"))
+        assertTrue(File(cpp, "uvc_negotiate.c").readText().contains("uvc_negotiate_interval_usable"))
+        assertTrue(File(cpp, "uvc_negotiate.c").readText().contains("uvc_negotiate_derive_interval"))
+        assertTrue(uvc.contains("uvc_negotiate_interval_usable"))
+        assertTrue(uvc.contains("uvc_negotiate_derive_interval"))
+        assertTrue(uvc.contains("if (fps <= 0) return 0"))
+        assertFalse(uvc.contains("append_candidate(modes, count, UVC_NEG_FORMAT_YUYV, (int)frame->wWidth, (int)frame->wHeight, 0)"))
     }
 
     @Test

@@ -34,15 +34,17 @@ class UvcNativeContractTest {
     private class FakeEngine(
         var failOpen: Boolean = false,
         var throwOnClose: Boolean = false,
+        var width: Int = 320,
+        var height: Int = 240,
     ) : UvcStreamEngine {
         var opens = 0
         var closes = 0
         var sink: UvcNative.Sink? = null
 
-        override fun open(fileDescriptor: Int, sink: UvcNative.Sink): Long {
+        override fun open(fileDescriptor: Int, sink: UvcNative.Sink): UvcOpenResult {
             opens += 1
             this.sink = sink
-            return if (failOpen) 0L else 99L
+            return if (failOpen) UvcOpenResult(0L, 0, 0) else UvcOpenResult(99L, width, height)
         }
 
         override fun close(handle: Long) {
@@ -208,6 +210,57 @@ class UvcNativeContractTest {
     }
 
     @Test
+    fun badNegotiatedDimsCloseNativeBeforeFdThenCamera1() {
+        val worker = ManualWorker()
+        val trace = ArrayList<String>()
+        val fd = FakeFd()
+        val engine = FakeEngine(width = 0, height = 240)
+        val camera1 = FakeCamera1()
+        val source = PreferExternalCameraFrameSource(
+            worker = worker,
+            sink = FakeConsumer(),
+            external = { fd },
+            uvcEngine = engine,
+            camera1Factory = { camera1 },
+            events = trace,
+        )
+        source.start(RecordingListener())
+        worker.runAll()
+        assertEquals(1, engine.opens)
+        assertEquals(1, engine.closes)
+        assertTrue(firstIndex(trace, "nativeClose:native-bad-dims") < firstIndex(trace, "fdClose:native-bad-dims"), trace.toString())
+        assertEquals(1, fd.closed)
+        assertEquals(1, camera1.starts)
+        assertFalse(source.usedExternal)
+    }
+
+    @Test
+    fun openExceptionAfterHandleStillReleasesFd() {
+        val worker = ManualWorker()
+        val fd = FakeFd()
+        val camera1 = FakeCamera1()
+        val source = PreferExternalCameraFrameSource(
+            worker = worker,
+            sink = FakeConsumer(),
+            external = { fd },
+            uvcEngine = object : UvcStreamEngine {
+                override fun open(fileDescriptor: Int, sink: UvcNative.Sink): UvcOpenResult {
+                    // Simulates DEFAULT engine closing the native handle before rethrowing.
+                    throw RuntimeException("negotiatedWidth blew up")
+                }
+
+                override fun close(handle: Long) = Unit
+            },
+            camera1Factory = { camera1 },
+        )
+        source.start(RecordingListener())
+        worker.runAll()
+        assertEquals(1, fd.closed)
+        assertEquals(1, camera1.starts)
+        assertFalse(source.usedExternal)
+    }
+
+    @Test
     fun stopDuringProviderOpenClosesFdWithoutNative() {
         val worker = ManualWorker()
         val fd = FakeFd()
@@ -242,10 +295,10 @@ class UvcNativeContractTest {
             sink = FakeConsumer(),
             external = { fd },
             uvcEngine = object : UvcStreamEngine {
-                override fun open(fileDescriptor: Int, sink: UvcNative.Sink): Long {
-                    val handle = engine.open(fileDescriptor, sink)
+                override fun open(fileDescriptor: Int, sink: UvcNative.Sink): UvcOpenResult {
+                    val opened = engine.open(fileDescriptor, sink)
                     source.stop()
-                    return handle
+                    return opened
                 }
 
                 override fun close(handle: Long) = engine.close(handle)

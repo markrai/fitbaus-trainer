@@ -173,6 +173,49 @@ val yuyvNv21HostTest by tasks.registering {
     }
 }
 
+val uvcNegotiateHostTest by tasks.registering {
+    val outDir = layout.buildDirectory.dir("uvc-negotiate-host-test")
+    val isWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+    val exeName = if (isWindows) "uvc_negotiate_test.exe" else "uvc_negotiate_test"
+    val exe = outDir.map { it.file(exeName) }
+    inputs.files(
+        "src/main/cpp/uvc_negotiate.c",
+        "src/main/cpp/uvc_negotiate.h",
+        "src/test/cpp/uvc_negotiate_test.c",
+    )
+    outputs.file(exe)
+    doLast {
+        val out = outDir.get().asFile
+        out.mkdirs()
+        val binary = File(out, exeName)
+        fun resolveCc(name: String): String? {
+            val probe = if (isWindows) listOf("where.exe", name) else listOf("which", name)
+            val proc = ProcessBuilder(probe).redirectErrorStream(true).start()
+            val text = proc.inputStream.bufferedReader().readText().trim()
+            return if (proc.waitFor() == 0 && text.isNotEmpty()) text.lineSequence().first() else null
+        }
+        val cc = sequenceOf("clang", "gcc", "cl").mapNotNull(::resolveCc).firstOrNull()
+            ?: throw GradleException("No host C compiler found for uvc_negotiate_test")
+        val include = file("src/main/cpp").absolutePath
+        val srcs = listOf(
+            file("src/main/cpp/uvc_negotiate.c").absolutePath,
+            file("src/test/cpp/uvc_negotiate_test.c").absolutePath,
+        )
+        val compile = if (File(cc).name.startsWith("cl")) {
+            listOf(cc, "/nologo", "/W3", "/Fe${binary.absolutePath}", "/I$include") + srcs
+        } else {
+            listOf(cc, "-O2", "-Wall", "-Wextra", "-Werror", "-o", binary.absolutePath, "-I$include") + srcs
+        }
+        exec {
+            commandLine(compile)
+        }
+        exec {
+            commandLine(binary.absolutePath)
+        }
+    }
+}
+
 tasks.named("check") {
     dependsOn(yuyvNv21HostTest)
+    dependsOn(uvcNegotiateHostTest)
 }

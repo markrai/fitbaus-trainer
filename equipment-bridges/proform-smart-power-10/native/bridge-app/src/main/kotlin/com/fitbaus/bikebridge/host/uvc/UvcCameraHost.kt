@@ -5,15 +5,18 @@ package com.fitbaus.bikebridge.host.uvc
 import android.util.Log
 import com.fitbaus.arcade.AuthorizedCameraFd
 import com.fitbaus.arcade.ExternalCameraProvider
+import java.util.concurrent.atomic.AtomicLong
 
 /**
- * USB Host owner for the verified Logitech C270.
+ * USB Host owner for external UVC webcams (VideoControl + VideoStreaming).
  *
  * [openAuthorizedCamera] never blocks waiting for a permission dialog.
  * Existing authorization opens immediately; first-time prompts are fired asynchronously and the
  * caller falls back to Camera1 until a later game enter after grant. Denial is sticky until detach.
  *
  * Map mutations are synchronized; USB Host calls run outside the lock.
+ * [closed] is volatile so Activity destruction is visible across threads without holding the lock
+ * during USB I/O.
  */
 internal class UvcCameraHost(
     private val gateway: UvcUsbGateway,
@@ -21,16 +24,18 @@ internal class UvcCameraHost(
 ) : ExternalCameraProvider, AutoCloseable {
     private val lock = Any()
     private val keysByDeviceName = HashMap<String, String>()
-    /** deviceName that currently has an outstanding permission request (stable key tracked separately). */
-    private var pendingRequestDeviceName: String? = null
+    /** Outstanding permission request; broadcasts must match name, key, and request id. */
+    private var pendingRequest: PendingUsbRequest? = null
+
+    @Volatile
     private var closed = false
 
     constructor(appContext: android.content.Context) : this(AndroidUvcUsbGateway(appContext))
 
     init {
         gateway.setListener(object : UvcUsbGateway.Listener {
-            override fun onPermissionBroadcast(deviceName: String, extraGranted: Boolean) {
-                handlePermissionBroadcast(deviceName, extraGranted)
+            override fun onPermissionBroadcast(deviceName: String, extraGranted: Boolean, requestId: Long) {
+                handlePermissionBroadcast(deviceName, extraGranted, requestId)
             }
 
             override fun onDeviceDetached(deviceName: String) {
@@ -42,29 +47,54 @@ internal class UvcCameraHost(
     override fun openAuthorizedCamera(): AuthorizedCameraFd? {
         if (closed) return null
         val device = UvcDeviceSelector.select(gateway.listDevices()) ?: return null
+        if (closed) return null
         val hasPerm = gateway.hasPermission(device.deviceName)
         val action = synchronized(lock) {
+            if (closed) return null
             keysByDeviceName[device.deviceName] = device.key
             machine.onOpenAttempt(device.key, hasPerm)
         }
         return when (action) {
             UvcPermissionAction.OpenNow -> {
+                if (closed) return null
                 if (!gateway.hasPermission(device.deviceName)) {
-                    synchronized(lock) { machine.onPermissionResult(device.key, false) }
+                    synchronized(lock) {
+                        if (!closed) machine.onPermissionResult(device.key, false)
+                    }
                     null
                 } else {
-                    gateway.openDevice(device.deviceName)
+                    val fd = gateway.openDevice(device.deviceName)
+                    if (closed) {
+                        try {
+                            fd?.close()
+                        } catch (_: Throwable) {
+                        }
+                        null
+                    } else {
+                        fd
+                    }
                 }
             }
             UvcPermissionAction.FallbackNoPrompt -> null
             UvcPermissionAction.RequestThenFallback -> {
-                synchronized(lock) { pendingRequestDeviceName = device.deviceName }
-                try {
-                    gateway.requestPermission(device.deviceName)
+                val request = synchronized(lock) {
+                    if (closed) return null
+                    val id = processRequestSeq.getAndIncrement()
+                    PendingUsbRequest(device.deviceName, device.key, id).also { pendingRequest = it }
+                }
+                val dispatched = try {
+                    if (!closed) gateway.requestPermission(device.deviceName, request.requestId) else false
                 } catch (t: Throwable) {
                     Log.e(TAG, "requestPermission failed", t)
-                    synchronized(lock) {
-                        if (pendingRequestDeviceName == device.deviceName) pendingRequestDeviceName = null
+                    false
+                }
+                synchronized(lock) {
+                    if (closed) {
+                        if (pendingRequest == request) pendingRequest = null
+                        return null
+                    }
+                    if (!dispatched) {
+                        if (pendingRequest == request) pendingRequest = null
                         machine.onRequestFailed(device.key)
                     }
                 }
@@ -74,10 +104,10 @@ internal class UvcCameraHost(
     }
 
     override fun close() {
-        if (closed) return
-        closed = true
         synchronized(lock) {
-            pendingRequestDeviceName = null
+            if (closed) return
+            closed = true
+            pendingRequest = null
             keysByDeviceName.clear()
             machine.clear()
         }
@@ -91,53 +121,94 @@ internal class UvcCameraHost(
 
     internal fun phaseForTest(deviceKey: String): UvcPermissionPhase = machine.phase(deviceKey)
 
-    private fun handlePermissionBroadcast(deviceName: String, extraGranted: Boolean) {
+    private fun handlePermissionBroadcast(deviceName: String, extraGranted: Boolean, requestId: Long) {
         if (closed) return
+        val claimed = synchronized(lock) {
+            if (closed) return
+            val pending = pendingRequest
+            if (pending == null ||
+                pending.deviceName != deviceName ||
+                pending.requestId != requestId
+            ) {
+                Log.i(
+                    TAG,
+                    "ignoring permission broadcast for $deviceName requestId=$requestId " +
+                        "pendingName=${pending?.deviceName} pendingId=${pending?.requestId}",
+                )
+                return
+            }
+            pending
+        }
+
+        // USB lookups run outside the host lock.
         val device = gateway.listDevices().firstOrNull { it.deviceName == deviceName }
-        val rememberedKey: String?
-        val pending: String?
-        synchronized(lock) {
-            pending = pendingRequestDeviceName
-            rememberedKey = keysByDeviceName[deviceName]
-            if (device != null) keysByDeviceName[deviceName] = device.key
+        if (device != null) {
+            if (!UvcDeviceSelector.isExternalUvc(device)) return
+            if (device.key != claimed.key) {
+                Log.i(TAG, "ignoring stale broadcast key=${device.key} pendingKey=${claimed.key}")
+                return
+            }
         }
-        val key = device?.key ?: rememberedKey ?: return
-        val isC270 = if (device != null) {
-            UvcDeviceSelector.isC270(device.vendorId, device.productId)
-        } else {
-            key == C270_KEY
-        }
-        if (!isC270) return
-        if (pending != null && pending != deviceName) {
-            Log.i(TAG, "ignoring stale permission broadcast for $deviceName pending=$pending")
-            return
-        }
+        if (closed) return
         val live = gateway.hasPermission(deviceName)
-        val phase = machine.onPermissionResult(key, live)
+
+        // Revalidate after USB I/O so close/detach cannot be followed by a stale machine update.
         synchronized(lock) {
-            if (pendingRequestDeviceName == deviceName) pendingRequestDeviceName = null
+            if (closed) return
+            val pending = pendingRequest
+            if (pending == null ||
+                pending.deviceName != deviceName ||
+                pending.requestId != requestId ||
+                pending.key != claimed.key
+            ) {
+                Log.i(
+                    TAG,
+                    "dropping stale permission result after close/detach device=$deviceName " +
+                        "requestId=$requestId",
+                )
+                return
+            }
+            if (device != null) keysByDeviceName[deviceName] = device.key
+            val phase = machine.onPermissionResult(pending.key, live)
+            pendingRequest = null
+            Log.i(
+                TAG,
+                "permission result device=$deviceName extraGranted=$extraGranted live=$live " +
+                    "phase=$phase key=${pending.key} requestId=$requestId",
+            )
         }
-        Log.i(TAG, "permission result device=$deviceName extraGranted=$extraGranted live=$live phase=$phase key=$key")
     }
 
     private fun handleDetach(deviceName: String) {
         if (closed) return
         val key = synchronized(lock) {
-            if (pendingRequestDeviceName == deviceName) pendingRequestDeviceName = null
+            if (closed) return
+            val pending = pendingRequest
+            if (pending != null && pending.deviceName == deviceName) pendingRequest = null
             keysByDeviceName.remove(deviceName)
         }
         if (key != null) {
             machine.onDetached(key)
-        } else {
-            // Only one C270 is ever tracked; clear its phase if the name map was already empty.
-            machine.onDetached(C270_KEY)
         }
         Log.i(TAG, "uvc detached name=$deviceName key=$key")
     }
 
+    private data class PendingUsbRequest(
+        val deviceName: String,
+        val key: String,
+        val requestId: Long,
+    )
+
     companion object {
         private const val TAG = "FitbausUvcHost"
-        private val C270_KEY: String =
-            String.format("%04x:%04x", UvcDeviceSelector.C270_VID and 0xffff, UvcDeviceSelector.C270_PID and 0xffff)
+
+        /**
+         * Process-wide sequence so a recreated Activity cannot reuse request ids still embedded in
+         * an older outstanding USB permission PendingIntent.
+         */
+        private val processRequestSeq = AtomicLong(System.currentTimeMillis() shl 20)
+
+        /** Test helper: peek the next id that would be allocated. */
+        internal fun peekNextRequestIdForTest(): Long = processRequestSeq.get()
     }
 }

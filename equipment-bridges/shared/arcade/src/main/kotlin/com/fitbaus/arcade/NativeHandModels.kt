@@ -77,11 +77,18 @@ internal object UvcNative {
     }
 
     /**
-     * Opens YUYV 320×240@30 on [fileDescriptor]. Returns 0 on failure with no active stream
-     * or claimed USB resources left behind.
+     * Opens a descriptor-negotiated YUYV stream on [fileDescriptor].
+     * Returns 0 on failure with no active stream or claimed USB resources left behind.
+     * On success, [negotiatedWidth]/[negotiatedHeight] report the chosen size.
      */
     @JvmStatic
     external fun open(fileDescriptor: Int, sink: Sink): Long
+
+    @JvmStatic
+    external fun negotiatedWidth(handle: Long): Int
+
+    @JvmStatic
+    external fun negotiatedHeight(handle: Long): Int
 
     /** Stops streaming and releases native resources. Safe on 0. Must precede FD close. */
     @JvmStatic

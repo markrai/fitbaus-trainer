@@ -38,7 +38,8 @@ internal class AndroidUvcUsbGateway(
                     @Suppress("DEPRECATION")
                     val device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE) as UsbDevice? ?: return
                     val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
-                    current.onPermissionBroadcast(device.deviceName, granted)
+                    val requestId = intent.getLongExtra(EXTRA_REQUEST_ID, NO_REQUEST_ID)
+                    current.onPermissionBroadcast(device.deviceName, granted, requestId)
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     @Suppress("DEPRECATION")
@@ -57,18 +58,22 @@ internal class AndroidUvcUsbGateway(
         return usbManager.hasPermission(device)
     }
 
-    override fun requestPermission(deviceName: String) {
-        if (closed) return
-        val device = usbManager.deviceList[deviceName] ?: return
+    override fun requestPermission(deviceName: String, requestId: Long): Boolean {
+        if (closed) return false
+        val device = usbManager.deviceList[deviceName] ?: return false
         ensureRegistered()
         val intent = Intent(ACTION_USB_PERMISSION).setPackage(appContext.packageName)
+        intent.putExtra(EXTRA_REQUEST_ID, requestId)
         val flags = if (Build.VERSION.SDK_INT >= 31) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         } else {
             PendingIntent.FLAG_UPDATE_CURRENT
         }
-        val pi = PendingIntent.getBroadcast(appContext, device.deviceId, intent, flags)
+        // Full requestId bits in requestCode so Activity-recreation IDs stay distinct in the PI table.
+        val requestCode = (requestId xor (requestId ushr 32)).toInt()
+        val pi = PendingIntent.getBroadcast(appContext, requestCode, intent, flags)
         usbManager.requestPermission(device, pi)
+        return true
     }
 
     override fun openDevice(deviceName: String): AuthorizedCameraFd? {
@@ -138,6 +143,8 @@ internal class AndroidUvcUsbGateway(
     companion object {
         private const val TAG = "FitbausUvcUsb"
         private const val ACTION_USB_PERMISSION = "com.fitbaus.bikebridge.UVC_USB_PERMISSION"
+        internal const val EXTRA_REQUEST_ID = "com.fitbaus.bikebridge.UVC_REQUEST_ID"
+        internal const val NO_REQUEST_ID = -1L
 
         private fun UsbDevice.toInfo(): UvcDeviceInfo {
             var vc = false
