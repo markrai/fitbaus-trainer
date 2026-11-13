@@ -260,11 +260,84 @@ test("preparePublicArtifacts writes canonical names and separates qualification 
   assert.equal(validated.versionName, "1.0.0");
 });
 
-/** Empty ZIP (EOCD only) — listable by unzip/tar without being a signed APK. */
-function writeEmptyZipApk(apkPath) {
+/** CRC-32 for uncompressed ZIP local/central headers (deterministic, no deps). */
+function zipCrc32(buf) {
+  let crc = ~0;
+  const table = zipCrc32.table || (zipCrc32.table = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })());
+  for (const byte of buf) crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (~crc) >>> 0;
+}
+
+/**
+ * Build a minimal valid ZIP with one stored entry. EOCD-only archives make
+ * `unzip -l` exit 1 on Ubuntu; a single harmless entry is listable everywhere.
+ */
+function buildStoredZip(entries) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, data] of entries) {
+    const nameBuf = Buffer.from(name, "utf8");
+    const crc = zipCrc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    const localFull = Buffer.concat([local, nameBuf, data]);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(Buffer.concat([central, nameBuf]));
+    locals.push(localFull);
+    offset += localFull.length;
+  }
+  const centralDir = Buffer.concat(centrals);
   const eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(0x06054b50, 0);
-  fs.writeFileSync(apkPath, eocd);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralDir.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, centralDir, eocd]);
+}
+
+/** Structurally valid unsigned ZIP/APK fixture (not signed; for sidecar / listing tests). */
+function writeListableZipApk(apkPath) {
+  fs.writeFileSync(apkPath, buildStoredZip([["fixture.txt", Buffer.alloc(0)]]));
+}
+
+function assertArchiveListable(apkPath) {
+  const unzip = spawnSync("unzip", ["-l", apkPath], { encoding: "utf8" });
+  if (unzip.status === 0) {
+    assert.match(String(unzip.stdout || ""), /fixture\.txt/);
+    return;
+  }
+  const tar = spawnSync("tar", ["-tf", apkPath], { encoding: "utf8" });
+  if (tar.status === 0) {
+    assert.match(String(tar.stdout || ""), /fixture\.txt/);
+    return;
+  }
+  assert.fail(
+    `Archive listing unavailable or fixture not listable ` +
+      `(unzip=${unzip.status}, tar=${tar.status}): ${apkPath}`,
+  );
 }
 
 function writeVerifySidecars(apkPath, { applicationId, signed = true, certSha256 = "D".repeat(64) }) {
@@ -311,7 +384,7 @@ function presentSdkHarness() {
 test("verifyApk fails closed when SDK tools are absent and sidecar is disabled", () => {
   const dir = tempDir("fitbaus-apk-no-sdk-");
   const apk = path.join(dir, "app.apk");
-  writeEmptyZipApk(apk);
+  writeListableZipApk(apk);
   writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge" });
   assert.throws(
     () =>
@@ -329,7 +402,8 @@ test("verifyApk fails closed when SDK tools are absent and sidecar is disabled",
 test("verifyApk uses sidecar metadata when SDK tools are absent and fallback is enabled", () => {
   const dir = tempDir("fitbaus-apk-sidecar-ok-");
   const apk = path.join(dir, "app.apk");
-  writeEmptyZipApk(apk);
+  writeListableZipApk(apk);
+  assertArchiveListable(apk);
   const cert = "E".repeat(64);
   writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge", certSha256: cert });
   const result = verifyApk({
@@ -387,7 +461,7 @@ test("verifyApk ignores sidecars and rejects malformed APK when SDK tools are pr
 test("verifyApk rejects unsigned sidecar when fallback is explicitly allowed", () => {
   const dir = tempDir("fitbaus-apk-unsigned-");
   const apk = path.join(dir, "app.apk");
-  writeEmptyZipApk(apk);
+  writeListableZipApk(apk);
   writeVerifySidecars(apk, {
     applicationId: "com.markrai.fitbaus.trainer",
     signed: false,
@@ -408,7 +482,7 @@ test("verifyApk rejects unsigned sidecar when fallback is explicitly allowed", (
 test("verifyApk rejects wrong application ID from an allowed sidecar", () => {
   const dir = tempDir("fitbaus-apk-wrong-id-");
   const apk = path.join(dir, "app.apk");
-  writeEmptyZipApk(apk);
+  writeListableZipApk(apk);
   writeVerifySidecars(apk, { applicationId: "com.example.wrong" });
   assert.throws(
     () =>
