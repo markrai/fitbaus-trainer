@@ -7,4 +7,5 @@
     <string name="pairing_done">Done</string>
     <string name="pairing_regenerate_title">Regenerate pairing token?</string>
     <string name="pairing_regenerate_message">Paired clients will lose control access until the new token is entered.</string>
+    <string name="open_bike_bridge_settings">Open Bike Bridge settings</string>
 </resources>
