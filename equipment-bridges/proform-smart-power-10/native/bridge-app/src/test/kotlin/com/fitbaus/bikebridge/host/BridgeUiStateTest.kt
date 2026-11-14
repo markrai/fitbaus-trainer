@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -103,6 +104,49 @@ class BridgeUiStateTest {
         assertEquals(56f, BridgeUiStateMapper.gridValueSp(1280, 100, 1f, 1f), 0.001f)
         assertEquals(168f, BridgeUiStateMapper.gridValueSp(10_000, 2_000, 1f, 1f), 0.001f)
         assertEquals(24f, BridgeUiStateMapper.gridValueSp(100, 800, 1f, 1f), 0.001f)
+    }
+
+    @Test
+    fun versionLabelFormatsRepresentativeProductVersions() {
+        val cases = listOf(
+            "1.0.0" to "v1.0.0",
+            "1.0.1" to "v1.0.1",
+            "1.4.7" to "v1.4.7",
+            "2.0.0" to "v2.0.0",
+            "2.12.35" to "v2.12.35",
+            "v1.0.0" to "v1.0.0",
+            "V2.0.0" to "v2.0.0",
+            " 1.0.1 " to "v1.0.1",
+            " v2.12.35 " to "v2.12.35",
+        )
+        for ((input, expected) in cases) {
+            val label = BridgeUiStateMapper.versionLabel(input)
+            assertEquals(expected, label, input)
+            assertEquals('v', label.first(), input)
+            assertFalse(label.substring(1).startsWith("v", ignoreCase = true), input)
+        }
+    }
+
+    @Test
+    fun versionLabelRejectsEmptyOrMalformedProductVersions() {
+        for (input in listOf("", "   ", "v", "V", "1.0", "1.0.0.0", "v1.0", "10.0.0-rc.1", "latest", "vv1.0.0", "1.100.0", "1.0.100")) {
+            assertThrows(IllegalArgumentException::class.java, { BridgeUiStateMapper.versionLabel(input) }, input)
+        }
+    }
+
+    @Test
+    fun versionLabelMatchesInstalledBuildConfigContract() {
+        val installed = BuildConfig.VERSION_NAME.trim()
+        assertTrue(Regex("""^\d+\.\d+\.\d+$""").matches(installed), installed)
+        val minor = installed.split('.')[1].toLong()
+        val patch = installed.split('.')[2].toLong()
+        assertTrue(minor in 0L..99L, installed)
+        assertTrue(patch in 0L..99L, installed)
+        val expected = "v$installed"
+        assertEquals(expected, BridgeUiStateMapper.versionLabel(BuildConfig.VERSION_NAME))
+        assertEquals(expected, BridgeUiStateMapper.versionLabel("v$installed"))
+        assertEquals(expected, BridgeUiStateMapper.versionLabel("V$installed"))
+        assertEquals(expected, BridgeUiStateMapper.versionLabel(" $installed "))
     }
 
     @Test
