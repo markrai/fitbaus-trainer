@@ -202,7 +202,8 @@ class NativeHttpServerTest {
             assertTrue(failed)
             assertFalse(server.isListening())
             assertTrue(server.lastError() != null)
-            blocker.stop()
+            assertTrue(blocker.stop())
+            assertFalse(blocker.isListening())
             server.start()
             assertTrue(server.isListening())
             assertTrue(server.lastError() == null)
@@ -242,7 +243,8 @@ class NativeHttpServerTest {
             assertTrue(failed)
             assertFalse(challenger.isListening())
             assertTrue(challenger.lastError() != null)
-            owner.stop()
+            assertTrue(owner.stop())
+            assertFalse(owner.isListening())
             challenger.start()
             assertTrue(challenger.isListening())
             assertTrue(exchange(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n").contains("HTTP/1.1 200"))
@@ -257,6 +259,32 @@ class NativeHttpServerTest {
             }
             try {
                 first.stop()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    @Test
+    fun stopTerminatesAcceptThreadBeforeReturning() {
+        val server = NativeHttpServer(bindAddress = "127.0.0.1", port = 0, snapshot = { snap })
+        try {
+            server.start()
+            val port = server.boundPort()
+            assertTrue(port > 0)
+            assertTrue(server.isListening())
+            assertTrue(server.stop())
+            assertFalse(server.isListening())
+            val rebound = NativeHttpServer(bindAddress = "127.0.0.1", port = port, snapshot = { snap })
+            try {
+                rebound.start()
+                assertTrue(rebound.isListening())
+                assertTrue(exchange(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n").contains("HTTP/1.1 200"))
+            } finally {
+                rebound.stop()
+            }
+        } finally {
+            try {
+                server.stop()
             } catch (_: Exception) {
             }
         }

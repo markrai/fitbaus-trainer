@@ -104,14 +104,29 @@ internal class NativeHttpServer(
         }
     }
 
-    fun stop() {
+    fun stop(): Boolean {
         running.set(false)
+        val listening = server
+        val worker = thread
+        server = null
         try {
-            server?.close()
+            listening?.close()
         } catch (_: Exception) {
         }
-        server = null
+        var terminated = true
+        if (worker != null && worker !== Thread.currentThread()) {
+            try {
+                worker.join(1_000L)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            terminated = !worker.isAlive
+            if (!terminated) {
+                lastError.set("accept thread did not terminate")
+            }
+        }
         thread = null
+        return terminated
     }
 
     private fun handleClient(socket: Socket) {
