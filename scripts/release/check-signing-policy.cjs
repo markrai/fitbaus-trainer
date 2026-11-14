@@ -70,7 +70,12 @@ function parseArgs(argv) {
 
 if (require.main === module) {
   const options = parseArgs(process.argv.slice(2));
-  const result = assertCertMatchesPolicy(options);
+  const result = assertCertMatchesPolicy({
+    policyPath: options.policy,
+    applicationId: options.applicationId,
+    actualCertSha256: options.certSha256,
+    allowUnset: options.allowUnset,
+  });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
