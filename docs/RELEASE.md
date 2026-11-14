@@ -56,7 +56,9 @@ that tag or its source. `expected_commit` is **required** on every run (no hardc
 default for future versions).
 
 Trainer APKs from historical source may still be unsigned from Gradle; the release
-workflow aligns + signs them with `apksigner` (`env:` password refs, v1 enabled).
+workflow aligns + signs them with `apksigner` (`env:` password refs; v1 and v2
+enabled). Post-sign verification is API-aware: minSdk >= 24 (Trainer) requires
+verified v2; minSdk <= 23 (Bike Bridge / API 22 consoles) requires verified v1.
 Bike Bridge production signing uses temporary `local.properties` for historical
 `bikebridge.signing.*` support (API 22 / x86) without putting passwords on `-P`.
 
