@@ -85,9 +85,58 @@ function parseVerifyText(text) {
   return {
     v1: v1 ? v1[1].toLowerCase() === "true" : false,
     v2: v2 ? v2[1].toLowerCase() === "true" : false,
+    v1Reported: Boolean(v1),
+    v2Reported: Boolean(v2),
     certSha256: cert ? normalizeCertSha256(cert[1]) : null,
     raw: text,
   };
+}
+
+function signatureSchemeRequirements({ minSdkVersion = null, requireV1 = false, requireV2 = false } = {}) {
+  let needV1 = requireV1 === true;
+  let needV2 = requireV2 === true;
+  if (minSdkVersion == null || minSdkVersion === "") {
+    needV1 = true;
+    needV2 = true;
+  } else {
+    const min = Number(minSdkVersion);
+    if (!Number.isFinite(min)) fail(`Invalid minSdkVersion: ${minSdkVersion}`);
+    if (min <= 23) needV1 = true;
+    else needV2 = true;
+  }
+  return { requireV1: needV1, requireV2: needV2 };
+}
+
+function assertSignatureSchemes(
+  parsed,
+  { minSdkVersion = null, apkPath = "APK", requireV1 = false, requireV2 = false } = {},
+) {
+  const needed = signatureSchemeRequirements({ minSdkVersion, requireV1, requireV2 });
+  if (needed.requireV1) {
+    if (!parsed.v1Reported) {
+      fail(
+        `Unparseable APK Signature Scheme v1 status for minSdk ${minSdkVersion ?? "unspecified"}: ${apkPath}`,
+      );
+    }
+    if (!parsed.v1) {
+      fail(
+        `APK lacks verified APK Signature Scheme v1 (required for API <= 23 / minSdk ${minSdkVersion ?? "unspecified"}): ${apkPath}`,
+      );
+    }
+  }
+  if (needed.requireV2) {
+    if (!parsed.v2Reported) {
+      fail(
+        `Unparseable APK Signature Scheme v2 status for minSdk ${minSdkVersion ?? "unspecified"}: ${apkPath}`,
+      );
+    }
+    if (!parsed.v2) {
+      fail(
+        `APK lacks verified APK Signature Scheme v2 (required for API >= 24 / minSdk ${minSdkVersion ?? "unspecified"}): ${apkPath}`,
+      );
+    }
+  }
+  return needed;
 }
 
 function assertSigned(
@@ -96,6 +145,7 @@ function assertSigned(
     minSdkVersion = null,
     allowSidecarFallback = false,
     requireV1 = false,
+    requireV2 = false,
     findTool: resolveTool = findTool,
     runTool = run,
   } = {},
@@ -107,11 +157,19 @@ function assertSigned(
       if (fs.existsSync(sidecar)) {
         const parsed = JSON.parse(fs.readFileSync(sidecar, "utf8"));
         if (parsed.signed === false) fail(`APK is unsigned: ${apkPath}`);
-        if (requireV1 && parsed.v1 !== true) fail(`APK missing v1 signature (sidecar): ${apkPath}`);
-        return {
+        const schemes = {
           v1: parsed.v1 === true,
           v2: parsed.v2 === true,
+          v1Reported: Object.prototype.hasOwnProperty.call(parsed, "v1"),
+          v2Reported: Object.prototype.hasOwnProperty.call(parsed, "v2"),
           certSha256: normalizeCertSha256(parsed.certSha256),
+          raw: "(sidecar)",
+        };
+        assertSignatureSchemes(schemes, { minSdkVersion, apkPath, requireV1, requireV2 });
+        return {
+          v1: schemes.v1,
+          v2: schemes.v2,
+          certSha256: schemes.certSha256,
         };
       }
     }
@@ -123,9 +181,7 @@ function assertSigned(
   // Production path: execute real apksigner. Sidecars are never consulted when the tool exists.
   const result = runTool(apksigner, args);
   const parsed = parseVerifyText(`${result.stdout || ""}\n${result.stderr || ""}`);
-  if (requireV1 && !parsed.v1) {
-    fail(`APK lacks verified APK Signature Scheme v1 (needed for minSdk ${minSdkVersion}): ${apkPath}`);
-  }
+  assertSignatureSchemes(parsed, { minSdkVersion, apkPath, requireV1, requireV2 });
   if (!parsed.certSha256) fail(`Could not parse certificate SHA-256 from apksigner for ${apkPath}`);
   return parsed;
 }
@@ -148,7 +204,7 @@ function verifyApk({
   const signature = assertSigned(apkPath, {
     minSdkVersion: expectedMinSdk,
     allowSidecarFallback,
-    requireV1: requireV1 || expectedMinSdk === 22,
+    requireV1,
     findTool: resolveTool,
     runTool,
   });
@@ -235,4 +291,12 @@ if (require.main === module) {
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-module.exports = { verifyApk, readMetadata, assertSigned, parseVerifyText, findTool };
+module.exports = {
+  verifyApk,
+  readMetadata,
+  assertSigned,
+  parseVerifyText,
+  findTool,
+  signatureSchemeRequirements,
+  assertSignatureSchemes,
+};

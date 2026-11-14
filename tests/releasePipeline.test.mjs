@@ -14,7 +14,13 @@ const { resolveSourceRef } = require("../scripts/release/resolve-source-ref.cjs"
 const { assertCertMatchesPolicy } = require("../scripts/release/check-signing-policy.cjs");
 const { assertBridgeQualified } = require("../scripts/release/check-physical-qualification.cjs");
 const { preparePublicArtifacts } = require("../scripts/release/prepare-public-artifacts.cjs");
-const { verifyApk, findTool } = require("../scripts/release/verify-apk.cjs");
+const {
+  verifyApk,
+  findTool,
+  parseVerifyText,
+  signatureSchemeRequirements,
+  assertSignatureSchemes,
+} = require("../scripts/release/verify-apk.cjs");
 const { signApk } = require("../scripts/release/sign-apk.cjs");
 const { publicArtifactNames, redactArg, sha256File } = require("../scripts/release/common.cjs");
 const {
@@ -495,6 +501,282 @@ test("verifyApk rejects wrong application ID from an allowed sidecar", () => {
         findTool: absentSdkFindTool,
       }),
     /applicationId/,
+  );
+});
+
+function schemeStatus(v1, v2) {
+  return {
+    v1,
+    v2,
+    v1Reported: true,
+    v2Reported: true,
+    certSha256: "F".repeat(64),
+    raw: `Verified using v1 scheme (JAR signing): ${v1}\nVerified using v2 scheme (APK Signature Scheme v2): ${v2}\n`,
+  };
+}
+
+test("signatureSchemeRequirements are API-aware", () => {
+  assert.deepEqual(signatureSchemeRequirements({ minSdkVersion: 24 }), {
+    requireV1: false,
+    requireV2: true,
+  });
+  assert.deepEqual(signatureSchemeRequirements({ minSdkVersion: 22 }), {
+    requireV1: true,
+    requireV2: false,
+  });
+  assert.deepEqual(signatureSchemeRequirements({ minSdkVersion: null }), {
+    requireV1: true,
+    requireV2: true,
+  });
+  assert.deepEqual(signatureSchemeRequirements({ minSdkVersion: 24, requireV1: true }), {
+    requireV1: true,
+    requireV2: true,
+  });
+});
+
+test("assertSignatureSchemes enforces the release v1/v2 matrix", () => {
+  const apk = "trainer-or-bridge.apk";
+  const cases = [
+    { minSdk: 24, v1: false, v2: true, ok: true },
+    { minSdk: 24, v1: true, v2: true, ok: true },
+    { minSdk: 24, v1: false, v2: false, ok: false, err: /Scheme v2/ },
+    { minSdk: 24, v1: true, v2: false, ok: false, err: /Scheme v2/ },
+    { minSdk: 22, v1: true, v2: false, ok: true },
+    { minSdk: 22, v1: true, v2: true, ok: true },
+    { minSdk: 22, v1: false, v2: true, ok: false, err: /Scheme v1/ },
+    { minSdk: 22, v1: false, v2: false, ok: false, err: /Scheme v1/ },
+  ];
+  for (const row of cases) {
+    const parsed = schemeStatus(row.v1, row.v2);
+    if (row.ok) {
+      assert.doesNotThrow(() =>
+        assertSignatureSchemes(parsed, { minSdkVersion: row.minSdk, apkPath: apk }),
+      );
+    } else {
+      assert.throws(
+        () => assertSignatureSchemes(parsed, { minSdkVersion: row.minSdk, apkPath: apk }),
+        row.err,
+      );
+    }
+  }
+
+  assert.doesNotThrow(() =>
+    assertSignatureSchemes(schemeStatus(true, true), { minSdkVersion: null, apkPath: apk }),
+  );
+  assert.throws(
+    () => assertSignatureSchemes(schemeStatus(true, false), { minSdkVersion: null, apkPath: apk }),
+    /Scheme v2/,
+  );
+  assert.throws(
+    () => assertSignatureSchemes(schemeStatus(false, true), { minSdkVersion: null, apkPath: apk }),
+    /Scheme v1/,
+  );
+
+  const unparseable = {
+    v1: false,
+    v2: false,
+    v1Reported: false,
+    v2Reported: false,
+    certSha256: null,
+    raw: "no scheme lines",
+  };
+  assert.throws(
+    () => assertSignatureSchemes(unparseable, { minSdkVersion: 24, apkPath: apk }),
+    /Unparseable APK Signature Scheme v2/,
+  );
+  assert.throws(
+    () => assertSignatureSchemes(unparseable, { minSdkVersion: 22, apkPath: apk }),
+    /Unparseable APK Signature Scheme v1/,
+  );
+  assert.throws(
+    () => assertSignatureSchemes(unparseable, { minSdkVersion: null, apkPath: apk }),
+    /Unparseable APK Signature Scheme v1/,
+  );
+
+  const parsedFromVerify = parseVerifyText(
+    "Verified using v1 scheme (JAR signing): false\nVerified using v2 scheme (APK Signature Scheme v2): true\n",
+  );
+  assert.equal(parsedFromVerify.v1, false);
+  assert.equal(parsedFromVerify.v2, true);
+  assert.doesNotThrow(() =>
+    assertSignatureSchemes(parsedFromVerify, { minSdkVersion: 24, apkPath: apk }),
+  );
+});
+
+test("verifyApk API 24 accepts v2-only sidecar and rejects v1-only", () => {
+  const dir = tempDir("fitbaus-apk-api24-");
+  const apk = path.join(dir, "app.apk");
+  writeListableZipApk(apk);
+  fs.writeFileSync(
+    `${apk}.meta.json`,
+    JSON.stringify({
+      applicationId: "com.markrai.fitbaus.trainer",
+      versionName: "1.0.0",
+      versionCode: 10000,
+      minSdk: 24,
+    }),
+  );
+  fs.writeFileSync(
+    `${apk}.cert.json`,
+    JSON.stringify({ signed: true, v1: false, v2: true, certSha256: "A".repeat(64) }),
+  );
+  const ok = verifyApk({
+    apkPath: apk,
+    expectedApplicationId: "com.markrai.fitbaus.trainer",
+    expectedVersionName: "1.0.0",
+    expectedMinSdk: 24,
+    allowSidecarFallback: true,
+    findTool: absentSdkFindTool,
+  });
+  assert.equal(ok.v2, true);
+  assert.equal(ok.v1, false);
+
+  fs.writeFileSync(
+    `${apk}.cert.json`,
+    JSON.stringify({ signed: true, v1: true, v2: false, certSha256: "A".repeat(64) }),
+  );
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.markrai.fitbaus.trainer",
+        expectedVersionName: "1.0.0",
+        expectedMinSdk: 24,
+        allowSidecarFallback: true,
+        findTool: absentSdkFindTool,
+      }),
+    /Scheme v2/,
+  );
+});
+
+test("verifyApk API 22 still requires verified v1 even when v2 is present", () => {
+  const dir = tempDir("fitbaus-apk-api22-");
+  const apk = path.join(dir, "app.apk");
+  writeListableZipApk(apk);
+  writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge" });
+  fs.writeFileSync(
+    `${apk}.cert.json`,
+    JSON.stringify({ signed: true, v1: false, v2: true, certSha256: "B".repeat(64) }),
+  );
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.fitbaus.bikebridge",
+        expectedVersionName: "1.0.0",
+        expectedMinSdk: 22,
+        requireV1: true,
+        allowSidecarFallback: true,
+        findTool: absentSdkFindTool,
+      }),
+    /Scheme v1/,
+  );
+});
+
+function makeSignApkRunTool({ verifyStdout = "", verifyFailMessage = null } = {}) {
+  return (command, args) => {
+    if (args[0] === "-f" && args[1] === "4") {
+      fs.copyFileSync(args[2], args[3]);
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "sign") {
+      const outIdx = args.indexOf("--out");
+      assert.ok(outIdx >= 0);
+      fs.copyFileSync(args[args.length - 1], args[outIdx + 1]);
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "verify") {
+      if (verifyFailMessage) {
+        throw new Error(`${command} ${args.join(" ")} failed\n${verifyFailMessage}`);
+      }
+      return { status: 0, stdout: verifyStdout, stderr: "" };
+    }
+    throw new Error(`unexpected mock command: ${command} ${args.join(" ")}`);
+  };
+}
+
+function signApkFixture(prefix) {
+  const dir = tempDir(prefix);
+  const inputApk = path.join(dir, "in.apk");
+  const outputApk = path.join(dir, "out.apk");
+  const keystore = path.join(dir, "test.jks");
+  fs.writeFileSync(inputApk, "unsigned-apk-bytes");
+  fs.writeFileSync(keystore, "keystore-bytes");
+  return {
+    dir,
+    inputApk,
+    outputApk,
+    keystore,
+    base: {
+      inputApk,
+      outputApk,
+      keystore,
+      storePassword: "store-pass",
+      keyAlias: "alias",
+      keyPassword: "key-pass",
+      apksigner: "mock-apksigner",
+      zipalign: "mock-zipalign",
+    },
+  };
+}
+
+const v1FalseV2TrueVerify = [
+  "Verified using v1 scheme (JAR signing): false",
+  "Verified using v2 scheme (APK Signature Scheme v2): true",
+  "",
+].join("\n");
+
+test("signApk post-sign verify accepts API 24 when v1=false and v2=true", () => {
+  const fx = signApkFixture("fitbaus-sign-api24-ok-");
+  const out = signApk({
+    ...fx.base,
+    minSdkVersion: 24,
+    runTool: makeSignApkRunTool({ verifyStdout: v1FalseV2TrueVerify }),
+  });
+  assert.equal(out, fx.outputApk);
+  assert.ok(fs.existsSync(fx.outputApk));
+});
+
+test("signApk post-sign verify rejects API 22 when v1=false and v2=true", () => {
+  const fx = signApkFixture("fitbaus-sign-api22-reject-");
+  assert.throws(
+    () =>
+      signApk({
+        ...fx.base,
+        minSdkVersion: 22,
+        runTool: makeSignApkRunTool({ verifyStdout: v1FalseV2TrueVerify }),
+      }),
+    /Scheme v1/,
+  );
+});
+
+test("signApk treats nonzero apksigner verify exit as fatal", () => {
+  const fx = signApkFixture("fitbaus-sign-verify-fail-");
+  assert.throws(
+    () =>
+      signApk({
+        ...fx.base,
+        minSdkVersion: 24,
+        runTool: makeSignApkRunTool({
+          verifyFailMessage: "DOES NOT VERIFY\nMalformed APK: not a ZIP archive",
+        }),
+      }),
+    /DOES NOT VERIFY|failed/,
+  );
+});
+
+test("signApk treats missing required signature-scheme status as fatal", () => {
+  const fx = signApkFixture("fitbaus-sign-unparseable-");
+  assert.throws(
+    () =>
+      signApk({
+        ...fx.base,
+        minSdkVersion: 24,
+        runTool: makeSignApkRunTool({
+          verifyStdout: "Verified using v1 scheme (JAR signing): false\n",
+        }),
+      }),
+    /Unparseable APK Signature Scheme v2/,
   );
 });
 

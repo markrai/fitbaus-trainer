@@ -4,6 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { fail, run, which } = require("./common.cjs");
+const { assertSignatureSchemes, parseVerifyText } = require("./verify-apk.cjs");
 
 function requireEnv(name) {
   const value = process.env[name];
@@ -53,6 +54,7 @@ function signApk({
   apksigner = findApksigner(),
   zipalign = findZipalign(),
   minSdkVersion = null,
+  runTool = run,
 }) {
   if (!fs.existsSync(inputApk)) fail(`Input APK missing: ${inputApk}`);
   if (!fs.existsSync(keystore)) fail(`Keystore missing: ${keystore}`);
@@ -70,8 +72,8 @@ function signApk({
   const ksPassEnv = "FITBAUS_APKSIGNER_KS_PASS";
   const keyPassEnv = "FITBAUS_APKSIGNER_KEY_PASS";
   try {
-    run(zipalign, ["-f", "4", inputApk, aligned]);
-    run(
+    runTool(zipalign, ["-f", "4", inputApk, aligned]);
+    runTool(
       apksigner,
       [
         "sign",
@@ -104,11 +106,13 @@ function signApk({
       verifyArgs.push("--min-sdk-version", String(minSdkVersion));
     }
     verifyArgs.push(outputApk);
-    const verified = run(apksigner, verifyArgs);
+    const verified = runTool(apksigner, verifyArgs);
     const text = `${verified.stdout || ""}\n${verified.stderr || ""}`;
-    if (!/Verified using v1 scheme \(JAR signing\):\s*true/i.test(text)) {
-      fail(`APK lacks verified APK Signature Scheme v1 (required for API 22 installs): ${outputApk}`);
-    }
+    const parsed = parseVerifyText(text);
+    assertSignatureSchemes(parsed, {
+      minSdkVersion,
+      apkPath: outputApk,
+    });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
