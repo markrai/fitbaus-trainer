@@ -20,6 +20,27 @@ internal data class BridgeUiState(
 internal object BridgeUiStateMapper {
     const val GRID_UNKNOWN: String = "—"
     private const val UNKNOWN_MACHINE: String = "Unknown"
+    private val PRODUCT_VERSION = Regex("""^(\d+)\.(\d+)\.(\d+)$""")
+
+    fun versionLabel(versionName: String): String {
+        val trimmed = versionName.trim()
+        val bare = when {
+            trimmed.startsWith("v") || trimmed.startsWith("V") -> trimmed.substring(1)
+            else -> trimmed
+        }
+        val match = PRODUCT_VERSION.matchEntire(bare)
+            ?: throw IllegalArgumentException("FitBaus product version must be major.minor.patch, got '$versionName'")
+        val major = match.groupValues[1].toLongOrNull()
+            ?: throw IllegalArgumentException("FitBaus product version must be major.minor.patch, got '$versionName'")
+        val minor = match.groupValues[2].toLongOrNull()
+            ?: throw IllegalArgumentException("FitBaus product version must be major.minor.patch, got '$versionName'")
+        val patch = match.groupValues[3].toLongOrNull()
+            ?: throw IllegalArgumentException("FitBaus product version must be major.minor.patch, got '$versionName'")
+        if (major < 0 || minor !in 0L..99L || patch !in 0L..99L) {
+            throw IllegalArgumentException("FitBaus product version must be major.minor.patch, got '$versionName'")
+        }
+        return "v$bare"
+    }
 
     private val usbIds: String =
         "VID ${BikeUsbConstants.VENDOR_ID} PID ${BikeUsbConstants.PRODUCT_ID}"
