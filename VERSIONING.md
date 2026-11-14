@@ -74,32 +74,42 @@ node scripts/check-version-consistency.cjs --require-gradle=all
 CI runs the file-level check on the Trainer job and the Gradle-resolved check
 on the Native Bike Bridge job.
 
-## GitHub release procedure
+## Editions and release tracks
 
-Tagging `v1.0.0` and creating a GitHub Release is a **manual** step. Do not
-rely on CI to publish.
+- **FitBaus Lite 1.x** — maintenance on `lite/1.x` from `v1.0.0`; no external UVC.
+- **FitBaus Full 2.x** — feature work toward `main` (webcam support lives on
+  `feature/external-webcam` until promoted). Do not merge webcam into Lite.
 
-1. Confirm `npm test`, `npm run check:version`, and Bike Bridge unit tests pass.
-2. Run **Release artifacts** (`workflow_dispatch`) with `dry_run=true`.
-3. Inspect uploaded artifacts and `SHA256SUMS.txt`.
-4. If the inspection set is acceptable, create the Git tag and GitHub Release
-   locally/manually and attach the intended files.
-5. Production Bike Bridge packaging requires a separate
-   `package_production_bridge=true` opt-in **and** signing secrets. Secrets
-   alone do not package production. A packaged production APK is **not**
-   physical-device qualification.
+Product versioning stays unified via `version.js`. Edition differences use
+artifact filenames (for example `fitbaus-bikebridge-lite-1.0.0.apk`), not
+package-ID forks.
 
-`dry_run=false` currently fails closed; this workflow never tags, pushes, or
-creates a GitHub Release.
+Maintainer procedure, secrets, certificate pins, and physical qualification:
+see [docs/RELEASE.md](docs/RELEASE.md).
+
+## GitHub release procedure (Point A)
+
+Public installers are produced by **Release** (`.github/workflows/release.yml`):
+
+1. Ensure the release tag already exists (for example annotated `v1.0.0`).
+2. Fill signing secrets and certificate pins; record Bridge physical qualification
+   before `mode=publish` (details in `docs/RELEASE.md`).
+3. Run **Release** with `tag=v1.0.0`, matching `expected_commit`, `edition=lite`,
+   `mode=inspect`.
+4. Confirm Actions artifacts, fingerprints, and `SHA256SUMS.txt`.
+5. Re-run with `mode=publish`. GitHub Actions attaches the verified public files.
+   Maintainers do not manually sign APKs or re-upload assets for the happy path.
+
+The older **Release artifacts** workflow remains inspection-oriented legacy
+packaging; prefer **Release** for installer publication.
 
 ## Artifact signing classes
 
 | Artifact | Class | Installability |
 | --- | --- | --- |
-| Trainer Android release APK | unsigned release | Not normally installable until signed |
-| Bike Bridge staging release APK | unsigned release | Not normally installable until signed |
-| Bike Bridge staging debug APK | debug-signed | Sideloadable; `adb install -r` needs the **same** debug certificate as any already-installed staging build |
-| Bike Bridge production APK | production-signed, opt-in only | Upgrades require the production signing certificate already used on that console |
+| Trainer Android public APK | release-signed (Release workflow) | Sideloadable; upgrades need certificate continuity |
+| Bike Bridge Lite/public APK | production-signed | Upgrades need the established production certificate |
+| Bike Bridge staging APKs | inspection / debug | Engineering only |
 | iOS IPA | not produced in CI | No macOS runner or App Store signing in this repository's workflows |
 | Web zip | unsigned static files | Host on any static HTTPS server |
 
@@ -107,7 +117,8 @@ Do not present unsigned APKs as install-ready releases.
 
 ## Remaining gates (not version consistency)
 
-- Trainer Android Play/sideload signing
+- Populate Trainer and Bridge certificate pins in `.github/release/signing-policy.json`
+- Configure GitHub Actions signing secrets
+- Production Bike Bridge physical-device qualification record for each published version
 - iOS distribution signing and a macOS build
-- Production Bike Bridge physical-device qualification on the ProForm Smart Power 10.0 console (Android 5.1.1 / API 22 / x86)
 - Console storage: measure APK size before installing on stock hardware

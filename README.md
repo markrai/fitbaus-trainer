@@ -73,7 +73,11 @@ npm test
 
 Edit TypeScript in `src/`, then commit the matching generated `dist/` output. Do not hand-edit `dist/`. Treat persisted schemas and version identifiers as compatibility contracts.
 
-Product versioning is centralized in `version.js`. See [VERSIONING.md](VERSIONING.md) for how Android, iOS, Bike Bridge, and the PWA cache stay aligned, and for the GitHub release-candidate procedure. Signing and physical-device qualification are separate gates from version consistency.
+Product versioning is centralized in `version.js`. See [VERSIONING.md](VERSIONING.md)
+for how Android, iOS, Bike Bridge, and the PWA cache stay aligned. Maintainer release
+signing, Lite versus Full tracks, and automated publication are documented in
+[docs/RELEASE.md](docs/RELEASE.md). Physical-device qualification remains a separate
+gate from CI packaging.
 
 See [Native Development](docs/NATIVE-DEVELOPMENT.MD) for platform toolchains and device testing, and [Personalization Architecture](docs/personalization-architecture.md) for the distinction between live control and experimental research.
 

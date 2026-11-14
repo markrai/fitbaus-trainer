@@ -1,5 +1,29 @@
 apply plugin: 'com.android.application'
 
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { localProperties.load(it) }
+}
+
+def trainerSigningValue = { String key ->
+    (findProperty(key) as String) ?: localProperties.getProperty(key)
+}
+
+def trainerSigningRequired = (findProperty('fitbaus.signing.required') as String) == 'true'
+def trainerStoreFile = trainerSigningValue('fitbaus.signing.storeFile')
+def trainerHasSigning = trainerStoreFile != null &&
+    trainerSigningValue('fitbaus.signing.storePassword') != null &&
+    trainerSigningValue('fitbaus.signing.keyAlias') != null &&
+    trainerSigningValue('fitbaus.signing.keyPassword') != null
+
+if (trainerSigningRequired && !trainerHasSigning) {
+    throw new GradleException(
+        'fitbaus.signing.required=true but Trainer release signing properties are missing. ' +
+        'No debug signing fallback.'
+    )
+}
+
 android {
     namespace = "com.markrai.fitbaus.trainer"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +40,27 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (trainerHasSigning) {
+            release {
+                storeFile file(trainerStoreFile)
+                storePassword trainerSigningValue('fitbaus.signing.storePassword')
+                keyAlias trainerSigningValue('fitbaus.signing.keyAlias')
+                keyPassword trainerSigningValue('fitbaus.signing.keyPassword')
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Historical tags may still produce unsigned release APKs; CI signs with apksigner.
+            // When signing properties are present on a tooling-capable source tree, use them.
+            if (trainerHasSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

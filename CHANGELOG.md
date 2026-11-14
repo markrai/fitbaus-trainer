@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Release engineering Point A: `.github/workflows/release.yml` builds an existing
+  immutable tag with newer tooling, signs Trainer + production Bike Bridge,
+  verifies metadata/certificates, and can attach public assets without manual
+  re-upload. See `docs/RELEASE.md`.
+- Local `lite/1.x` maintenance track rooted at `v1.0.0` (no external UVC).
+
 ## [1.0.0] - 2026-11-12
 
 First unified FitBaus product release. Trainer web/PWA, Capacitor Android and

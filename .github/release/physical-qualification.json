@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 2,
+  "description": "Exact-binary physical qualification records. A production Bike Bridge APK may become a public installer only when version, applicationId, sourceCommit, apkSha256, certSha256, and evidenceRef all match the qualified candidate. CI packaging never auto-qualifies.",
+  "records": []
+}

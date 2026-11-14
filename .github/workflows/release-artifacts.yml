@@ -1,5 +1,8 @@
 name: Release artifacts
 
+# Legacy inspection packaging. Prefer workflow "Release" (.github/workflows/release.yml)
+# for signed public installers and automated GitHub Release attachment.
+
 on:
   workflow_dispatch:
     inputs:
