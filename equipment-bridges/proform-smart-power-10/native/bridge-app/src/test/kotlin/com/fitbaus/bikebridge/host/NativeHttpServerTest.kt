@@ -187,25 +187,78 @@ class NativeHttpServerTest {
     @Test
     fun bindFailureIsReportedAndRecoversWhenPortFrees() {
         val blocker = NativeHttpServer(bindAddress = "127.0.0.1", port = 0, snapshot = { snap })
-        blocker.start()
-        val port = blocker.boundPort()
-        val server = NativeHttpServer(bindAddress = "127.0.0.1", port = port, snapshot = { snap })
-        var failed = false
+        var server: NativeHttpServer? = null
         try {
+            blocker.start()
+            val port = blocker.boundPort()
+            assertTrue(port > 0)
+            server = NativeHttpServer(bindAddress = "127.0.0.1", port = port, snapshot = { snap })
+            var failed = false
+            try {
+                server.start()
+            } catch (_: Exception) {
+                failed = true
+            }
+            assertTrue(failed)
+            assertFalse(server.isListening())
+            assertTrue(server.lastError() != null)
+            blocker.stop()
             server.start()
-        } catch (_: Exception) {
-            failed = true
-        }
-        assertTrue(failed)
-        assertFalse(server.isListening())
-        assertTrue(server.lastError() != null)
-        blocker.stop()
-        server.start()
-        try {
             assertTrue(server.isListening())
+            assertTrue(server.lastError() == null)
             assertTrue(exchange(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n").contains("HTTP/1.1 200"))
         } finally {
-            server.stop()
+            try {
+                server?.stop()
+            } catch (_: Exception) {
+            }
+            try {
+                blocker.stop()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    @Test
+    fun repeatedStopStartOnSamePortRemainsExclusive() {
+        val first = NativeHttpServer(bindAddress = "127.0.0.1", port = 0, snapshot = { snap })
+        var owner: NativeHttpServer? = null
+        var challenger: NativeHttpServer? = null
+        try {
+            first.start()
+            val port = first.boundPort()
+            assertTrue(port > 0)
+            first.stop()
+            owner = NativeHttpServer(bindAddress = "127.0.0.1", port = port, snapshot = { snap })
+            challenger = NativeHttpServer(bindAddress = "127.0.0.1", port = port, snapshot = { snap })
+            owner.start()
+            assertTrue(owner.isListening())
+            var failed = false
+            try {
+                challenger.start()
+            } catch (_: Exception) {
+                failed = true
+            }
+            assertTrue(failed)
+            assertFalse(challenger.isListening())
+            assertTrue(challenger.lastError() != null)
+            owner.stop()
+            challenger.start()
+            assertTrue(challenger.isListening())
+            assertTrue(exchange(port, "GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n").contains("HTTP/1.1 200"))
+        } finally {
+            try {
+                challenger?.stop()
+            } catch (_: Exception) {
+            }
+            try {
+                owner?.stop()
+            } catch (_: Exception) {
+            }
+            try {
+                first.stop()
+            } catch (_: Exception) {
+            }
         }
     }
 
