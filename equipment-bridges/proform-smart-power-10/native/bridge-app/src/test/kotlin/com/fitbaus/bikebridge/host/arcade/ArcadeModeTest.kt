@@ -211,5 +211,15 @@ class ArcadeModeTest {
         assertFalse(source.contains("\"ARCADE\""))
         assertNotNull(Regex("""setOnLongClickListener""").find(source), "long-press FITBAUS still opens pairing")
         assertTrue(source.contains("PairingActivity::class.java"))
+        assertTrue(source.contains("openPairingSettings()"), "settings entry points share PairingActivity launch")
+        assertTrue(source.contains("BuildConfig.VERSION_NAME"), "header version comes from installed BuildConfig")
+        assertTrue(source.contains("BridgeUiStateMapper.versionLabel"), "header formats BuildConfig with a single v prefix")
+        assertTrue(source.contains("R.drawable.ic_settings"), "visible settings gear uses vector icon")
+        assertTrue(source.contains("R.string.open_bike_bridge_settings"), "settings gear has accessible content description")
+        assertTrue(source.contains("settingsButton()"), "header exposes a dedicated settings control")
+        assertTrue(
+            source.indexOf("settingsButton()") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide)"),
+            "settings gear stays after navigation tabs",
+        )
     }
 }
