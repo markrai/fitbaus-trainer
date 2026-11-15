@@ -2,6 +2,11 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+      - lite/1.x
+    tags:
+      - "v*"
   pull_request:
 
 permissions:

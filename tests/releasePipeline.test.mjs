@@ -29,7 +29,12 @@ const {
   releaseGhArgs,
 } = require("../scripts/release/upload-github-release-assets.cjs");
 const { writeReleaseCandidate } = require("../scripts/release/write-release-candidate.cjs");
-const { validateReleaseCandidate } = require("../scripts/release/validate-release-candidate.cjs");
+const {
+  validateReleaseCandidate,
+  expectedVersionFromTag,
+} = require("../scripts/release/validate-release-candidate.cjs");
+const { assertTagMatchesSourceVersion } = require("../scripts/release/assert-tag-source-version.cjs");
+const { parseProductVersion } = require("../scripts/fitbaus-version.cjs");
 const {
   assertCandidateRun,
   parseWorkflowRunPath,
@@ -1373,6 +1378,7 @@ test("workflow trusts default branch and requires expected_commit", () => {
   assert.match(yml, /candidate_run_id/);
   assert.match(yml, /assert-candidate-run\.cjs/);
   assert.match(yml, /validate-release-candidate\.cjs/);
+  assert.match(yml, /assert-tag-source-version\.cjs/);
   assert.match(yml, /sdkmanager "build-tools;35\.0\.0"/);
   assert.match(yml, /local\.properties/);
   assert.match(yml, /env:FITBAUS_APKSIGNER|env:\$\{|sign-apk\.cjs/);
@@ -1380,4 +1386,215 @@ test("workflow trusts default branch and requires expected_commit", () => {
   assert.match(yml, /--require-v1/);
   assert.match(yml, /contents:\s*write/);
   assert.match(yml, /actions:\s*read/);
+});
+
+function writeVersionJs(dir, version) {
+  const file = path.join(dir, "version.js");
+  fs.writeFileSync(
+    file,
+    `const APP_VERSION = "${version}";\nif (typeof window !== 'undefined') {\n  window.APP_VERSION = APP_VERSION;\n}\n`,
+    "utf8",
+  );
+  return file;
+}
+
+test("assertTagMatchesSourceVersion accepts matching tag and source versions", () => {
+  const dir = tempDir("fitbaus-tagver-ok-");
+  const versionJs = writeVersionJs(dir, "1.0.1");
+  const matched = assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: versionJs });
+  assert.equal(matched.versionName, "1.0.1");
+  assert.equal(matched.versionCode, 10001);
+  assert.equal(matched.tag, "v1.0.1");
+
+  const two = writeVersionJs(dir, "2.0.0");
+  assert.equal(assertTagMatchesSourceVersion({ tag: "v2.0.0", versionJsPath: two }).versionName, "2.0.0");
+  assert.equal(assertTagMatchesSourceVersion({ tag: "v1.0.0", versionJsPath: writeVersionJs(dir, "1.0.0") }).versionCode, 10000);
+});
+
+test("assertTagMatchesSourceVersion rejects mismatched, missing, or malformed source versions", () => {
+  const dir = tempDir("fitbaus-tagver-bad-");
+  const mismatched = writeVersionJs(dir, "1.0.0");
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: mismatched }),
+    /Release version mismatch: tag v1\.0\.1 requires 1\.0\.1, but source version\.js declares 1\.0\.0/,
+  );
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v2.0.0", versionJsPath: writeVersionJs(dir, "1.0.1") }),
+    /tag v2\.0\.0 requires 2\.0\.0, but source version\.js declares 1\.0\.1/,
+  );
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: path.join(dir, "missing-version.js") }),
+    /version file is missing/,
+  );
+  fs.writeFileSync(path.join(dir, "broken.js"), "const APP_VERSION = \"not-a-semver\";\n", "utf8");
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: path.join(dir, "broken.js") }),
+    /major\.minor\.patch/,
+  );
+  fs.writeFileSync(path.join(dir, "empty.js"), "const OTHER = \"1.0.1\";\n", "utf8");
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: path.join(dir, "empty.js") }),
+    /Could not find APP_VERSION/,
+  );
+});
+
+test("matching expected_commit cannot bypass tag/source version mismatch", () => {
+  const fixture = (() => {
+    const dir = tempDir("fitbaus-tagver-commit-");
+    gitOk(dir, ["init", "-b", "main"]);
+    gitOk(dir, ["config", "user.email", "release-test@example.com"]);
+    gitOk(dir, ["config", "user.name", "Release Test"]);
+    writeVersionJs(dir, "1.0.0");
+    gitOk(dir, ["add", "version.js"]);
+    gitOk(dir, ["commit", "-m", "source still at 1.0.0"]);
+    const commit = gitOk(dir, ["rev-parse", "HEAD"]);
+    gitOk(dir, ["tag", "-a", "v1.0.1", "-m", "wrong source version"]);
+    return { dir, commit, tag: "v1.0.1" };
+  })();
+
+  const resolved = resolveSourceRef({
+    repoDir: fixture.dir,
+    tag: fixture.tag,
+    expectedCommit: fixture.commit,
+    fetch: false,
+  });
+  assert.equal(resolved.commit, fixture.commit);
+  assert.throws(
+    () =>
+      assertTagMatchesSourceVersion({
+        tag: fixture.tag,
+        versionJsPath: path.join(fixture.dir, "version.js"),
+      }),
+    /Release version mismatch/,
+  );
+});
+
+test("expectedVersionFromTag and version-code derivation remain stable", () => {
+  assert.equal(expectedVersionFromTag("v1.0.1"), "1.0.1");
+  assert.equal(expectedVersionFromTag("v2.12.35"), "2.12.35");
+  assert.throws(() => expectedVersionFromTag("1.0.1"), /Cannot derive version from tag/);
+  assert.equal(parseProductVersion("1.0.1", "fixture").versionCode, 10001);
+  assert.equal(parseProductVersion("2.0.0", "fixture").versionCode, 20000);
+});
+
+test("validateReleaseCandidate rejects candidate versionName that disagrees with the tag", () => {
+  const dir = tempDir("fitbaus-cand-ver-");
+  const trainer = path.join(dir, "t.apk");
+  const bridge = path.join(dir, "b.apk");
+  const web = path.join(dir, "w.zip");
+  fs.writeFileSync(trainer, "trainer");
+  fs.writeFileSync(bridge, "bridge");
+  fs.writeFileSync(web, "web");
+  const out = path.join(dir, "public");
+  preparePublicArtifacts({
+    artifactDir: out,
+    versionName: "1.0.0",
+    versionCode: 10000,
+    edition: "lite",
+    sourceTag: "v1.0.1",
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    toolingRef: "tooling",
+    trainerApkPath: trainer,
+    bridgeApkPath: bridge,
+    webZipPath: web,
+    trainerCert: "A".repeat(64),
+    bridgeCert: "B".repeat(64),
+    bridgeQualified: false,
+  });
+  writeReleaseCandidate({
+    artifactDir: out,
+    versionName: "1.0.0",
+    versionCode: 10000,
+    edition: "lite",
+    sourceTag: "v1.0.1",
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    toolingRef: "tooling",
+    trainerCert: "A".repeat(64),
+    bridgeCert: "B".repeat(64),
+    workflowRunId: "77",
+  });
+  assert.throws(
+    () =>
+      validateReleaseCandidate({
+        candidateDir: out,
+        expectedTag: "v1.0.1",
+        expectedCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+        expectedEdition: "lite",
+        expectedWorkflowRunId: "77",
+      }),
+    /versionName 1\.0\.0 != 1\.0\.1/,
+  );
+});
+
+test("release inspect runs tag/source version guard before builds and signing", () => {
+  const yml = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+  const guard = yml.indexOf("Require tag matches source version.js");
+  const helper = yml.indexOf("assert-tag-source-version.cjs");
+  const appTests = yml.indexOf("Install and test application source");
+  const bridgeTests = yml.indexOf("Bike Bridge unit tests");
+  const secrets = yml.indexOf("Require signing secrets");
+  assert.ok(guard > 0, "missing inspect version-guard step");
+  assert.ok(helper > guard, "helper must be invoked by the guard step");
+  assert.ok(appTests > helper, "version guard must precede application builds");
+  assert.ok(bridgeTests > helper, "version guard must precede Bridge builds");
+  assert.ok(secrets > helper, "version guard must precede signing");
+  assert.match(
+    yml.slice(guard, helper + 80),
+    /SOURCE_VERSION_JS:\s*\$\{\{\s*github\.workspace\s*\}\}\/source\/version\.js/,
+  );
+});
+
+function parseCiTriggerPolicy(yml) {
+  const onMatch = /^on:\r?\n([\s\S]*?)(?=^permissions:|^jobs:)/m.exec(yml);
+  if (!onMatch) throw new Error("ci.yml is missing a top-level on: block");
+  const block = onMatch[1];
+  const hasPush = /^\s{2}push:\s*$/m.test(block);
+  const hasPullRequest = /^\s{2}pull_request:\s*$/m.test(block);
+  const branches = [];
+  const branchBlock = /branches:\r?\n((?:\s{6}-\s+.+\r?\n)+)/.exec(block);
+  if (branchBlock) {
+    for (const line of branchBlock[1].split(/\r?\n/)) {
+      const m = /^\s{6}-\s+(.+)$/.exec(line);
+      if (m) branches.push(m[1].replace(/^["']|["']$/g, ""));
+    }
+  }
+  const tags = [];
+  const tagBlock = /tags:\r?\n((?:\s{6}-\s+.+\r?\n)+)/.exec(block);
+  if (tagBlock) {
+    for (const line of tagBlock[1].split(/\r?\n/)) {
+      const m = /^\s{6}-\s+(.+)$/.exec(line);
+      if (m) tags.push(m[1].replace(/^["']|["']$/g, ""));
+    }
+  }
+  const unfilteredPush = /^\s{2}push:\s*$/m.test(block) && !/^\s{4}branches:/m.test(block);
+  return {
+    hasPush,
+    hasPullRequest,
+    branches,
+    tags,
+    unfilteredPush,
+    includesFeatureBranchPush: unfilteredPush || branches.some((b) => b.includes("*") && !b.startsWith("v")),
+  };
+}
+
+test("ci workflow triggers avoid duplicate feature-branch push and PR runs", () => {
+  const yml = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const policy = parseCiTriggerPolicy(yml);
+  assert.equal(policy.hasPush, true);
+  assert.equal(policy.hasPullRequest, true);
+  assert.equal(policy.unfilteredPush, false);
+  assert.deepEqual([...policy.branches].sort(), ["lite/1.x", "main"]);
+  assert.deepEqual(policy.tags, ["v*"]);
+  assert.equal(policy.includesFeatureBranchPush, false);
+  assert.doesNotMatch(yml, /^on:\r?\n {2}push:\r?\n {2}pull_request:\r?\n/m);
+  assert.match(yml, /name:\s*Trainer/);
+  assert.match(yml, /name:\s*Native Bike Bridge/);
+  assert.match(yml, /npm run check:version/);
+  assert.match(
+    yml,
+    /:equipment-protocol:test :bridge-app:testReleaseUnitTest :equipment-usb-probe:testDebugUnitTest :arcade:testDebugUnitTest/,
+  );
+  assert.match(yml, /node-version:\s*22/);
+  assert.match(yml, /java-version:\s*21/);
+  assert.match(yml, /permissions:\s*\r?\n\s*contents:\s*read/);
 });
