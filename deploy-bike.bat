@@ -30,6 +30,7 @@ if "%BIKE::=%"=="%BIKE%" set "BIKE=%BIKE%:5555"
 
 set "NATIVE=%~dp0equipment-bridges\proform-smart-power-10\native"
 set "IDENTITY_PS1=%~dp0equipment-bridges\proform-smart-power-10\scripts\native-apk-identity.ps1"
+set "PREFLIGHT_PS1=%~dp0equipment-bridges\proform-smart-power-10\scripts\native-install-preflight.ps1"
 if /i "%FLAVOR%"=="production" (
     set "GRADLE_TASK=:bridge-app:assembleRelease"
     set "GRADLE_ARGS=-PbridgeIdentity=production"
@@ -105,6 +106,13 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
+echo Install preflight ^(version + signing; never uninstalls^)...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { . '%PREFLIGHT_PS1%'; Assert-BikeBridgeInstallPreflight -AdbPath '%ADB%' -Serial '!BIKE!' -ApkPath '%APK%' -ExpectedApplicationId '%PACKAGE%' | Out-Null; exit 0 } catch { Write-Host ('ERROR: ' + $_.Exception.Message); exit 1 }"
+if errorlevel 1 (
+    echo ERROR: install preflight failed. Not installing.
+    exit /b 1
+)
+echo.
 
 REM ---- install -------------------------------------------------------------------------
 echo Installing on !BIKE! ^(keeps pairing data^)...
@@ -119,6 +127,10 @@ if errorlevel 1 (
         echo The APK signature does not match the app already on the console.
         echo Production builds must be signed with the installed certificate ^(see native\local.properties^).
         echo Do NOT uninstall the existing app: that would erase its pairing data.
+    )
+    findstr /c:"INSTALL_FAILED_VERSION_DOWNGRADE" "%INSTALL_LOG%" >nul && (
+        echo The APK versionCode is lower than the installed package.
+        echo Raise APP_VERSION in version.js, rebuild, and retry. Do NOT uninstall.
     )
     exit /b 1
 )

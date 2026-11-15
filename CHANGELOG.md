@@ -10,6 +10,27 @@
   re-upload. See `docs/RELEASE.md`.
 - Local `lite/1.x` maintenance track rooted at `v1.0.0` (no external UVC).
 
+## [2.0.0] - Upcoming (FitBaus Full)
+
+Upcoming **FitBaus Full** feature release on the path from
+`feature/external-webcam` into `main`. Product version **2.0.0**
+(`versionCode` **20000**) so in-place upgrades succeed over published Lite
+**1.0.1** (`10001`) without uninstalling the Bike Bridge or clearing pairing
+data.
+
+### Added
+
+- External Webcams settings tab with exclusive UVC preview, absolute zoom
+  controls, preference persistence keyed by camera identity, and scoped USB
+  detach handling.
+- `deploy-bike.bat` install preflight: refuses version-code downgrades and
+  signing mismatches; never uninstalls the console package.
+
+### Notes
+
+- FitBaus **Lite** remains on `lite/1.x` (published **1.0.1** unchanged).
+- Do not merge webcam support into Lite.
+
 ## [1.0.0] - 2026-11-12
 
 First unified FitBaus product release. Trainer web/PWA, Capacitor Android and
