@@ -1,13 +1,14 @@
 # FitBaus product versioning
 
-FitBaus **1.0.0** is the first unified product version. Trainer web/PWA,
-Capacitor Android and iOS, Native Bike Bridge, and arcade (shipped inside
-the Bridge APK) all report the same semantic version.
+FitBaus uses one unified product version across Trainer web/PWA, Capacitor
+Android and iOS, Native Bike Bridge, and arcade (shipped inside the Bridge
+APK). **1.0.0** was the first unified release; **FitBaus Full 2.0.0** is the
+upcoming feature release that includes external webcam support.
 
 There is one authoritative source: [`version.js`](version.js).
 
 ```js
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "2.0.0";
 ```
 
 Do not treat persistence schema versions, protocol identifiers, API versions,
@@ -38,9 +39,11 @@ The USB probe app is diagnostic tooling and keeps its own version.
 versionCode = major * 10000 + minor * 100 + patch
 ```
 
-`1.0.0` → `10000`. Minor and patch must each be `0..99`. The result must stay
-inside Android's permitted `versionCode` range (`1..2100000000`). Node and
-Gradle helpers enforce the same rules.
+`1.0.0` → `10000`, `1.0.1` → `10001`, `2.0.0` → `20000`. Minor and patch must
+each be `0..99`. The result must stay inside Android's permitted `versionCode`
+range (`1..2100000000`). Node and Gradle helpers enforce the same rules.
+Published Lite **1.0.1** on production Bike Bridge requires Full to ship at
+least **20000** for an in-place `adb install -r` upgrade.
 
 Known installed maxima before 1.0.0: Trainer Android `1`, Bike Bridge `2`,
 iOS build `1`. `10000` is monotonic for every preserved package identity:
@@ -76,9 +79,11 @@ on the Native Bike Bridge job.
 
 ## Editions and release tracks
 
-- **FitBaus Lite 1.x** — maintenance on `lite/1.x` from `v1.0.0`; no external UVC.
+- **FitBaus Lite 1.x** — maintenance on `lite/1.x` from `v1.0.0` / published
+  `v1.0.1`; no external UVC. Do not rewrite published Lite tags.
 - **FitBaus Full 2.x** — feature work toward `main` (webcam support lives on
-  `feature/external-webcam` until promoted). Do not merge webcam into Lite.
+  `feature/external-webcam` until promoted as **2.0.0** / `20000`). Do not
+  merge webcam into Lite.
 
 Product versioning stays unified via `version.js`. Edition differences use
 artifact filenames (for example `fitbaus-bikebridge-lite-1.0.0.apk`), not

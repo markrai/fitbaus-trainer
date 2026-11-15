@@ -57,6 +57,62 @@ internal object NativeHandBridge {
     external fun nativeDestroy(handle: Long)
 }
 
+/**
+ * JNI endpoint for the UVC webcam path used by [PreferExternalCameraFrameSource].
+ *
+ * Ownership contract (host integration must enforce this outside arcade):
+ * - The caller owns the authorized USB Host connection and its file descriptor for the entire
+ *   native session. Pass that FD into [open] and do **not** close the connection until after
+ *   [close] returns.
+ * - Native wraps the FD via libusb/`uvc_wrap` and does not close it on [close]; it only stops
+ *   streaming, releases UVC interface claims, and drops JNI globals.
+ * - [Sink.onFrame] is invoked synchronously on a libuvc worker thread with a reusable NV21
+ *   buffer owned by native until the callback returns. Exceptions from [Sink.onFrame] are
+ *   cleared in native and must not be assumed fatal to the stream.
+ * - [Sink.onFrame] must not call [close]; host shutdown posts close onto the camera worker.
+ */
+internal object UvcNative {
+    interface Sink {
+        fun onFrame(nv21: ByteArray, width: Int, height: Int)
+    }
+
+    /**
+     * Opens a descriptor-negotiated YUYV stream on [fileDescriptor].
+     * Returns 0 on failure with no active stream or claimed USB resources left behind.
+     * On success, [negotiatedWidth]/[negotiatedHeight] report the chosen size.
+     */
+    @JvmStatic
+    external fun open(fileDescriptor: Int, sink: Sink): Long
+
+    @JvmStatic
+    external fun negotiatedWidth(handle: Long): Int
+
+    @JvmStatic
+    external fun negotiatedHeight(handle: Long): Int
+
+    /** Stops streaming and releases native resources. Safe on 0. Must precede FD close. */
+    @JvmStatic
+    external fun close(handle: Long)
+
+    /**
+     * Queries absolute zoom on a live handle.
+     * Returns six ints: supported(0/1), min, max, step, default, current — or null on invalid handle.
+     */
+    @JvmStatic
+    external fun queryZoomAbs(handle: Long): IntArray?
+
+    /** Sets absolute zoom on a live handle. Returns false when unsupported or the handle is gone. */
+    @JvmStatic
+    external fun setZoomAbs(handle: Long, value: Int): Boolean
+
+    fun ensureLoaded() {
+        System.loadLibrary(NativeHandModels.LIBRARY)
+    }
+
+    fun zoomCapability(handle: Long): UvcZoomCapability =
+        UvcZoomCapability.fromQuery(if (handle == 0L) null else queryZoomAbs(handle))
+}
+
 internal class NativeHandModels private constructor(private var handle: Long) : HandModelBackend {
     override fun detectPalms(frame: ByteArray, width: Int, height: Int, minScore: Float, out: FloatArray, maxOut: Int, times: FloatArray): Int =
         if (handle == 0L) CLOSED else NativeHandBridge.nativeDetectPalms(handle, frame, width, height, minScore, out, maxOut, times)

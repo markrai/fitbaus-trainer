@@ -39,6 +39,7 @@ import com.fitbaus.bikebridge.host.arcade.ArcadeContent
 import com.fitbaus.bikebridge.host.arcade.ArcadeMode
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeController
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
+import com.fitbaus.bikebridge.host.uvc.UvcProcess
 import com.fitbaus.bikebridge.protocol.BridgeHttpJson
 import com.fitbaus.bikebridge.protocol.NativeTelemetrySnapshot
 
@@ -69,7 +70,14 @@ class NativeBridgeActivity : Activity() {
     private val trackerRate = RateMeter()
     private var arcadeDiagnostics = ""
     private val cameraSession by lazy {
-        ArcadeCameraSession.forActivity(this, handInput, CAMERA_PERMISSION_REQUEST, settings = savedTrackerSettings())
+        ArcadeCameraSession.forActivity(
+            this,
+            handInput,
+            CAMERA_PERMISSION_REQUEST,
+            settings = savedTrackerSettings(),
+            externalCamera = UvcProcess.acquire(this, this),
+            zoomHook = UvcProcess.zoomHook(this),
+        )
     }
     private val arcadeClock by lazy { ArcadeClock(handler) { arcadeTick() } }
 
@@ -106,6 +114,7 @@ class NativeBridgeActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UvcProcess.acquire(this, this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(buildUi())
         startBridgeService()
@@ -136,6 +145,7 @@ class NativeBridgeActivity : Activity() {
     override fun onDestroy() {
         modeController.onHostDestroy()
         handler.removeCallbacks(refresh)
+        UvcProcess.release(this)
         super.onDestroy()
     }
 

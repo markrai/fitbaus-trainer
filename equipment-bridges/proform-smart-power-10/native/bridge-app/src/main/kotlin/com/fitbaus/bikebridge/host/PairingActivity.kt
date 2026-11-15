@@ -4,36 +4,118 @@ package com.fitbaus.bikebridge.host
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
+import com.fitbaus.arcade.ExternalWebcamPreview
+import com.fitbaus.arcade.UvcZoomCapability
+import com.fitbaus.arcade.UvcZoomPreference
+import com.fitbaus.bikebridge.host.uvc.UvcCameraHost
+import com.fitbaus.bikebridge.host.uvc.UvcDeviceInfo
+import com.fitbaus.bikebridge.host.uvc.UvcDeviceSelector
+import com.fitbaus.bikebridge.host.uvc.UvcProcess
+import com.fitbaus.bikebridge.host.uvc.WebcamZoomStore
 import com.fitbaus.bikebridge.protocol.BridgeHttpJson
 import com.fitbaus.bikebridge.protocol.BridgeHttpRouter
 import com.fitbaus.bikebridge.protocol.PairingToken
+import java.util.concurrent.atomic.AtomicInteger
 
 class PairingActivity : Activity() {
+    private enum class SettingsTab { Pairing, Webcams }
+
+    private val uiHandler = Handler(Looper.getMainLooper())
     private lateinit var endpointValue: TextView
     private lateinit var tokenValue: TextView
+    private lateinit var pairingPanel: View
+    private lateinit var webcamPanel: View
+    private lateinit var pairingTab: TextView
+    private lateinit var webcamTab: TextView
+    private lateinit var cameraList: TextView
+    private lateinit var statusText: TextView
+    private lateinit var zoomStatus: TextView
+    private lateinit var previewImage: ImageView
+    private lateinit var zoomSeek: SeekBar
+    private lateinit var widestButton: Button
+    private lateinit var defaultButton: Button
+    private lateinit var authorizeButton: Button
+
+    private var activeTab = SettingsTab.Pairing
+    private var preview: ExternalWebcamPreview? = null
+    private var previewSessionId: Int = 0
+    private var liveCapability: UvcZoomCapability = UvcZoomCapability.UNSUPPORTED
+    private var openedZoomIdentity: String? = null
+    private var openedAttachmentKey: String? = null
+    private var selectedDevice: UvcDeviceInfo? = null
+    private var updatingSeek = false
+    private var destroyed = false
+    private val zoomRequestSeq = AtomicInteger(0)
+    private var pendingZoomRequestId: Int = -1
+    private var uiBitmap: Bitmap? = null
+    private var uiPixels: IntArray? = null
+
+    private val detachListener = UvcCameraHost.DetachListener { deviceName, deviceKey ->
+        uiHandler.post {
+            if (!uiAlive(SettingsTab.Webcams)) return@post
+            if (!UvcProcess.detachAffectsOpened(openedAttachmentKey, deviceName, deviceKey)) {
+                // Unrelated UVC removal — refresh the list but keep the live preview.
+                refreshWebcams(startPreview = false)
+                return@post
+            }
+            stopPreview()
+            statusText.text = getString(R.string.webcam_status_disconnected)
+            setZoomUnsupported(getString(R.string.webcam_zoom_unsupported))
+            refreshWebcams(startPreview = false)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UvcProcess.acquire(this, this).addDetachListener(detachListener)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(buildUi())
+        showTab(SettingsTab.Pairing)
     }
 
     override fun onResume() {
         super.onResume()
-        bind()
+        bindPairing()
+        if (activeTab == SettingsTab.Webcams) refreshWebcams(startPreview = true)
     }
 
-    private fun bind() {
+    override fun onPause() {
+        stopPreview()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        destroyed = true
+        stopPreview()
+        UvcProcess.hostOrNull()?.removeDetachListener(detachListener)
+        UvcProcess.release(this)
+        super.onDestroy()
+    }
+
+    private fun uiAlive(requiredTab: SettingsTab? = null): Boolean {
+        if (destroyed || isFinishing) return false
+        if (requiredTab != null && activeTab != requiredTab) return false
+        return true
+    }
+
+    private fun bindPairing() {
         endpointValue.text = "http://" + LanEndpointDisplay.format(BridgeHttpJson.DEFAULT_PORT)
         tokenValue.text = PairingToken.grouped(BridgeProcess.pairing(this).token())
     }
@@ -45,10 +127,252 @@ class PairingActivity : Activity() {
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.pairing_regenerate) { _, _ ->
                 BridgeProcess.pairing(this).regenerate()
-                bind()
+                bindPairing()
             }
             .show()
     }
+
+    private fun showTab(tab: SettingsTab) {
+        activeTab = tab
+        pairingPanel.visibility = if (tab == SettingsTab.Pairing) View.VISIBLE else View.GONE
+        webcamPanel.visibility = if (tab == SettingsTab.Webcams) View.VISIBLE else View.GONE
+        styleTab(pairingTab, tab == SettingsTab.Pairing)
+        styleTab(webcamTab, tab == SettingsTab.Webcams)
+        if (tab == SettingsTab.Webcams) {
+            refreshWebcams(startPreview = true)
+        } else {
+            stopPreview()
+        }
+    }
+
+    private fun styleTab(tab: TextView, selected: Boolean) {
+        tab.setTextColor(if (selected) Color.WHITE else MUTE)
+        tab.setBackgroundColor(if (selected) Color.rgb(40, 40, 40) else Color.TRANSPARENT)
+    }
+
+    private fun refreshWebcams(startPreview: Boolean) {
+        val host = UvcProcess.acquire(this, this)
+        val devices = host.listDevices().filter(UvcDeviceSelector::isExternalUvc).sortedBy { it.deviceName }
+        val selected = UvcProcess.selectedDevice(this)
+        selectedDevice = selected
+        if (devices.isEmpty()) {
+            cameraList.text = getString(R.string.webcam_none)
+            statusText.text = getString(R.string.webcam_status_disconnected)
+            setZoomUnsupported(getString(R.string.webcam_zoom_unsupported))
+            previewImage.setImageDrawable(null)
+            stopPreview()
+            return
+        }
+        val lines = devices.joinToString("\n") { device ->
+            val perm = if (host.hasPermission(device.deviceName)) "authorized" else "needs USB permission"
+            val marker = if (selected != null && selected.key == device.key) "▶ " else "  "
+            String.format(
+                "%s%04X:%04X  %s\n   %s",
+                marker,
+                device.vendorId and 0xffff,
+                device.productId and 0xffff,
+                device.serial?.takeIf { it.isNotBlank() } ?: "(no serial)",
+                perm,
+            )
+        }
+        cameraList.text = lines
+        authorizeButton.isEnabled = selected != null && !host.hasPermission(selected.deviceName)
+        if (!startPreview) return
+        if (selected == null) {
+            statusText.text = getString(R.string.webcam_status_disconnected)
+            setZoomUnsupported(getString(R.string.webcam_zoom_unsupported))
+            return
+        }
+        if (!host.hasPermission(selected.deviceName)) {
+            statusText.text = getString(R.string.webcam_status_needs_permission)
+            setZoomUnsupported(getString(R.string.webcam_zoom_unsupported))
+            stopPreview()
+            host.promptUsbPermission()
+            return
+        }
+        startPreviewSession()
+    }
+
+    private fun startPreviewSession() {
+        stopPreview()
+        statusText.text = getString(R.string.webcam_status_opening)
+        openedZoomIdentity = null
+        val session = ExternalWebcamPreview(
+            external = UvcProcess.acquire(this, this),
+            zoomHook = UvcProcess.zoomHook(this),
+        )
+        preview = session
+        session.start(object : ExternalWebcamPreview.Listener {
+            override fun onStatus(sessionId: Int, message: String) {
+                uiHandler.post {
+                    if (!previewMatches(session, sessionId)) return@post
+                    statusText.text = message
+                }
+            }
+
+            override fun onReady(
+                sessionId: Int,
+                width: Int,
+                height: Int,
+                capability: UvcZoomCapability,
+                zoomIdentity: String?,
+                attachmentKey: String?,
+            ) {
+                uiHandler.post {
+                    if (!previewMatches(session, sessionId)) return@post
+                    previewSessionId = sessionId
+                    openedZoomIdentity = zoomIdentity
+                    openedAttachmentKey = attachmentKey
+                    // Keep list marker aligned with the device that produced this stream.
+                    selectedDevice = selectedDevice?.takeIf { it.key == attachmentKey }
+                        ?: UvcProcess.selectedDevice(this@PairingActivity)
+                    liveCapability = capability
+                    statusText.text = getString(R.string.webcam_status_live, width, height)
+                    bindZoomControls(capability)
+                    refreshWebcams(startPreview = false)
+                }
+            }
+
+            override fun onFrame(frame: ExternalWebcamPreview.PreviewFrame) {
+                uiHandler.post {
+                    if (!previewMatches(session, frame.sessionId)) {
+                        session.releaseFrame(frame)
+                        return@post
+                    }
+                    try {
+                        presentFrame(frame)
+                    } finally {
+                        session.releaseFrame(frame)
+                    }
+                }
+            }
+
+            override fun onFailed(sessionId: Int, reason: String) {
+                uiHandler.post {
+                    if (!previewMatches(session, sessionId)) return@post
+                    statusText.text = reason
+                    setZoomUnsupported(getString(R.string.webcam_zoom_unsupported))
+                    previewImage.setImageDrawable(null)
+                }
+            }
+
+            override fun onStopped(sessionId: Int) {
+                uiHandler.post {
+                    if (preview === session && previewSessionId == sessionId) {
+                        preview = null
+                    }
+                }
+            }
+
+            override fun onZoomResult(result: ExternalWebcamPreview.ZoomResult) {
+                uiHandler.post {
+                    if (!previewMatches(session, result.sessionId)) return@post
+                    if (result.requestId != pendingZoomRequestId) return@post
+                    val preference = pendingPreference
+                    pendingPreference = null
+                    pendingZoomRequestId = -1
+                    if (!result.ok) {
+                        statusText.text = getString(R.string.webcam_zoom_failed)
+                        return@post
+                    }
+                    val identity = openedZoomIdentity
+                    if (identity != null && preference != null) {
+                        WebcamZoomStore.save(this@PairingActivity, identity, preference)
+                    }
+                    if (result.readbackOk && result.capability.supported) {
+                        // Display device-reported GET_CUR, not the requested value.
+                        liveCapability = result.capability
+                        bindZoomControls(liveCapability)
+                        statusText.text = getString(R.string.webcam_zoom_applied, result.capability.current)
+                    } else {
+                        // Write succeeded but state is unverified — do not present as confirmed FOV.
+                        statusText.text = getString(R.string.webcam_zoom_unverified, result.value)
+                    }
+                }
+            }
+        })
+        previewSessionId = session.sessionId()
+    }
+
+    private fun previewMatches(session: ExternalWebcamPreview, sessionId: Int): Boolean =
+        uiAlive(SettingsTab.Webcams) && preview === session && session.sessionId() == sessionId
+
+    private fun presentFrame(frame: ExternalWebcamPreview.PreviewFrame) {
+        val count = frame.width * frame.height
+        if (frame.pixels.size < count) return
+        var pixels = uiPixels
+        if (pixels == null || pixels.size != count) {
+            pixels = IntArray(count)
+            uiPixels = pixels
+        }
+        System.arraycopy(frame.pixels, 0, pixels, 0, count)
+        var bitmap = uiBitmap
+        if (bitmap == null || bitmap.width != frame.width || bitmap.height != frame.height) {
+            bitmap = Bitmap.createBitmap(frame.width, frame.height, Bitmap.Config.ARGB_8888)
+            uiBitmap = bitmap
+        }
+        bitmap.setPixels(pixels, 0, frame.width, 0, 0, frame.width, frame.height)
+        previewImage.setImageBitmap(bitmap)
+    }
+
+    private fun stopPreview() {
+        pendingZoomRequestId = -1
+        val session = preview
+        preview = null
+        previewSessionId = 0
+        openedZoomIdentity = null
+        openedAttachmentKey = null
+        session?.stop()
+        previewImage.setImageDrawable(null)
+    }
+
+    private fun bindZoomControls(capability: UvcZoomCapability) {
+        if (!capability.supported) {
+            setZoomUnsupported(getString(R.string.webcam_zoom_unsupported))
+            return
+        }
+        zoomSeek.isEnabled = true
+        widestButton.isEnabled = true
+        defaultButton.isEnabled = true
+        zoomSeek.max = ((capability.max - capability.min) / capability.step).coerceAtLeast(0)
+        updatingSeek = true
+        zoomSeek.progress = ((capability.current - capability.min) / capability.step).coerceIn(0, zoomSeek.max)
+        updatingSeek = false
+        zoomStatus.text = getString(
+            R.string.webcam_zoom_range,
+            capability.min,
+            capability.max,
+            capability.step,
+            capability.default,
+            capability.current,
+        )
+    }
+
+    private fun setZoomUnsupported(message: String) {
+        liveCapability = UvcZoomCapability.UNSUPPORTED
+        zoomSeek.isEnabled = false
+        widestButton.isEnabled = false
+        defaultButton.isEnabled = false
+        updatingSeek = true
+        zoomSeek.progress = 0
+        updatingSeek = false
+        zoomStatus.text = message
+    }
+
+    private fun applyZoomPreference(preference: UvcZoomPreference) {
+        val session = preview ?: return
+        if (!liveCapability.supported) {
+            setZoomUnsupported(getString(R.string.webcam_zoom_unsupported))
+            return
+        }
+        val value = preference.resolve(liveCapability) ?: return
+        val requestId = zoomRequestSeq.incrementAndGet()
+        pendingZoomRequestId = requestId
+        pendingPreference = preference
+        session.requestSetZoom(value, requestId)
+    }
+
+    private var pendingPreference: UvcZoomPreference? = null
 
     private fun buildUi(): View {
         val root = LinearLayout(this)
@@ -62,12 +386,69 @@ class PairingActivity : Activity() {
         title.letterSpacing = 0.18f
         root.addView(title, marginBottom(dp(4)))
 
+        root.addView(buildTabs(), marginBottom(dp(8)))
+
         val rule = View(this)
         rule.setBackgroundColor(DIVIDER)
-        val ruleLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1))
-        ruleLp.topMargin = dp(8)
-        ruleLp.bottomMargin = dp(8)
-        root.addView(rule, ruleLp)
+        root.addView(rule, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+
+        val body = LinearLayout(this)
+        body.orientation = LinearLayout.VERTICAL
+        pairingPanel = buildPairingPanel()
+        webcamPanel = buildWebcamPanel()
+        body.addView(pairingPanel)
+        body.addView(webcamPanel)
+        val scroll = ScrollView(this)
+        scroll.isFillViewport = true
+        scroll.addView(body)
+        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        val doneRow = LinearLayout(this)
+        doneRow.orientation = LinearLayout.HORIZONTAL
+        doneRow.gravity = Gravity.END
+        val done = Button(this)
+        done.setText(R.string.pairing_done)
+        done.setOnClickListener { finish() }
+        doneRow.addView(done)
+        val doneLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        doneLp.topMargin = dp(8)
+        root.addView(doneRow, doneLp)
+        return root
+    }
+
+    private fun buildTabs(): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        val outline = GradientDrawable()
+        outline.setStroke(dp(1), DIVIDER)
+        outline.cornerRadius = dp(4).toFloat()
+        row.background = outline
+        pairingTab = tabLabel(getString(R.string.settings_tab_pairing)) {
+            showTab(SettingsTab.Pairing)
+        }
+        webcamTab = tabLabel(getString(R.string.settings_tab_webcams)) {
+            showTab(SettingsTab.Webcams)
+        }
+        row.addView(pairingTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(webcamTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        return row
+    }
+
+    private fun tabLabel(text: String, onClick: () -> Unit): TextView {
+        val tab = label(text, 12f, MUTE)
+        tab.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        tab.letterSpacing = 0.1f
+        tab.gravity = Gravity.CENTER
+        tab.setPadding(dp(12), dp(8), dp(12), dp(8))
+        tab.isClickable = true
+        tab.setOnClickListener { onClick() }
+        return tab
+    }
+
+    private fun buildPairingPanel(): View {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(0, dp(8), 0, 0)
 
         val heading = label(getString(R.string.pairing_heading), 11f, MUTE)
         heading.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
@@ -83,23 +464,82 @@ class PairingActivity : Activity() {
         noteLp.topMargin = dp(12)
         root.addView(note, noteLp)
 
-        val buttons = LinearLayout(this)
-        buttons.orientation = LinearLayout.HORIZONTAL
-        buttons.gravity = Gravity.START
         val regenerate = Button(this)
         regenerate.setText(R.string.pairing_regenerate)
         regenerate.setOnClickListener { confirmRegenerate() }
-        buttons.addView(regenerate)
-        val done = Button(this)
-        done.setText(R.string.pairing_done)
-        done.setOnClickListener { finish() }
-        val doneLp = LinearLayout.LayoutParams(
+        root.addView(regenerate)
+        return root
+    }
+
+    private fun buildWebcamPanel(): View {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(0, dp(8), 0, 0)
+
+        val heading = label(getString(R.string.webcam_heading), 11f, MUTE)
+        heading.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        heading.letterSpacing = 0.12f
+        root.addView(heading, marginBottom(dp(4)))
+
+        cameraList = label("", 12f, Color.WHITE)
+        cameraList.setTypeface(Typeface.MONOSPACE, Typeface.NORMAL)
+        root.addView(cameraList, marginBottom(dp(8)))
+
+        statusText = label(getString(R.string.webcam_status_idle), 12f, MUTE)
+        root.addView(statusText, marginBottom(dp(8)))
+
+        val previewRow = LinearLayout(this)
+        previewRow.orientation = LinearLayout.HORIZONTAL
+        previewRow.gravity = Gravity.CENTER_VERTICAL
+        previewImage = ImageView(this)
+        previewImage.scaleType = ImageView.ScaleType.FIT_CENTER
+        previewImage.setBackgroundColor(Color.rgb(24, 24, 24))
+        previewRow.addView(previewImage, LinearLayout.LayoutParams(dp(240), dp(180)))
+
+        val controls = LinearLayout(this)
+        controls.orientation = LinearLayout.VERTICAL
+        controls.setPadding(dp(12), 0, 0, 0)
+        zoomStatus = label(getString(R.string.webcam_zoom_unsupported), 11f, MUTE)
+        controls.addView(zoomStatus, marginBottom(dp(6)))
+        zoomSeek = SeekBar(this)
+        zoomSeek.isEnabled = false
+        zoomSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {}
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                if (updatingSeek || !liveCapability.supported) return
+                val value = liveCapability.min + zoomSeek.progress * liveCapability.step
+                applyZoomPreference(UvcZoomPreference.Absolute(value))
+            }
+        })
+        controls.addView(zoomSeek, marginBottom(dp(6)))
+
+        val buttons = LinearLayout(this)
+        buttons.orientation = LinearLayout.HORIZONTAL
+        widestButton = Button(this)
+        widestButton.setText(R.string.webcam_widest)
+        widestButton.isEnabled = false
+        widestButton.setOnClickListener { applyZoomPreference(UvcZoomPreference.Widest) }
+        buttons.addView(widestButton)
+        defaultButton = Button(this)
+        defaultButton.setText(R.string.webcam_camera_default)
+        defaultButton.isEnabled = false
+        defaultButton.setOnClickListener { applyZoomPreference(UvcZoomPreference.CameraDefault) }
+        val defaultLp = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
         )
-        doneLp.leftMargin = dp(16)
-        buttons.addView(done, doneLp)
-        root.addView(buttons)
+        defaultLp.leftMargin = dp(8)
+        buttons.addView(defaultButton, defaultLp)
+        controls.addView(buttons, marginBottom(dp(6)))
+
+        authorizeButton = Button(this)
+        authorizeButton.setText(R.string.webcam_authorize)
+        authorizeButton.setOnClickListener { refreshWebcams(startPreview = true) }
+        controls.addView(authorizeButton)
+
+        previewRow.addView(controls, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        root.addView(previewRow)
         return root
     }
 

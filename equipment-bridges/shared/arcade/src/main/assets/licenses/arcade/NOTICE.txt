@@ -19,4 +19,23 @@ TensorFlow Lite runtime
   lib/<abi>/libtensorflowlite_jni.so from org.tensorflow:tensorflow-lite:2.16.1
   Copyright The TensorFlow Authors. Licensed under the Apache License, Version 2.0.
 
+libusb 1.0.30 (via libusb-cmake v1.0.30-0 /
+  https://github.com/libusb/libusb-cmake/archive/refs/tags/v1.0.30-0.tar.gz
+  sha256 c8143ceba42b7b93d484ccd09db7be261bb9b15f61dae5fdc605a01a6913bada)
+  Statically linked into libfitbaus_arcade_hand.so for the USB Host UVC path.
+  Copyright © 2001–2024 libusb authors. Licensed under the GNU Lesser General
+  Public License, version 2.1 or later (LGPL-2.1-or-later). The LGPL text is
+  included as LGPL-2.1.txt. Because libusb is statically linked, providing
+  relink materials (object files or equivalent) for libusb is a **release
+  blocker** before production distribution (see arcade RELEASE-BLOCKERS.md).
+  The libusb source corresponding to this pin remains available from the
+  upstream tag.
+
+libuvc (commit f1434af4b7040988de716b8b95f85d4d58c0219f /
+  https://github.com/libuvc/libuvc/archive/f1434af4b7040988de716b8b95f85d4d58c0219f.tar.gz
+  sha256 9346e43730c88b5b5e72cbdd1bdf056f3bfb2f350aae1a333b6b4ba63fa54343)
+  Statically linked into libfitbaus_arcade_hand.so.
+  Copyright (C) 2010–2015 Ken Tossell and contributors. BSD 3-Clause license;
+  text included as BSD-libuvc.txt.
+
 The Apache License, Version 2.0 text is included as Apache-2.0.txt.
