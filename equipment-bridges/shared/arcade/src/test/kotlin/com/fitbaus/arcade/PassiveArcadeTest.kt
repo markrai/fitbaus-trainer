@@ -87,6 +87,7 @@ class PassiveArcadeTest {
                 "AuthorizedCameraFd",
                 "BikeMotion",
                 "BikeMotionMonitor",
+                "BiketrisView",
                 "CameraRegion",
                 "CameraState",
                 "ExternalCameraProvider",
@@ -104,6 +105,7 @@ class PassiveArcadeTest {
                 "UvcZoomControls",
                 "UvcZoomHook",
                 "UvcZoomPreference",
+                "WaveGestureInput",
             ),
             exposed,
         )
@@ -118,6 +120,7 @@ class PassiveArcadeTest {
                 "TrackingFrameSink", "ActivityCameraPermission", "LandmarkHandTracker", "LandmarkFrameSink", "NativeHandModels",
                 "NativeHandBridge", "HandModelBackend", "FaceTracker", "NativeFrameTracker",
                 "FingerTracker", "FingerClassifier", "FingerMathGame", "FingerObservation", "FingerCountReading",
+                "BiketrisGame", "BiketrisSession", "WaveSwipeDetector", "WaveMotionProcessor", "MotionFrameProcessor", "WaveConfig",
             )) {
             assertFalse(hidden in exposed, hidden)
         }

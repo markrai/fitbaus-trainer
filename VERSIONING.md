@@ -8,7 +8,7 @@ upcoming feature release that includes external webcam support.
 There is one authoritative source: [`version.js`](version.js).
 
 ```js
-const APP_VERSION = "2.0.0";
+const APP_VERSION = "2.1.0";
 ```
 
 Do not treat persistence schema versions, protocol identifiers, API versions,

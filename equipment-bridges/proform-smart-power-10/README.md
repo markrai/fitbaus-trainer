@@ -106,9 +106,11 @@ It does not own USB or resistance.
 
 ## Arcade games
 
-The console title bar has a DASHBOARD tab and four game tabs: BRICKS, MATH,
-FLAK RUN and TRAIL RIDE. The exercise HUD (RPM, watts, resistance, HR) stays
-above every game. Games only **read** cadence telemetry. They never send
+The console title bar has a DASHBOARD tab and five game tabs: BRICKS, MATH,
+FLAK RUN, TRAIL RIDE and BIKETRIS. The game tabs sit in a horizontal scroller
+that only uses the space between the FITBAUS title and the settings gear, so
+the gear always stays visible. The exercise HUD (RPM, watts, resistance, HR)
+stays above every game. Games only **read** cadence telemetry. They never send
 resistance, change workouts or bike modes, or touch the USB session, and
 switching games never restarts the bridge service. Only one camera pipeline
 runs at a time.
@@ -169,6 +171,114 @@ gates and slaloms).
 TRAIL RIDE has not yet been qualified on the physical console. Use the
 diagnostics overlay (frame, update and draw p50/p90) with face tracking
 active to confirm it holds about 30 FPS on the Atom Z3735G.
+
+### BIKETRIS
+
+A falling-block puzzle on a 10x20 board (two hidden rows above it). Bike
+telemetry is only shown in the HUD; pieces fall whether or not you pedal.
+
+- **Move with your head.** The same mirrored face x as BRICKS (camera
+  columns 30-70 % span the whole board) maps to the piece's leftmost
+  occupied column across `0 .. 10 - width`, so the piece always stays on the
+  board. A column change needs the head to pass the midpoint between columns
+  by 0.2 columns (hysteresis), and the piece slides one column at a time at
+  most every 60 ms, stopping at walls and settled blocks.
+- **Wave to rotate.** One deliberate sideways wave, in either direction,
+  rotates the piece 90° clockwise once (`ROTATE` with a check mark confirms
+  it). Wave beside the face, at shoulder height or across the chest, with
+  either hand, while pedaling. Waving continuously rotates only once; pause
+  the arm briefly (about 0.2 s) after the cooldown (default 650 ms) to wave
+  again. Pedaling and the rest of the scene do not need to be still.
+- **Pieces and rules.** All seven pieces, a seeded seven-piece bag, a next
+  piece preview and a ghost outline of the landing position. Rotation follows the standard
+  rotation-system states and wall-kick tables (five tests per turn; O does
+  not kick). Gravity starts at 800 ms per row and gets 12 % faster per level
+  (minimum 150 ms); a level is 10 lines. A landed piece locks after 0.5 s;
+  moving or rotating resets that delay at most 12 times. Full rows clear
+  together. Score: 100 / 300 / 500 / 800 for 1-4 lines, times the level.
+  The game ends when a new piece cannot spawn.
+- **Holds.** A lost face keeps the piece falling (without sideways moves) for
+  0.6 s, then everything pauses until the face has been stable again for
+  0.6 s.
+- **Touch fallback.** Drag across the board to move; tap the large `ROTATE`
+  button to rotate (no drag needed). When the face is not being tracked
+  (camera unavailable or starting, or no face found), any drag, board tap or
+  `ROTATE` tap starts touch play: the game keeps running with no finger down
+  until it ends, you leave BIKETRIS, the game restarts, or a face has been
+  tracked steadily for 0.6 s, which hands control back to the head without a
+  pause. While the face is tracked, a finger only overrides the head while
+  it is down. `PLAY AGAIN` appears only after game over and keeps touch play
+  going in the new game.
+
+The wave detector uses no model. It reuses the Face session's NV21 frames on
+the camera thread, about 15 observations per second:
+
+1. The Y plane is sampled into a 64x48 grid (four pixels per cell) in player
+   space and compared with the previous observation after correcting for a
+   global gain change.
+2. A compact box around the tracked head (face box plus margins, widened by
+   the head's recent sideways travel) is ignored. Everything beside, above
+   and below it is analysed, including the shoulders and chest.
+3. Changed cells are joined into regions. Each region is block-matched
+   against the previous grid over its changed cells only, so static
+   background never votes; large regions are matched in 8x8-cell blocks and
+   regrouped by similar motion, so a waving hand is separated from a torso
+   moving with the head.
+4. Each region's sideways shift is taken relative to the head: motion along
+   with the head is discounted, motion against it is not.
+5. A wave is one region moving one way, mostly sideways, until it has
+   travelled 14 % of the frame width (Medium) within 650 ms over at least two
+   observations. One weaker opposite reading inside a wave is ignored.
+6. After a wave the detector rearms only when sideways motion has stayed
+   below a release level for 180 ms and the cooldown has passed. That level
+   follows a slow baseline of background sideways motion, so pedaling,
+   clothing and flicker do not hold it unarmed; a continuously waving arm
+   does. Whole-frame changes and camera gaps also wait for that release.
+
+It recognises motion, not hands. Thresholds come from synthetic tests and have
+not been tuned on the console. Very fast flicks (a quarter-turn of the forearm
+in under about 200 ms) are not reliably detected in those tests.
+
+**Developer options** (long-press the BIKETRIS tab):
+
+| Option | Effect |
+| --- | --- |
+| Face 10 Hz / 15 Hz | Face tracker preset. BIKETRIS keeps its own preference. Default 10 Hz, 1 thread. |
+| Head sensitivity | Low / Medium / High / Very high gain around the centre. |
+| Wave rotation | On / off, to compare with touch-only rotation. |
+| Wave sensitivity | Low / Medium / High: minimum sideways travel 16 / 14 / 11 % of the frame width and onset speed; Low also ignores smaller brightness changes. |
+| Wave cooldown | 500 / 650 / 800 / 1000 ms. |
+| Simulate one wave rotation event | Publishes a labeled simulated event through the same one-shot channel. |
+| Restart game now | Starts a new game. |
+| Diagnostics overlay | Shared with the other games. Text: camera state, face rate, age and x, mapped target column; wave state, what the last observation saw (`None` no eligible motion, `Unexplained`, `Lateral`, `WithHead`, `Vertical`, `Broad`, `Global`, `Stale`), sideways speed against the onset / release levels and baseline, direction and travel against the threshold, head speed; the event pipeline (detected, rejected with the last reason, ignored while rearming, published / refused, consumed, discarded, rotated, blocked by a collision); motion p50/p90 ms and frame/update/draw timings. A 64x48 heatmap in the lower left shows changed cells, the ignored head box (blue), moving regions (orange), the tracked region (green box) and an arrow for its direction and travel. |
+
+BIKETRIS has not yet been qualified on the physical console.
+
+**Wave acceptance on the console** (diagnostics overlay on, pedaling at a
+normal cadence, head free to move):
+
+| # | Trial | Pass |
+| --- | --- | --- |
+| 1 | Five deliberate waves beside the face | at least 4 rotations |
+| 2 | Five waves at shoulder height | at least 4 |
+| 3 | Five waves across the upper chest | at least 4 |
+| 4 | Five waves with the opposite hand | at least 4 |
+| 5 | One minute of pedaling without waving | no rotation |
+| 6 | Head-only steering left and right, no waving | no rotation |
+| 7 | Two separate waves with a normal pause between them | two rotations |
+| 8 | One continuous back-and-forth wave for 3 s | exactly one rotation |
+
+For each trial, record from the overlay: `detected` (the detector accepted a
+wave), `published`, `consumed`, `rotated` and `blocked`. A wave that never
+reaches `detected` is a detection miss: note the `signal` and `last reject`
+shown during the attempt and whether the green region box followed the hand.
+`ignored while rearming` rising means the detector had not released. A
+`discarded` count means the game was not live (face lost too long) or the
+wave predated the current piece. `blocked` means the piece could not rotate
+there and is not a detection failure. Targets: at least 80 % detection (goal
+90 % after tuning), no unintended rotations, no repeated rotation from one
+continuous wave, no visible change to head steering or frame rate (frame p90
+in the overlay).
 
 ## Build and test
 

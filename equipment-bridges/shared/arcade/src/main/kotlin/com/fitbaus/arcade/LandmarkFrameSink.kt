@@ -47,6 +47,7 @@ internal class LandmarkFrameSink(
     },
     private val previewCols: Int = PREVIEW_COLS,
     private val previewRows: Int = PREVIEW_ROWS,
+    private val motion: MotionFrameProcessor? = null,
 ) : FrameConsumer {
     private val lock = ReentrantLock()
     private val frameReady = lock.newCondition()
@@ -127,8 +128,12 @@ internal class LandmarkFrameSink(
             pendingFresh = true
             frameReady.signalAll()
         }
+        motion?.onFrame(nv21, width, height, mirror, clock())
         return true
     }
+
+    internal val motionEnabled: Boolean
+        get() = motion != null
 
     fun step(nowNanos: Long): Boolean {
         val width: Int
@@ -185,6 +190,9 @@ internal class LandmarkFrameSink(
         if (point != null) {
             val mapped = HandMapping.fromCamera(point.x, point.y, mirror, controlRegion)
             input.publishCamera(mapped.x, mapped.y, point.confidence, end, generation)
+            motion?.onFace(point.x, point.y, activeTracker.lastExtent, end)
+        } else {
+            motion?.onFaceLost(end)
         }
         publishPreview(width, height, point)
         val period = if (activeTracker.isTracking) trackPeriodNanos else searchPeriod(start)

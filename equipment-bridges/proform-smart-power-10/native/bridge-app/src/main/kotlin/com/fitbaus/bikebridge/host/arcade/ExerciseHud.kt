@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.fitbaus.arcade.BiketrisView
 import com.fitbaus.arcade.FingerMathView
 import com.fitbaus.arcade.FlakView
 import com.fitbaus.arcade.PlaygroundView
@@ -101,6 +102,7 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
     val math: FingerMathView = FingerMathView(context)
     val flak: FlakView = FlakView(context)
     val trail: TrailRideView = TrailRideView(context)
+    val biketris: BiketrisView = BiketrisView(context)
 
     init {
         orientation = VERTICAL
@@ -112,6 +114,7 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
         addView(math, LayoutParams(playLp))
         addView(flak, LayoutParams(playLp))
         addView(trail, LayoutParams(playLp))
+        addView(biketris, LayoutParams(playLp))
         show(ArcadeMode.Bricks)
     }
 
@@ -120,5 +123,6 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
         math.visibility = if (game == ArcadeMode.Math) VISIBLE else GONE
         flak.visibility = if (game == ArcadeMode.Flak) VISIBLE else GONE
         trail.visibility = if (game == ArcadeMode.TrailRide) VISIBLE else GONE
+        biketris.visibility = if (game == ArcadeMode.Biketris) VISIBLE else GONE
     }
 }
