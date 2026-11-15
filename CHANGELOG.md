@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-14
+
+Maintenance release for Lite 1.x. Product version is **1.0.1** across Trainer
+web/PWA, Capacitor Android and iOS, Native Bike Bridge, and arcade (inside
+the Bridge APK).
+
+### Changed
+
+- **Bike Bridge header settings.** A dedicated gear control in the upper-right
+  header opens the existing pairing/settings screen with one tap. The FITBAUS
+  long-press shortcut to the same screen is preserved.
+- **Bike Bridge version visibility.** A small muted version label beside the
+  FITBAUS title shows the installed APK version from
+  `BuildConfig.VERSION_NAME` (for example `v1.0.1`).
+
 ## [1.0.0] - 2026-11-12
 
 First unified FitBaus product release. Trainer web/PWA, Capacitor Android and
