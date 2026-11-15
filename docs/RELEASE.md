@@ -55,6 +55,13 @@ The annotated tag `v1.0.0` remains immutable and peels to
 that tag or its source. `expected_commit` is **required** on every run (no hardcoded
 default for future versions).
 
+**Tag ↔ source version:** for `mode=inspect`, after the immutable source checkout
+is verified, the workflow requires `RELEASE_TAG === "v" + version.js APP_VERSION`
+from that source tree. A tag such as `v1.0.1` pointing at source that still declares
+`1.0.0` fails closed before npm/Gradle builds, signing, or artifact upload. Publish
+mode continues to reuse the inspected candidate and rejects candidates whose
+`versionName` does not match the tag.
+
 Trainer APKs from historical source may still be unsigned from Gradle; the release
 workflow aligns + signs them with `apksigner` (`env:` password refs; v1 and v2
 enabled). Post-sign verification is API-aware: minSdk >= 24 (Trainer) requires
@@ -178,6 +185,18 @@ Inspect / qualify / publish:
 - Existing asset with different content → **fails closed**
 - Already **published** release missing/different assets → **fails closed**
 - Failed upload leaves a newly created release as **draft** (publish happens last)
+
+## CI event policy
+
+`.github/workflows/ci.yml` runs on:
+
+- pushes to `main` or `lite/1.x`
+- pushes of version tags matching `v*`
+- pull requests (open / synchronize / reopen)
+
+Ordinary feature-branch pushes do **not** start a push CI run. When a PR is open,
+additional commits are covered by the `pull_request` workflow only, so the same
+commit is not tested twice.
 
 ## Local validation vs GitHub Actions
 

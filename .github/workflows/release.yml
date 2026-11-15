@@ -136,6 +136,17 @@ jobs:
           test "$got" = "$WANT_COMMIT"
           test "$got" = "$EXPECTED_COMMIT"
 
+      - name: Require tag matches source version.js
+        if: ${{ github.event.inputs.mode == 'inspect' }}
+        working-directory: tooling
+        env:
+          SOURCE_VERSION_JS: ${{ github.workspace }}/source/version.js
+        run: |
+          set -euo pipefail
+          node scripts/release/assert-tag-source-version.cjs \
+            --tag "$RELEASE_TAG" \
+            --version-js "$SOURCE_VERSION_JS"
+
       - name: Cache npm for application source
         if: ${{ github.event.inputs.mode == 'inspect' }}
         uses: actions/setup-node@v4
