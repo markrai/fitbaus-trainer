@@ -8,4 +8,21 @@
     <string name="pairing_regenerate_title">Regenerate pairing token?</string>
     <string name="pairing_regenerate_message">Paired clients will lose control access until the new token is entered.</string>
     <string name="open_bike_bridge_settings">Open Bike Bridge settings</string>
+    <string name="settings_tab_pairing">Pairing</string>
+    <string name="settings_tab_webcams">External Webcams</string>
+    <string name="webcam_heading">EXTERNAL WEBCAMS</string>
+    <string name="webcam_none">No external UVC webcam connected.</string>
+    <string name="webcam_status_idle">Select External Webcams to preview.</string>
+    <string name="webcam_status_disconnected">No webcam available.</string>
+    <string name="webcam_status_needs_permission">USB permission required.</string>
+    <string name="webcam_status_opening">Opening webcam…</string>
+    <string name="webcam_status_live">Live preview %1$dx%2$d</string>
+    <string name="webcam_zoom_unsupported">This webcam does not expose adjustable zoom. Its widest view is determined by the camera hardware.</string>
+    <string name="webcam_zoom_range">Zoom abs  min %1$d  max %2$d  step %3$d  default %4$d  current %5$d</string>
+    <string name="webcam_zoom_applied">Zoom set to %1$d</string>
+    <string name="webcam_zoom_unverified">Zoom command sent (%1$d); camera did not confirm current value.</string>
+    <string name="webcam_zoom_failed">Zoom control failed; stream continues.</string>
+    <string name="webcam_widest">Widest</string>
+    <string name="webcam_camera_default">Camera Default</string>
+    <string name="webcam_authorize">Authorize / Refresh</string>
 </resources>

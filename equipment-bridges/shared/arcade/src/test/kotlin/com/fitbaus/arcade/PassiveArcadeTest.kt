@@ -90,6 +90,7 @@ class PassiveArcadeTest {
                 "CameraRegion",
                 "CameraState",
                 "ExternalCameraProvider",
+                "ExternalWebcamPreview",
                 "FingerCountInput",
                 "FingerMathView",
                 "FlakView",
@@ -99,6 +100,10 @@ class PassiveArcadeTest {
                 "PlaygroundView",
                 "RateMeter",
                 "TrailRideView",
+                "UvcZoomCapability",
+                "UvcZoomControls",
+                "UvcZoomHook",
+                "UvcZoomPreference",
             ),
             exposed,
         )

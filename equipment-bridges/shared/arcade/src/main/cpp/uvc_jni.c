@@ -333,6 +333,53 @@ JNIEXPORT void JNICALL Java_com_fitbaus_arcade_UvcNative_close(JNIEnv *env, jcla
   free(u);
 }
 
+JNIEXPORT jintArray JNICALL Java_com_fitbaus_arcade_UvcNative_queryZoomAbs(JNIEnv *env, jclass cls,
+                                                                          jlong handle) {
+  Uvc *u = (Uvc *)(intptr_t)handle;
+  uint16_t min_v = 0, max_v = 0, res_v = 0, def_v = 0, cur_v = 0;
+  jint out[6];
+  jintArray arr;
+
+  (void)cls;
+  if (!env || !u || !u->device || !atomic_load(&u->alive)) return NULL;
+
+  if (uvc_get_zoom_abs(u->device, &min_v, UVC_GET_MIN) != UVC_SUCCESS) goto unsupported;
+  if (uvc_get_zoom_abs(u->device, &max_v, UVC_GET_MAX) != UVC_SUCCESS) goto unsupported;
+  if (uvc_get_zoom_abs(u->device, &res_v, UVC_GET_RES) != UVC_SUCCESS) goto unsupported;
+  if (uvc_get_zoom_abs(u->device, &def_v, UVC_GET_DEF) != UVC_SUCCESS) goto unsupported;
+  if (uvc_get_zoom_abs(u->device, &cur_v, UVC_GET_CUR) != UVC_SUCCESS) goto unsupported;
+
+  out[0] = 1;
+  out[1] = (jint)min_v;
+  out[2] = (jint)max_v;
+  out[3] = (jint)res_v;
+  out[4] = (jint)def_v;
+  out[5] = (jint)cur_v;
+  arr = (*env)->NewIntArray(env, 6);
+  if (!arr) return NULL;
+  (*env)->SetIntArrayRegion(env, arr, 0, 6, out);
+  return arr;
+
+unsupported:
+  out[0] = 0;
+  out[1] = out[2] = out[3] = out[4] = out[5] = 0;
+  arr = (*env)->NewIntArray(env, 6);
+  if (!arr) return NULL;
+  (*env)->SetIntArrayRegion(env, arr, 0, 6, out);
+  return arr;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_fitbaus_arcade_UvcNative_setZoomAbs(JNIEnv *env, jclass cls,
+                                                                       jlong handle, jint value) {
+  Uvc *u = (Uvc *)(intptr_t)handle;
+  (void)env;
+  (void)cls;
+  if (!u || !u->device || !atomic_load(&u->alive)) return JNI_FALSE;
+  if (value < 0 || value > 0xffff) return JNI_FALSE;
+  if (uvc_set_zoom_abs(u->device, (uint16_t)value) != UVC_SUCCESS) return JNI_FALSE;
+  return JNI_TRUE;
+}
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
   int opt;
   (void)vm;

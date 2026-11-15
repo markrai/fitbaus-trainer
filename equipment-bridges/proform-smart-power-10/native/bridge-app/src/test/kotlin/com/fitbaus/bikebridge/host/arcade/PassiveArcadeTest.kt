@@ -52,9 +52,9 @@ class PassiveArcadeTest {
     fun hostUsesSharedArcadeOnlyThroughItsPublicFactory() {
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         assertTrue(activity.contains("ArcadeCameraSession.forActivity("))
-        assertTrue(activity.contains("externalCamera = ensureUvcCameraHost()"))
-        assertTrue(activity.contains("UvcCameraHost("))
-        assertTrue(activity.contains("uvcCameraHost?.close()"), "Activity must release UVC USB receiver on destroy")
+        assertTrue(activity.contains("UvcProcess.acquire(this, this)"))
+        assertTrue(activity.contains("zoomHook = UvcProcess.zoomHook(this)"))
+        assertTrue(activity.contains("UvcProcess.release(this)"), "Activity must release shared UVC host on destroy")
         for (hidden in listOf(
             "Camera1Driver", "ArcadeCameraThread", "SerialCameraFrameSource", "ClassicalHandTracker", "TrackingFrameSink",
             "LandmarkHandTracker", "LandmarkFrameSink", "NativeHandModels", "NativeHandBridge", "HandModelBackend",

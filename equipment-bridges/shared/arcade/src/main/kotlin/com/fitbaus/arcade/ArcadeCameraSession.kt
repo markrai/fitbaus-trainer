@@ -356,6 +356,7 @@ public class ArcadeCameraSession internal constructor(
             settings: ArcadeTrackerSettings = ArcadeTrackerSettings.DEFAULT,
             detectionRegion: CameraRegion = CameraRegion.DEFAULT_DETECTION,
             externalCamera: ExternalCameraProvider? = null,
+            zoomHook: UvcZoomHook? = null,
         ): ArcadeCameraSession {
             val appContext = activity.applicationContext
             return ArcadeCameraSession(
@@ -369,6 +370,7 @@ public class ArcadeCameraSession internal constructor(
                     worker = ArcadeCameraThread,
                     sink = sink,
                     external = externalCamera,
+                    zoomHook = zoomHook,
                 )
             }
         }

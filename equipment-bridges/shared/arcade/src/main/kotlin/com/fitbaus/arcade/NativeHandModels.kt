@@ -94,9 +94,23 @@ internal object UvcNative {
     @JvmStatic
     external fun close(handle: Long)
 
+    /**
+     * Queries absolute zoom on a live handle.
+     * Returns six ints: supported(0/1), min, max, step, default, current — or null on invalid handle.
+     */
+    @JvmStatic
+    external fun queryZoomAbs(handle: Long): IntArray?
+
+    /** Sets absolute zoom on a live handle. Returns false when unsupported or the handle is gone. */
+    @JvmStatic
+    external fun setZoomAbs(handle: Long, value: Int): Boolean
+
     fun ensureLoaded() {
         System.loadLibrary(NativeHandModels.LIBRARY)
     }
+
+    fun zoomCapability(handle: Long): UvcZoomCapability =
+        UvcZoomCapability.fromQuery(if (handle == 0L) null else queryZoomAbs(handle))
 }
 
 internal class NativeHandModels private constructor(private var handle: Long) : HandModelBackend {

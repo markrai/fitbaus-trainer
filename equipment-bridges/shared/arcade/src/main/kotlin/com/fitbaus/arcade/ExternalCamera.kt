@@ -14,6 +14,18 @@ public interface AuthorizedCameraFd : AutoCloseable {
     /** Dup of the authorized USB Host FD; valid until [close]. */
     public fun fileDescriptor(): Int
 
+    /**
+     * Preference identity captured at open time for the device that produced this FD.
+     * Null when the host cannot bind a stable identity. Never invents a serial number.
+     */
+    public fun zoomIdentity(): String? = null
+
+    /**
+     * Attachment-scoped key captured at open time (VID:PID:deviceName).
+     * Used to scope USB detach handling to the webcam that owns the stream.
+     */
+    public fun attachmentKey(): String? = null
+
     /** Releases the host USB connection. Idempotent. */
     public override fun close()
 }
@@ -30,10 +42,20 @@ public fun interface ExternalCameraProvider {
 /** Result of a native UVC open; [handle] 0 means failure. */
 internal data class UvcOpenResult(val handle: Long, val width: Int, val height: Int)
 
+/**
+ * Optional post-open zoom apply; failures must not abort streaming.
+ * [zoomIdentity] is the identity of the FD that produced [handle], not a later global selection.
+ */
+public fun interface UvcZoomHook {
+    public fun onOpened(handle: Long, zoomIdentity: String?)
+}
+
 /** Native UVC open/close seam; default delegates to [UvcNative]. */
 internal interface UvcStreamEngine {
     fun open(fileDescriptor: Int, sink: UvcNative.Sink): UvcOpenResult
     fun close(handle: Long)
+    fun zoomCapability(handle: Long): UvcZoomCapability = UvcZoomCapability.UNSUPPORTED
+    fun setZoom(handle: Long, value: Int): Boolean = false
 
     companion object {
         val DEFAULT: UvcStreamEngine = object : UvcStreamEngine {
@@ -61,6 +83,12 @@ internal interface UvcStreamEngine {
             override fun close(handle: Long) {
                 UvcNative.close(handle)
             }
+
+            override fun zoomCapability(handle: Long): UvcZoomCapability =
+                UvcNative.zoomCapability(handle)
+
+            override fun setZoom(handle: Long, value: Int): Boolean =
+                handle != 0L && UvcNative.setZoomAbs(handle, value)
         }
     }
 }
@@ -74,6 +102,7 @@ internal class PreferExternalCameraFrameSource(
     private val sink: FrameConsumer,
     private val external: ExternalCameraProvider?,
     private val uvcEngine: UvcStreamEngine = UvcStreamEngine.DEFAULT,
+    private val zoomHook: UvcZoomHook? = null,
     private val camera1Factory: (FrameConsumer) -> FrameSource = { s ->
         SerialCameraFrameSource(worker, Camera1Driver(s))
     },
@@ -196,6 +225,12 @@ internal class PreferExternalCameraFrameSource(
         uvcFd = fd
         usedExternal = true
         sink.mirror = false
+        try {
+            zoomHook?.onOpened(opened.handle, fd.zoomIdentity())
+        } catch (t: Throwable) {
+            Log.e(TAG, "zoom apply failed; continuing stream", t)
+            trace("zoomApplyError")
+        }
         Log.i(TAG, "using external UVC ${opened.width}x${opened.height}")
         listener.onCameraReady(opened.width, opened.height, false)
         return true

@@ -44,9 +44,53 @@ internal class UvcCameraHost(
         })
     }
 
+    private val detachListeners = LinkedHashSet<DetachListener>()
+
+    fun interface DetachListener {
+        fun onUvcDetached(deviceName: String, deviceKey: String?)
+    }
+
+    fun listDevices(): Collection<UvcDeviceInfo> =
+        if (closed) emptyList() else gateway.listDevices()
+
+    fun hasPermission(deviceName: String): Boolean =
+        !closed && gateway.hasPermission(deviceName)
+
+    fun addDetachListener(listener: DetachListener) {
+        synchronized(lock) {
+            if (!closed) detachListeners.add(listener)
+        }
+    }
+
+    fun removeDetachListener(listener: DetachListener) {
+        synchronized(lock) {
+            detachListeners.remove(listener)
+        }
+    }
+
+    /**
+     * Fires the existing USB permission state machine without opening a camera connection.
+     * Safe to call from the UI thread; never blocks on USB control transfers for streaming.
+     */
+    fun promptUsbPermission(): Boolean {
+        if (closed) return false
+        val device = UvcProcess.resolveExternalCamera(gateway.listDevices()) ?: return false
+        if (closed) return false
+        if (gateway.hasPermission(device.deviceName)) return true
+        val action = synchronized(lock) {
+            if (closed) return false
+            keysByDeviceName[device.deviceName] = device.key
+            machine.onOpenAttempt(device.key, hasPermission = false)
+        }
+        return when (action) {
+            UvcPermissionAction.RequestThenFallback -> dispatchPermissionRequest(device)
+            UvcPermissionAction.OpenNow, UvcPermissionAction.FallbackNoPrompt -> false
+        }
+    }
+
     override fun openAuthorizedCamera(): AuthorizedCameraFd? {
         if (closed) return null
-        val device = UvcDeviceSelector.select(gateway.listDevices()) ?: return null
+        val device = UvcProcess.resolveExternalCamera(gateway.listDevices()) ?: return null
         if (closed) return null
         val hasPerm = gateway.hasPermission(device.deviceName)
         val action = synchronized(lock) {
@@ -71,36 +115,47 @@ internal class UvcCameraHost(
                         }
                         null
                     } else {
-                        fd
+                        fd?.let {
+                            IdentifiedCameraFd(
+                                it,
+                                WebcamZoomStore.identityKey(device),
+                                device.key,
+                            )
+                        }
                     }
                 }
             }
             UvcPermissionAction.FallbackNoPrompt -> null
             UvcPermissionAction.RequestThenFallback -> {
-                val request = synchronized(lock) {
-                    if (closed) return null
-                    val id = processRequestSeq.getAndIncrement()
-                    PendingUsbRequest(device.deviceName, device.key, id).also { pendingRequest = it }
-                }
-                val dispatched = try {
-                    if (!closed) gateway.requestPermission(device.deviceName, request.requestId) else false
-                } catch (t: Throwable) {
-                    Log.e(TAG, "requestPermission failed", t)
-                    false
-                }
-                synchronized(lock) {
-                    if (closed) {
-                        if (pendingRequest == request) pendingRequest = null
-                        return null
-                    }
-                    if (!dispatched) {
-                        if (pendingRequest == request) pendingRequest = null
-                        machine.onRequestFailed(device.key)
-                    }
-                }
+                dispatchPermissionRequest(device)
                 null
             }
         }
+    }
+
+    private fun dispatchPermissionRequest(device: UvcDeviceInfo): Boolean {
+        val request = synchronized(lock) {
+            if (closed) return false
+            val id = processRequestSeq.getAndIncrement()
+            PendingUsbRequest(device.deviceName, device.key, id).also { pendingRequest = it }
+        }
+        val dispatched = try {
+            if (!closed) gateway.requestPermission(device.deviceName, request.requestId) else false
+        } catch (t: Throwable) {
+            Log.e(TAG, "requestPermission failed", t)
+            false
+        }
+        synchronized(lock) {
+            if (closed) {
+                if (pendingRequest == request) pendingRequest = null
+                return false
+            }
+            if (!dispatched) {
+                if (pendingRequest == request) pendingRequest = null
+                machine.onRequestFailed(device.key)
+            }
+        }
+        return dispatched
     }
 
     override fun close() {
@@ -109,6 +164,7 @@ internal class UvcCameraHost(
             closed = true
             pendingRequest = null
             keysByDeviceName.clear()
+            detachListeners.clear()
             machine.clear()
         }
         try {
@@ -181,16 +237,24 @@ internal class UvcCameraHost(
 
     private fun handleDetach(deviceName: String) {
         if (closed) return
-        val key = synchronized(lock) {
+        val (key, listeners) = synchronized(lock) {
             if (closed) return
             val pending = pendingRequest
             if (pending != null && pending.deviceName == deviceName) pendingRequest = null
-            keysByDeviceName.remove(deviceName)
+            val removed = keysByDeviceName.remove(deviceName)
+            removed to detachListeners.toList()
         }
         if (key != null) {
             machine.onDetached(key)
         }
         Log.i(TAG, "uvc detached name=$deviceName key=$key")
+        for (listener in listeners) {
+            try {
+                listener.onUvcDetached(deviceName, key)
+            } catch (t: Throwable) {
+                Log.e(TAG, "detach listener failed", t)
+            }
+        }
     }
 
     private data class PendingUsbRequest(
@@ -198,6 +262,18 @@ internal class UvcCameraHost(
         val key: String,
         val requestId: Long,
     )
+
+    /** Binds zoom preference identity and attachment key to the FD that was actually opened. */
+    private class IdentifiedCameraFd(
+        private val inner: AuthorizedCameraFd,
+        private val identity: String,
+        private val attachment: String,
+    ) : AuthorizedCameraFd {
+        override fun fileDescriptor(): Int = inner.fileDescriptor()
+        override fun zoomIdentity(): String = identity
+        override fun attachmentKey(): String = attachment
+        override fun close() = inner.close()
+    }
 
     companion object {
         private const val TAG = "FitbausUvcHost"

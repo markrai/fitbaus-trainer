@@ -132,6 +132,32 @@ class UvcNativeContractTest {
     }
 
     @Test
+    fun zoomHookFailureDoesNotAbortExternalStream() {
+        val worker = ManualWorker()
+        val trace = ArrayList<String>()
+        val fd = FakeFd()
+        val engine = FakeEngine()
+        val source = PreferExternalCameraFrameSource(
+            worker = worker,
+            sink = FakeConsumer(),
+            external = { fd },
+            uvcEngine = engine,
+            zoomHook = { _, _ -> error("zoom boom") },
+            camera1Factory = { error("camera1 should not open") },
+            events = trace,
+        )
+        val listener = RecordingListener()
+        source.start(listener)
+        worker.runAll()
+        assertTrue(source.usedExternal)
+        assertTrue(listener.events.any { it.startsWith("ready:") })
+        assertTrue(trace.contains("zoomApplyError"), trace.toString())
+        source.stop()
+        worker.runAll()
+        assertEquals(1, fd.closed)
+    }
+
+    @Test
     fun nativeCloseFailureStillClosesFdAndWorkerContinues() {
         val worker = ManualWorker()
         val trace = ArrayList<String>()
@@ -343,8 +369,12 @@ class UvcNativeContractTest {
         val fdB = FakeFd()
         val engineA = FakeEngine()
         val engineB = FakeEngine()
-        val a = PreferExternalCameraFrameSource(worker, FakeConsumer(), { fdA }, engineA, { error("no") })
-        val b = PreferExternalCameraFrameSource(worker, FakeConsumer(), { fdB }, engineB, { error("no") })
+        val a = PreferExternalCameraFrameSource(
+            worker, FakeConsumer(), { fdA }, engineA, camera1Factory = { error("no") },
+        )
+        val b = PreferExternalCameraFrameSource(
+            worker, FakeConsumer(), { fdB }, engineB, camera1Factory = { error("no") },
+        )
         a.start(RecordingListener())
         worker.runAll()
         a.stop()
