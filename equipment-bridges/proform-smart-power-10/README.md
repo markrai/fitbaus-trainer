@@ -174,8 +174,9 @@ active to confirm it holds about 30 FPS on the Atom Z3735G.
 
 ### BIKETRIS
 
-A falling-block puzzle on a 10x20 board (two hidden rows above it). Bike
-telemetry is only shown in the HUD; pieces fall whether or not you pedal.
+A falling-block puzzle on a 10x20 board (two hidden rows above it). Your
+cadence sets how fast pieces fall (read-only RPM; nothing is sent to the
+bike), and pieces keep falling whether or not you pedal.
 
 - **Move with your head.** The same mirrored face x as BRICKS (camera
   columns 30-70 % span the whole board) maps to the piece's leftmost
@@ -192,23 +193,51 @@ telemetry is only shown in the HUD; pieces fall whether or not you pedal.
 - **Pieces and rules.** All seven pieces, a seeded seven-piece bag, a next
   piece preview and a ghost outline of the landing position. Rotation follows the standard
   rotation-system states and wall-kick tables (five tests per turn; O does
-  not kick). Gravity starts at 800 ms per row and gets 12 % faster per level
-  (minimum 150 ms); a level is 10 lines. A landed piece locks after 0.5 s;
+  not kick). Gravity starts at 720 ms per row at neutral cadence and gets
+  12 % faster per level (minimum 150 ms before the cadence multiplier); a
+  level is 10 lines. A landed piece locks after 0.5 s;
   moving or rotating resets that delay at most 12 times. Full rows clear
   together. Score: 100 / 300 / 500 / 800 for 1-4 lines, times the level.
   The game ends when a new piece cannot spawn.
 - **Holds.** A lost face keeps the piece falling (without sideways moves) for
   0.6 s, then everything pauses until the face has been stable again for
   0.6 s.
-- **Touch fallback.** Drag across the board to move; tap the large `ROTATE`
-  button to rotate (no drag needed). When the face is not being tracked
-  (camera unavailable or starting, or no face found), any drag, board tap or
-  `ROTATE` tap starts touch play: the game keeps running with no finger down
+- **Cadence modes.** The selector in the right-hand panel switches between
+  `PEDAL TO SLOW` (default) and `PEDAL TO SPEED UP`. The choice is saved, can
+  change mid-game without touching the board or score, works on the game-over
+  screen, and eases in over about half a second. Below it the panel shows
+  your smoothed `RPM`, the current `FALL` interval and a hint.
+- **Touch fallback.** Drag across the board to move. There is no touch
+  rotation; pieces rotate only with a wave. When the face is not being
+  tracked (camera unavailable or starting, or no face found), any drag or
+  board tap starts touch play: the game keeps running with no finger down
   until it ends, you leave BIKETRIS, the game restarts, or a face has been
   tracked steadily for 0.6 s, which hands control back to the head without a
   pause. While the face is tracked, a finger only overrides the head while
   it is down. `PLAY AGAIN` appears only after game over and keeps touch play
   going in the new game.
+
+**Cadence mapping.** With `t = clamp((rpm - 40) / 60, 0, 1)`, the fall
+interval is the level interval times `0.75 + 0.5 t` in `PEDAL TO SLOW` and
+`1.25 - 0.5 t` in `PEDAL TO SPEED UP`, never below 100 ms:
+
+| RPM | PEDAL TO SLOW | PEDAL TO SPEED UP |
+| --- | --- | --- |
+| 40 or less (including 0) | 540 ms | 900 ms |
+| 70 | 720 ms | 720 ms |
+| 100 or more | 900 ms | 540 ms |
+
+(Level 1 values; higher levels scale the same way.) An RPM sample counts only
+when its timestamp changes, it is current and the bike is connected and
+initialized, the same rules FLAK RUN and TRAIL RIDE use. Cadence is smoothed
+over about a second; one sample can pull the smoothed value at most 30 RPM,
+so a single spike barely moves the fall speed. With no new sample for 2 s, or
+with the bike disconnected or not initialized, the panel shows
+`RPM UNAVAILABLE` and the fall speed eases back to neutral (720 ms at level
+1) over a few seconds; it never freezes and never keeps the benefit of an old
+fast reading. Changing speed keeps the piece's progress toward the next row,
+so it never jumps or drops early, and the lock delay does not depend on
+cadence. All calibration values live in `CadenceGravityConfig`.
 
 The wave detector uses no model. It reuses the Face session's NV21 frames on
 the camera thread, about 15 observations per second:
@@ -250,7 +279,7 @@ in under about 200 ms) are not reliably detected in those tests.
 | Wave cooldown | 500 / 650 / 800 / 1000 ms. |
 | Simulate one wave rotation event | Publishes a labeled simulated event through the same one-shot channel. |
 | Restart game now | Starts a new game. |
-| Diagnostics overlay | Shared with the other games. Text: camera state, face rate, age and x, mapped target column; wave state, what the last observation saw (`None` no eligible motion, `Unexplained`, `Lateral`, `WithHead`, `Vertical`, `Broad`, `Global`, `Stale`), sideways speed against the onset / release levels and baseline, direction and travel against the threshold, head speed; the event pipeline (detected, rejected with the last reason, ignored while rearming, published / refused, consumed, discarded, rotated, blocked by a collision); motion p50/p90 ms and frame/update/draw timings. A 64x48 heatmap in the lower left shows changed cells, the ignored head box (blue), moving regions (orange), the tracked region (green box) and an arrow for its direction and travel. |
+| Diagnostics overlay | Shared with the other games. Text: camera state, face rate, age and x, mapped target column; wave state, what the last observation saw (`None` no eligible motion, `Unexplained`, `Lateral`, `WithHead`, `Vertical`, `Broad`, `Global`, `Stale`), sideways speed against the onset / release levels and baseline, direction and travel against the threshold, head speed; the event pipeline (detected, rejected with the last reason, ignored while rearming, published / refused, consumed, discarded, rotated, blocked by a collision); motion p50/p90 ms and frame/update/draw timings; and a cadence line (mode, status, raw and smoothed RPM, target and applied multiplier, level and effective fall interval, fall progress, sample age). A 64x48 heatmap in the lower left shows changed cells, the ignored head box (blue), moving regions (orange), the tracked region (green box) and an arrow for its direction and travel. |
 
 BIKETRIS has not yet been qualified on the physical console.
 
@@ -268,7 +297,15 @@ normal cadence, head free to move):
 | 7 | Two separate waves with a normal pause between them | two rotations |
 | 8 | One continuous back-and-forth wave for 3 s | exactly one rotation |
 
-For each trial, record from the overlay: `detected` (the detector accepted a
+**Cadence acceptance on the console:** in each mode, hold about 40, 70 and
+100 RPM for 10 s each and confirm the panel's `FALL` reads roughly the table
+values (level 1); stop pedaling and confirm pieces keep falling; unplug the
+bike USB briefly and confirm `RPM UNAVAILABLE` appears and the speed eases to
+neutral, then recovers smoothly; switch modes mid-game and confirm the board,
+score and current piece are kept; confirm the selector is fully visible and
+both segments respond on the console screen.
+
+For each wave trial, record from the overlay: `detected` (the detector accepted a
 wave), `published`, `consumed`, `rotated` and `blocked`. A wave that never
 reaches `detected` is a detection miss: note the `signal` and `last reject`
 shown during the attempt and whether the green region box followed the hand.

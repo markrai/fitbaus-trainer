@@ -194,6 +194,16 @@ class ArcadeModeTest {
         assertTrue(start > 0 && start < fallback)
         val branch = source.substring(start, fallback)
         assertTrue(branch.contains("arcadeContent.biketris.render("))
+        for (field in listOf(
+            "connected = telemetry?.connected == true",
+            "initialized = telemetry?.initialized == true",
+            "rpm = telemetry?.rpm?.value",
+            "rpmCurrent = telemetry?.rpm?.current == true",
+            "rpmObservedAt = telemetry?.rpm?.observedAt",
+        )) {
+            assertTrue(branch.contains(field), "cadence comes from the existing snapshot: $field")
+        }
+        assertFalse(branch.contains("NativeBridgeService"), "no second telemetry lookup in the branch")
         for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager", "session()", "startService")) {
             assertFalse(branch.contains(forbidden), forbidden)
         }
