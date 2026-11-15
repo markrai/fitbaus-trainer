@@ -14,6 +14,7 @@ import android.view.MotionEvent
 import android.view.View
 import java.util.Locale
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 internal object BiketrisPalette {
     val BACKGROUND: Int = Color.rgb(10, 10, 24)
@@ -27,6 +28,7 @@ internal object BiketrisPalette {
     val OVERLAY: Int = Color.argb(200, 0, 0, 0)
     val BUTTON: Int = Color.rgb(44, 44, 70)
     val BUTTON_PRESSED: Int = Color.rgb(80, 80, 130)
+    val SELECTED: Int = Color.rgb(110, 236, 130)
     val PIECES: IntArray = intArrayOf(
         Color.rgb(40, 40, 40),
         Color.rgb(40, 196, 210),
@@ -49,8 +51,9 @@ internal object BiketrisPalette {
  * BIKETRIS: a falling-block game for the console. Move the falling piece by moving the head left
  * or right (Face tracking, the same mirrored x as Bricks) and rotate it clockwise with one
  * deliberate sideways wave, detected from frame-to-frame luminance motion on the same camera
- * stream. Touch fallback: drag across the board to move, tap ROTATE to rotate. Bike telemetry is
- * never read here and nothing is ever sent to the bike.
+ * stream. Touch fallback: drag across the board to move. Read-only cadence sets the fall speed in
+ * one of two modes chosen on screen (PEDAL TO SLOW, the default, or PEDAL TO SPEED UP). Nothing is
+ * ever sent to the bike.
  */
 public class BiketrisView(context: Context) : View(context) {
     public var diagnosticsOverlay: Boolean = false
@@ -73,12 +76,13 @@ public class BiketrisView(context: Context) : View(context) {
     private var waveSensitivity = (prefs?.getInt(WAVE_SENSITIVITY_KEY, WaveConfig.DEFAULT_SENSITIVITY) ?: WaveConfig.DEFAULT_SENSITIVITY)
         .coerceIn(0, WaveConfig.SENSITIVITY_LABELS.size - 1)
     private var cooldownIndex = (prefs?.getInt(WAVE_COOLDOWN_KEY, DEFAULT_COOLDOWN) ?: DEFAULT_COOLDOWN).coerceIn(0, COOLDOWNS_MS.size - 1)
+    private var cadenceMode = CadenceMode.fromKey(prefs?.getString(CADENCE_MODE_KEY, null))
     private val game = BiketrisGame(seed = System.nanoTime())
     private val session = BiketrisSession(game)
 
     private var touchX = Float.NaN
     private var dragging = false
-    private var rotatePressed = false
+    private var pressedMode: CadenceMode? = null
     private var restartPressed = false
     private var lastRenderNanos = Long.MIN_VALUE
     private var cameraState = CameraState.Off
@@ -102,7 +106,12 @@ public class BiketrisView(context: Context) : View(context) {
     private var boardTop = 0f
     private var boardWidth = 0f
     private var boardHeight = 0f
-    private val rotateRect = RectF()
+    private val selector = CadenceSelectorLayout()
+    private var feedbackTop = 0f
+    private var shownRpm = Int.MIN_VALUE
+    private var shownFallMs = Int.MIN_VALUE
+    private var rpmText = ""
+    private var fallText = ""
     private val restartRect = RectF()
     private val blockRect = RectF()
     private val checkPath = Path()
@@ -120,6 +129,8 @@ public class BiketrisView(context: Context) : View(context) {
     private val infoPaint = text(BiketrisPalette.PRIMARY, 15f, Typeface.DEFAULT_BOLD)
     private val bannerPaint = text(BiketrisPalette.PRIMARY, 20f, Typeface.DEFAULT_BOLD).apply { textAlign = Paint.Align.CENTER }
     private val buttonPaint = text(BiketrisPalette.PRIMARY, 22f, Typeface.DEFAULT_BOLD).apply { textAlign = Paint.Align.CENTER }
+    private val segmentPaint = text(BiketrisPalette.PRIMARY, 13f, Typeface.DEFAULT_BOLD).apply { textAlign = Paint.Align.CENTER }
+    private val feedbackPaint = text(BiketrisPalette.PRIMARY, 16f, Typeface.MONOSPACE).apply { isFakeBoldText = true }
     private val diagPaint = text(BiketrisPalette.PRIMARY, 11f, Typeface.MONOSPACE)
     private val checkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -132,9 +143,21 @@ public class BiketrisView(context: Context) : View(context) {
         setBackgroundColor(BiketrisPalette.BACKGROUND)
         isClickable = true
         session.mapper.gain = SENSITIVITIES[sensitivityIndex]
+        session.cadence.mode = cadenceMode
     }
 
-    public fun render(position: HandPosition, camera: CameraState, failure: String?, diagnostics: String, cameraInfo: ArcadeCameraInfo?) {
+    public fun render(
+        position: HandPosition,
+        camera: CameraState,
+        failure: String?,
+        connected: Boolean,
+        initialized: Boolean,
+        rpm: Int?,
+        rpmCurrent: Boolean,
+        rpmObservedAt: String?,
+        diagnostics: String,
+        cameraInfo: ArcadeCameraInfo?,
+    ) {
         val now = System.nanoTime()
         if (lastRenderNanos != Long.MIN_VALUE) {
             val gap = now - lastRenderNanos
@@ -147,7 +170,7 @@ public class BiketrisView(context: Context) : View(context) {
         diagnosticsText = if (failure != null && camera != CameraState.Ready) failure else diagnostics
         val start = System.nanoTime()
         val wave = gestures
-        session.update(position, camera, if (dragging) touchX else Float.NaN, wave?.latest(), now)
+        session.update(position, camera, if (dragging) touchX else Float.NaN, wave?.latest(), now, connected, initialized, rpm, rpmCurrent, rpmObservedAt)
         if (wave != null) waveRate.update(wave.observations, now)
         updateWindow.record((System.nanoTime() - start) / 1_000_000f)
         invalidate()
@@ -158,7 +181,7 @@ public class BiketrisView(context: Context) : View(context) {
         session.pause()
         dragging = false
         touchX = Float.NaN
-        rotatePressed = false
+        pressedMode = null
         restartPressed = false
         lastRenderNanos = Long.MIN_VALUE
         waveRate.reset()
@@ -207,6 +230,14 @@ public class BiketrisView(context: Context) : View(context) {
         invalidate()
     }
 
+    private fun selectCadenceMode(mode: CadenceMode) {
+        if (mode == cadenceMode) return
+        cadenceMode = mode
+        session.cadence.mode = mode
+        prefs?.edit()?.putString(CADENCE_MODE_KEY, mode.key)?.apply()
+        invalidate()
+    }
+
     private fun applyWaveSettings() {
         val target = gestures ?: return
         target.config = WaveConfig.forSensitivity(waveSensitivity, COOLDOWNS_MS[cooldownIndex] * 1_000_000L)
@@ -228,9 +259,15 @@ public class BiketrisView(context: Context) : View(context) {
         boardLeft = floor((w - boardWidth) / 2f)
         boardTop = floor((h - boardHeight) / 2f)
         val panelLeft = boardLeft + boardWidth + 24f * density
-        val buttonW = minOf(w - pad - panelLeft, 260f * density)
-        val buttonH = 96f * density
-        rotateRect.set(panelLeft, boardTop + boardHeight - buttonH, panelLeft + buttonW, boardTop + boardHeight)
+        val panelWidth = w - pad - panelLeft
+        val segmentWidth = CadenceMode.values().maxOf { segmentPaint.measureText(it.label) } + 24f * density
+        val stacked = panelWidth < segmentWidth * 2f
+        val selectorWidth = if (stacked) minOf(panelWidth, segmentWidth) else minOf(panelWidth, maxOf(segmentWidth * 2f, 360f * density))
+        val selectorHeight = (if (stacked) 88f else 52f) * density
+        val feedbackHeight = 3f * (feedbackPaint.textSize + 6f * density)
+        val selectorTop = boardTop + boardHeight - feedbackHeight - 10f * density - selectorHeight
+        selector.set(panelLeft, selectorTop, selectorWidth, selectorHeight, stacked)
+        feedbackTop = selectorTop + selectorHeight + 10f * density
         val playW = boardWidth * 0.8f
         val playTop = boardTop + boardHeight * 0.56f
         restartRect.set(boardLeft + (boardWidth - playW) / 2f, playTop, boardLeft + (boardWidth + playW) / 2f, playTop + 64f * density)
@@ -363,7 +400,7 @@ public class BiketrisView(context: Context) : View(context) {
         canvas.drawText(if (waveEnabled) "WAVE HAND TO ROTATE" else "WAVE ROTATION OFF", left, y, infoPaint)
         y += infoPaint.textSize + 8f * density
         infoPaint.color = BiketrisPalette.MUTE
-        canvas.drawText("OR DRAG / TAP ROTATE", left, y, infoPaint)
+        canvas.drawText("OR DRAG THE BOARD TO MOVE", left, y, infoPaint)
         y += infoPaint.textSize + 20f * density
         infoPaint.color = when {
             session.reading.control == BiketrisControl.Touch || session.touchSession -> BiketrisPalette.WARN
@@ -404,14 +441,59 @@ public class BiketrisView(context: Context) : View(context) {
             bannerPaint.textAlign = Paint.Align.CENTER
             bannerPaint.color = BiketrisPalette.PRIMARY
         }
-        if (game.phase == BiketrisPhase.Playing && rotateRect.width() > 40f * density) {
-            fill.color = if (rotatePressed) BiketrisPalette.BUTTON_PRESSED else BiketrisPalette.BUTTON
-            canvas.drawRect(rotateRect, fill)
-            stroke.color = BiketrisPalette.BORDER
-            stroke.strokeWidth = 2f * density
-            canvas.drawRect(rotateRect, stroke)
-            canvas.drawText("ROTATE", rotateRect.centerX(), rotateRect.centerY() + buttonPaint.textSize / 3f, buttonPaint)
+        drawSelector(canvas)
+        drawCadenceFeedback(canvas, left)
+    }
+
+    private fun drawSelector(canvas: Canvas) {
+        if (!selector.visible) return
+        stroke.strokeWidth = 2f * density
+        for (mode in CadenceMode.values()) {
+            val l = selector.segmentLeft(mode)
+            val t = selector.segmentTop(mode)
+            val r = selector.segmentRight(mode)
+            val b = selector.segmentBottom(mode)
+            val active = mode == cadenceMode
+            fill.color = when {
+                active -> BiketrisPalette.SELECTED
+                pressedMode == mode -> BiketrisPalette.BUTTON_PRESSED
+                else -> BiketrisPalette.BUTTON
+            }
+            canvas.drawRect(l, t, r, b, fill)
+            stroke.color = if (active) BiketrisPalette.GOOD else BiketrisPalette.BORDER
+            canvas.drawRect(l, t, r, b, stroke)
+            segmentPaint.color = if (active) BiketrisPalette.BACKGROUND else BiketrisPalette.MUTE
+            canvas.drawText(mode.label, (l + r) / 2f, (t + b) / 2f + segmentPaint.textSize / 3f, segmentPaint)
         }
+    }
+
+    private fun drawCadenceFeedback(canvas: Canvas, left: Float) {
+        val c = session.cadence
+        val live = c.live
+        val rpm = if (live) c.filteredRpm.roundToInt() else -1
+        if (rpm != shownRpm) {
+            shownRpm = rpm
+            rpmText = if (live) "RPM $rpm" else "RPM UNAVAILABLE"
+        }
+        val fall = ((game.effectiveGravitySeconds * 1000f) / 10f).roundToInt() * 10
+        if (fall != shownFallMs) {
+            shownFallMs = fall
+            fallText = "FALL $fall ms"
+        }
+        val line = feedbackPaint.textSize + 6f * density
+        var y = feedbackTop + feedbackPaint.textSize
+        feedbackPaint.color = if (live) BiketrisPalette.PRIMARY else BiketrisPalette.WARN
+        canvas.drawText(rpmText, left, y, feedbackPaint)
+        y += line
+        feedbackPaint.color = when {
+            c.appliedMultiplier > 1.02f -> BiketrisPalette.GOOD
+            c.appliedMultiplier < 0.98f -> BiketrisPalette.WARN
+            else -> BiketrisPalette.PRIMARY
+        }
+        canvas.drawText(fallText, left, y, feedbackPaint)
+        y += line
+        infoPaint.color = BiketrisPalette.MUTE
+        canvas.drawText(if (live) cadenceMode.hint else "NO RPM - NORMAL SPEED", left, y, infoPaint)
     }
 
     private fun statusText(): String = when {
@@ -444,6 +526,7 @@ public class BiketrisView(context: Context) : View(context) {
         } else if (game.elapsed < INTRO_SECONDS) {
             banner(canvas, "HEAD LEFT / RIGHT TO MOVE", cx, boardTop + boardHeight * 0.18f, 15f)
             if (waveEnabled) banner(canvas, "WAVE HAND TO ROTATE", cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
+            banner(canvas, cadenceMode.hint, cx, boardTop + boardHeight * 0.18f + 60f * density, 15f)
         }
     }
 
@@ -493,8 +576,14 @@ public class BiketrisView(context: Context) : View(context) {
             )
         }
         lines += String.format(
-            Locale.US, "game %s  level %d  lines %d  pieces %d  gravity %.0f ms  lock resets %d  rotations %d (blocked %d)  touch rot %d  seed %d",
-            g.phase, g.level, g.lines, g.piecesSpawned, g.gravitySeconds * 1000f, g.lockResets, g.rotations, g.blockedRotations, session.touchRotations, g.seed,
+            Locale.US, "game %s  level %d  lines %d  pieces %d  gravity %.0f ms  lock resets %d  rotations %d (blocked %d)  seed %d",
+            g.phase, g.level, g.lines, g.piecesSpawned, g.gravitySeconds * 1000f, g.lockResets, g.rotations, g.blockedRotations, g.seed,
+        )
+        val c = session.cadence
+        lines += String.format(
+            Locale.US, "cadence %s  %s  raw %s  filtered %.1f rpm  target x%.3f  applied x%.3f  level %.0f ms  fall %.0f ms  progress %.2f  sample age %s  samples %d",
+            c.mode, c.status, if (c.rawRpm < 0) "-" else c.rawRpm.toString(), c.filteredRpm, c.targetMultiplier, c.appliedMultiplier,
+            g.gravitySeconds * 1000f, g.effectiveGravitySeconds * 1000f, g.fallProgress, if (c.sampleAgeMs < 0) "-" else "${c.sampleAgeMs} ms", c.samples,
         )
         lines += String.format(
             Locale.US, "frame p50 %.0f / p90 %.0f ms  update p50 %.2f / p90 %.2f ms  draw p50 %.1f / p90 %.1f ms  steps %d  cpu %s",
@@ -567,9 +656,10 @@ public class BiketrisView(context: Context) : View(context) {
         val y = event.y
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                val segment = selector.hit(x, y)
                 when {
+                    segment != null -> pressedMode = segment
                     game.phase == BiketrisPhase.GameOver -> restartPressed = restartRect.contains(x, y)
-                    rotateRect.contains(x, y) -> rotatePressed = true
                     x >= boardLeft - cell * 2f && x <= boardLeft + boardWidth + cell * 2f -> {
                         dragging = true
                         touchX = boardFraction(x)
@@ -579,11 +669,12 @@ public class BiketrisView(context: Context) : View(context) {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (dragging) touchX = boardFraction(x)
-                if (rotatePressed && !rotateRect.contains(x, y)) rotatePressed = false
+                if (pressedMode != null && selector.hit(x, y) != pressedMode) pressedMode = null
                 if (restartPressed && !restartRect.contains(x, y)) restartPressed = false
             }
             MotionEvent.ACTION_UP -> {
-                if (rotatePressed && rotateRect.contains(x, y)) session.requestTouchRotation()
+                val pressed = pressedMode
+                if (pressed != null && selector.hit(x, y) == pressed) selectCadenceMode(pressed)
                 if (restartPressed && restartRect.contains(x, y) && game.phase == BiketrisPhase.GameOver) {
                     restartGame()
                     session.noteTouchIntent()
@@ -600,7 +691,7 @@ public class BiketrisView(context: Context) : View(context) {
     private fun endTouch() {
         dragging = false
         touchX = Float.NaN
-        rotatePressed = false
+        pressedMode = null
         restartPressed = false
     }
 
@@ -623,6 +714,7 @@ public class BiketrisView(context: Context) : View(context) {
         const val WAVE_ENABLED_KEY = "biketris_wave_enabled"
         const val WAVE_SENSITIVITY_KEY = "biketris_wave_sensitivity"
         const val WAVE_COOLDOWN_KEY = "biketris_wave_cooldown"
+        const val CADENCE_MODE_KEY = "biketris_cadence_mode"
         const val DEFAULT_SENSITIVITY = 1
         const val DEFAULT_COOLDOWN = 1
         const val STALL_NANOS = 500_000_000L

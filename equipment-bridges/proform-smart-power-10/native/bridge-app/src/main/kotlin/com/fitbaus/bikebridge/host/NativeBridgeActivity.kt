@@ -253,6 +253,11 @@ class NativeBridgeActivity : Activity() {
                 handInput.latest(now),
                 cameraSession.state(),
                 cameraSession.failureReason(),
+                connected = telemetry?.connected == true,
+                initialized = telemetry?.initialized == true,
+                rpm = telemetry?.rpm?.value,
+                rpmCurrent = telemetry?.rpm?.current == true,
+                rpmObservedAt = telemetry?.rpm?.observedAt,
                 diagnostics = arcadeDiagnosticsText(now, info),
                 cameraInfo = info,
             )

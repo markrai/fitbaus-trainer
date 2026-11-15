@@ -20,6 +20,12 @@ class BiketrisControlsTest {
         var faceOn = true
         var camera = CameraState.Ready
         var touch = Float.NaN
+        var bike = false
+        var rpm: Int? = null
+        var sampleEveryMs = 250L
+        private var sampleSerial = 0
+        private var lastSampleAt = Long.MIN_VALUE
+        private var observedAt: String? = null
 
         fun position(): HandPosition = if (faceOn) {
             faceAt = nanos
@@ -30,7 +36,12 @@ class BiketrisControlsTest {
 
         fun tick(ms: Long = 33L): BiketrisHold {
             nanos += ms * 1_000_000L
-            return session.update(position(), camera, touch, gestures.latest(), nanos)
+            if (bike && rpm != null && (lastSampleAt == Long.MIN_VALUE || nanos - lastSampleAt >= sampleEveryMs * 1_000_000L)) {
+                lastSampleAt = nanos
+                sampleSerial += 1
+                observedAt = "sample-$sampleSerial"
+            }
+            return session.update(position(), camera, touch, gestures.latest(), nanos, bike, bike, rpm, bike && rpm != null, observedAt)
         }
 
         fun run(ms: Long) {
@@ -191,7 +202,7 @@ class BiketrisControlsTest {
     }
 
     @Test
-    fun touchDragMovesAndTheRotateButtonRotatesOnce() {
+    fun touchDragMovesThePieceAndAWaveStillRotatesDuringTouchPlay() {
         val r = Rig()
         r.faceOn = false
         r.camera = CameraState.Unavailable
@@ -200,11 +211,10 @@ class BiketrisControlsTest {
         assertEquals(0, r.game.pieceLeft)
         r.touch = Float.NaN
         val rotation = r.game.rotation
-        r.session.requestTouchRotation()
-        r.tick()
+        r.gestures.simulate(r.nanos)
         r.tick()
         assertEquals((rotation + 1) and 3, r.game.rotation)
-        assertEquals(1, r.session.touchRotations)
+        assertEquals(1, r.session.waveRotations)
     }
 
     private fun tapBoard(r: Rig, x: Float = 0.5f) {
@@ -237,7 +247,7 @@ class BiketrisControlsTest {
     }
 
     @Test
-    fun theRotateButtonAloneStartsTouchPlayAndRotates() {
+    fun aSingleTapOnTheBoardStartsTouchPlayWithoutRotating() {
         for (setup in listOf("unavailable", "lookToStart", "faceLost")) {
             val r = Rig()
             if (setup == "faceLost") r.goLive()
@@ -246,11 +256,10 @@ class BiketrisControlsTest {
             r.run(800)
             assertFalse(r.session.live, "$setup: held")
             val rotation = r.game.rotation
-            r.session.requestTouchRotation()
+            r.session.noteTouchIntent()
             r.tick()
-            assertEquals((rotation + 1) and 3, r.game.rotation, "$setup: rotated without any drag")
-            assertEquals(1, r.session.touchRotations)
-            assertTrue(r.session.touchSession, "$setup: ROTATE established touch play")
+            assertEquals(rotation, r.game.rotation, "$setup: a tap never rotates")
+            assertTrue(r.session.touchSession, "$setup: the tap established touch play")
             r.run(5000)
             assertTrue(r.session.live, "$setup: keeps running")
         }
@@ -297,7 +306,7 @@ class BiketrisControlsTest {
         r.run(800)
         assertEquals(r.game.maxLeft, r.game.pieceLeft, "the head steers again after release")
         val rotation = r.game.rotation
-        r.session.requestTouchRotation()
+        r.gestures.publish(r.gestures.generation(), r.nanos)
         r.tick()
         assertEquals((rotation + 1) and 3, r.game.rotation)
         assertFalse(r.session.touchSession)
@@ -357,7 +366,7 @@ class BiketrisControlsTest {
         r.session.pause()
         assertFalse(r.session.touchSession)
         assertEquals(BiketrisHold.CameraUnavailable, r.tick(), "leaving the mode ends touch play")
-        r.session.requestTouchRotation()
+        r.session.noteTouchIntent()
         assertEquals(BiketrisHold.None, r.tick())
     }
 
@@ -410,16 +419,58 @@ class BiketrisControlsTest {
     }
 
     @Test
-    fun pauseAbsorbsAPendingWaveAndTouchRotation() {
+    fun pauseAbsorbsAPendingWave() {
         val r = Rig()
         r.goLive()
         r.gestures.publish(r.gestures.generation(), r.nanos)
-        r.session.requestTouchRotation()
         r.session.pause()
         r.run(800)
         assertEquals(0, r.session.waveRotations)
-        assertEquals(0, r.session.touchRotations)
         assertEquals(0, r.game.rotation)
+    }
+
+    @Test
+    fun cadenceSetsTheFallSpeedInBothModesWithoutTouchingTheBoard() {
+        val r = Rig()
+        r.goLive()
+        r.bike = true
+        r.rpm = 100
+        r.run(4000)
+        assertEquals(CadenceMode.PedalToSlow, r.session.cadence.mode, "default mode")
+        assertEquals(0.9f, r.game.effectiveGravitySeconds, 0.02f, "fast pedaling gives more time")
+        val pieces = r.game.piecesSpawned
+        val score = r.game.score
+        val piece = r.game.piece
+        val rotation = r.game.rotation
+        r.session.cadence.mode = CadenceMode.PedalToSpeedUp
+        r.tick()
+        assertTrue(r.game.effectiveGravitySeconds > 0.8f, "the mode switch eases in, not a jump")
+        r.run(3000)
+        assertEquals(0.54f, r.game.effectiveGravitySeconds, 0.02f, "the same cadence now speeds the fall up")
+        assertTrue(r.game.piecesSpawned - pieces <= 1)
+        assertEquals(score, r.game.score)
+        if (r.game.piecesSpawned == pieces) {
+            assertEquals(piece, r.game.piece, "switching modes keeps the current piece")
+            assertEquals(rotation, r.game.rotation)
+        }
+    }
+
+    @Test
+    fun theGameKeepsFallingWithZeroRpmAndWithoutTelemetry() {
+        val r = Rig()
+        r.goLive()
+        r.bike = true
+        r.rpm = 0
+        val y0 = r.game.pieceY
+        r.run(4000)
+        assertTrue(r.session.cadence.live, "zero rpm is a valid sample")
+        assertEquals(0.54f, r.game.effectiveGravitySeconds, 0.02f, "not pedaling falls faster in PEDAL TO SLOW")
+        assertTrue(r.game.pieceY > y0 || r.game.piecesSpawned > 1)
+        r.bike = false
+        r.run(6000)
+        assertEquals(CadenceStatus.NoTelemetry, r.session.cadence.status)
+        assertEquals(0.72f, r.game.effectiveGravitySeconds, 0.02f, "missing telemetry returns to neutral")
+        assertTrue(r.session.live, "telemetry never holds the game")
     }
 
     @Test

@@ -107,7 +107,7 @@ internal class BiketrisSupervisor(private val config: BiketrisControlConfig = Bi
     fun message(hold: BiketrisHold): String? = when (hold) {
         BiketrisHold.None, BiketrisHold.GameOver -> null
         BiketrisHold.CameraStarting -> "STARTING CAMERA..."
-        BiketrisHold.CameraUnavailable -> "CAMERA UNAVAILABLE - DRAG TO MOVE, TAP ROTATE"
+        BiketrisHold.CameraUnavailable -> "CAMERA UNAVAILABLE - DRAG TO MOVE"
         BiketrisHold.LookToStart -> "LOOK AT THE SCREEN TO START"
         BiketrisHold.FaceLost -> "FACE LOST - LOOK AT THE SCREEN"
         BiketrisHold.Resuming -> "GET READY..."
@@ -142,12 +142,13 @@ internal class WaveEventEdge(private val maxAgeNanos: Long) {
 
 /**
  * One BIKETRIS frame without Android: read the head (or touch) position, decide the hold, apply at
- * most one wave rotation and one touch rotation, steer the piece toward the mapped column and
- * advance the fixed-step game only while live. While held the game clock is reset.
+ * most one wave rotation, update the cadence gravity multiplier from read-only RPM, steer the piece
+ * toward the mapped column and advance the fixed-step game only while live. While held the game
+ * clock is reset.
  *
  * Touch control has two forms. While the face is fresh, a finger on the board only overrides the
  * head while it is down. When the face is not fresh (camera unavailable or starting, or no face
- * tracked), any intentional touch (a drag, a tap on the board or the ROTATE button) starts a
+ * tracked), any intentional touch on the board (a drag or a tap) starts a
  * persistent touch-play session: the game keeps running without a finger down until the game
  * ends, the mode exits ([pause]), the game restarts, or the face has been fresh for
  * [BiketrisControlConfig.resumeStableNanos] with no finger down, which hands control back to the
@@ -158,12 +159,12 @@ internal class BiketrisSession(
     val config: BiketrisControlConfig = BiketrisControlConfig(),
     val mapper: HeadColumnMapper = HeadColumnMapper(config.gain, config.hysteresis),
     private val supervisor: BiketrisSupervisor = BiketrisSupervisor(config),
+    val cadence: CadenceGravity = CadenceGravity(),
 ) {
     private val edge = WaveEventEdge(config.eventMaxAgeNanos)
     private var freshSince = Long.MIN_VALUE
     private var faceFresh = false
     private var touchIntent = false
-    private var pendingTouchRotation = false
     private var seenPieces = -1
     private var pieceSpawnNanos = Long.MIN_VALUE
 
@@ -174,8 +175,6 @@ internal class BiketrisSession(
     var targetColumn: Int = -1
         private set
     var waveRotations: Int = 0
-        private set
-    var touchRotations: Int = 0
         private set
     var discardedWaves: Int = 0
         private set
@@ -201,7 +200,13 @@ internal class BiketrisSession(
         touchX: Float,
         wave: WaveEvent?,
         nowNanos: Long,
+        connected: Boolean = false,
+        initialized: Boolean = false,
+        rpm: Int? = null,
+        rpmCurrent: Boolean = false,
+        rpmObservedAt: String? = null,
     ): BiketrisHold {
+        game.gravityScale = cadence.update(connected, initialized, rpm, rpmCurrent, rpmObservedAt, nowNanos)
         reading = read(position, touchX, nowNanos)
         val fingerDown = reading.control == BiketrisControl.Touch
         val gameOver = game.phase == BiketrisPhase.GameOver
@@ -225,10 +230,6 @@ internal class BiketrisSession(
             WaveOutcome.Discarded -> discardedWaves += 1
             WaveOutcome.None -> Unit
         }
-        if (pendingTouchRotation) {
-            pendingTouchRotation = false
-            if (live && game.rotate()) touchRotations += 1
-        }
         if (!live) {
             game.clearTarget()
             game.resetClock()
@@ -249,11 +250,6 @@ internal class BiketrisSession(
 
     fun message(): String? = supervisor.message(hold)
 
-    fun requestTouchRotation() {
-        pendingTouchRotation = true
-        touchIntent = true
-    }
-
     fun noteTouchIntent() {
         touchIntent = true
     }
@@ -271,7 +267,7 @@ internal class BiketrisSession(
         freshSince = Long.MIN_VALUE
         faceFresh = false
         touchIntent = false
-        pendingTouchRotation = false
+        cadence.pauseClock()
         if (endTouchSession) touchSession = false
     }
 
@@ -284,11 +280,10 @@ internal class BiketrisSession(
         faceFresh = false
         touchIntent = false
         touchSession = false
-        pendingTouchRotation = false
+        cadence.pauseClock()
         seenPieces = -1
         pieceSpawnNanos = Long.MIN_VALUE
         waveRotations = 0
-        touchRotations = 0
         discardedWaves = 0
         consumedWaves = 0
         blockedWaveRotations = 0

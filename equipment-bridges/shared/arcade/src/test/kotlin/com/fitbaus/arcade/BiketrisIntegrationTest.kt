@@ -157,7 +157,7 @@ class BiketrisIntegrationTest {
         val sink = File(dir, "LandmarkFrameSink.kt").readText()
         assertTrue(sink.contains("motion?.onFrame(nv21, width, height, mirror, clock())"))
         val biketris = listOf("BiketrisGame.kt", "BiketrisControls.kt", "BiketrisView.kt", "BiketrisSwipeDetector.kt").joinToString("\n") { File(dir, it).readText() }
-        for (forbidden in listOf("Camera.open", "UvcNative", "Interpreter", "detectPalms", "landmarks(", "rpm", "Rpm")) {
+        for (forbidden in listOf("Camera.open", "UvcNative", "Interpreter", "detectPalms", "landmarks(", "setResistance")) {
             assertFalse(biketris.contains(forbidden), forbidden)
         }
         assertEquals(1, Regex("""createBitmap""").findAll(biketris).count(), "only the overlay heatmap allocates a bitmap")

@@ -97,9 +97,10 @@ internal data class BiketrisConfig(
     val hiddenRows: Int = 2,
     val stepSeconds: Float = 1f / 60f,
     val maxFrameSeconds: Float = 0.1f,
-    val baseGravitySeconds: Float = 0.8f,
+    val baseGravitySeconds: Float = 0.72f,
     val gravityFactor: Float = 0.88f,
     val minGravitySeconds: Float = 0.15f,
+    val minEffectiveGravitySeconds: Float = 0.1f,
     val linesPerLevel: Int = 10,
     val lockDelaySeconds: Float = 0.5f,
     val maxLockResets: Int = 12,
@@ -108,7 +109,7 @@ internal data class BiketrisConfig(
     init {
         require(columns in 4..20 && visibleRows in 4..40 && hiddenRows in 0..4) { "invalid board" }
         require(stepSeconds > 0f && maxFrameSeconds >= stepSeconds) { "invalid timing" }
-        require(baseGravitySeconds >= minGravitySeconds && minGravitySeconds > 0f) { "invalid gravity" }
+        require(baseGravitySeconds >= minGravitySeconds && minGravitySeconds > 0f && minEffectiveGravitySeconds > 0f) { "invalid gravity" }
         require(gravityFactor > 0f && gravityFactor <= 1f) { "invalid gravity factor" }
         require(linesPerLevel >= 1 && maxLockResets >= 0 && lockDelaySeconds > 0f && moveIntervalSeconds >= 0f) { "invalid rules" }
     }
@@ -148,7 +149,6 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
     private var random = Random(seed)
     private var accumulator = 0f
     private var lastNanos = Long.MIN_VALUE
-    private var gravityTimer = 0f
     private var lockTimer = 0f
     private var moveTimer = 0f
     private val clearedRows = IntArray(4)
@@ -203,6 +203,17 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
 
     val gravitySeconds: Float
         get() = config.gravitySeconds(level)
+
+    var gravityScale: Float = 1f
+        set(value) {
+            field = if (value.isNaN()) 1f else value.coerceIn(MIN_GRAVITY_SCALE, MAX_GRAVITY_SCALE)
+        }
+
+    val effectiveGravitySeconds: Float
+        get() = maxOf(config.minEffectiveGravitySeconds, gravitySeconds * gravityScale)
+
+    var fallProgress: Float = 0f
+        private set
 
     val pieceLeft: Int
         get() = pieceX + piece.left(rotation)
@@ -319,18 +330,17 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
         elapsed += dt
         slide(dt)
         if (grounded) {
-            gravityTimer = 0f
+            fallProgress = 0f
             lockTimer += dt
             if (lockTimer >= config.lockDelaySeconds - 1e-6f) lock()
             return
         }
         lockTimer = 0f
-        gravityTimer += dt
-        val interval = gravitySeconds
-        if (gravityTimer >= interval - 1e-6f) {
-            gravityTimer -= interval
+        fallProgress += dt / effectiveGravitySeconds
+        if (fallProgress >= 1f - 1e-5f) {
+            fallProgress = maxOf(0f, fallProgress - 1f)
             pieceY += 1
-            if (grounded) gravityTimer = 0f
+            if (grounded) fallProgress = 0f
         }
     }
 
@@ -408,7 +418,7 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
         rotation = 0
         pieceX = x
         pieceY = y
-        gravityTimer = 0f
+        fallProgress = 0f
         lockTimer = 0f
         moveTimer = 0f
         lockResets = 0
@@ -445,7 +455,7 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
         rotation = state and 3
         pieceX = x
         pieceY = y
-        gravityTimer = 0f
+        fallProgress = 0f
         lockTimer = 0f
         moveTimer = 0f
         lockResets = 0
@@ -456,7 +466,9 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
         String(CharArray(config.columns) { c -> if (board[r * config.columns + c] != 0) '#' else '.' })
     }
 
-    private companion object {
-        val PIECES = BlockPiece.values()
+    internal companion object {
+        val PIECES: Array<BlockPiece> = BlockPiece.values()
+        const val MIN_GRAVITY_SCALE: Float = 0.5f
+        const val MAX_GRAVITY_SCALE: Float = 2f
     }
 }

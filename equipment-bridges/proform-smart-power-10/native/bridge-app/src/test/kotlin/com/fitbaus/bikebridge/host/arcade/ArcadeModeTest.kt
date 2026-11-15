@@ -194,7 +194,7 @@ class ArcadeModeTest {
         assertTrue(start > 0 && start < fallback)
         val branch = source.substring(start, fallback)
         assertTrue(branch.contains("arcadeContent.biketris.render("))
-        for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager", "session()", "startService", "rpm")) {
+        for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager", "session()", "startService")) {
             assertFalse(branch.contains(forbidden), forbidden)
         }
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ExerciseHud.kt").readText()

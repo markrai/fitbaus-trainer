@@ -161,13 +161,14 @@ class BiketrisGameTest {
     fun gravityDropsOneRowPerIntervalAndSpeedsUpWithLevel() {
         val game = BiketrisGame(seed = 1L)
         val y0 = game.pieceY
-        repeat(15) { game.advance(0.05f) }
-        assertEquals(y0, game.pieceY, "0.75 s is below the 0.8 s level-1 interval")
+        repeat(14) { game.advance(0.05f) }
+        assertEquals(y0, game.pieceY, "0.70 s is below the 0.72 s level-1 interval")
         repeat(2) { game.advance(0.05f) }
         assertEquals(y0 + 1, game.pieceY)
-        repeat(16) { game.advance(0.05f) }
+        repeat(14) { game.advance(0.05f) }
         assertEquals(y0 + 2, game.pieceY)
-        assertEquals(0.8f, game.config.gravitySeconds(1), 1e-4f)
+        assertEquals(0.72f, game.config.gravitySeconds(1), 1e-4f)
+        assertEquals(0.72f, game.effectiveGravitySeconds, 1e-4f, "neutral cadence scale")
         var previous = game.config.gravitySeconds(1)
         for (level in 2..30) {
             val next = game.config.gravitySeconds(level)
@@ -176,6 +177,76 @@ class BiketrisGameTest {
         }
         assertTrue(game.config.gravitySeconds(2) > 0.6f, "acceleration is gradual")
         assertEquals(game.config.minGravitySeconds, game.config.gravitySeconds(60), 1e-4f)
+    }
+
+    @Test
+    fun changingTheGravityScaleKeepsFallProgressContinuous() {
+        val game = BiketrisGame(seed = 1L)
+        val y0 = game.pieceY
+        repeat(9) { game.advance(0.04f) }
+        val halfway = game.fallProgress
+        assertEquals(0.5f, halfway, 0.03f)
+        game.gravityScale = 0.75f
+        game.advance(0.0f)
+        assertEquals(halfway, game.fallProgress, 1e-6f, "a new interval never resets or jumps the progress")
+        assertEquals(y0, game.pieceY, "no immediate drop just because the interval shortened")
+        var t = 0f
+        while (game.pieceY == y0) {
+            game.advance(0.01f)
+            t += 0.01f
+        }
+        assertEquals(0.5f * 0.72f * 0.75f, t, 0.03f, "the remaining half row takes half of the new interval")
+        assertTrue(game.fallProgress < 0.1f)
+        game.gravityScale = 1.25f
+        repeat(20) { game.advance(0.05f) }
+        assertEquals(y0 + 2, game.pieceY, "one row per 0.9 s, never a multi-row jump")
+    }
+
+    @Test
+    fun gravityScaleIsBoundedAndLevelsKeepTheCadenceEffect() {
+        val game = BiketrisGame(seed = 1L)
+        game.gravityScale = 10f
+        assertEquals(BiketrisGame.MAX_GRAVITY_SCALE, game.gravityScale)
+        game.gravityScale = 0f
+        assertEquals(BiketrisGame.MIN_GRAVITY_SCALE, game.gravityScale)
+        game.gravityScale = Float.NaN
+        assertEquals(1f, game.gravityScale)
+        val cfg = game.config
+        val fast = maxOf(cfg.minEffectiveGravitySeconds, cfg.gravitySeconds(60) * 0.75f)
+        val slow = maxOf(cfg.minEffectiveGravitySeconds, cfg.gravitySeconds(60) * 1.25f)
+        assertTrue(slow > fast, "the level floor does not erase the cadence modes at top speed")
+        assertTrue(fast >= cfg.minEffectiveGravitySeconds)
+    }
+
+    @Test
+    fun lockDelayIgnoresTheGravityScale() {
+        for (scale in floatArrayOf(0.5f, 1f, 2f)) {
+            val game = BiketrisGame(seed = 1L)
+            game.gravityScale = scale
+            game.loadRowsForTest(emptyRows(1))
+            game.placeForTest(BlockPiece.O, 0, 4, game.rows - 2)
+            val spawned = game.piecesSpawned
+            repeat(9) { game.advance(0.05f) }
+            assertEquals(spawned, game.piecesSpawned, "scale $scale: still inside the 0.5 s lock delay")
+            repeat(2) { game.advance(0.05f) }
+            assertEquals(spawned + 1, game.piecesSpawned, "scale $scale: locked at 0.5 s")
+        }
+    }
+
+    @Test
+    fun levelsProgressTheSameWayAtAnyGravityScale() {
+        for (scale in floatArrayOf(0.75f, 1.25f)) {
+            val game = BiketrisGame(seed = 1L)
+            game.gravityScale = scale
+            repeat(3) {
+                game.loadRowsForTest(List(4) { "#########." })
+                game.placeForTest(BlockPiece.I, 1, 7, 4)
+                settle(game)
+            }
+            assertEquals(2, game.level, "scale $scale")
+            assertEquals(2400, game.score, "scale $scale")
+            assertEquals(game.config.gravitySeconds(2) * scale, game.effectiveGravitySeconds, 1e-4f)
+        }
     }
 
     @Test
