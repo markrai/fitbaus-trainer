@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import http from "node:http";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const { readAppVersion } = require("../../../scripts/fitbaus-version.cjs");
+const APP_VERSION = readAppVersion(
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../version.js")
+).name;
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) {
@@ -87,7 +96,7 @@ function status() {
   const at = tick();
   return {
     status: "ok",
-    bridgeVersion: "0.2.0",
+    bridgeVersion: APP_VERSION,
     connected: true,
     initialized: true,
     resistanceControlAvailable: true,

@@ -46,7 +46,7 @@ public data class BridgeHttpResult(
 )
 
 public object BridgeHttpJson {
-    public const val VERSION: String = "0.2.0"
+    public const val VERSION: String = FitbausProductVersion.NAME
     public const val DEFAULT_BIND: String = "0.0.0.0"
     public const val DEFAULT_PORT: Int = 8765
     public const val MAX_REQUEST_BODY_BYTES: Int = 4096

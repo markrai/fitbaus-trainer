@@ -21,7 +21,7 @@ equipment-bridges/proform-smart-power-10/
 | ABI | x86 (`byt_t_crv2`) |
 | Stock packages | `com.ifit.standalone` (Wolf), `com.ifit.eru`, `com.ifit.launcher` |
 | Brainboard USB | VID `8508`, normal PID `2`, bootloader PID `153`, interface `0` |
-| Production package | `com.fitbaus.bikebridge` (`0.2.0`) |
+| Production package | `com.fitbaus.bikebridge` (product version from repo-root `version.js`, currently `1.0.0`) |
 
 **Not claimed:** generic ProForm, generic exercise bikes, other iFIT equipment,
 or modern 64-bit Android consoles.
@@ -190,6 +190,17 @@ Production assemble refuses `-PunlockQualification=auth` or `lockout`. Staging:
 
 produces `com.fitbaus.bikebridge.native` (WarmState when unlockQualification=off:
 skips VerifySecurity; not a reliable cold-controller control path).
+
+`versionName` / `versionCode` and HTTP `bridgeVersion` come from repository-root
+`version.js`. Independent Gradle builds read that file via
+`rootProject.file("../../../version.js")`; they do not need npm first. The USB
+probe keeps a separate tooling version. See [VERSIONING.md](../../VERSIONING.md).
+
+Staging **release** APKs are unsigned and not normally installable. Staging
+**debug** APKs are debug-signed. Production assemble still requires
+`bikebridge.signing.*` and refuses staging qualification flags. A CI-packaged
+production APK is not physical-device qualification. `adb install -r` needs the
+same certificate as the installed app.
 
 CI runs the same Native unit tests. It does not sign, deploy, or talk to a bike.
 

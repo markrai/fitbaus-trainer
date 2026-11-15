@@ -9,6 +9,7 @@ import com.fitbaus.bikebridge.protocol.NativeTelemetrySnapshot
 import java.io.BufferedInputStream
 import java.io.OutputStream
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.Charset
@@ -38,17 +39,20 @@ internal class NativeHttpServer(
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
+        var socket: ServerSocket? = null
         try {
-            val socket = ServerSocket(
-                port,
+            socket = ServerSocket()
+            socket.reuseAddress = true
+            socket.bind(
+                InetSocketAddress(InetAddress.getByName(bindAddress), port),
                 BridgeHttpJson.ACCEPT_BACKLOG,
-                InetAddress.getByName(bindAddress),
             )
-            server = socket
+            lastError.set(null)
+            val listening = socket
             val worker = Thread({
                 while (running.get()) {
                     try {
-                        val client = socket.accept()
+                        val client = listening.accept()
                         if (!inflight.tryAcquire()) {
                             try {
                                 writeHttp(
@@ -83,24 +87,46 @@ internal class NativeHttpServer(
                 }
             }, "fitbaus-native-http")
             worker.isDaemon = true
+            server = listening
             thread = worker
             worker.start()
+            socket = null
         } catch (ex: Exception) {
             running.set(false)
             server = null
+            thread = null
             lastError.set(ex.message)
+            try {
+                socket?.close()
+            } catch (_: Exception) {
+            }
             throw ex
         }
     }
 
-    fun stop() {
+    fun stop(): Boolean {
         running.set(false)
+        val listening = server
+        val worker = thread
+        server = null
         try {
-            server?.close()
+            listening?.close()
         } catch (_: Exception) {
         }
-        server = null
+        var terminated = true
+        if (worker != null && worker !== Thread.currentThread()) {
+            try {
+                worker.join(1_000L)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            terminated = !worker.isAlive
+            if (!terminated) {
+                lastError.set("accept thread did not terminate")
+            }
+        }
         thread = null
+        return terminated
     }
 
     private fun handleClient(socket: Socket) {

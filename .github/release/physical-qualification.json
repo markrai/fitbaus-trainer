@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "description": "Exact-binary physical qualification records. A production Bike Bridge APK may become a public installer only when version, applicationId, sourceCommit, apkSha256, certSha256, and evidenceRef all match the qualified candidate. CI packaging never auto-qualifies.",
+  "records": [
+    {
+      "versionName": "1.0.1",
+      "applicationId": "com.fitbaus.bikebridge",
+      "status": "qualified",
+      "certSha256": "5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C",
+      "apkSha256": "f9ec401394d11a27cda3cb88417769734263a4a551e1d9c9fab7fd469f600a61",
+      "sourceCommit": "cf91c7d32fe54315cb5e1ec5488e8f477abe9a50",
+      "evidenceRef": "docs/release-evidence/lite-v1.0.1.md",
+      "console": "ProForm Smart Power 10.0",
+      "notes": "Physical console acceptance completed; see evidenceRef"
+    }
+  ]
+}

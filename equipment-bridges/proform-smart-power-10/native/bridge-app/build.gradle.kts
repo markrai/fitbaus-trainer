@@ -65,8 +65,8 @@ android {
         applicationId = if (isProduction) "com.fitbaus.bikebridge" else "com.fitbaus.bikebridge.native"
         minSdk = 22
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = rootProject.extra["fitbausVersionCode"] as Int
+        versionName = rootProject.extra["fitbausVersionName"] as String
         resValue("string", "app_name", if (isProduction) "FitBaus Bike Bridge" else "FitBaus Bike Bridge Native")
         buildConfigField("String", "UNLOCK_QUALIFICATION", "\"$unlockQualification\"")
         buildConfigField("boolean", "PRODUCTION_IDENTITY", "$isProduction")
@@ -153,4 +153,14 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+}
+
+tasks.register("printFitbausVersion") {
+    doLast {
+        println("FITBAUS_VERSION_NAME=${android.defaultConfig.versionName}")
+        println("FITBAUS_VERSION_CODE=${android.defaultConfig.versionCode}")
+        println("FITBAUS_APPLICATION_ID=${android.defaultConfig.applicationId}")
+        println("FITBAUS_MIN_SDK=${android.defaultConfig.minSdk}")
+        println("FITBAUS_TARGET_SDK=${android.defaultConfig.targetSdk}")
+    }
 }

@@ -1,0 +1,40 @@
+def versionFile = ext.find("fitbausVersionJs")
+if (!(versionFile instanceof File)) {
+    throw new GradleException("fitbausVersionJs must be set to a java.io.File before applying scripts/fitbaus-version.gradle")
+}
+if (!versionFile.isAbsolute()) {
+    throw new GradleException("fitbausVersionJs must be an absolute path derived from the Gradle root, was ${versionFile.path}")
+}
+if (!versionFile.isFile()) {
+    throw new GradleException("FitBaus version file is missing: ${versionFile.canonicalPath}")
+}
+
+def text = versionFile.getText("UTF-8")
+def versionMatch = text =~ /APP_VERSION\s*=\s*["']([^"']+)["']/
+if (!versionMatch.find()) {
+    throw new GradleException("Could not find APP_VERSION in ${versionFile.canonicalPath}")
+}
+
+def name = versionMatch.group(1)
+def semver = (name =~ /^(\d+)\.(\d+)\.(\d+)$/)
+if (!semver.matches()) {
+    throw new GradleException("FitBaus product version must be major.minor.patch with no prerelease, got '${name}' (${versionFile.canonicalPath})")
+}
+
+long major = Long.parseLong(semver[0][1] as String)
+long minor = Long.parseLong(semver[0][2] as String)
+long patch = Long.parseLong(semver[0][3] as String)
+if (major < 0) {
+    throw new GradleException("FitBaus major version is invalid in '${name}' (${versionFile.canonicalPath})")
+}
+if (minor < 0 || minor > 99 || patch < 0 || patch > 99) {
+    throw new GradleException("FitBaus minor and patch must be 0..99, got '${name}' (${versionFile.canonicalPath})")
+}
+
+long code = major * 10000L + minor * 100L + patch
+if (code < 1L || code > 2100000000L) {
+    throw new GradleException("FitBaus versionCode ${code} for '${name}' is outside Android's permitted range 1..2100000000 (${versionFile.canonicalPath})")
+}
+
+ext.fitbausVersionName = name
+ext.fitbausVersionCode = code.intValue()

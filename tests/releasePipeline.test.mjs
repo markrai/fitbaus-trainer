@@ -1,0 +1,1600 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createRequire } from "node:module";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const { resolveSourceRef } = require("../scripts/release/resolve-source-ref.cjs");
+const { assertCertMatchesPolicy } = require("../scripts/release/check-signing-policy.cjs");
+const { assertBridgeQualified } = require("../scripts/release/check-physical-qualification.cjs");
+const { preparePublicArtifacts } = require("../scripts/release/prepare-public-artifacts.cjs");
+const {
+  verifyApk,
+  findTool,
+  parseVerifyText,
+  signatureSchemeRequirements,
+  assertSignatureSchemes,
+} = require("../scripts/release/verify-apk.cjs");
+const { signApk } = require("../scripts/release/sign-apk.cjs");
+const { publicArtifactNames, redactArg, sha256File } = require("../scripts/release/common.cjs");
+const {
+  classifyGhFailure,
+  uploadGithubReleaseAssets,
+  releaseGhArgs,
+} = require("../scripts/release/upload-github-release-assets.cjs");
+const { writeReleaseCandidate } = require("../scripts/release/write-release-candidate.cjs");
+const {
+  validateReleaseCandidate,
+  expectedVersionFromTag,
+} = require("../scripts/release/validate-release-candidate.cjs");
+const { assertTagMatchesSourceVersion } = require("../scripts/release/assert-tag-source-version.cjs");
+const { parseProductVersion } = require("../scripts/fitbaus-version.cjs");
+const {
+  assertCandidateRun,
+  parseWorkflowRunPath,
+} = require("../scripts/release/assert-candidate-run.cjs");
+
+function tempDir(prefix) {
+  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+}
+
+function gitOk(cwd, args) {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${result.stderr || result.stdout}`);
+  }
+  return String(result.stdout || "").trim();
+}
+
+/** Isolated annotated-tag fixture — independent of the developer's local tags/branches. */
+function makeAnnotatedTagFixture({ tag = "v1.0.0" } = {}) {
+  const dir = tempDir("fitbaus-tag-fixture-");
+  gitOk(dir, ["init", "-b", "main"]);
+  gitOk(dir, ["config", "user.email", "release-test@example.com"]);
+  gitOk(dir, ["config", "user.name", "FitBaus Release Test"]);
+  fs.writeFileSync(path.join(dir, "README"), "annotated-tag fixture\n");
+  gitOk(dir, ["add", "README"]);
+  gitOk(dir, ["commit", "-m", "fixture commit for tag peeling"]);
+  const commit = gitOk(dir, ["rev-parse", "HEAD"]);
+  gitOk(dir, ["tag", "-a", tag, "-m", `annotated ${tag}`]);
+  assert.equal(gitOk(dir, ["cat-file", "-t", tag]), "tag");
+  return { dir, tag, commit };
+}
+
+test("resolveSourceRef peels an annotated tag to the expected commit", () => {
+  const fixture = makeAnnotatedTagFixture();
+  const resolved = resolveSourceRef({
+    repoDir: fixture.dir,
+    tag: fixture.tag,
+    expectedCommit: fixture.commit,
+    fetch: false,
+  });
+  assert.equal(resolved.commit, fixture.commit);
+  assert.equal(resolved.tagType, "tag");
+});
+
+test("resolveSourceRef requires expected commit and rejects mismatches", () => {
+  const fixture = makeAnnotatedTagFixture();
+  assert.throws(
+    () => resolveSourceRef({ repoDir: fixture.dir, tag: fixture.tag, fetch: false }),
+    /expect-commit is required|--expect-commit is required|expectedCommit/,
+  );
+  assert.throws(
+    () =>
+      resolveSourceRef({
+        repoDir: fixture.dir,
+        tag: fixture.tag,
+        expectedCommit: "0000000000000000000000000000000000000000",
+        fetch: false,
+      }),
+    /expected 0000000000000000000000000000000000000000/,
+  );
+});
+
+test("signing policy unset pin fails closed unless allowUnset", () => {
+  const dir = tempDir("fitbaus-sign-unset-");
+  const policyPath = path.join(dir, "signing-policy.json");
+  fs.writeFileSync(
+    policyPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      packages: {
+        "com.fitbaus.bikebridge": {
+          role: "bikebridge-production",
+          expectedCertSha256: null,
+        },
+      },
+    }),
+  );
+  assert.throws(
+    () =>
+      assertCertMatchesPolicy({
+        policyPath,
+        applicationId: "com.fitbaus.bikebridge",
+        actualCertSha256: "A".repeat(64),
+      }),
+    /expectedCertSha256 is unset/,
+  );
+  const soft = assertCertMatchesPolicy({
+    policyPath,
+    applicationId: "com.fitbaus.bikebridge",
+    actualCertSha256: "A".repeat(64),
+    allowUnset: true,
+  });
+  assert.equal(soft.pinned, false);
+});
+
+test("signing policy accepts matching pin and rejects wrong identity", () => {
+  const dir = tempDir("fitbaus-sign-pinned-");
+  const policyPath = path.join(dir, "signing-policy.json");
+  const pin = "B".repeat(64);
+  fs.writeFileSync(
+    policyPath,
+    JSON.stringify({
+      schemaVersion: 1,
+      packages: {
+        "com.fitbaus.bikebridge": {
+          role: "bikebridge-production",
+          expectedCertSha256: pin,
+        },
+      },
+    }),
+  );
+  const ok = assertCertMatchesPolicy({
+    policyPath,
+    applicationId: "com.fitbaus.bikebridge",
+    actualCertSha256: pin,
+  });
+  assert.equal(ok.pinned, true);
+  assert.throws(
+    () =>
+      assertCertMatchesPolicy({
+        policyPath,
+        applicationId: "com.fitbaus.bikebridge",
+        actualCertSha256: "A".repeat(64),
+      }),
+    /Wrong signing identity/,
+  );
+});
+
+test("physical qualification requires exact apk/commit/cert/evidence binding", () => {
+  assert.throws(
+    () =>
+      assertBridgeQualified({
+        qualificationPath: path.join(root, ".github/release/physical-qualification.json"),
+        versionName: "1.0.0",
+        certSha256: "C".repeat(64),
+        apkSha256: "d".repeat(64),
+        sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+      }),
+    /No physical qualification record/,
+  );
+
+  const dir = tempDir("fitbaus-qual-");
+  const file = path.join(dir, "physical-qualification.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      schemaVersion: 2,
+      records: [
+        {
+          versionName: "1.0.0",
+          applicationId: "com.fitbaus.bikebridge",
+          status: "qualified",
+          certSha256: "C".repeat(64),
+          apkSha256: "d".repeat(64),
+          sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+          evidenceRef: "agent-store/uvc-physical-evidence/README.txt",
+          console: "ProForm Smart Power 10.0",
+        },
+      ],
+    }),
+  );
+  assert.throws(
+    () =>
+      assertBridgeQualified({
+        qualificationPath: file,
+        versionName: "1.0.0",
+        certSha256: "C".repeat(64),
+        apkSha256: "e".repeat(64),
+        sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+      }),
+    /exact Bridge candidate/,
+  );
+  const row = assertBridgeQualified({
+    qualificationPath: file,
+    versionName: "1.0.0",
+    certSha256: "C".repeat(64),
+    apkSha256: "d".repeat(64),
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+  });
+  assert.equal(row.evidenceRef, "agent-store/uvc-physical-evidence/README.txt");
+});
+
+test("preparePublicArtifacts writes canonical names and separates qualification wording", () => {
+  const dir = tempDir("fitbaus-public-");
+  const trainer = path.join(dir, "t.apk");
+  const bridge = path.join(dir, "b.apk");
+  const web = path.join(dir, "w.zip");
+  fs.writeFileSync(trainer, "trainer");
+  fs.writeFileSync(bridge, "bridge");
+  fs.writeFileSync(web, "web");
+  const out = path.join(dir, "public");
+  const names = preparePublicArtifacts({
+    artifactDir: out,
+    versionName: "1.0.0",
+    versionCode: 10000,
+    edition: "lite",
+    sourceTag: "v1.0.0",
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    toolingRef: "tooling",
+    trainerApkPath: trainer,
+    bridgeApkPath: bridge,
+    webZipPath: web,
+    trainerCert: "A".repeat(64),
+    bridgeCert: "B".repeat(64),
+    bridgeQualified: false,
+  });
+  assert.equal(names.trainerApk, publicArtifactNames("1.0.0", "lite").trainerApk);
+  const md = fs.readFileSync(path.join(out, names.manifest), "utf8");
+  assert.match(md, /Candidate provenance/);
+  assert.match(md, /Physical qualification/);
+  assert.match(md, /published Release means that\s+gate passed/i);
+  assert.doesNotMatch(md, /bridgeQualified=false|qualification was not recorded/i);
+  assert.doesNotMatch(md, /does \*\*not\*\* claim the Bridge APK has already been/);
+  const candidate = writeReleaseCandidate({
+    artifactDir: out,
+    versionName: "1.0.0",
+    versionCode: 10000,
+    edition: "lite",
+    sourceTag: "v1.0.0",
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    toolingRef: "tooling",
+    trainerCert: "A".repeat(64),
+    bridgeCert: "B".repeat(64),
+    workflowRunId: "4242",
+  });
+  assert.equal(candidate.artifacts.bridgeApk.sha256, sha256File(path.join(out, names.bridgeApk)));
+  const validated = validateReleaseCandidate({
+    candidateDir: out,
+    expectedTag: "v1.0.0",
+    expectedCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    expectedEdition: "lite",
+    expectedWorkflowRunId: "4242",
+  });
+  assert.equal(validated.versionName, "1.0.0");
+});
+
+/** CRC-32 for uncompressed ZIP local/central headers (deterministic, no deps). */
+function zipCrc32(buf) {
+  let crc = ~0;
+  const table = zipCrc32.table || (zipCrc32.table = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })());
+  for (const byte of buf) crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (~crc) >>> 0;
+}
+
+/**
+ * Build a minimal valid ZIP with one stored entry. EOCD-only archives make
+ * `unzip -l` exit 1 on Ubuntu; a single harmless entry is listable everywhere.
+ */
+function buildStoredZip(entries) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, data] of entries) {
+    const nameBuf = Buffer.from(name, "utf8");
+    const crc = zipCrc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    const localFull = Buffer.concat([local, nameBuf, data]);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    centrals.push(Buffer.concat([central, nameBuf]));
+    locals.push(localFull);
+    offset += localFull.length;
+  }
+  const centralDir = Buffer.concat(centrals);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(centralDir.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, centralDir, eocd]);
+}
+
+/** Structurally valid unsigned ZIP/APK fixture (not signed; for sidecar / listing tests). */
+function writeListableZipApk(apkPath) {
+  fs.writeFileSync(apkPath, buildStoredZip([["fixture.txt", Buffer.alloc(0)]]));
+}
+
+function assertArchiveListable(apkPath) {
+  const unzip = spawnSync("unzip", ["-l", apkPath], { encoding: "utf8" });
+  if (unzip.status === 0) {
+    assert.match(String(unzip.stdout || ""), /fixture\.txt/);
+    return;
+  }
+  const tar = spawnSync("tar", ["-tf", apkPath], { encoding: "utf8" });
+  if (tar.status === 0) {
+    assert.match(String(tar.stdout || ""), /fixture\.txt/);
+    return;
+  }
+  assert.fail(
+    `Archive listing unavailable or fixture not listable ` +
+      `(unzip=${unzip.status}, tar=${tar.status}): ${apkPath}`,
+  );
+}
+
+function writeVerifySidecars(apkPath, { applicationId, signed = true, certSha256 = "D".repeat(64) }) {
+  fs.writeFileSync(
+    `${apkPath}.meta.json`,
+    JSON.stringify({
+      applicationId,
+      versionName: "1.0.0",
+      versionCode: 10000,
+      minSdk: 22,
+    }),
+  );
+  fs.writeFileSync(
+    `${apkPath}.cert.json`,
+    JSON.stringify({
+      signed,
+      v1: signed,
+      v2: signed,
+      certSha256: signed ? certSha256 : null,
+    }),
+  );
+}
+
+/** Simulate host with no Android SDK build-tools / PATH entries. */
+const absentSdkFindTool = () => null;
+
+/**
+ * Simulate discoverable SDK tools. runTool rejects malformed APKs the same way
+ * real apksigner does on CI (ApkFormatException), without requiring a local SDK.
+ */
+function presentSdkHarness() {
+  return {
+    findTool: (name) => `/fake-sdk/build-tools/35.0.0/${name}`,
+    runTool: (command, args) => {
+      throw new Error(
+        `${command} ${args.join(" ")} failed\n` +
+          `Exception in thread "main" com.android.apksig.apk.ApkFormatException: ` +
+          `Malformed APK: not a ZIP archive`,
+      );
+    },
+  };
+}
+
+test("verifyApk fails closed when SDK tools are absent and sidecar is disabled", () => {
+  const dir = tempDir("fitbaus-apk-no-sdk-");
+  const apk = path.join(dir, "app.apk");
+  writeListableZipApk(apk);
+  writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge" });
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.fitbaus.bikebridge",
+        expectedVersionName: "1.0.0",
+        expectedMinSdk: 22,
+        findTool: absentSdkFindTool,
+      }),
+    /apksigner unavailable/,
+  );
+});
+
+test("verifyApk uses sidecar metadata when SDK tools are absent and fallback is enabled", () => {
+  const dir = tempDir("fitbaus-apk-sidecar-ok-");
+  const apk = path.join(dir, "app.apk");
+  writeListableZipApk(apk);
+  assertArchiveListable(apk);
+  const cert = "E".repeat(64);
+  writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge", certSha256: cert });
+  const result = verifyApk({
+    apkPath: apk,
+    expectedApplicationId: "com.fitbaus.bikebridge",
+    expectedVersionName: "1.0.0",
+    expectedVersionCode: 10000,
+    expectedMinSdk: 22,
+    allowSidecarFallback: true,
+    findTool: absentSdkFindTool,
+  });
+  assert.equal(result.applicationId, "com.fitbaus.bikebridge");
+  assert.equal(result.certSha256, cert);
+  assert.equal(result.v1, true);
+});
+
+test("verifyApk ignores sidecars and rejects malformed APK when SDK tools are present", () => {
+  const dir = tempDir("fitbaus-apk-sdk-present-");
+  const apk = path.join(dir, "app.apk");
+  // Deliberately not a ZIP — matches the CI failure mode for the old test fixture.
+  fs.writeFileSync(apk, "not-a-zip-apk");
+  writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge" });
+  const harness = presentSdkHarness();
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.fitbaus.bikebridge",
+        expectedVersionName: "1.0.0",
+        expectedMinSdk: 22,
+        allowSidecarFallback: true,
+        findTool: harness.findTool,
+        runTool: harness.runTool,
+      }),
+    /Malformed APK|not a ZIP archive/,
+  );
+
+  // When the host actually has SDK tools, the production discovery path must behave the same.
+  const realApksigner = findTool("apksigner", "APKSIGNER");
+  if (realApksigner) {
+    assert.throws(
+      () =>
+        verifyApk({
+          apkPath: apk,
+          expectedApplicationId: "com.fitbaus.bikebridge",
+          expectedVersionName: "1.0.0",
+          expectedMinSdk: 22,
+          allowSidecarFallback: true,
+        }),
+      /Malformed APK|not a ZIP archive|failed/,
+    );
+  }
+});
+
+test("verifyApk rejects unsigned sidecar when fallback is explicitly allowed", () => {
+  const dir = tempDir("fitbaus-apk-unsigned-");
+  const apk = path.join(dir, "app.apk");
+  writeListableZipApk(apk);
+  writeVerifySidecars(apk, {
+    applicationId: "com.markrai.fitbaus.trainer",
+    signed: false,
+  });
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.markrai.fitbaus.trainer",
+        expectedVersionName: "1.0.0",
+        allowSidecarFallback: true,
+        findTool: absentSdkFindTool,
+      }),
+    /unsigned/,
+  );
+});
+
+test("verifyApk rejects wrong application ID from an allowed sidecar", () => {
+  const dir = tempDir("fitbaus-apk-wrong-id-");
+  const apk = path.join(dir, "app.apk");
+  writeListableZipApk(apk);
+  writeVerifySidecars(apk, { applicationId: "com.example.wrong" });
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.fitbaus.bikebridge",
+        expectedVersionName: "1.0.0",
+        expectedMinSdk: 22,
+        allowSidecarFallback: true,
+        findTool: absentSdkFindTool,
+      }),
+    /applicationId/,
+  );
+});
+
+function schemeStatus(v1, v2) {
+  return {
+    v1,
+    v2,
+    v1Reported: true,
+    v2Reported: true,
+    certSha256: "F".repeat(64),
+    raw: `Verified using v1 scheme (JAR signing): ${v1}\nVerified using v2 scheme (APK Signature Scheme v2): ${v2}\n`,
+  };
+}
+
+test("signatureSchemeRequirements are API-aware", () => {
+  assert.deepEqual(signatureSchemeRequirements({ minSdkVersion: 24 }), {
+    requireV1: false,
+    requireV2: true,
+  });
+  assert.deepEqual(signatureSchemeRequirements({ minSdkVersion: 22 }), {
+    requireV1: true,
+    requireV2: false,
+  });
+  assert.deepEqual(signatureSchemeRequirements({ minSdkVersion: null }), {
+    requireV1: true,
+    requireV2: true,
+  });
+  assert.deepEqual(signatureSchemeRequirements({ minSdkVersion: 24, requireV1: true }), {
+    requireV1: true,
+    requireV2: true,
+  });
+});
+
+test("assertSignatureSchemes enforces the release v1/v2 matrix", () => {
+  const apk = "trainer-or-bridge.apk";
+  const cases = [
+    { minSdk: 24, v1: false, v2: true, ok: true },
+    { minSdk: 24, v1: true, v2: true, ok: true },
+    { minSdk: 24, v1: false, v2: false, ok: false, err: /Scheme v2/ },
+    { minSdk: 24, v1: true, v2: false, ok: false, err: /Scheme v2/ },
+    { minSdk: 22, v1: true, v2: false, ok: true },
+    { minSdk: 22, v1: true, v2: true, ok: true },
+    { minSdk: 22, v1: false, v2: true, ok: false, err: /Scheme v1/ },
+    { minSdk: 22, v1: false, v2: false, ok: false, err: /Scheme v1/ },
+  ];
+  for (const row of cases) {
+    const parsed = schemeStatus(row.v1, row.v2);
+    if (row.ok) {
+      assert.doesNotThrow(() =>
+        assertSignatureSchemes(parsed, { minSdkVersion: row.minSdk, apkPath: apk }),
+      );
+    } else {
+      assert.throws(
+        () => assertSignatureSchemes(parsed, { minSdkVersion: row.minSdk, apkPath: apk }),
+        row.err,
+      );
+    }
+  }
+
+  assert.doesNotThrow(() =>
+    assertSignatureSchemes(schemeStatus(true, true), { minSdkVersion: null, apkPath: apk }),
+  );
+  assert.throws(
+    () => assertSignatureSchemes(schemeStatus(true, false), { minSdkVersion: null, apkPath: apk }),
+    /Scheme v2/,
+  );
+  assert.throws(
+    () => assertSignatureSchemes(schemeStatus(false, true), { minSdkVersion: null, apkPath: apk }),
+    /Scheme v1/,
+  );
+
+  const unparseable = {
+    v1: false,
+    v2: false,
+    v1Reported: false,
+    v2Reported: false,
+    certSha256: null,
+    raw: "no scheme lines",
+  };
+  assert.throws(
+    () => assertSignatureSchemes(unparseable, { minSdkVersion: 24, apkPath: apk }),
+    /Unparseable APK Signature Scheme v2/,
+  );
+  assert.throws(
+    () => assertSignatureSchemes(unparseable, { minSdkVersion: 22, apkPath: apk }),
+    /Unparseable APK Signature Scheme v1/,
+  );
+  assert.throws(
+    () => assertSignatureSchemes(unparseable, { minSdkVersion: null, apkPath: apk }),
+    /Unparseable APK Signature Scheme v1/,
+  );
+
+  const parsedFromVerify = parseVerifyText(
+    "Verified using v1 scheme (JAR signing): false\nVerified using v2 scheme (APK Signature Scheme v2): true\n",
+  );
+  assert.equal(parsedFromVerify.v1, false);
+  assert.equal(parsedFromVerify.v2, true);
+  assert.doesNotThrow(() =>
+    assertSignatureSchemes(parsedFromVerify, { minSdkVersion: 24, apkPath: apk }),
+  );
+});
+
+test("verifyApk API 24 accepts v2-only sidecar and rejects v1-only", () => {
+  const dir = tempDir("fitbaus-apk-api24-");
+  const apk = path.join(dir, "app.apk");
+  writeListableZipApk(apk);
+  fs.writeFileSync(
+    `${apk}.meta.json`,
+    JSON.stringify({
+      applicationId: "com.markrai.fitbaus.trainer",
+      versionName: "1.0.0",
+      versionCode: 10000,
+      minSdk: 24,
+    }),
+  );
+  fs.writeFileSync(
+    `${apk}.cert.json`,
+    JSON.stringify({ signed: true, v1: false, v2: true, certSha256: "A".repeat(64) }),
+  );
+  const ok = verifyApk({
+    apkPath: apk,
+    expectedApplicationId: "com.markrai.fitbaus.trainer",
+    expectedVersionName: "1.0.0",
+    expectedMinSdk: 24,
+    allowSidecarFallback: true,
+    findTool: absentSdkFindTool,
+  });
+  assert.equal(ok.v2, true);
+  assert.equal(ok.v1, false);
+
+  fs.writeFileSync(
+    `${apk}.cert.json`,
+    JSON.stringify({ signed: true, v1: true, v2: false, certSha256: "A".repeat(64) }),
+  );
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.markrai.fitbaus.trainer",
+        expectedVersionName: "1.0.0",
+        expectedMinSdk: 24,
+        allowSidecarFallback: true,
+        findTool: absentSdkFindTool,
+      }),
+    /Scheme v2/,
+  );
+});
+
+test("verifyApk API 22 still requires verified v1 even when v2 is present", () => {
+  const dir = tempDir("fitbaus-apk-api22-");
+  const apk = path.join(dir, "app.apk");
+  writeListableZipApk(apk);
+  writeVerifySidecars(apk, { applicationId: "com.fitbaus.bikebridge" });
+  fs.writeFileSync(
+    `${apk}.cert.json`,
+    JSON.stringify({ signed: true, v1: false, v2: true, certSha256: "B".repeat(64) }),
+  );
+  assert.throws(
+    () =>
+      verifyApk({
+        apkPath: apk,
+        expectedApplicationId: "com.fitbaus.bikebridge",
+        expectedVersionName: "1.0.0",
+        expectedMinSdk: 22,
+        requireV1: true,
+        allowSidecarFallback: true,
+        findTool: absentSdkFindTool,
+      }),
+    /Scheme v1/,
+  );
+});
+
+function makeSignApkRunTool({ verifyStdout = "", verifyFailMessage = null } = {}) {
+  return (command, args) => {
+    if (args[0] === "-f" && args[1] === "4") {
+      fs.copyFileSync(args[2], args[3]);
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "sign") {
+      const outIdx = args.indexOf("--out");
+      assert.ok(outIdx >= 0);
+      fs.copyFileSync(args[args.length - 1], args[outIdx + 1]);
+      return { status: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "verify") {
+      if (verifyFailMessage) {
+        throw new Error(`${command} ${args.join(" ")} failed\n${verifyFailMessage}`);
+      }
+      return { status: 0, stdout: verifyStdout, stderr: "" };
+    }
+    throw new Error(`unexpected mock command: ${command} ${args.join(" ")}`);
+  };
+}
+
+function signApkFixture(prefix) {
+  const dir = tempDir(prefix);
+  const inputApk = path.join(dir, "in.apk");
+  const outputApk = path.join(dir, "out.apk");
+  const keystore = path.join(dir, "test.jks");
+  fs.writeFileSync(inputApk, "unsigned-apk-bytes");
+  fs.writeFileSync(keystore, "keystore-bytes");
+  return {
+    dir,
+    inputApk,
+    outputApk,
+    keystore,
+    base: {
+      inputApk,
+      outputApk,
+      keystore,
+      storePassword: "store-pass",
+      keyAlias: "alias",
+      keyPassword: "key-pass",
+      apksigner: "mock-apksigner",
+      zipalign: "mock-zipalign",
+    },
+  };
+}
+
+const v1FalseV2TrueVerify = [
+  "Verified using v1 scheme (JAR signing): false",
+  "Verified using v2 scheme (APK Signature Scheme v2): true",
+  "",
+].join("\n");
+
+test("signApk post-sign verify accepts API 24 when v1=false and v2=true", () => {
+  const fx = signApkFixture("fitbaus-sign-api24-ok-");
+  const out = signApk({
+    ...fx.base,
+    minSdkVersion: 24,
+    runTool: makeSignApkRunTool({ verifyStdout: v1FalseV2TrueVerify }),
+  });
+  assert.equal(out, fx.outputApk);
+  assert.ok(fs.existsSync(fx.outputApk));
+});
+
+test("signApk post-sign verify rejects API 22 when v1=false and v2=true", () => {
+  const fx = signApkFixture("fitbaus-sign-api22-reject-");
+  assert.throws(
+    () =>
+      signApk({
+        ...fx.base,
+        minSdkVersion: 22,
+        runTool: makeSignApkRunTool({ verifyStdout: v1FalseV2TrueVerify }),
+      }),
+    /Scheme v1/,
+  );
+});
+
+test("signApk treats nonzero apksigner verify exit as fatal", () => {
+  const fx = signApkFixture("fitbaus-sign-verify-fail-");
+  assert.throws(
+    () =>
+      signApk({
+        ...fx.base,
+        minSdkVersion: 24,
+        runTool: makeSignApkRunTool({
+          verifyFailMessage: "DOES NOT VERIFY\nMalformed APK: not a ZIP archive",
+        }),
+      }),
+    /DOES NOT VERIFY|failed/,
+  );
+});
+
+test("signApk treats missing required signature-scheme status as fatal", () => {
+  const fx = signApkFixture("fitbaus-sign-unparseable-");
+  assert.throws(
+    () =>
+      signApk({
+        ...fx.base,
+        minSdkVersion: 24,
+        runTool: makeSignApkRunTool({
+          verifyStdout: "Verified using v1 scheme (JAR signing): false\n",
+        }),
+      }),
+    /Unparseable APK Signature Scheme v2/,
+  );
+});
+
+test("signApk fails closed without credentials and redacts pass args", () => {
+  assert.match(redactArg("pass:super-secret"), /redacted/);
+  const dir = tempDir("fitbaus-sign-missing-");
+  const input = path.join(dir, "in.apk");
+  const output = path.join(dir, "out.apk");
+  fs.writeFileSync(input, "apk");
+  assert.throws(
+    () =>
+      signApk({
+        inputApk: input,
+        outputApk: output,
+        keystore: path.join(dir, "missing.jks"),
+        storePassword: "x",
+        keyAlias: "y",
+        keyPassword: "z",
+        apksigner: "apksigner-does-not-exist",
+        zipalign: "zipalign-does-not-exist",
+      }),
+    /Keystore missing/,
+  );
+});
+
+test("upload helper requires explicit repo and classifies not_found", () => {
+  assert.equal(classifyGhFailure("HTTP 404: Not Found\nrelease not found", ""), "not_found");
+  assert.equal(classifyGhFailure("HTTP 403: Resource not accessible by integration", ""), "auth");
+  assert.throws(
+    () =>
+      uploadGithubReleaseAssets({
+        tag: "v1.0.0",
+        title: "x",
+        notesFile: "notes",
+        artifactDir: tempDir("fitbaus-upload-"),
+        assetNames: ["a"],
+        dryRun: true,
+      }),
+    /--repo|required/,
+  );
+  const dir = tempDir("fitbaus-upload-ok-");
+  fs.writeFileSync(path.join(dir, "a.txt"), "hi");
+  fs.writeFileSync(path.join(dir, "notes.md"), "notes");
+  const dry = uploadGithubReleaseAssets({
+    tag: "v1.0.0",
+    title: "x",
+    notesFile: path.join(dir, "notes.md"),
+    artifactDir: dir,
+    assetNames: ["a.txt"],
+    repo: "markrai/fitbaus-trainer",
+    dryRun: true,
+  });
+  assert.equal(dry.dryRun, true);
+  assert.equal(dry.repo, "markrai/fitbaus-trainer");
+});
+
+function makeAssetBundle(prefix) {
+  const dir = tempDir(prefix);
+  const assets = ["a.apk", "b.apk", "web.zip", "SHA256SUMS.txt", "ARTIFACTS.md", "release-candidate.json"];
+  for (const name of assets) {
+    fs.writeFileSync(path.join(dir, name), `${name}-bytes`);
+  }
+  fs.writeFileSync(path.join(dir, "ARTIFACTS.md"), "# FitBaus Lite 1.0.0\n");
+  return { dir, assets, notes: path.join(dir, "ARTIFACTS.md") };
+}
+
+function assertReleaseGhArgv(args, { repo = "markrai/fitbaus-trainer" } = {}) {
+  assert.notEqual(args[0], "--repo", "must not prepend --repo before the gh command");
+  assert.notEqual(args[0], "-R", "must not prepend -R before the gh command");
+  assert.equal(args[0], "release");
+  const repoIdx = args.lastIndexOf("--repo");
+  assert.ok(repoIdx > 1, `command-local --repo required in ${args.join(" ")}`);
+  assert.equal(args[repoIdx + 1], repo);
+  assert.ok(repoIdx > args.indexOf(args[1]), "--repo must follow the release subcommand");
+}
+
+function createMockGh({ initialRelease = null, repo = "markrai/fitbaus-trainer" } = {}) {
+  const state = {
+    release: initialRelease
+      ? {
+          id: initialRelease.id || "1",
+          tagName: initialRelease.tagName || "v1.0.0",
+          isDraft: initialRelease.isDraft !== false,
+          url: initialRelease.url || "https://example.test/release",
+          title: initialRelease.title || "",
+          notesFile: initialRelease.notesFile || null,
+          assets: (initialRelease.assets || []).map((asset) => ({
+            name: asset.name,
+            content: asset.content,
+          })),
+        }
+      : null,
+    calls: [],
+    failNextUpload: false,
+  };
+
+  function runner(args) {
+    state.calls.push([...args]);
+    assertReleaseGhArgv(args, { repo });
+    const join = args.join(" ");
+
+    if (args[0] === "release" && args[1] === "view") {
+      const tag = args[2];
+      if (!state.release || state.release.tagName !== tag) {
+        return { status: 1, stdout: "", stderr: "release not found\nHTTP 404" };
+      }
+      if (args.includes("--json")) {
+        return {
+          status: 0,
+          stdout: JSON.stringify({
+            id: state.release.id,
+            tagName: state.release.tagName,
+            isDraft: state.release.isDraft,
+            url: state.release.url,
+            assets: state.release.assets.map((a) => ({ name: a.name })),
+          }),
+          stderr: "",
+        };
+      }
+    }
+
+    if (args[0] === "release" && args[1] === "create") {
+      const tag = args[2];
+      const titleIdx = args.indexOf("--title");
+      const notesIdx = args.indexOf("--notes-file");
+      state.release = {
+        id: "new",
+        tagName: tag,
+        isDraft: true,
+        url: "https://example.test/release",
+        title: titleIdx >= 0 ? args[titleIdx + 1] : "",
+        notesFile: notesIdx >= 0 ? args[notesIdx + 1] : null,
+        assets: [],
+      };
+      return { status: 0, stdout: state.release.url, stderr: "" };
+    }
+
+    if (args[0] === "release" && args[1] === "edit") {
+      if (!state.release) return { status: 1, stdout: "", stderr: "release not found" };
+      const titleIdx = args.indexOf("--title");
+      const notesIdx = args.indexOf("--notes-file");
+      if (titleIdx >= 0) state.release.title = args[titleIdx + 1];
+      if (notesIdx >= 0) state.release.notesFile = args[notesIdx + 1];
+      if (args.includes("--draft=false")) state.release.isDraft = false;
+      return { status: 0, stdout: "", stderr: "" };
+    }
+
+    if (args[0] === "release" && args[1] === "upload") {
+      if (state.failNextUpload) {
+        state.failNextUpload = false;
+        return { status: 1, stdout: "", stderr: "upload failed: network timeout" };
+      }
+      const filePath = args[3];
+      const name = path.basename(filePath);
+      state.release.assets.push({
+        name,
+        content: fs.readFileSync(filePath),
+      });
+      return { status: 0, stdout: "", stderr: "" };
+    }
+
+    if (args[0] === "release" && args[1] === "download") {
+      const patternIdx = args.indexOf("--pattern");
+      const dirIdx = args.indexOf("--dir");
+      const pattern = patternIdx >= 0 ? args[patternIdx + 1] : null;
+      const dest = dirIdx >= 0 ? args[dirIdx + 1] : null;
+      const asset = state.release.assets.find((a) => a.name === pattern);
+      if (!asset || !dest) {
+        return { status: 1, stdout: "", stderr: `asset ${pattern} not found` };
+      }
+      fs.mkdirSync(dest, { recursive: true });
+      fs.writeFileSync(path.join(dest, asset.name), asset.content);
+      return { status: 0, stdout: "", stderr: "" };
+    }
+
+    return { status: 1, stdout: "", stderr: `unexpected gh mock call: ${join}` };
+  }
+
+  return { state, runner };
+}
+
+test("mocked gh: creates new draft, uploads assets, then publishes", () => {
+  const { dir, assets, notes } = makeAssetBundle("fitbaus-pub-new-");
+  const { state, runner } = createMockGh();
+  const result = uploadGithubReleaseAssets({
+    tag: "v1.0.0",
+    title: "FitBaus Lite 1.0.0",
+    notesFile: notes,
+    artifactDir: dir,
+    assetNames: assets,
+    repo: "markrai/fitbaus-trainer",
+    runner,
+  });
+  assert.equal(result.createdDraft, true);
+  assert.equal(result.updatedDraftMetadata, true);
+  assert.equal(result.published, true);
+  assert.equal(result.isDraft, false);
+  assert.equal(result.uploaded.length, assets.length);
+  assert.equal(state.release.isDraft, false);
+  assert.equal(state.release.title, "FitBaus Lite 1.0.0");
+  assert.ok(state.calls.some((c) => c.includes("create") && c.includes("--draft")));
+  assert.ok(state.calls.some((c) => c.includes("--draft=false")));
+  const publishIdx = state.calls.findIndex((c) => c.includes("--draft=false"));
+  const lastUploadIdx = state.calls.map((c) => c[1]).lastIndexOf("upload");
+  assert.ok(lastUploadIdx < publishIdx, "publish must happen after uploads");
+});
+
+test("mocked gh: existing empty draft gets Lite metadata before assets", () => {
+  const { dir, assets, notes } = makeAssetBundle("fitbaus-pub-draft-");
+  const { state, runner } = createMockGh({
+    initialRelease: {
+      tagName: "v1.0.0",
+      isDraft: true,
+      title: "Old unsigned notes",
+      assets: [],
+    },
+  });
+  const result = uploadGithubReleaseAssets({
+    tag: "v1.0.0",
+    title: "FitBaus Lite 1.0.0",
+    notesFile: notes,
+    artifactDir: dir,
+    assetNames: assets,
+    repo: "markrai/fitbaus-trainer",
+    runner,
+  });
+  assert.equal(result.createdDraft, false);
+  assert.equal(result.updatedDraftMetadata, true);
+  assert.equal(state.release.title, "FitBaus Lite 1.0.0");
+  assert.equal(state.release.notesFile, notes);
+  const editIdx = state.calls.findIndex((c) => c[1] === "edit" && c.includes("--title"));
+  const uploadIdx = state.calls.findIndex((c) => c[1] === "upload");
+  assert.ok(editIdx >= 0 && editIdx < uploadIdx);
+});
+
+test("mocked gh: failed upload leaves release as draft", () => {
+  const { dir, assets, notes } = makeAssetBundle("fitbaus-pub-fail-");
+  const { state, runner } = createMockGh();
+  state.failNextUpload = true;
+  assert.throws(
+    () =>
+      uploadGithubReleaseAssets({
+        tag: "v1.0.0",
+        title: "FitBaus Lite 1.0.0",
+        notesFile: notes,
+        artifactDir: dir,
+        assetNames: assets,
+        repo: "markrai/fitbaus-trainer",
+        runner,
+      }),
+    /upload failed|network/,
+  );
+  assert.equal(state.release.isDraft, true);
+  assert.ok(!state.calls.some((c) => c.includes("--draft=false")));
+});
+
+test("mocked gh: identical asset retry is skipped; conflicting asset rejected", () => {
+  const { dir, assets, notes } = makeAssetBundle("fitbaus-pub-retry-");
+  const firstContent = fs.readFileSync(path.join(dir, "a.apk"));
+  const { state, runner } = createMockGh({
+    initialRelease: {
+      tagName: "v1.0.0",
+      isDraft: true,
+      assets: [{ name: "a.apk", content: firstContent }],
+    },
+  });
+  const ok = uploadGithubReleaseAssets({
+    tag: "v1.0.0",
+    title: "FitBaus Lite 1.0.0",
+    notesFile: notes,
+    artifactDir: dir,
+    assetNames: assets,
+    repo: "markrai/fitbaus-trainer",
+    runner,
+  });
+  assert.equal(ok.skippedSameHash.length, 1);
+  assert.equal(ok.skippedSameHash[0].name, "a.apk");
+
+  fs.writeFileSync(path.join(dir, "a.apk"), "different-bytes");
+  const { runner: runner2 } = createMockGh({
+    initialRelease: {
+      tagName: "v1.0.0",
+      isDraft: true,
+      assets: [{ name: "a.apk", content: firstContent }],
+    },
+  });
+  assert.throws(
+    () =>
+      uploadGithubReleaseAssets({
+        tag: "v1.0.0",
+        title: "FitBaus Lite 1.0.0",
+        notesFile: notes,
+        artifactDir: dir,
+        assetNames: ["a.apk"],
+        repo: "markrai/fitbaus-trainer",
+        runner: runner2,
+      }),
+    /different content|Refusing to overwrite/,
+  );
+});
+
+test("mocked gh: already-published release refuses missing or mutating assets", () => {
+  const { dir, notes } = makeAssetBundle("fitbaus-pub-published-");
+  const { runner } = createMockGh({
+    initialRelease: {
+      tagName: "v1.0.0",
+      isDraft: false,
+      assets: [{ name: "a.apk", content: Buffer.from("a.apk-bytes") }],
+    },
+  });
+  assert.throws(
+    () =>
+      uploadGithubReleaseAssets({
+        tag: "v1.0.0",
+        title: "FitBaus Lite 1.0.0",
+        notesFile: notes,
+        artifactDir: dir,
+        assetNames: ["a.apk", "b.apk"],
+        repo: "markrai/fitbaus-trainer",
+        runner,
+      }),
+    /already published|Refusing to mutate/,
+  );
+  const { state, runner: runnerView } = createMockGh({
+    initialRelease: {
+      tagName: "v1.0.0",
+      isDraft: false,
+      title: "Keep me",
+      assets: [{ name: "a.apk", content: Buffer.from("a.apk-bytes") }],
+    },
+  });
+  assert.throws(
+    () =>
+      uploadGithubReleaseAssets({
+        tag: "v1.0.0",
+        title: "FitBaus Lite 1.0.0",
+        notesFile: notes,
+        artifactDir: dir,
+        assetNames: ["a.apk", "b.apk"],
+        repo: "markrai/fitbaus-trainer",
+        runner: runnerView,
+      }),
+    /already published/,
+  );
+  assert.equal(state.release.title, "Keep me");
+  assert.ok(!state.calls.some((c) => c[1] === "edit"));
+});
+
+test("validateReleaseCandidate rejects wrong tag, edition, or mismatched hashes", () => {
+  const dir = tempDir("fitbaus-cand-");
+  const trainer = path.join(dir, "t.apk");
+  const bridge = path.join(dir, "b.apk");
+  const web = path.join(dir, "w.zip");
+  fs.writeFileSync(trainer, "trainer");
+  fs.writeFileSync(bridge, "bridge");
+  fs.writeFileSync(web, "web");
+  const out = path.join(dir, "public");
+  preparePublicArtifacts({
+    artifactDir: out,
+    versionName: "1.0.0",
+    versionCode: 10000,
+    edition: "lite",
+    sourceTag: "v1.0.0",
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    toolingRef: "tooling",
+    trainerApkPath: trainer,
+    bridgeApkPath: bridge,
+    webZipPath: web,
+    trainerCert: "A".repeat(64),
+    bridgeCert: "B".repeat(64),
+    bridgeQualified: false,
+  });
+  writeReleaseCandidate({
+    artifactDir: out,
+    versionName: "1.0.0",
+    versionCode: 10000,
+    edition: "lite",
+    sourceTag: "v1.0.0",
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    toolingRef: "tooling",
+    trainerCert: "A".repeat(64),
+    bridgeCert: "B".repeat(64),
+    workflowRunId: "99",
+  });
+
+  assert.throws(
+    () =>
+      validateReleaseCandidate({
+        candidateDir: out,
+        expectedTag: "v9.9.9",
+        expectedCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+        expectedEdition: "lite",
+        expectedWorkflowRunId: "99",
+      }),
+    /sourceTag/,
+  );
+  assert.throws(
+    () =>
+      validateReleaseCandidate({
+        candidateDir: out,
+        expectedTag: "v1.0.0",
+        expectedCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+        expectedEdition: "full",
+        expectedWorkflowRunId: "99",
+      }),
+    /edition/,
+  );
+
+  const names = publicArtifactNames("1.0.0", "lite");
+  fs.writeFileSync(path.join(out, names.bridgeApk), "tampered-bridge");
+  assert.throws(
+    () =>
+      validateReleaseCandidate({
+        candidateDir: out,
+        expectedTag: "v1.0.0",
+        expectedCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+        expectedEdition: "lite",
+        expectedWorkflowRunId: "99",
+      }),
+    /Hash mismatch/,
+  );
+});
+
+test("releaseGhArgs places --repo after the release subcommand", () => {
+  const args = releaseGhArgs(["release", "view", "v1.0.0", "--json", "tagName"], {
+    repo: "markrai/fitbaus-trainer",
+  });
+  assert.deepEqual(args, [
+    "release",
+    "view",
+    "v1.0.0",
+    "--json",
+    "tagName",
+    "--repo",
+    "markrai/fitbaus-trainer",
+  ]);
+  assert.throws(
+    () => releaseGhArgs(["--repo", "x", "release", "view", "v1.0.0"], { repo: "x" }),
+    /expects \["release"/,
+  );
+});
+
+test("parseWorkflowRunPath accepts path@ref and bare paths", () => {
+  assert.deepEqual(parseWorkflowRunPath(".github/workflows/release.yml@main"), {
+    workflowFile: ".github/workflows/release.yml",
+    ref: "main",
+    raw: ".github/workflows/release.yml@main",
+  });
+  assert.deepEqual(parseWorkflowRunPath(".github/workflows/release.yml"), {
+    workflowFile: ".github/workflows/release.yml",
+    ref: null,
+    raw: ".github/workflows/release.yml",
+  });
+});
+
+test("assertCandidateRun accepts path@main and rejects bad path/ref/api argv", () => {
+  const fixtures = {
+    55: {
+      run: {
+        id: 55,
+        conclusion: "success",
+        status: "completed",
+        event: "workflow_dispatch",
+        head_branch: "main",
+        path: ".github/workflows/release.yml@main",
+        name: "Release",
+        html_url: "https://example.test/55",
+      },
+      jobs: { jobs: [{ name: "inspect v1.0.0", conclusion: "success" }] },
+    },
+    56: {
+      run: {
+        id: 56,
+        conclusion: "success",
+        status: "completed",
+        event: "workflow_dispatch",
+        head_branch: "main",
+        path: ".github/workflows/release.yml",
+        name: "Release",
+      },
+      jobs: { jobs: [{ name: "publish v1.0.0", conclusion: "success" }] },
+    },
+    57: {
+      run: {
+        id: 57,
+        conclusion: "success",
+        status: "completed",
+        event: "workflow_dispatch",
+        head_branch: "main",
+        path: ".github/workflows/release.yml@chore/release-pipeline",
+        name: "Release",
+      },
+      jobs: { jobs: [{ name: "inspect v1.0.0", conclusion: "success" }] },
+    },
+    58: {
+      run: {
+        id: 58,
+        conclusion: "success",
+        status: "completed",
+        event: "workflow_dispatch",
+        head_branch: "main",
+        path: ".github/workflows/ci.yml@main",
+        name: "CI",
+      },
+      jobs: { jobs: [{ name: "inspect v1.0.0", conclusion: "success" }] },
+    },
+  };
+  const seen = [];
+  const runner = (args) => {
+    seen.push([...args]);
+    assert.equal(args[0], "api");
+    assert.ok(!args.includes("--repo") && !args.includes("-R"), `gh api must not get --repo: ${args.join(" ")}`);
+    assert.match(args[1], /^repos\/markrai\/fitbaus-trainer\/actions\/runs\/\d+/);
+    const match = /^repos\/markrai\/fitbaus-trainer\/actions\/runs\/(\d+)(\/jobs)?$/.exec(args[1]);
+    assert.ok(match, `unexpected endpoint ${args[1]}`);
+    const id = match[1];
+    const payload = match[2] ? fixtures[id].jobs : fixtures[id].run;
+    return { status: 0, stdout: JSON.stringify(payload), stderr: "" };
+  };
+
+  const ok = assertCandidateRun({
+    repo: "markrai/fitbaus-trainer",
+    runId: "55",
+    defaultBranch: "main",
+    runner,
+  });
+  assert.equal(ok.inspectJobName, "inspect v1.0.0");
+  assert.equal(ok.workflowFile, ".github/workflows/release.yml");
+  assert.equal(ok.workflowRef, "main");
+  assert.deepEqual(seen[0], ["api", "repos/markrai/fitbaus-trainer/actions/runs/55"]);
+  assert.deepEqual(seen[1], ["api", "repos/markrai/fitbaus-trainer/actions/runs/55/jobs"]);
+
+  assert.throws(
+    () =>
+      assertCandidateRun({
+        repo: "markrai/fitbaus-trainer",
+        runId: "56",
+        defaultBranch: "main",
+        runner,
+      }),
+    /no inspect job/,
+  );
+  assert.throws(
+    () =>
+      assertCandidateRun({
+        repo: "markrai/fitbaus-trainer",
+        runId: "57",
+        defaultBranch: "main",
+        runner,
+      }),
+    /workflow path ref chore\/release-pipeline/,
+  );
+  assert.throws(
+    () =>
+      assertCandidateRun({
+        repo: "markrai/fitbaus-trainer",
+        runId: "58",
+        defaultBranch: "main",
+        runner,
+      }),
+    /workflow file \.github\/workflows\/ci\.yml/,
+  );
+});
+
+test("mocked gh: records command-local --repo vectors", () => {
+  const { dir, assets, notes } = makeAssetBundle("fitbaus-pub-argv-");
+  const { state, runner } = createMockGh();
+  uploadGithubReleaseAssets({
+    tag: "v1.0.0",
+    title: "FitBaus Lite 1.0.0",
+    notesFile: notes,
+    artifactDir: dir,
+    assetNames: assets,
+    repo: "markrai/fitbaus-trainer",
+    runner,
+  });
+  assert.ok(state.calls.length > 0);
+  for (const args of state.calls) {
+    assertReleaseGhArgv(args);
+  }
+  assert.deepEqual(state.calls[0].slice(0, 3), ["release", "view", "v1.0.0"]);
+  assert.deepEqual(state.calls[0].slice(-2), ["--repo", "markrai/fitbaus-trainer"]);
+});
+
+test("workflow trusts default branch and requires expected_commit", () => {
+  const yml = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+  assert.match(yml, /environment:\s*release/);
+  assert.match(yml, /DEFAULT_BRANCH:\s*\$\{\{\s*github\.event\.repository\.default_branch\s*\}\}/);
+  assert.match(yml, /test "\$GITHUB_REF" = "refs\/heads\/\$\{DEFAULT_BRANCH\}"/);
+  assert.match(yml, /persist-credentials:\s*false/);
+  assert.match(yml, /GH_REPO:\s*\$\{\{\s*github\.repository\s*\}\}/);
+  assert.match(yml, /expected_commit:/);
+  assert.doesNotMatch(yml, /default:\s*"9847e9f/);
+  assert.match(yml, /candidate_run_id/);
+  assert.match(yml, /assert-candidate-run\.cjs/);
+  assert.match(yml, /validate-release-candidate\.cjs/);
+  assert.match(yml, /assert-tag-source-version\.cjs/);
+  assert.match(yml, /sdkmanager "build-tools;35\.0\.0"/);
+  assert.match(yml, /local\.properties/);
+  assert.match(yml, /env:FITBAUS_APKSIGNER|env:\$\{|sign-apk\.cjs/);
+  assert.match(yml, /--min-sdk 22/);
+  assert.match(yml, /--require-v1/);
+  assert.match(yml, /contents:\s*write/);
+  assert.match(yml, /actions:\s*read/);
+});
+
+function writeVersionJs(dir, version) {
+  const file = path.join(dir, "version.js");
+  fs.writeFileSync(
+    file,
+    `const APP_VERSION = "${version}";\nif (typeof window !== 'undefined') {\n  window.APP_VERSION = APP_VERSION;\n}\n`,
+    "utf8",
+  );
+  return file;
+}
+
+test("assertTagMatchesSourceVersion accepts matching tag and source versions", () => {
+  const dir = tempDir("fitbaus-tagver-ok-");
+  const versionJs = writeVersionJs(dir, "1.0.1");
+  const matched = assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: versionJs });
+  assert.equal(matched.versionName, "1.0.1");
+  assert.equal(matched.versionCode, 10001);
+  assert.equal(matched.tag, "v1.0.1");
+
+  const two = writeVersionJs(dir, "2.0.0");
+  assert.equal(assertTagMatchesSourceVersion({ tag: "v2.0.0", versionJsPath: two }).versionName, "2.0.0");
+  assert.equal(assertTagMatchesSourceVersion({ tag: "v1.0.0", versionJsPath: writeVersionJs(dir, "1.0.0") }).versionCode, 10000);
+});
+
+test("assertTagMatchesSourceVersion rejects mismatched, missing, or malformed source versions", () => {
+  const dir = tempDir("fitbaus-tagver-bad-");
+  const mismatched = writeVersionJs(dir, "1.0.0");
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: mismatched }),
+    /Release version mismatch: tag v1\.0\.1 requires 1\.0\.1, but source version\.js declares 1\.0\.0/,
+  );
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v2.0.0", versionJsPath: writeVersionJs(dir, "1.0.1") }),
+    /tag v2\.0\.0 requires 2\.0\.0, but source version\.js declares 1\.0\.1/,
+  );
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: path.join(dir, "missing-version.js") }),
+    /version file is missing/,
+  );
+  fs.writeFileSync(path.join(dir, "broken.js"), "const APP_VERSION = \"not-a-semver\";\n", "utf8");
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: path.join(dir, "broken.js") }),
+    /major\.minor\.patch/,
+  );
+  fs.writeFileSync(path.join(dir, "empty.js"), "const OTHER = \"1.0.1\";\n", "utf8");
+  assert.throws(
+    () => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: path.join(dir, "empty.js") }),
+    /Could not find APP_VERSION/,
+  );
+});
+
+test("matching expected_commit cannot bypass tag/source version mismatch", () => {
+  const fixture = (() => {
+    const dir = tempDir("fitbaus-tagver-commit-");
+    gitOk(dir, ["init", "-b", "main"]);
+    gitOk(dir, ["config", "user.email", "release-test@example.com"]);
+    gitOk(dir, ["config", "user.name", "Release Test"]);
+    writeVersionJs(dir, "1.0.0");
+    gitOk(dir, ["add", "version.js"]);
+    gitOk(dir, ["commit", "-m", "source still at 1.0.0"]);
+    const commit = gitOk(dir, ["rev-parse", "HEAD"]);
+    gitOk(dir, ["tag", "-a", "v1.0.1", "-m", "wrong source version"]);
+    return { dir, commit, tag: "v1.0.1" };
+  })();
+
+  const resolved = resolveSourceRef({
+    repoDir: fixture.dir,
+    tag: fixture.tag,
+    expectedCommit: fixture.commit,
+    fetch: false,
+  });
+  assert.equal(resolved.commit, fixture.commit);
+  assert.throws(
+    () =>
+      assertTagMatchesSourceVersion({
+        tag: fixture.tag,
+        versionJsPath: path.join(fixture.dir, "version.js"),
+      }),
+    /Release version mismatch/,
+  );
+});
+
+test("expectedVersionFromTag and version-code derivation remain stable", () => {
+  assert.equal(expectedVersionFromTag("v1.0.1"), "1.0.1");
+  assert.equal(expectedVersionFromTag("v2.12.35"), "2.12.35");
+  assert.throws(() => expectedVersionFromTag("1.0.1"), /Cannot derive version from tag/);
+  assert.equal(parseProductVersion("1.0.1", "fixture").versionCode, 10001);
+  assert.equal(parseProductVersion("2.0.0", "fixture").versionCode, 20000);
+});
+
+test("validateReleaseCandidate rejects candidate versionName that disagrees with the tag", () => {
+  const dir = tempDir("fitbaus-cand-ver-");
+  const trainer = path.join(dir, "t.apk");
+  const bridge = path.join(dir, "b.apk");
+  const web = path.join(dir, "w.zip");
+  fs.writeFileSync(trainer, "trainer");
+  fs.writeFileSync(bridge, "bridge");
+  fs.writeFileSync(web, "web");
+  const out = path.join(dir, "public");
+  preparePublicArtifacts({
+    artifactDir: out,
+    versionName: "1.0.0",
+    versionCode: 10000,
+    edition: "lite",
+    sourceTag: "v1.0.1",
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    toolingRef: "tooling",
+    trainerApkPath: trainer,
+    bridgeApkPath: bridge,
+    webZipPath: web,
+    trainerCert: "A".repeat(64),
+    bridgeCert: "B".repeat(64),
+    bridgeQualified: false,
+  });
+  writeReleaseCandidate({
+    artifactDir: out,
+    versionName: "1.0.0",
+    versionCode: 10000,
+    edition: "lite",
+    sourceTag: "v1.0.1",
+    sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+    toolingRef: "tooling",
+    trainerCert: "A".repeat(64),
+    bridgeCert: "B".repeat(64),
+    workflowRunId: "77",
+  });
+  assert.throws(
+    () =>
+      validateReleaseCandidate({
+        candidateDir: out,
+        expectedTag: "v1.0.1",
+        expectedCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
+        expectedEdition: "lite",
+        expectedWorkflowRunId: "77",
+      }),
+    /versionName 1\.0\.0 != 1\.0\.1/,
+  );
+});
+
+test("release inspect runs tag/source version guard before builds and signing", () => {
+  const yml = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+  const guard = yml.indexOf("Require tag matches source version.js");
+  const helper = yml.indexOf("assert-tag-source-version.cjs");
+  const appTests = yml.indexOf("Install and test application source");
+  const bridgeTests = yml.indexOf("Bike Bridge unit tests");
+  const secrets = yml.indexOf("Require signing secrets");
+  assert.ok(guard > 0, "missing inspect version-guard step");
+  assert.ok(helper > guard, "helper must be invoked by the guard step");
+  assert.ok(appTests > helper, "version guard must precede application builds");
+  assert.ok(bridgeTests > helper, "version guard must precede Bridge builds");
+  assert.ok(secrets > helper, "version guard must precede signing");
+  assert.match(
+    yml.slice(guard, helper + 80),
+    /SOURCE_VERSION_JS:\s*\$\{\{\s*github\.workspace\s*\}\}\/source\/version\.js/,
+  );
+});
+
+function parseCiTriggerPolicy(yml) {
+  const onMatch = /^on:\r?\n([\s\S]*?)(?=^permissions:|^jobs:)/m.exec(yml);
+  if (!onMatch) throw new Error("ci.yml is missing a top-level on: block");
+  const block = onMatch[1];
+  const hasPush = /^\s{2}push:\s*$/m.test(block);
+  const hasPullRequest = /^\s{2}pull_request:\s*$/m.test(block);
+  const branches = [];
+  const branchBlock = /branches:\r?\n((?:\s{6}-\s+.+\r?\n)+)/.exec(block);
+  if (branchBlock) {
+    for (const line of branchBlock[1].split(/\r?\n/)) {
+      const m = /^\s{6}-\s+(.+)$/.exec(line);
+      if (m) branches.push(m[1].replace(/^["']|["']$/g, ""));
+    }
+  }
+  const tags = [];
+  const tagBlock = /tags:\r?\n((?:\s{6}-\s+.+\r?\n)+)/.exec(block);
+  if (tagBlock) {
+    for (const line of tagBlock[1].split(/\r?\n/)) {
+      const m = /^\s{6}-\s+(.+)$/.exec(line);
+      if (m) tags.push(m[1].replace(/^["']|["']$/g, ""));
+    }
+  }
+  const unfilteredPush = /^\s{2}push:\s*$/m.test(block) && !/^\s{4}branches:/m.test(block);
+  return {
+    hasPush,
+    hasPullRequest,
+    branches,
+    tags,
+    unfilteredPush,
+    includesFeatureBranchPush: unfilteredPush || branches.some((b) => b.includes("*") && !b.startsWith("v")),
+  };
+}
+
+test("ci workflow triggers avoid duplicate feature-branch push and PR runs", () => {
+  const yml = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const policy = parseCiTriggerPolicy(yml);
+  assert.equal(policy.hasPush, true);
+  assert.equal(policy.hasPullRequest, true);
+  assert.equal(policy.unfilteredPush, false);
+  assert.deepEqual([...policy.branches].sort(), ["lite/1.x", "main"]);
+  assert.deepEqual(policy.tags, ["v*"]);
+  assert.equal(policy.includesFeatureBranchPush, false);
+  assert.doesNotMatch(yml, /^on:\r?\n {2}push:\r?\n {2}pull_request:\r?\n/m);
+  assert.match(yml, /name:\s*Trainer/);
+  assert.match(yml, /name:\s*Native Bike Bridge/);
+  assert.match(yml, /npm run check:version/);
+  assert.match(
+    yml,
+    /:equipment-protocol:test :bridge-app:testReleaseUnitTest :equipment-usb-probe:testDebugUnitTest :arcade:testDebugUnitTest/,
+  );
+  assert.match(yml, /node-version:\s*22/);
+  assert.match(yml, /java-version:\s*21/);
+  assert.match(yml, /permissions:\s*\r?\n\s*contents:\s*read/);
+});

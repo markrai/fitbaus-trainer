@@ -8,7 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.StateListDrawable
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
@@ -19,6 +21,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.fitbaus.arcade.ArcadeCameraInfo
@@ -365,21 +369,74 @@ class NativeBridgeActivity : Activity() {
         rowLp.bottomMargin = dp(4)
         row.layoutParams = rowLp
 
+        val brand = LinearLayout(this)
+        brand.orientation = LinearLayout.HORIZONTAL
+        brand.gravity = Gravity.CENTER_VERTICAL
+
         val title = label("FITBAUS", 16f, PRIMARY)
         title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
         title.letterSpacing = 0.18f
+        title.includeFontPadding = false
         title.isLongClickable = true
         title.setOnLongClickListener {
-            startActivity(Intent(this, PairingActivity::class.java))
+            openPairingSettings()
             true
         }
-        row.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        brand.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val version = label(BridgeUiStateMapper.versionLabel(BuildConfig.VERSION_NAME), 11f, MUTE)
+        version.includeFontPadding = false
+        version.maxLines = 1
+        version.isClickable = false
+        version.isFocusable = false
+        version.isLongClickable = false
+        val versionLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        versionLp.leftMargin = dp(8)
+        brand.addView(version, versionLp)
+
+        row.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         row.addView(tabGroup(ArcadeMode.Dashboard))
         val gamesLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         gamesLp.leftMargin = dp(GAME_TAB_GAP_DP)
         row.addView(tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide), gamesLp)
+
+        val settingsLp = LinearLayout.LayoutParams(dp(SETTINGS_TOUCH_DP), dp(SETTINGS_TOUCH_DP))
+        settingsLp.leftMargin = dp(GAME_TAB_GAP_DP)
+        row.addView(settingsButton(), settingsLp)
         return row
+    }
+
+    private fun settingsButton(): ImageButton {
+        val button = ImageButton(this)
+        button.setImageResource(R.drawable.ic_settings)
+        button.scaleType = ImageView.ScaleType.CENTER
+        button.contentDescription = getString(R.string.open_bike_bridge_settings)
+        val iconPad = dp((SETTINGS_TOUCH_DP - SETTINGS_ICON_DP) / 2)
+        button.setPadding(iconPad, iconPad, iconPad, iconPad)
+        button.background = settingsButtonBackground()
+        button.isClickable = true
+        button.isFocusable = true
+        button.setOnClickListener { openPairingSettings() }
+        return button
+    }
+
+    private fun settingsButtonBackground(): StateListDrawable {
+        val pressed = GradientDrawable()
+        pressed.setColor(DIVIDER)
+        pressed.cornerRadius = dp(4).toFloat()
+        val focused = GradientDrawable()
+        focused.setColor(Color.rgb(64, 64, 64))
+        focused.cornerRadius = dp(4).toFloat()
+        val states = StateListDrawable()
+        states.addState(intArrayOf(android.R.attr.state_pressed), pressed)
+        states.addState(intArrayOf(android.R.attr.state_focused), focused)
+        states.addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+        return states
+    }
+
+    private fun openPairingSettings() {
+        startActivity(Intent(this, PairingActivity::class.java))
     }
 
     private fun tabGroup(vararg modes: ArcadeMode): LinearLayout {
@@ -683,6 +740,8 @@ class NativeBridgeActivity : Activity() {
         const val ARCADE_FLAK_TRACKER_KEY = "flak_tracker"
         const val ARCADE_TRAIL_TRACKER_KEY = "trail_tracker"
         const val GAME_TAB_GAP_DP = 12
+        const val SETTINGS_TOUCH_DP = 48
+        const val SETTINGS_ICON_DP = 24
         val BACKGROUND: Int = Color.BLACK
         val PRIMARY: Int = Color.WHITE
         val LABEL_COLOR: Int = Color.rgb(180, 180, 180)
