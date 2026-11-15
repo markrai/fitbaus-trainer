@@ -10,6 +10,45 @@
   re-upload. See `docs/RELEASE.md`.
 - Local `lite/1.x` maintenance track rooted at `v1.0.0` (no external UVC).
 
+## [2.1.0] - Upcoming (FitBaus Full)
+
+Minor **FitBaus Full** release adding the BIKETRIS arcade game. Product
+version **2.1.0** (`versionCode` **20100**), an in-place upgrade over
+**2.0.0** (`20000`) and published Lite **1.0.1** (`10001`).
+
+### Added
+
+- **BIKETRIS** arcade game in the Bike Bridge (new title-bar tab): a
+  falling-block puzzle on a 10x20 board with all seven pieces, a seeded
+  seven-piece bag, standard rotation states and wall kicks, next-piece
+  preview, ghost landing outline, lock delay, gradual speed-up per level and
+  1-4 line scoring.
+- Head steering: the piece follows the same mirrored face position as BRICKS,
+  with column hysteresis and one-column-at-a-time movement. Gravity pauses
+  when the face is lost and resumes once it is stable again.
+- Wave-to-rotate: a deliberate sideways hand or arm wave rotates the piece
+  clockwise once. Detection is a lightweight luminance-motion detector that
+  reuses the existing face-tracking camera frames, with no extra camera
+  stream and no new model.
+- Touch fallback: drag across the board to move and tap ROTATE to rotate.
+  Without face tracking, a touch starts persistent touch play until the game
+  ends, the mode exits, or the face is stable again.
+- BIKETRIS developer options (long-press the tab): face tracker preset, head
+  sensitivity, wave on/off, wave sensitivity and cooldown, simulated wave
+  event, restart, and a diagnostics overlay with motion-detector timings.
+
+### Changed
+
+- Arcade game tabs sit in a horizontal scroller between the FITBAUS title and
+  the settings gear, so the gear stays visible with the extra tab.
+
+### Notes
+
+- Bike telemetry stays read-only: BIKETRIS never sends resistance or touches
+  the USB session, and pieces fall whether or not you pedal.
+- BIKETRIS and its wave thresholds have not yet been qualified on the
+  physical console.
+
 ## [2.0.0] - Upcoming (FitBaus Full)
 
 Upcoming **FitBaus Full** feature release on the path from

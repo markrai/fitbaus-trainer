@@ -46,6 +46,8 @@ internal class FaceTracker(
         private set
     override var lastBackendStatus: Int = 0
         private set
+    override var lastExtent: Float = Float.NaN
+        private set
 
     override fun losses(reason: LossReason): Int = lossReasons[reason.ordinal]
 
@@ -85,6 +87,7 @@ internal class FaceTracker(
         }
         lastX = noseX
         lastY = noseY
+        lastExtent = HandMapping.clamp01(faces[base + 3] / width)
         smoother.update(HandMapping.clamp01(noseX / width), HandMapping.clamp01(noseY / height), nowNanos)
         return LandmarkPoint(smoother.x, smoother.y, HandMapping.clamp01(faces[base]), acquired)
     }

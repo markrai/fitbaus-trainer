@@ -21,6 +21,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -93,6 +94,7 @@ class NativeBridgeActivity : Activity() {
             arcadeDiagnostics = ""
             bikeMotion.reset()
             cameraSession.updateSettings(trackerSettingsFor(game))
+            cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)
             cameraSession.start()
             arcadeClock.start()
         }
@@ -101,6 +103,7 @@ class NativeBridgeActivity : Activity() {
             arcadeClock.stop()
             cameraSession.stop(reason)
             arcadeContent.trail.pause()
+            arcadeContent.biketris.pause()
         }
     }
     private val modeController = ArcadeModeController(arcadeHooks)
@@ -245,6 +248,21 @@ class NativeBridgeActivity : Activity() {
             )
             return
         }
+        if (modeController.mode == ArcadeMode.Biketris) {
+            arcadeContent.biketris.render(
+                handInput.latest(now),
+                cameraSession.state(),
+                cameraSession.failureReason(),
+                connected = telemetry?.connected == true,
+                initialized = telemetry?.initialized == true,
+                rpm = telemetry?.rpm?.value,
+                rpmCurrent = telemetry?.rpm?.current == true,
+                rpmObservedAt = telemetry?.rpm?.observedAt,
+                diagnostics = arcadeDiagnosticsText(now, info),
+                cameraInfo = info,
+            )
+            return
+        }
         val position = handInput.latest(now)
         val status = ArcadeStatusResolver.resolve(
             cameraSession.state(),
@@ -337,11 +355,13 @@ class NativeBridgeActivity : Activity() {
         arcadeContent.playground.faceControl = savedTrackerSettings().mode == ArcadeTrackerMode.Face
         arcadeContent.math.fingers = cameraSession.fingers
         arcadeContent.math.preview = cameraSession.preview
+        arcadeContent.biketris.gestures = cameraSession.gestures
         val overlay = getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getBoolean(ARCADE_OVERLAY_KEY, false)
         arcadeContent.playground.diagnosticsOverlay = overlay
         arcadeContent.math.diagnosticsOverlay = overlay
         arcadeContent.flak.diagnosticsOverlay = overlay
         arcadeContent.trail.diagnosticsOverlay = overlay
+        arcadeContent.biketris.diagnosticsOverlay = overlay
         contentHost.addView(
             arcadeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
@@ -389,12 +409,22 @@ class NativeBridgeActivity : Activity() {
         versionLp.leftMargin = dp(8)
         brand.addView(version, versionLp)
 
-        row.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(brand, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
-        row.addView(tabGroup(ArcadeMode.Dashboard))
+        val tabs = LinearLayout(this)
+        tabs.orientation = LinearLayout.HORIZONTAL
+        tabs.gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        tabs.addView(tabGroup(ArcadeMode.Dashboard))
         val gamesLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         gamesLp.leftMargin = dp(GAME_TAB_GAP_DP)
-        row.addView(tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide), gamesLp)
+        tabs.addView(tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris), gamesLp)
+        val tabScroller = HorizontalScrollView(this)
+        tabScroller.isFillViewport = true
+        tabScroller.isHorizontalScrollBarEnabled = false
+        tabScroller.addView(tabs, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val scrollerLp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        scrollerLp.leftMargin = dp(GAME_TAB_GAP_DP)
+        row.addView(tabScroller, scrollerLp)
 
         val settingsLp = LinearLayout.LayoutParams(dp(SETTINGS_TOUCH_DP), dp(SETTINGS_TOUCH_DP))
         settingsLp.leftMargin = dp(GAME_TAB_GAP_DP)
@@ -476,19 +506,35 @@ class NativeBridgeActivity : Activity() {
     private fun savedTrailSettings(): ArcadeTrackerSettings =
         ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_TRAIL_TRACKER_KEY, null))
 
+    private fun savedBiketrisSettings(): ArcadeTrackerSettings =
+        ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_BIKETRIS_TRACKER_KEY, null))
+
     private fun trackerSettingsFor(game: ArcadeMode): ArcadeTrackerSettings = when (game) {
         ArcadeMode.Math -> savedMathSettings()
         ArcadeMode.Flak -> savedFlakSettings()
         ArcadeMode.TrailRide -> savedTrailSettings()
+        ArcadeMode.Biketris -> savedBiketrisSettings()
         else -> savedTrackerSettings()
     }
 
-    // FLAK RUN and TRAIL RIDE share the face presets but keep separate tracker preferences.
+    private fun faceGameOptions(game: ArcadeMode): List<String> = when (game) {
+        ArcadeMode.TrailRide -> arcadeContent.trail.developerOptions()
+        ArcadeMode.Biketris -> arcadeContent.biketris.developerOptions()
+        else -> arcadeContent.flak.developerOptions()
+    }
+
+    private fun selectFaceGameOption(game: ArcadeMode, option: Int) {
+        when (game) {
+            ArcadeMode.TrailRide -> arcadeContent.trail.selectDeveloperOption(option)
+            ArcadeMode.Biketris -> arcadeContent.biketris.selectDeveloperOption(option)
+            else -> arcadeContent.flak.selectDeveloperOption(option)
+        }
+    }
+
     private fun showFaceGamePicker(game: ArcadeMode) {
-        val trail = game == ArcadeMode.TrailRide
         val presets = ArcadeTrackerSettings.FACE_PRESETS
-        val options = if (trail) arcadeContent.trail.developerOptions() else arcadeContent.flak.developerOptions()
-        val overlay = if (trail) arcadeContent.trail.diagnosticsOverlay else arcadeContent.flak.diagnosticsOverlay
+        val options = faceGameOptions(game)
+        val overlay = arcadeContent.playground.diagnosticsOverlay
         val current = presets.indexOf(trackerSettingsFor(game))
         val labels = presets.map { (if (it == presets.getOrNull(current)) "[x] " else "[ ] ") + it.label } + options +
             (if (overlay) "Diagnostics overlay: ON (tap to hide)" else "Diagnostics overlay: OFF (tap to show)")
@@ -499,8 +545,7 @@ class NativeBridgeActivity : Activity() {
                 when {
                     which < presets.size -> applyTrackerSettings(game, presets[which])
                     which < presets.size + options.size -> {
-                        val option = which - presets.size
-                        if (trail) arcadeContent.trail.selectDeveloperOption(option) else arcadeContent.flak.selectDeveloperOption(option)
+                        selectFaceGameOption(game, which - presets.size)
                         showFaceGamePicker(game)
                     }
                     else -> setDiagnosticsOverlay(!overlay)
@@ -511,7 +556,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     private fun showTrackerPicker(game: ArcadeMode) {
-        if (game == ArcadeMode.Flak || game == ArcadeMode.TrailRide) {
+        if (game == ArcadeMode.Flak || game == ArcadeMode.TrailRide || game == ArcadeMode.Biketris) {
             showFaceGamePicker(game)
             return
         }
@@ -535,6 +580,7 @@ class NativeBridgeActivity : Activity() {
         arcadeContent.math.diagnosticsOverlay = enabled
         arcadeContent.flak.diagnosticsOverlay = enabled
         arcadeContent.trail.diagnosticsOverlay = enabled
+        arcadeContent.biketris.diagnosticsOverlay = enabled
     }
 
     private fun applyTrackerSettings(game: ArcadeMode, next: ArcadeTrackerSettings) {
@@ -542,6 +588,7 @@ class NativeBridgeActivity : Activity() {
             ArcadeMode.Math -> ARCADE_MATH_TRACKER_KEY
             ArcadeMode.Flak -> ARCADE_FLAK_TRACKER_KEY
             ArcadeMode.TrailRide -> ARCADE_TRAIL_TRACKER_KEY
+            ArcadeMode.Biketris -> ARCADE_BIKETRIS_TRACKER_KEY
             else -> ARCADE_TRACKER_KEY
         }
         getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).edit().putString(key, next.key).apply()
@@ -734,6 +781,7 @@ class NativeBridgeActivity : Activity() {
         const val ARCADE_MATH_TRACKER_KEY = "math_tracker"
         const val ARCADE_FLAK_TRACKER_KEY = "flak_tracker"
         const val ARCADE_TRAIL_TRACKER_KEY = "trail_tracker"
+        const val ARCADE_BIKETRIS_TRACKER_KEY = "biketris_tracker"
         const val GAME_TAB_GAP_DP = 12
         const val SETTINGS_TOUCH_DP = 48
         const val SETTINGS_ICON_DP = 24

@@ -121,7 +121,7 @@ class ArcadeModeTest {
         hooks.onDeactivate = { active -= 1 }
         val controller = ArcadeModeController(hooks)
         controller.onHostResume()
-        for (mode in listOf(ArcadeMode.TrailRide, ArcadeMode.Bricks, ArcadeMode.TrailRide, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide)) {
+        for (mode in listOf(ArcadeMode.TrailRide, ArcadeMode.Bricks, ArcadeMode.Biketris, ArcadeMode.TrailRide, ArcadeMode.Math, ArcadeMode.Biketris, ArcadeMode.Flak, ArcadeMode.TrailRide)) {
             controller.select(mode)
         }
         controller.onHostDestroy()
@@ -148,13 +148,80 @@ class ArcadeModeTest {
     }
 
     @Test
+    fun switchingToBiketrisStopsThePreviousPipelineFirstAndBack() {
+        val hooks = RecordingHooks()
+        val controller = ArcadeModeController(hooks)
+        controller.onHostResume()
+        controller.select(ArcadeMode.TrailRide)
+        controller.select(ArcadeMode.Biketris)
+        controller.onHostPause()
+        controller.onHostResume()
+        controller.select(ArcadeMode.Bricks)
+        assertEquals(
+            listOf(
+                "show:TrailRide", "activate:TrailRide", "deactivate:ExitArcade", "show:Biketris", "activate:Biketris",
+                "deactivate:HostPaused", "activate:Biketris", "deactivate:ExitArcade", "show:Bricks", "activate:Bricks",
+            ),
+            hooks.events(),
+        )
+    }
+
+    @Test
+    fun biketrisUsesItsOwnFaceTrackerAndWaveDetectionOnlyWhileSelected() {
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(source.contains("ArcadeMode.Biketris -> savedBiketrisSettings()"))
+        assertTrue(source.contains("ArcadeMode.Biketris -> ARCADE_BIKETRIS_TRACKER_KEY"))
+        assertTrue(source.contains("const val ARCADE_BIKETRIS_TRACKER_KEY = \"biketris_tracker\""))
+        assertTrue(source.contains("ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_BIKETRIS_TRACKER_KEY, null))"))
+        for (other in listOf("ArcadeMode.Math -> savedMathSettings()", "ArcadeMode.Flak -> savedFlakSettings()", "ArcadeMode.TrailRide -> savedTrailSettings()", "else -> savedTrackerSettings()")) {
+            assertTrue(source.contains(other), other)
+        }
+        val hooksStart = source.indexOf("object : ArcadeModeHooks")
+        val hooksBody = source.substring(hooksStart, source.indexOf("private val modeController", hooksStart))
+        assertTrue(hooksBody.contains("cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)"))
+        assertTrue(hooksBody.indexOf("enableWaveGestures") < hooksBody.indexOf("cameraSession.start()"), "configured before the session starts")
+        assertTrue(hooksBody.contains("arcadeContent.biketris.pause()"))
+        assertEquals(1, Regex("""ArcadeCameraSession\.forActivity\(""").findAll(source).count(), "one camera session for every game")
+        assertTrue(source.contains("arcadeContent.biketris.gestures = cameraSession.gestures"))
+        assertTrue(source.contains("game == ArcadeMode.Flak || game == ArcadeMode.TrailRide || game == ArcadeMode.Biketris"), "long-press opens the face-game developer menu")
+    }
+
+    @Test
+    fun biketrisBranchComesBeforeTheBricksFallbackAndStaysReadOnly() {
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val start = source.indexOf("if (modeController.mode == ArcadeMode.Biketris) {")
+        val fallback = source.indexOf("val position = handInput.latest(now)")
+        assertTrue(start > 0 && start < fallback)
+        val branch = source.substring(start, fallback)
+        assertTrue(branch.contains("arcadeContent.biketris.render("))
+        for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager", "session()", "startService")) {
+            assertFalse(branch.contains(forbidden), forbidden)
+        }
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ExerciseHud.kt").readText()
+        assertTrue(content.contains("biketris.visibility = if (game == ArcadeMode.Biketris) VISIBLE else GONE"))
+        assertTrue(content.contains("addView(hud, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))"), "HUD strip unchanged above every game")
+    }
+
+    @Test
+    fun gameTabsScrollWhileTheSettingsGearStaysFixed() {
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val row = source.substring(source.indexOf("private fun buildTitleRow()"), source.indexOf("private fun settingsButton()"))
+        assertTrue(row.contains("HorizontalScrollView(this)"))
+        assertTrue(row.contains("tabScroller.isFillViewport = true"))
+        assertTrue(row.contains("LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)"), "tabs take only the space left between brand and gear")
+        assertTrue(row.indexOf("row.addView(tabScroller") < row.indexOf("row.addView(settingsButton()"), "gear is a direct row child after the tabs")
+        assertTrue(row.contains("LinearLayout.LayoutParams(dp(SETTINGS_TOUCH_DP), dp(SETTINGS_TOUCH_DP))"), "fixed 48 dp gear target")
+    }
+
+    @Test
     fun onlyGameModesActivate() {
         assertFalse(ArcadeMode.Dashboard.isGame)
         assertTrue(ArcadeMode.Bricks.isGame)
         assertTrue(ArcadeMode.Math.isGame)
         assertTrue(ArcadeMode.Flak.isGame)
         assertTrue(ArcadeMode.TrailRide.isGame)
-        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN", "TRAIL RIDE"), ArcadeMode.values().map { it.caption })
+        assertTrue(ArcadeMode.Biketris.isGame)
+        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN", "TRAIL RIDE", "BIKETRIS"), ArcadeMode.values().map { it.caption })
     }
 
     @Test
@@ -207,7 +274,7 @@ class ArcadeModeTest {
             assertFalse(hooksBody.contains(forbidden), forbidden)
         }
         assertTrue(source.contains("tabGroup(ArcadeMode.Dashboard)"))
-        assertTrue(source.contains("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide)"))
+        assertTrue(source.contains("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris)"))
         assertFalse(source.contains("\"ARCADE\""))
         assertNotNull(Regex("""setOnLongClickListener""").find(source), "long-press FITBAUS still opens pairing")
         assertTrue(source.contains("PairingActivity::class.java"))
@@ -218,7 +285,7 @@ class ArcadeModeTest {
         assertTrue(source.contains("R.string.open_bike_bridge_settings"), "settings gear has accessible content description")
         assertTrue(source.contains("settingsButton()"), "header exposes a dedicated settings control")
         assertTrue(
-            source.indexOf("settingsButton()") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide)"),
+            source.indexOf("settingsButton()") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris)"),
             "settings gear stays after navigation tabs",
         )
     }

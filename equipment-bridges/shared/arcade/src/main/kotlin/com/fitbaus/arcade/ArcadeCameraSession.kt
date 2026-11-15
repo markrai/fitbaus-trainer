@@ -146,6 +146,16 @@ public class ArcadeCameraSession internal constructor(
 
     public val fingers: FingerCountInput = FingerCountInput()
 
+    public val gestures: WaveGestureInput = WaveGestureInput()
+
+    @Volatile
+    private var waveGestures = false
+
+    /** Adds BIKETRIS wave detection to the next Face session; it shares that session's frames. */
+    public fun enableWaveGestures(enabled: Boolean) {
+        waveGestures = enabled
+    }
+
     public fun state(): CameraState {
         val current = state
         if (current == CameraState.Ready && sink?.failure != null) return CameraState.Unavailable
@@ -253,6 +263,7 @@ public class ArcadeCameraSession internal constructor(
         input.clearCamera()
         input.resetTiming()
         fingers.clear()
+        gestures.clear()
         preview.clear()
         if (reason == ArcadeStopReason.ExitArcade) denied = false
         failure = null
@@ -331,6 +342,7 @@ public class ArcadeCameraSession internal constructor(
                 gate = nativeGate,
                 mode = ArcadeTrackerMode.Face,
                 trackerFactory = { models, events -> FaceTracker(models, FaceConfig(), events) },
+                motion = if (waveGestures) WaveMotionProcessor(gestures, gestures.generation()) else null,
             )
         }
         return LandmarkFrameSink(

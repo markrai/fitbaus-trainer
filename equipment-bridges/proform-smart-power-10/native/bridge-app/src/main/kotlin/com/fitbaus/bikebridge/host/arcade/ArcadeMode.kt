@@ -10,6 +10,7 @@ internal enum class ArcadeMode(val caption: String) {
     Math("MATH"),
     Flak("FLAK RUN"),
     TrailRide("TRAIL RIDE"),
+    Biketris("BIKETRIS"),
     ;
 
     val isGame: Boolean

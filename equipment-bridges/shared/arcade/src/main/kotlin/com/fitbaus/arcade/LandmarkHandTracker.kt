@@ -37,6 +37,9 @@ internal interface NativeFrameTracker {
     val consecutiveBackendErrors: Int
     val lastBackendStatus: Int
 
+    val lastExtent: Float
+        get() = Float.NaN
+
     fun losses(reason: LossReason): Int
 
     fun process(frame: ByteArray, width: Int, height: Int, nowNanos: Long): LandmarkPoint?
