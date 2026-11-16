@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { spawnSync } = require("child_process");
+const { resolveRelease } = require("./edition.cjs");
 
 function fail(message) {
   throw new Error(message);
@@ -79,15 +80,7 @@ function normalizeCommitSha(value) {
 }
 
 function publicArtifactNames(versionName, edition) {
-  if (edition !== "lite") fail(`Unsupported edition: ${edition}`);
-  return {
-    trainerApk: `fitbaus-trainer-android-${versionName}.apk`,
-    bridgeApk: `fitbaus-bikebridge-lite-${versionName}.apk`,
-    webZip: `fitbaus-trainer-web-${versionName}.zip`,
-    checksums: "SHA256SUMS.txt",
-    manifest: "ARTIFACTS.md",
-    candidate: "release-candidate.json",
-  };
+  return { ...resolveRelease({ edition, versionName }).artifacts };
 }
 
 module.exports = {

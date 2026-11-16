@@ -18,10 +18,11 @@ on:
         required: true
         type: string
       edition:
-        description: "Product edition for public artifact naming."
+        description: "Product edition: lite (1.x.x, lite/1.x) or full (2.x.x, main). Must match the tag's major version."
         type: choice
         options:
           - lite
+          - full
         default: lite
       mode:
         description: "inspect = build signed candidate. publish = attach/publish exact candidate from a prior inspect run."
@@ -89,6 +90,10 @@ jobs:
             echo "mode=publish requires candidate_run_id from a prior inspect run"
             exit 1
           fi
+          case "$EDITION" in
+            lite|full) ;;
+            *) echo "Invalid edition: $EDITION"; exit 1 ;;
+          esac
 
       - name: Checkout release tooling (default branch)
         uses: actions/checkout@v4
@@ -100,6 +105,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Validate edition against release tag
+        id: edition
+        working-directory: tooling
+        run: |
+          set -euo pipefail
+          node scripts/release/edition.cjs --edition "$EDITION" --tag "$RELEASE_TAG"
+          title="$(node scripts/release/edition.cjs --edition "$EDITION" --tag "$RELEASE_TAG" --field title)"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
 
       - name: Resolve and verify source tag
         id: ref
@@ -145,7 +159,8 @@ jobs:
           set -euo pipefail
           node scripts/release/assert-tag-source-version.cjs \
             --tag "$RELEASE_TAG" \
-            --version-js "$SOURCE_VERSION_JS"
+            --version-js "$SOURCE_VERSION_JS" \
+            --edition "$EDITION"
 
       - name: Cache npm for application source
         if: ${{ github.event.inputs.mode == 'inspect' }}
@@ -519,21 +534,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CAND_DIR: ${{ steps.candidate.outputs.dir }}
+          EDITION_TITLE: ${{ steps.edition.outputs.title }}
         run: |
           set -euo pipefail
           command -v gh >/dev/null
           cand="$CAND_DIR/release-candidate.json"
           version="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).versionName)" "$cand")"
+          plan=(node "$TOOLING_DIR/scripts/release/edition.cjs" --edition "$EDITION" --version-name "$version" --tag "$RELEASE_TAG")
+          title="$("${plan[@]}" --field title)"
+          test -n "$title"
+          test "$title" = "$EDITION_TITLE"
+          asset_args=()
+          while IFS= read -r asset; do
+            asset_args+=(--asset "$asset")
+          done < <("${plan[@]}" --field assets)
+          test "${#asset_args[@]}" -eq 12
           notes="$CAND_DIR/ARTIFACTS.md"
           node "$TOOLING_DIR/scripts/release/upload-github-release-assets.cjs" \
             --repo "$GH_REPO" \
             --tag "$RELEASE_TAG" \
-            --title "FitBaus Lite $version" \
+            --title "$title" \
             --notes "$notes" \
             --dir "$CAND_DIR" \
-            --asset "fitbaus-trainer-android-$version.apk" \
-            --asset "fitbaus-bikebridge-lite-$version.apk" \
-            --asset "fitbaus-trainer-web-$version.zip" \
-            --asset "SHA256SUMS.txt" \
-            --asset "ARTIFACTS.md" \
-            --asset "release-candidate.json"
+            "${asset_args[@]}"

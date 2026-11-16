@@ -32,6 +32,7 @@ const { writeReleaseCandidate } = require("../scripts/release/write-release-cand
 const {
   validateReleaseCandidate,
   expectedVersionFromTag,
+  parseSha256Sums,
 } = require("../scripts/release/validate-release-candidate.cjs");
 const { assertTagMatchesSourceVersion } = require("../scripts/release/assert-tag-source-version.cjs");
 const { parseProductVersion } = require("../scripts/fitbaus-version.cjs");
@@ -1597,4 +1598,753 @@ test("ci workflow triggers avoid duplicate feature-branch push and PR runs", () 
   assert.match(yml, /node-version:\s*22/);
   assert.match(yml, /java-version:\s*21/);
   assert.match(yml, /permissions:\s*\r?\n\s*contents:\s*read/);
+});
+
+const {
+  EDITIONS,
+  PACKAGES,
+  resolveEdition,
+  resolveRelease,
+  releaseAssetNames,
+} = require("../scripts/release/edition.cjs");
+
+const SIGNING_POLICY_PATH = path.join(root, ".github/release/signing-policy.json");
+const SIGNING_POLICY = JSON.parse(fs.readFileSync(SIGNING_POLICY_PATH, "utf8"));
+const TRAINER_PIN = SIGNING_POLICY.packages["com.markrai.fitbaus.trainer"].expectedCertSha256;
+const BRIDGE_PIN = SIGNING_POLICY.packages["com.fitbaus.bikebridge"].expectedCertSha256;
+const FULL_COMMIT = "a588c45783c55c0c102c4061fa7d8176d33eb314";
+const LITE_COMMIT = "cf91c7d32fe54315cb5e1ec5488e8f477abe9a50";
+
+const PUBLISHED_LITE_1_0_1_ARTIFACTS_MD = [
+  "# FitBaus 1.0.1 (lite) distribution",
+  "",
+  "These are the public installer artifacts for tag `v1.0.1` (commit `cf91c7d32fe54315cb5e1ec5488e8f477abe9a50`).",
+  "Release tooling revision: `8815635bc1032a64bbb1d98f476f032991760372`.",
+  "",
+  "Product version: **1.0.1** (versionCode **10001**)",
+  "Edition: **FitBaus Lite 1.0.1** — compact edition for supported, storage-constrained",
+  "ProForm Smart Power 10.0 consoles. Lite is maintained on `lite/1.x` without external UVC webcam support.",
+  "",
+  "| File | Package / contents | Notes |",
+  "| --- | --- | --- |",
+  "| `fitbaus-trainer-android-1.0.1.apk` | `com.markrai.fitbaus.trainer` | Release-signed Trainer Android APK |",
+  "| `fitbaus-bikebridge-lite-1.0.1.apk` | `com.fitbaus.bikebridge` | Release-signed production Bike Bridge (Lite filename; same package ID) |",
+  "| `fitbaus-trainer-web-1.0.1.zip` | static web/PWA | Host on HTTPS; not signed |",
+  "| `SHA256SUMS.txt` | SHA-256 | Verify downloads |",
+  "| `ARTIFACTS.md` | this file | |",
+  "",
+  "Trainer certificate SHA-256: `38A830D320081E59BBDA44CD52BFEF10D6CD7473E31281A27C0D010CF4FE8DAA`",
+  "Bike Bridge certificate SHA-256: `5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C`",
+  "",
+  "**Candidate provenance** (inspect/build): signed binaries and hashes are recorded in",
+  "`release-candidate.json`. That file identifies the exact Bridge APK (`apkSha256`) for",
+  "console acceptance and later publication checks. Candidate provenance is not the same as",
+  "publication qualification.",
+  "",
+  "**Physical qualification** is a separate publication gate recorded in",
+  "`.github/release/physical-qualification.json`. `mode=publish` verifies that binding against",
+  "this exact Bridge APK before undrafting the GitHub Release. A published Release means that",
+  "gate passed for these binaries; an inspect candidate alone does not.",
+  "",
+  "End users should install only from a **published** GitHub Release. Users never handle signing keys.",
+  "",
+  "Unsigned APKs, staging package IDs (`com.fitbaus.bikebridge.native`), and debug-signed builds",
+  "are engineering inspection outputs only — not the normal public installer selection.",
+  "",
+].join("\n");
+
+function buildEditionCandidate({
+  edition,
+  versionName,
+  sourceTag = `v${versionName}`,
+  sourceCommit = edition === "full" ? FULL_COMMIT : LITE_COMMIT,
+  workflowRunId = "5150",
+  toolingRef = "tooling-sha",
+}) {
+  const dir = tempDir(`fitbaus-${edition}-cand-`);
+  const trainer = path.join(dir, "trainer-signed.apk");
+  const bridge = path.join(dir, "bridge-production-signed.apk");
+  const web = path.join(dir, "web.zip");
+  fs.writeFileSync(trainer, `trainer-${edition}-${versionName}`);
+  fs.writeFileSync(bridge, `bridge-${edition}-${versionName}`);
+  fs.writeFileSync(web, `web-${edition}-${versionName}`);
+  const out = path.join(dir, "public");
+  const versionCode = resolveRelease({ edition, versionName }).versionCode;
+  const names = preparePublicArtifacts({
+    artifactDir: out,
+    versionName,
+    versionCode,
+    edition,
+    sourceTag,
+    sourceCommit,
+    toolingRef,
+    trainerApkPath: trainer,
+    bridgeApkPath: bridge,
+    webZipPath: web,
+    trainerCert: TRAINER_PIN,
+    bridgeCert: BRIDGE_PIN,
+    bridgeQualified: false,
+  });
+  const candidate = writeReleaseCandidate({
+    artifactDir: out,
+    versionName,
+    versionCode,
+    edition,
+    sourceTag,
+    sourceCommit,
+    toolingRef,
+    trainerCert: TRAINER_PIN,
+    bridgeCert: BRIDGE_PIN,
+    workflowRunId,
+  });
+  const expectations = {
+    candidateDir: out,
+    expectedTag: sourceTag,
+    expectedCommit: sourceCommit,
+    expectedEdition: edition,
+    expectedWorkflowRunId: workflowRunId,
+  };
+  return { out, names, candidate, expectations };
+}
+
+function rewriteSums(out, updates) {
+  const sumsPath = path.join(out, "SHA256SUMS.txt");
+  const lines = fs
+    .readFileSync(sumsPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [hash, name] = line.split("  ");
+      if (Object.prototype.hasOwnProperty.call(updates, name)) {
+        const next = updates[name];
+        return next == null ? null : `${next.hash}  ${next.name || name}`;
+      }
+      return `${hash}  ${name}`;
+    })
+    .filter(Boolean);
+  fs.writeFileSync(sumsPath, `${lines.join("\n")}\n`);
+}
+
+function tamperCandidate(out, mutate) {
+  const candidatePath = path.join(out, "release-candidate.json");
+  const candidate = JSON.parse(fs.readFileSync(candidatePath, "utf8"));
+  mutate(candidate);
+  fs.writeFileSync(candidatePath, `${JSON.stringify(candidate, null, 2)}\n`);
+  rewriteSums(out, { "release-candidate.json": { hash: sha256File(candidatePath) } });
+}
+
+function writeQualificationFixture(records) {
+  const file = path.join(tempDir("fitbaus-qual-fixture-"), "physical-qualification.json");
+  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 2, records }, null, 2));
+  return file;
+}
+
+test("edition policy maps Lite to 1.x.x and Full to 2.x.x with shared identities", () => {
+  const lite = resolveRelease({ edition: "lite", versionName: "1.0.1" });
+  assert.equal(lite.title, "FitBaus Lite 1.0.1");
+  assert.equal(lite.tag, "v1.0.1");
+  assert.equal(lite.versionCode, 10001);
+  assert.equal(lite.branch, "lite/1.x");
+  const full = resolveRelease({ edition: "full", tag: "v2.1.0" });
+  assert.equal(full.title, "FitBaus Full 2.1.0");
+  assert.equal(full.versionName, "2.1.0");
+  assert.equal(full.versionCode, 20100);
+  assert.equal(full.tag, "v2.1.0");
+  assert.equal(full.branch, "main");
+  assert.equal(resolveRelease({ edition: "full", versionName: "2.12.35" }).versionCode, 21235);
+  assert.deepEqual(Object.keys(EDITIONS).sort(), ["full", "lite"]);
+  assert.equal(PACKAGES.trainer.applicationId, "com.markrai.fitbaus.trainer");
+  assert.equal(PACKAGES.bridge.applicationId, "com.fitbaus.bikebridge");
+  assert.equal(PACKAGES.bridge.minSdk, 22);
+  assert.equal(resolveEdition("full").major, 2);
+});
+
+test("edition policy rejects unknown editions, cross-major versions, and tag mismatches", () => {
+  for (const edition of ["", "Full", "LITE", "pro", " lite", undefined, null, "lite/1.x", "__proto__", "toString"]) {
+    assert.throws(() => resolveRelease({ edition, versionName: "1.0.1" }), /Unsupported edition/, String(edition));
+  }
+  assert.throws(() => resolveRelease({ edition: "lite", versionName: "2.1.0" }), /FitBaus Lite requires major version 1/);
+  assert.throws(() => resolveRelease({ edition: "full", versionName: "1.0.1" }), /FitBaus Full requires major version 2/);
+  assert.throws(() => resolveRelease({ edition: "full", versionName: "3.0.0" }), /FitBaus Full requires major version 2/);
+  assert.throws(() => resolveRelease({ edition: "lite", versionName: "0.10.14" }), /FitBaus Lite requires major version 1/);
+  assert.throws(() => resolveRelease({ edition: "full", versionName: "2.1" }), /major\.minor\.patch/);
+  assert.throws(() => resolveRelease({ edition: "full", versionName: "2.1.0-rc1" }), /major\.minor\.patch/);
+  assert.throws(() => resolveRelease({ edition: "full", versionName: "2.1.0", tag: "v2.1.1" }), /requires version 2\.1\.1/);
+  assert.throws(() => resolveRelease({ edition: "full", tag: "2.1.0" }), /Cannot derive version from tag/);
+  assert.throws(() => resolveRelease({ edition: "full" }), /versionName or tag is required/);
+});
+
+test("public artifact names: Lite 1.0.1 unchanged and Full 2.1.0 canonical", () => {
+  assert.deepEqual(publicArtifactNames("1.0.1", "lite"), {
+    trainerApk: "fitbaus-trainer-android-1.0.1.apk",
+    bridgeApk: "fitbaus-bikebridge-lite-1.0.1.apk",
+    webZip: "fitbaus-trainer-web-1.0.1.zip",
+    checksums: "SHA256SUMS.txt",
+    manifest: "ARTIFACTS.md",
+    candidate: "release-candidate.json",
+  });
+  const full = publicArtifactNames("2.1.0", "full");
+  assert.deepEqual(full, {
+    trainerApk: "fitbaus-trainer-android-2.1.0.apk",
+    bridgeApk: "fitbaus-bikebridge-full-2.1.0.apk",
+    webZip: "fitbaus-trainer-web-2.1.0.zip",
+    checksums: "SHA256SUMS.txt",
+    manifest: "ARTIFACTS.md",
+    candidate: "release-candidate.json",
+  });
+  assert.deepEqual(releaseAssetNames(full), [
+    "fitbaus-trainer-android-2.1.0.apk",
+    "fitbaus-bikebridge-full-2.1.0.apk",
+    "fitbaus-trainer-web-2.1.0.zip",
+    "SHA256SUMS.txt",
+    "ARTIFACTS.md",
+    "release-candidate.json",
+  ]);
+  assert.throws(() => publicArtifactNames("2.1.0", "lite"), /FitBaus Lite requires major version 1/);
+  assert.throws(() => publicArtifactNames("1.0.1", "full"), /FitBaus Full requires major version 2/);
+  assert.throws(() => publicArtifactNames("2.1.0", "beta"), /Unsupported edition/);
+});
+
+test("edition CLI resolves the workflow's release title and assets and fails closed", () => {
+  const cli = path.join(root, "scripts/release/edition.cjs");
+  const run = (args) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
+  const title = run(["--edition", "full", "--tag", "v2.1.0", "--field", "title"]);
+  assert.equal(title.status, 0, title.stderr);
+  assert.equal(title.stdout, "FitBaus Full 2.1.0\n");
+  const assets = run(["--edition", "full", "--version-name", "2.1.0", "--tag", "v2.1.0", "--field", "assets"]);
+  assert.equal(assets.status, 0, assets.stderr);
+  assert.deepEqual(assets.stdout.trim().split("\n"), releaseAssetNames(publicArtifactNames("2.1.0", "full")));
+  const liteTitle = run(["--edition", "lite", "--tag", "v1.0.1", "--field", "title"]);
+  assert.equal(liteTitle.stdout, "FitBaus Lite 1.0.1\n");
+  const liteBridge = run(["--edition", "lite", "--version-name", "1.0.1", "--field", "bridgeApk"]);
+  assert.equal(liteBridge.stdout, "fitbaus-bikebridge-lite-1.0.1.apk\n");
+  const plan = JSON.parse(run(["--edition", "full", "--tag", "v2.1.0"]).stdout);
+  assert.equal(plan.versionCode, 20100);
+  assert.equal(plan.artifacts.bridgeApk, "fitbaus-bikebridge-full-2.1.0.apk");
+  for (const bad of [
+    ["--edition", "lite", "--tag", "v2.1.0"],
+    ["--edition", "full", "--tag", "v1.0.1"],
+    ["--edition", "pro", "--tag", "v2.1.0"],
+    ["--edition", "full", "--version-name", "2.1.0", "--tag", "v2.0.0"],
+    ["--edition", "full", "--tag", "v2.1.0", "--field", "secrets"],
+    ["--tag", "v2.1.0"],
+  ]) {
+    const result = run(bad);
+    assert.notEqual(result.status, 0, bad.join(" "));
+    assert.equal(result.stdout, "", bad.join(" "));
+  }
+});
+
+test("Lite 1.0.1 ARTIFACTS.md is byte-identical to the published release notes", () => {
+  const { out } = buildEditionCandidate({ edition: "lite", versionName: "1.0.1" });
+  const dir = path.join(out, "regen");
+  const { writeArtifactsMarkdown } = require("../scripts/release/prepare-public-artifacts.cjs");
+  writeArtifactsMarkdown({
+    artifactDir: dir,
+    versionName: "1.0.1",
+    versionCode: 10001,
+    edition: "lite",
+    sourceTag: "v1.0.1",
+    sourceCommit: LITE_COMMIT,
+    toolingRef: "8815635bc1032a64bbb1d98f476f032991760372",
+    trainerCert: TRAINER_PIN,
+    bridgeCert: BRIDGE_PIN,
+    bridgeQualified: false,
+  });
+  assert.equal(fs.readFileSync(path.join(dir, "ARTIFACTS.md"), "utf8"), PUBLISHED_LITE_1_0_1_ARTIFACTS_MD);
+});
+
+test("Full 2.1.0 ARTIFACTS.md describes the Full edition without claiming qualification", () => {
+  const { out, names } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  const md = fs.readFileSync(path.join(out, names.manifest), "utf8");
+  assert.match(md, /^# FitBaus 2\.1\.0 \(full\) distribution$/m);
+  assert.match(md, /Product version: \*\*2\.1\.0\*\* \(versionCode \*\*20100\*\*\)/);
+  assert.match(md, /Edition: \*\*FitBaus Full 2\.1\.0\*\* — ongoing feature edition/);
+  assert.match(md, /external USB \(UVC\) webcam support/);
+  assert.match(md, /native YouTube playback/);
+  assert.match(md, /installs over a\nLite 1\.x installation without uninstalling or clearing Bike Bridge pairing/);
+  assert.match(md, /\| `fitbaus-bikebridge-full-2\.1\.0\.apk` \| `com\.fitbaus\.bikebridge` \| Release-signed production Bike Bridge \(Full filename; same package ID\) \|/);
+  assert.match(md, /\| `fitbaus-trainer-android-2\.1\.0\.apk` \| `com\.markrai\.fitbaus\.trainer` \|/);
+  assert.match(md, new RegExp(`Bike Bridge certificate SHA-256: \`${BRIDGE_PIN}\``));
+  assert.match(md, /Candidate provenance/);
+  assert.match(md, /A published Release means that\s+gate passed for these binaries; an inspect candidate alone does not\./);
+  assert.match(md, /End users should install only from a \*\*published\*\* GitHub Release/);
+  assert.match(md, /staging package IDs \(`com\.fitbaus\.bikebridge\.native`\)/);
+  assert.doesNotMatch(md, /FitBaus Lite|Lite filename|Lite is maintained|fitbaus-bikebridge-lite/);
+  assert.doesNotMatch(md, /has been (physically )?qualified|already (been )?(qualified|published)|qualification (passed|complete)/i);
+});
+
+test("Full 2.1.0 candidate metadata is canonical and passes integrity validation", () => {
+  const { out, names, candidate, expectations } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  assert.equal(candidate.schemaVersion, 1);
+  assert.equal(candidate.edition, "full");
+  assert.equal(candidate.versionName, "2.1.0");
+  assert.equal(candidate.versionCode, 20100);
+  assert.equal(candidate.sourceTag, "v2.1.0");
+  assert.equal(candidate.sourceCommit, FULL_COMMIT);
+  assert.equal(candidate.workflowRunId, "5150");
+  assert.equal(candidate.artifacts.trainerApk.name, "fitbaus-trainer-android-2.1.0.apk");
+  assert.equal(candidate.artifacts.bridgeApk.name, "fitbaus-bikebridge-full-2.1.0.apk");
+  assert.equal(candidate.artifacts.webZip.name, "fitbaus-trainer-web-2.1.0.zip");
+  assert.equal(candidate.artifacts.bridgeApk.applicationId, "com.fitbaus.bikebridge");
+  assert.equal(candidate.artifacts.bridgeApk.minSdk, 22);
+  assert.equal(candidate.artifacts.bridgeApk.certSha256, BRIDGE_PIN);
+  assert.equal(candidate.artifacts.trainerApk.applicationId, "com.markrai.fitbaus.trainer");
+  assert.equal(candidate.artifacts.trainerApk.certSha256, TRAINER_PIN);
+  assert.equal(candidate.artifacts.bridgeApk.sha256, sha256File(path.join(out, names.bridgeApk)));
+  const sums = fs.readFileSync(path.join(out, "SHA256SUMS.txt"), "utf8").trim().split("\n").map((line) => line.split("  ")[1]);
+  assert.deepEqual(sums, [names.trainerApk, names.bridgeApk, names.webZip, names.manifest, names.candidate]);
+  assert.deepEqual(fs.readdirSync(out).sort(), releaseAssetNames(names).sort());
+  const validated = validateReleaseCandidate(expectations);
+  assert.equal(validated.edition, "full");
+  assert.equal(validated.versionCode, 20100);
+});
+
+test("Lite 1.0.1 candidate keeps its names and still validates", () => {
+  const { out, candidate, expectations } = buildEditionCandidate({ edition: "lite", versionName: "1.0.1" });
+  assert.equal(candidate.artifacts.bridgeApk.name, "fitbaus-bikebridge-lite-1.0.1.apk");
+  assert.equal(candidate.versionCode, 10001);
+  assert.ok(fs.existsSync(path.join(out, "fitbaus-bikebridge-lite-1.0.1.apk")));
+  assert.equal(validateReleaseCandidate(expectations).edition, "lite");
+});
+
+test("candidate writers refuse invalid edition, version, and version-code combinations", () => {
+  const { out } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  const base = {
+    artifactDir: out,
+    sourceTag: "v2.1.0",
+    sourceCommit: FULL_COMMIT,
+    toolingRef: "tooling-sha",
+    trainerCert: TRAINER_PIN,
+    bridgeCert: BRIDGE_PIN,
+    workflowRunId: "5150",
+  };
+  assert.throws(() => writeReleaseCandidate({ ...base, edition: "lite", versionName: "2.1.0", versionCode: 20100 }), /FitBaus Lite requires major version 1/);
+  assert.throws(() => writeReleaseCandidate({ ...base, edition: "full", versionName: "2.1.0", versionCode: 20000 }), /versionCode 20000 does not match 20100/);
+  assert.throws(() => writeReleaseCandidate({ ...base, edition: "enterprise", versionName: "2.1.0", versionCode: 20100 }), /Unsupported edition/);
+  const { writeArtifactsMarkdown } = require("../scripts/release/prepare-public-artifacts.cjs");
+  assert.throws(
+    () =>
+      writeArtifactsMarkdown({
+        artifactDir: path.join(out, "md"),
+        versionName: "1.0.1",
+        versionCode: 10001,
+        edition: "full",
+        sourceTag: "v1.0.1",
+        sourceCommit: FULL_COMMIT,
+        toolingRef: "t",
+        trainerCert: TRAINER_PIN,
+        bridgeCert: BRIDGE_PIN,
+      }),
+    /FitBaus Full requires major version 2/,
+  );
+});
+
+test("Full candidate validation rejects identity mismatches before publication", () => {
+  const { expectations } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  assert.throws(() => validateReleaseCandidate({ ...expectations, expectedTag: "v2.1.1" }), /sourceTag/);
+  assert.throws(() => validateReleaseCandidate({ ...expectations, expectedEdition: "lite" }), /edition full != lite/);
+  assert.throws(() => validateReleaseCandidate({ ...expectations, expectedEdition: "pro" }), /Unsupported edition/);
+  assert.throws(
+    () => validateReleaseCandidate({ ...expectations, expectedCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126" }),
+    /sourceCommit/,
+  );
+  assert.throws(() => validateReleaseCandidate({ ...expectations, expectedWorkflowRunId: "5151" }), /workflowRunId/);
+  assert.throws(() => validateReleaseCandidate({ ...expectations, expectedVersionName: "2.0.0" }), /versionName 2\.1\.0 != 2\.0\.0/);
+});
+
+test("candidate validation rejects consistent-looking edition/version combinations that break the contract", () => {
+  const liteClaimingTwo = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  tamperCandidate(liteClaimingTwo.out, (c) => {
+    c.edition = "lite";
+  });
+  assert.throws(
+    () => validateReleaseCandidate({ ...liteClaimingTwo.expectations, expectedEdition: "lite" }),
+    /FitBaus Lite requires major version 1/,
+  );
+
+  const fullClaimingOne = buildEditionCandidate({ edition: "lite", versionName: "1.0.1" });
+  tamperCandidate(fullClaimingOne.out, (c) => {
+    c.edition = "full";
+  });
+  assert.throws(
+    () => validateReleaseCandidate({ ...fullClaimingOne.expectations, expectedEdition: "full" }),
+    /FitBaus Full requires major version 2/,
+  );
+});
+
+test("candidate validation rejects artifact names that disagree with the edition and version", () => {
+  const { out, names, expectations } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  const liteName = "fitbaus-bikebridge-lite-2.1.0.apk";
+  fs.renameSync(path.join(out, names.bridgeApk), path.join(out, liteName));
+  rewriteSums(out, { [names.bridgeApk]: { hash: sha256File(path.join(out, liteName)), name: liteName } });
+  tamperCandidate(out, (c) => {
+    c.artifacts.bridgeApk.name = liteName;
+  });
+  assert.throws(() => validateReleaseCandidate(expectations), /artifacts\.bridgeApk\.name=fitbaus-bikebridge-lite-2\.1\.0\.apk != canonical fitbaus-bikebridge-full-2\.1\.0\.apk/);
+});
+
+test("candidate validation rejects tampered package identity, version code, and schema", () => {
+  const cases = [
+    [(c) => { c.artifacts.bridgeApk.applicationId = "com.fitbaus.bikebridge.native"; }, /applicationId com\.fitbaus\.bikebridge\.native != com\.fitbaus\.bikebridge/],
+    [(c) => { c.artifacts.trainerApk.applicationId = "com.example.trainer"; }, /trainerApk\.applicationId/],
+    [(c) => { c.artifacts.bridgeApk.minSdk = 24; }, /bridgeApk\.minSdk 24 != 22/],
+    [(c) => { c.artifacts.bridgeApk.certSha256 = null; }, /bridgeApk\.certSha256 is missing/],
+    [(c) => { c.artifacts.trainerApk.certSha256 = "not-a-cert"; }, /Certificate SHA-256 must be 64 hex/],
+    [(c) => { c.versionCode = 20000; }, /versionCode 20000 != 20100/],
+    [(c) => { c.versionCode = "20100"; }, /versionCode 20100 != 20100/],
+    [(c) => { c.schemaVersion = 2; }, /schemaVersion: 2/],
+    [(c) => { delete c.artifacts.webZip; }, /artifacts\.webZip\.name=undefined/],
+  ];
+  for (const [mutate, expected] of cases) {
+    const { out, expectations } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+    tamperCandidate(out, mutate);
+    assert.throws(() => validateReleaseCandidate(expectations), expected);
+  }
+});
+
+test("candidate validation rejects tampered binaries, manifests, and checksum lists", () => {
+  const binary = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  fs.writeFileSync(path.join(binary.out, binary.names.bridgeApk), "swapped-bridge");
+  assert.throws(() => validateReleaseCandidate(binary.expectations), /Hash mismatch for fitbaus-bikebridge-full-2\.1\.0\.apk: disk=/);
+
+  const manifest = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  fs.appendFileSync(path.join(manifest.out, "ARTIFACTS.md"), "\nThis build is physically qualified.\n");
+  assert.throws(() => validateReleaseCandidate(manifest.expectations), /Hash mismatch for ARTIFACTS\.md/);
+
+  const extra = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  fs.appendFileSync(path.join(extra.out, "SHA256SUMS.txt"), `${"0".repeat(64)}  fitbaus-bikebridge-lite-2.1.0.apk\n`);
+  assert.throws(() => validateReleaseCandidate(extra.expectations), /lists unexpected file fitbaus-bikebridge-lite-2\.1\.0\.apk/);
+
+  const missing = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  rewriteSums(missing.out, { "ARTIFACTS.md": null });
+  assert.throws(() => validateReleaseCandidate(missing.expectations), /missing entry for ARTIFACTS\.md/);
+
+  const absent = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  fs.rmSync(path.join(absent.out, absent.names.webZip));
+  assert.throws(() => validateReleaseCandidate(absent.expectations), /Missing distribution binary: fitbaus-trainer-web-2\.1\.0\.zip/);
+});
+
+test("a substituted Full Bridge APK with the same declared version cannot pass qualification", () => {
+  const { out, names, candidate, expectations } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  const qualifiedSha = candidate.artifacts.bridgeApk.sha256;
+  const qualificationPath = writeQualificationFixture([
+    {
+      versionName: "2.1.0",
+      applicationId: "com.fitbaus.bikebridge",
+      status: "qualified",
+      certSha256: BRIDGE_PIN,
+      apkSha256: qualifiedSha,
+      sourceCommit: FULL_COMMIT,
+      evidenceRef: "fixture/full-2.1.0-evidence.md",
+    },
+  ]);
+  const qualify = (apkSha256) =>
+    assertBridgeQualified({
+      qualificationPath,
+      versionName: "2.1.0",
+      certSha256: BRIDGE_PIN,
+      apkSha256,
+      sourceCommit: FULL_COMMIT,
+    });
+  assert.equal(qualify(qualifiedSha).evidenceRef, "fixture/full-2.1.0-evidence.md");
+
+  const bridgePath = path.join(out, names.bridgeApk);
+  fs.writeFileSync(bridgePath, "rebuilt-bridge-with-same-version");
+  const substituted = sha256File(bridgePath);
+  rewriteSums(out, { [names.bridgeApk]: { hash: substituted } });
+  tamperCandidate(out, (c) => {
+    c.artifacts.bridgeApk.sha256 = substituted;
+  });
+  const consistent = validateReleaseCandidate(expectations);
+  assert.equal(consistent.artifacts.bridgeApk.sha256, substituted, "a self-consistent substitution passes integrity");
+  assert.throws(() => qualify(substituted), /No physical qualification record for exact Bridge candidate/);
+});
+
+test("qualification fixtures: Lite cannot authorize Full; only an exactly qualified Full candidate passes", () => {
+  const { candidate } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  const fullBridge = candidate.artifacts.bridgeApk;
+  const liteRecord = {
+    versionName: "1.0.1",
+    applicationId: "com.fitbaus.bikebridge",
+    status: "qualified",
+    certSha256: BRIDGE_PIN,
+    apkSha256: "f9ec401394d11a27cda3cb88417769734263a4a551e1d9c9fab7fd469f600a61",
+    sourceCommit: LITE_COMMIT,
+    evidenceRef: "fixture/lite-v1.0.1.md",
+  };
+  const fullRecord = {
+    versionName: "2.1.0",
+    applicationId: "com.fitbaus.bikebridge",
+    status: "qualified",
+    certSha256: fullBridge.certSha256,
+    apkSha256: fullBridge.sha256,
+    sourceCommit: candidate.sourceCommit,
+    evidenceRef: "fixture/full-v2.1.0.md",
+  };
+  const qualifyFull = (qualificationPath, overrides = {}) =>
+    assertBridgeQualified({
+      qualificationPath,
+      versionName: candidate.versionName,
+      applicationId: fullBridge.applicationId,
+      certSha256: fullBridge.certSha256,
+      apkSha256: fullBridge.sha256,
+      sourceCommit: candidate.sourceCommit,
+      ...overrides,
+    });
+
+  const liteOnly = writeQualificationFixture([liteRecord]);
+  assert.equal(
+    assertBridgeQualified({
+      qualificationPath: liteOnly,
+      versionName: "1.0.1",
+      certSha256: liteRecord.certSha256,
+      apkSha256: liteRecord.apkSha256,
+      sourceCommit: liteRecord.sourceCommit,
+    }).evidenceRef,
+    "fixture/lite-v1.0.1.md",
+  );
+  assert.throws(() => qualifyFull(liteOnly), /No physical qualification record/, "an unqualified Full candidate is rejected");
+  assert.throws(
+    () =>
+      qualifyFull(liteOnly, {
+        apkSha256: liteRecord.apkSha256,
+        sourceCommit: liteRecord.sourceCommit,
+      }),
+    /No physical qualification record/,
+    "the Lite binary binding cannot authorize version 2.1.0",
+  );
+  const liteRelabelled = writeQualificationFixture([liteRecord, { ...liteRecord, versionName: "2.1.0" }]);
+  assert.throws(() => qualifyFull(liteRelabelled), /No physical qualification record/, "a relabelled Lite record does not match the Full binary");
+
+  for (const [label, mutate] of [
+    ["pending status", (row) => ({ ...row, status: "pending" })],
+    ["other APK", (row) => ({ ...row, apkSha256: "e".repeat(64) })],
+    ["other commit", (row) => ({ ...row, sourceCommit: "9847e9f5dd828cf28f1a85320b2142ec4d3f5126" })],
+    ["other certificate", (row) => ({ ...row, certSha256: "C".repeat(64) })],
+    ["staging package", (row) => ({ ...row, applicationId: "com.fitbaus.bikebridge.native" })],
+    ["other version", (row) => ({ ...row, versionName: "2.1.1" })],
+  ]) {
+    const file = writeQualificationFixture([liteRecord, mutate(fullRecord)]);
+    assert.throws(() => qualifyFull(file), /No physical qualification record/, label);
+  }
+  const missingEvidence = writeQualificationFixture([liteRecord, { ...fullRecord, evidenceRef: "  " }]);
+  assert.throws(() => qualifyFull(missingEvidence), /missing evidenceRef/);
+
+  const qualified = writeQualificationFixture([liteRecord, fullRecord]);
+  const row = qualifyFull(qualified);
+  assert.equal(row.versionName, "2.1.0");
+  assert.equal(row.evidenceRef, "fixture/full-v2.1.0.md");
+  assert.equal(
+    assertBridgeQualified({
+      qualificationPath: qualified,
+      versionName: "1.0.1",
+      certSha256: liteRecord.certSha256,
+      apkSha256: liteRecord.apkSha256,
+      sourceCommit: liteRecord.sourceCommit,
+    }).versionName,
+    "1.0.1",
+    "adding a Full record leaves the Lite binding intact",
+  );
+});
+
+test("parseSha256Sums rejects duplicate file entries", () => {
+  const a = "a".repeat(64);
+  const b = "b".repeat(64);
+  assert.equal(parseSha256Sums(`${a}  one.apk\n${b}  two.apk\n`).get("two.apk"), b);
+  assert.throws(() => parseSha256Sums(`${a}  one.apk\n${a}  one.apk\n`), /Duplicate SHA256SUMS entry for one\.apk/);
+  assert.throws(() => parseSha256Sums(`${a}  one.apk\n${b}  two.apk\n${b}  one.apk\n`), /Duplicate SHA256SUMS entry for one\.apk/);
+  assert.throws(() => parseSha256Sums(`${a}  one.apk\r\n${b}  one.apk\r\n`), /Duplicate SHA256SUMS entry/);
+});
+
+test("candidate validation rejects duplicate or conflicting SHA256SUMS entries", () => {
+  const conflicting = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  const bridgeName = conflicting.names.bridgeApk;
+  const sumsPath = path.join(conflicting.out, "SHA256SUMS.txt");
+  const original = fs.readFileSync(sumsPath, "utf8");
+  fs.writeFileSync(sumsPath, `${"f".repeat(64)}  ${bridgeName}\n${original}`);
+  assert.throws(
+    () => validateReleaseCandidate(conflicting.expectations),
+    new RegExp(`Duplicate SHA256SUMS entry for ${bridgeName.replace(/\./g, "\\.")}`),
+    "a conflicting earlier entry cannot be shadowed by the correct one",
+  );
+  fs.writeFileSync(sumsPath, `${original}${"f".repeat(64)}  ${bridgeName}\n`);
+  assert.throws(() => validateReleaseCandidate(conflicting.expectations), /Duplicate SHA256SUMS entry/);
+
+  const identical = buildEditionCandidate({ edition: "lite", versionName: "1.0.1" });
+  const liteSums = path.join(identical.out, "SHA256SUMS.txt");
+  const liteBridge = identical.names.bridgeApk;
+  fs.appendFileSync(liteSums, `${sha256File(path.join(identical.out, liteBridge))}  ${liteBridge}\n`);
+  assert.throws(() => validateReleaseCandidate(identical.expectations), /Duplicate SHA256SUMS entry for fitbaus-bikebridge-lite-1\.0\.1\.apk/);
+});
+
+test("Full candidate signing identities must match the existing pinned certificates", () => {
+  const { candidate } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  assert.equal(BRIDGE_PIN, "5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C");
+  assert.equal(
+    assertCertMatchesPolicy({
+      policyPath: SIGNING_POLICY_PATH,
+      applicationId: candidate.artifacts.bridgeApk.applicationId,
+      actualCertSha256: candidate.artifacts.bridgeApk.certSha256,
+    }).pinned,
+    true,
+  );
+  assert.equal(
+    assertCertMatchesPolicy({
+      policyPath: SIGNING_POLICY_PATH,
+      applicationId: candidate.artifacts.trainerApk.applicationId,
+      actualCertSha256: candidate.artifacts.trainerApk.certSha256,
+    }).pinned,
+    true,
+  );
+  assert.throws(
+    () =>
+      assertCertMatchesPolicy({
+        policyPath: SIGNING_POLICY_PATH,
+        applicationId: "com.fitbaus.bikebridge",
+        actualCertSha256: "C".repeat(64),
+      }),
+    /Wrong signing identity for com\.fitbaus\.bikebridge/,
+  );
+  assert.throws(
+    () =>
+      assertCertMatchesPolicy({
+        policyPath: SIGNING_POLICY_PATH,
+        applicationId: "com.fitbaus.bikebridge.full",
+        actualCertSha256: BRIDGE_PIN,
+      }),
+    /com\.fitbaus\.bikebridge\.full/,
+  );
+});
+
+test("tag/source guard enforces the edition contract on the source version", () => {
+  const dir = tempDir("fitbaus-tagver-edition-");
+  const two = writeVersionJs(dir, "2.1.0");
+  const full = assertTagMatchesSourceVersion({ tag: "v2.1.0", versionJsPath: two, edition: "full" });
+  assert.equal(full.title, "FitBaus Full 2.1.0");
+  assert.equal(full.versionCode, 20100);
+  assert.throws(() => assertTagMatchesSourceVersion({ tag: "v2.1.0", versionJsPath: two, edition: "lite" }), /FitBaus Lite requires major version 1/);
+  const one = writeVersionJs(dir, "1.0.1");
+  assert.equal(assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: one, edition: "lite" }).title, "FitBaus Lite 1.0.1");
+  assert.throws(() => assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: one, edition: "full" }), /FitBaus Full requires major version 2/);
+  assert.throws(() => assertTagMatchesSourceVersion({ tag: "v2.1.0", versionJsPath: one, edition: "full" }), /Release version mismatch/);
+  assert.equal(assertTagMatchesSourceVersion({ tag: "v1.0.1", versionJsPath: one }).edition, null);
+});
+
+test("mocked gh: Full publication uses the edition title and canonical assets", () => {
+  const { out, names } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  const release = resolveRelease({ edition: "full", versionName: "2.1.0", tag: "v2.1.0" });
+  const { state, runner } = createMockGh();
+  const result = uploadGithubReleaseAssets({
+    tag: "v2.1.0",
+    title: release.title,
+    notesFile: path.join(out, names.manifest),
+    artifactDir: out,
+    assetNames: releaseAssetNames(release.artifacts),
+    repo: "markrai/fitbaus-trainer",
+    runner,
+  });
+  assert.equal(result.published, true);
+  assert.equal(state.release.title, "FitBaus Full 2.1.0");
+  assert.equal(state.release.tagName, "v2.1.0");
+  assert.deepEqual(
+    state.release.assets.map((asset) => asset.name).sort(),
+    releaseAssetNames(names).sort(),
+  );
+  for (const asset of state.release.assets) {
+    assert.ok(fs.readFileSync(path.join(out, asset.name)).equals(asset.content), asset.name);
+  }
+  const createIdx = state.calls.findIndex((c) => c[1] === "create");
+  assert.ok(state.calls[createIdx].includes("--draft"), "draft first");
+  const publishIdx = state.calls.findIndex((c) => c.includes("--draft=false"));
+  const lastDownloadIdx = state.calls.map((c) => c[1]).lastIndexOf("download");
+  assert.ok(lastDownloadIdx < publishIdx, "remote hashes are verified before publication");
+});
+
+test("mocked gh: a published Full release refuses changed assets without editing it", () => {
+  const { out, names } = buildEditionCandidate({ edition: "full", versionName: "2.1.0" });
+  const assets = releaseAssetNames(names);
+  const { state, runner } = createMockGh({
+    initialRelease: {
+      tagName: "v2.1.0",
+      isDraft: false,
+      title: "FitBaus Full 2.1.0",
+      assets: assets.map((name) => ({
+        name,
+        content: name === names.bridgeApk ? Buffer.from("previously-published-bridge") : fs.readFileSync(path.join(out, name)),
+      })),
+    },
+  });
+  assert.throws(
+    () =>
+      uploadGithubReleaseAssets({
+        tag: "v2.1.0",
+        title: "FitBaus Full 2.1.0",
+        notesFile: path.join(out, names.manifest),
+        artifactDir: out,
+        assetNames: assets,
+        repo: "markrai/fitbaus-trainer",
+        runner,
+      }),
+    /already has asset fitbaus-bikebridge-full-2\.1\.0\.apk with different content/,
+  );
+  assert.ok(!state.calls.some((c) => c[1] === "edit" || c[1] === "upload"), "no mutation of the published release");
+  assert.equal(state.release.isDraft, false);
+});
+
+function workflowSteps(yml) {
+  const body = yml.slice(yml.indexOf("    steps:\n"));
+  return body
+    .split(/\n      - /)
+    .slice(1)
+    .map((block) => {
+      const name = /^(?:name:\s*(.+)|uses:\s*(.+))/.exec(block);
+      return { name: name ? (name[1] || name[2]).trim() : "", block };
+    });
+}
+
+test("release workflow offers Full, validates the edition early, and keeps trust gates", () => {
+  const yml = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+  const editionInput = yml.slice(yml.indexOf("      edition:"), yml.indexOf("      mode:"));
+  assert.match(editionInput, /options:\n\s+- lite\n\s+- full\n/);
+  assert.match(editionInput, /default: lite/);
+
+  const steps = workflowSteps(yml);
+  const index = (name) => {
+    const i = steps.findIndex((step) => step.name === name);
+    assert.ok(i >= 0, `missing step ${name}`);
+    return i;
+  };
+  const editionStep = index("Validate edition against release tag");
+  assert.match(steps[editionStep].block, /node scripts\/release\/edition\.cjs --edition "\$EDITION" --tag "\$RELEASE_TAG"/);
+  assert.ok(editionStep < index("Resolve and verify source tag"), "edition check precedes source resolution");
+  assert.ok(editionStep < index("Install and test application source"), "edition check precedes builds");
+  assert.ok(editionStep < index("Require signing secrets (fail closed)"), "edition check precedes signing");
+  assert.match(steps[index("Validate inputs")].block, /lite\|full\) ;;/);
+  assert.match(steps[index("Require tag matches source version.js")].block, /--edition "\$EDITION"/);
+
+  const publish = steps[index("Publish GitHub Release from exact candidate")].block;
+  assert.doesNotMatch(publish, /FitBaus Lite|bikebridge-lite|fitbaus-trainer-android-\$version/);
+  assert.match(publish, /edition\.cjs" --edition "\$EDITION" --version-name "\$version" --tag "\$RELEASE_TAG"/);
+  assert.match(publish, /--field title/);
+  assert.match(publish, /--field assets/);
+  assert.match(publish, /test "\$title" = "\$EDITION_TITLE"/);
+  assert.match(publish, /EDITION_TITLE: \$\{\{ steps\.edition\.outputs\.title \}\}/);
+  assert.doesNotMatch(yml, /FitBaus Lite \$version|fitbaus-bikebridge-lite-\$version/);
+
+  const assertRun = index("Assert candidate run is a trusted successful inspect");
+  const download = index("Download exact release candidate");
+  const validate = index("Validate candidate identity and binary integrity");
+  const qualify = index("Verify candidate APKs, pins, and physical qualification");
+  const publishIdx = index("Publish GitHub Release from exact candidate");
+  assert.ok(assertRun < download && download < validate && validate < qualify && qualify < publishIdx);
+  assert.match(steps[validate].block, /--edition "\$EDITION"/);
+  assert.match(steps[qualify].block, /check-physical-qualification\.cjs/);
+  assert.match(steps[qualify].block, /--require-v1 \\\n\s+--require-x86 \\\n\s+--forbid-non-x86/);
+  for (const step of steps.filter((s) => /mode == 'publish'/.test(s.block))) {
+    assert.doesNotMatch(step.block, /gradlew|sign-apk|SIGNING_STORE/, `publish step rebuilds or signs: ${step.name}`);
+  }
+  assert.doesNotMatch(yml, /debug\.keystore|signingConfigs\.debug|--allow-sidecar/);
+  assert.match(yml, /environment: release/);
+  assert.match(yml, /^permissions:\n  contents: read$/m);
 });

@@ -3,217 +3,265 @@
 This document is for maintainers. End users only need the public GitHub Release
 assets for their edition.
 
-## Editions
+## Editions and the version contract
 
-| Edition | Branch | Webcam | Audience |
+FitBaus has one numeric version namespace and two editions. The edition is not
+part of `versionName` or `versionCode`; it is a maintenance track, a release
+title, and a Bike Bridge filename.
+
+| Edition | Versions | Branch | Release title | Bike Bridge asset | Scope |
+| --- | --- | --- | --- | --- | --- |
+| **Lite** | `1.x.x` | `lite/1.x` | `FitBaus Lite X.Y.Z` | `fitbaus-bikebridge-lite-X.Y.Z.apk` | Compact maintenance edition for storage-constrained consoles; no external UVC webcam |
+| **Full** | `2.x.x` | `main` | `FitBaus Full X.Y.Z` | `fitbaus-bikebridge-full-X.Y.Z.apk` | Ongoing feature edition: external USB (UVC) webcam, native YouTube playback |
+
+`versionCode = major * 10000 + minor * 100 + patch` (see [VERSIONING.md](../VERSIONING.md)).
+Full 2.1.0 is `versionName 2.1.0`, `versionCode 20100`, tag `v2.1.0`.
+
+The rules live in one place, `scripts/release/edition.cjs`:
+
+- only `lite` and `full` are accepted (exact, lowercase);
+- Lite requires major version 1 and Full requires major version 2;
+- a tag must be `v` plus the same version;
+- canonical artifact names, the release title and package identities derive
+  from the edition and version.
+
+Artifact naming (`common.cjs`), `ARTIFACTS.md`, the release candidate writer and
+validator, the tag/source guard and the workflow's publish step all use it.
+An invalid combination fails before builds, signing or any GitHub Release call.
+
+```bash
+node scripts/release/edition.cjs --edition full --tag v2.1.0
+node scripts/release/edition.cjs --edition full --tag v2.1.0 --field title    # FitBaus Full 2.1.0
+node scripts/release/edition.cjs --edition full --tag v2.1.0 --field assets   # the six public files
+```
+
+## Shared identities and upgrade continuity
+
+Both editions ship the same application identities and certificates:
+
+| Component | Package | Min SDK | Certificate SHA-256 (pinned in `.github/release/signing-policy.json`) |
 | --- | --- | --- | --- |
-| **FitBaus Lite 1.x** | `lite/1.x` (starts at `v1.0.0`) | No external UVC | Storage-constrained ProForm Smart Power 10.0 consoles; limited maintenance |
-| **FitBaus Full 2.x** | developed toward `main` (currently `feature/external-webcam`) | Optional USB webcam | Ongoing feature development |
+| Trainer | `com.markrai.fitbaus.trainer` | 24 | `38A830D320081E59BBDA44CD52BFEF10D6CD7473E31281A27C0D010CF4FE8DAA` |
+| Bike Bridge (production) | `com.fitbaus.bikebridge` | 22 (x86, v1 signature) | `5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C` |
 
-Default GitHub branch remains `main`. Do not merge webcam work into Lite.
+`com.fitbaus.bikebridge.native` is the staging Bridge identity and is never a
+public installer. Because the package and certificate are shared and Full
+version codes are higher, Full installs over Lite with `adb install -r` without
+uninstalling and keeps Bike Bridge pairing.
 
-Package IDs stay unified across editions:
+## Trust boundary
 
-- Trainer: `com.markrai.fitbaus.trainer`
-- Bike Bridge production: `com.fitbaus.bikebridge`
-- Bike Bridge staging: `com.fitbaus.bikebridge.native` (engineering only)
+`.github/workflows/release.yml` is the only publication path
+(`release-artifacts.yml` remains inspection-only and never publishes).
 
-Lite versus Full is a **filename / maintenance-track** distinction, not a package-ID fork.
+- The workflow runs only from the repository **default branch**
+  (`GITHUB_REF` must equal `refs/heads/<default branch>`).
+- Signing and publication secrets live in the protected GitHub Environment
+  `release`. Restrict its **Deployment branches** to `main` only; this is the
+  primary control that keeps signing secrets off other refs.
+- Application source comes from an **existing, immutable tag** that the
+  workflow never creates or moves. Tooling (`tooling/`) and source (`source/`)
+  are separate checkouts.
+- `expected_commit` is required on every run and must equal the peeled tag.
+- In `mode=inspect`, the tag must equal `v` + the source `version.js`, and that
+  version must belong to the chosen edition, before npm/Gradle builds or signing.
+- Public APKs are release-signed and verified (`aapt`/`apksigner`), and their
+  certificates must match the pins. There is no debug-signing fallback; missing
+  secrets fail closed.
+- `mode=publish` never rebuilds. It downloads the candidate from a prior
+  successful inspect run of this workflow on the default branch, revalidates
+  it, checks physical qualification of the exact Bridge APK, creates a **draft**
+  Release, uploads, verifies remote hashes, and only then publishes.
 
-## Why the old pipeline stopped at inspection
+## Workflow inputs
 
-`.github/workflows/release-artifacts.yml` was intentionally inspection-only:
+| Input | Required | Notes |
+| --- | --- | --- |
+| `tag` | yes | Existing tag, e.g. `v2.1.0`. Never created by the workflow. |
+| `expected_commit` | yes | 40-hex peeled commit of `tag`. |
+| `edition` | yes (default `lite`) | `lite` or `full`; must match the tag's major version. |
+| `mode` | yes (default `inspect`) | `inspect` builds the signed candidate; `publish` attaches and publishes it. |
+| `candidate_run_id` | publish only | Run ID of the inspect run whose candidate was qualified. |
 
-1. Trainer release APKs were assembled **unsigned** (no Trainer signing config).
-2. Production Bike Bridge packaging was opt-in and still did not publish.
-3. `dry_run=false` failed closed; the workflow never created a GitHub Release.
-4. Maintainer had to download Actions artifacts, sign/arrange files, and attach them manually.
+### Obtaining the immutable source commit
 
-Point A replaces that with `.github/workflows/release.yml`.
+```bash
+git fetch origin --tags
+git rev-parse 'v2.1.0^{commit}'                 # peeled commit
+git ls-remote origin 'refs/tags/v2.1.0^{}'      # same commit as seen on GitHub
+git show 'v2.1.0:version.js' | grep APP_VERSION # must declare 2.1.0
+```
 
-**Trust boundary:** the workflow runs only from the repository **default branch**,
-uses the protected GitHub Environment `release` for signing/publication secrets,
-and never accepts arbitrary feature-branch workflow code with production credentials.
-Historical application source may still come from an immutable tag.
+Use the peeled commit (not the annotated tag object) as `expected_commit`.
 
-**Required Environment setting:** configure GitHub Environment `release` with
-**Deployment branches** restricted to the default branch (`main`) only. Do not allow
-`chore/*`, `feature/*`, or other refs. The workflow also fails closed unless
-`GITHUB_REF` equals `refs/heads/${{ github.event.repository.default_branch }}`, but
-Environment branch filters are the primary control that keeps signing secrets off
-non-default branches.
+### Finding the inspect run ID
 
-## Architecture: tooling vs source
+The run ID is the number in the run URL
+`https://github.com/markrai/fitbaus-trainer/actions/runs/<run id>`, or:
 
-| Tree | Role |
-| --- | --- |
-| Workflow checkout (`tooling/`) | Scripts, workflows, signing policy, physical-qualification registry |
-| Tag checkout (`source/`) | Exact application revision for `vX.Y.Z` (inspect only) |
+```bash
+gh run list --workflow release.yml --limit 5
+```
 
-The annotated tag `v1.0.0` remains immutable and peels to
-`9847e9f5dd828cf28f1a85320b2142ec4d3f5126`. Newer release tooling must not rewrite
-that tag or its source. `expected_commit` is **required** on every run (no hardcoded
-default for future versions).
+The candidate's `release-candidate.json` records the same value as
+`workflowRunId`; publish fails if they differ.
 
-**Tag ↔ source version:** for `mode=inspect`, after the immutable source checkout
-is verified, the workflow requires `RELEASE_TAG === "v" + version.js APP_VERSION`
-from that source tree. A tag such as `v1.0.1` pointing at source that still declares
-`1.0.0` fails closed before npm/Gradle builds, signing, or artifact upload. Publish
-mode continues to reuse the inspected candidate and rejects candidates whose
-`versionName` does not match the tag.
+## Public artifacts
 
-Trainer APKs from historical source may still be unsigned from Gradle; the release
-workflow aligns + signs them with `apksigner` (`env:` password refs; v1 and v2
-enabled). Post-sign verification is API-aware: minSdk >= 24 (Trainer) requires
-verified v2; minSdk <= 23 (Bike Bridge / API 22 consoles) requires verified v1.
-Bike Bridge production signing uses temporary `local.properties` for historical
-`bikebridge.signing.*` support (API 22 / x86) without putting passwords on `-P`.
+| File | Lite 1.0.1 | Full 2.1.0 |
+| --- | --- | --- |
+| Trainer APK | `fitbaus-trainer-android-1.0.1.apk` | `fitbaus-trainer-android-2.1.0.apk` |
+| Bike Bridge APK | `fitbaus-bikebridge-lite-1.0.1.apk` | `fitbaus-bikebridge-full-2.1.0.apk` |
+| Web/PWA bundle | `fitbaus-trainer-web-1.0.1.zip` | `fitbaus-trainer-web-2.1.0.zip` |
+| Checksums | `SHA256SUMS.txt` | `SHA256SUMS.txt` |
+| Release notes | `ARTIFACTS.md` | `ARTIFACTS.md` |
+| Provenance | `release-candidate.json` | `release-candidate.json` |
 
-## Build → qualify → publish sequence
+`release-candidate.json` (schema 1) records edition, version name and code,
+source tag and commit, tooling revision, workflow run ID, and for each file its
+canonical name and SHA-256, plus package ID, minimum SDK and certificate for the
+APKs. Publish rejects a candidate whose names, package identities, version code,
+hashes or `SHA256SUMS.txt` entries disagree with the edition and version, even
+if the caller supplies matching but invalid inputs.
 
-1. **inspect** (default branch): build/sign/verify; upload artifact
-   `fitbaus-release-candidate` containing public files + `release-candidate.json`.
-2. **Physical qualify** the exact Bridge APK from that candidate (console acceptance).
-3. Record the exact binding in `.github/release/physical-qualification.json` and
-   fill certificate pins.
-4. **publish**: download that candidate by `candidate_run_id`; verify pins +
-   exact apkSha256/sourceCommit/cert; draft Release → upload → verify remote
-   hashes → only then undraft/publish.
+Unsigned, staging and debug APKs appear only in the separate inspection dump.
 
-Rebuild-on-publish is intentionally avoided so the public Bridge binary is the
-qualified candidate.
+## Full 2.1.0: inspect, qualify, publish
 
-## Public artifacts (Lite 1.0.0)
+1. **Tag.** A maintainer creates the annotated tag `v2.1.0` on the `main`
+   commit whose `version.js` declares `2.1.0`, and pushes it. Note the peeled
+   commit (see above).
+2. **Inspect.** Actions → **Release** on `main` with `tag=v2.1.0`,
+   `expected_commit=<peeled commit>`, `edition=full`, `mode=inspect`. The run
+   builds, signs, verifies, and uploads `fitbaus-release-candidate`.
+3. **Collect the candidate.** Download `fitbaus-release-candidate`. From
+   `release-candidate.json` record `artifacts.bridgeApk.sha256`, the
+   certificates, `sourceCommit` and `workflowRunId`, and check the files against
+   `SHA256SUMS.txt`.
+4. **Physically qualify the exact APK.** Install
+   `fitbaus-bikebridge-full-2.1.0.apk` from that candidate on the ProForm Smart
+   Power 10.0 over the existing installation (`adb install -r`), confirm pairing
+   survives, and run the console acceptance checks (USB connection and
+   telemetry, resistance control, games, webcam, YouTube playback, sustained
+   use). Write the evidence to `docs/release-evidence/full-v2.1.0.md`.
+5. **Record qualification.** Add a record for that exact binary to
+   `.github/release/physical-qualification.json` and merge it to `main`:
 
-- `fitbaus-trainer-android-1.0.0.apk`
-- `fitbaus-bikebridge-lite-1.0.0.apk`
-- `fitbaus-trainer-web-1.0.0.zip`
-- `SHA256SUMS.txt`
-- `ARTIFACTS.md`
-- `release-candidate.json` (provenance)
+   ```json
+   {
+     "versionName": "2.1.0",
+     "applicationId": "com.fitbaus.bikebridge",
+     "status": "qualified",
+     "certSha256": "5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C",
+     "apkSha256": "<artifacts.bridgeApk.sha256 from the inspect candidate>",
+     "sourceCommit": "<peeled v2.1.0 commit>",
+     "evidenceRef": "docs/release-evidence/full-v2.1.0.md",
+     "console": "ProForm Smart Power 10.0",
+     "notes": "<date and acceptance summary>"
+   }
+   ```
 
-Unsigned, staging, and debug APKs may appear under Actions inspection output only.
+   A record matches only when version, package, certificate, APK hash and
+   source commit are all identical. Lite 1.0.1's record cannot qualify a Full
+   build, and a rebuilt APK with the same version needs its own record.
+6. **Publish.** Re-run **Release** on `main` with the same `tag`,
+   `expected_commit` and `edition=full`, `mode=publish`, and
+   `candidate_run_id=<inspect run ID>`. The title is `FitBaus Full 2.1.0`.
+7. **Confirm** the Release is published (not a draft) and its assets match
+   `SHA256SUMS.txt` and `release-candidate.json`.
+
+A green inspect run is **not** physical-console acceptance. CI proves the build
+is signed, versioned and internally consistent; only step 4 proves the exact
+Bridge binary works on the console. Publish refuses to run until step 5 exists.
+
+## Lite maintenance releases
+
+Lite releases follow the same sequence from `lite/1.x` with `edition=lite` and a
+`v1.x.y` tag. Lite 1.0.1 was published this way: `tag=v1.0.1`,
+`expected_commit=cf91c7d32fe54315cb5e1ec5488e8f477abe9a50`, evidence in
+`docs/release-evidence/lite-v1.0.1.md`. Its asset names and `ARTIFACTS.md`
+wording are unchanged by Full support.
+
+## Rollback and upgrades
+
+- **Lite → Full:** supported in place (higher version code, same package and
+  certificate). Pairing is preserved.
+- **Full → Lite:** Android refuses an in-place downgrade (for example `20100`
+  over `10001`). Returning to Lite requires uninstalling the Bike Bridge, which
+  clears pairing; pair the Trainer again afterwards.
+- **Full → earlier Full:** also a downgrade; prefer shipping a fixed `2.x.y`
+  with a higher version code over rolling back.
+- Before upgrading a console, keep the currently installed APK
+  (`adb shell pm path com.fitbaus.bikebridge` then `adb pull`) as a rollback copy.
+- A published Release is never modified. A broken release is replaced by a new
+  tag and Release.
 
 ## Signing responsibilities
 
 ### Trainer
 
-1. Create a **persistent** release keystore (one-time).
-2. Back it up offline (encrypted). Losing it prevents `adb install -r` upgrades.
-3. Store GitHub Actions secrets (never commit the keystore):
-   - `TRAINER_SIGNING_STORE_BASE64`
-   - `TRAINER_SIGNING_STORE_PASSWORD`
-   - `TRAINER_SIGNING_KEY_ALIAS`
-   - `TRAINER_SIGNING_KEY_PASSWORD`
-4. Record the certificate SHA-256 in `.github/release/signing-policy.json`
-   under `com.markrai.fitbaus.trainer` before **publish**.
-
-There was no prior public Trainer release installer; certificate continuity with
-field devices must still be checked if any sideloaded Trainer builds exist.
+1. Use the persistent release keystore; back it up offline (encrypted). Losing
+   it prevents `adb install -r` upgrades.
+2. GitHub Environment `release` secrets (never commit the keystore):
+   `TRAINER_SIGNING_STORE_BASE64`, `TRAINER_SIGNING_STORE_PASSWORD`,
+   `TRAINER_SIGNING_KEY_ALIAS`, `TRAINER_SIGNING_KEY_PASSWORD`.
+3. The certificate pin under `com.markrai.fitbaus.trainer` must match.
 
 ### Bike Bridge production
 
-1. Use the **existing** production keystore already used on consoles.
-2. Never create a replacement production certificate silently.
-3. Secrets:
-   - `BIKEBRIDGE_SIGNING_STORE_BASE64`
-   - `BIKEBRIDGE_SIGNING_STORE_PASSWORD`
-   - `BIKEBRIDGE_SIGNING_KEY_ALIAS`
-   - `BIKEBRIDGE_SIGNING_KEY_PASSWORD`
-4. Pin the certificate SHA-256 in `.github/release/signing-policy.json`
-   under `com.fitbaus.bikebridge` before **publish**.
+1. Use the **existing** production keystore already used on consoles. Never
+   create a replacement certificate.
+2. Secrets: `BIKEBRIDGE_SIGNING_STORE_BASE64`, `BIKEBRIDGE_SIGNING_STORE_PASSWORD`,
+   `BIKEBRIDGE_SIGNING_KEY_ALIAS`, `BIKEBRIDGE_SIGNING_KEY_PASSWORD`.
+3. The certificate pin under `com.fitbaus.bikebridge` must match.
 
-Release builds **fail closed** when signing secrets are missing. There is no
-debug-signing fallback for public installers.
-
-### Fingerprint helper
+Bike Bridge signing uses a temporary `local.properties` so passwords never appear
+on the Gradle command line. Post-sign verification is API-aware: the Trainer
+(min SDK 24) requires a verified v2 signature; the Bike Bridge (min SDK 22,
+Android 5.1.1) requires a verified v1 signature, x86 native code and no non-x86
+libraries.
 
 ```bash
 keytool -list -v -keystore bikebridge-release.jks
-# use SHA-256, uppercase hex without colons, in signing-policy.json
+# SHA-256, uppercase hex without colons, as in signing-policy.json
 ```
-
-## Physical qualification gate
-
-CI packaging is **not** physical-device qualification.
-
-Before `mode=publish`, add a record binding the **exact** Bridge candidate:
-
-```json
-{
-  "versionName": "1.0.0",
-  "applicationId": "com.fitbaus.bikebridge",
-  "status": "qualified",
-  "certSha256": "<PINNED_CERT_SHA256>",
-  "apkSha256": "<BRIDGE_APK_SHA256_FROM_release-candidate.json>",
-  "sourceCommit": "9847e9f5dd828cf28f1a85320b2142ec4d3f5126",
-  "evidenceRef": "<path or URL to acceptance evidence>",
-  "console": "ProForm Smart Power 10.0",
-  "notes": "Date and acceptance summary"
-}
-```
-
-Supported Bridge hardware for Lite: **ProForm Smart Power 10.0** (Android 5.1.1 /
-API 22 / 32-bit x86) only.
-
-## Maintainer: install tooling on main, then Lite 1.0.0
-
-1. Review `chore/release-pipeline` locally (do not publish yet).
-2. Create GitHub Environment `release`; add the eight signing secrets there.
-3. Restrict Environment **Deployment branches** to `main` only; required reviewers optional but recommended.
-4. Merge release tooling to `main` when approved (**without** moving `v1.0.0`).
-5. Create/backup Trainer keystore; confirm Bridge production keystore continuity.
-6. Fill certificate pins in `.github/release/signing-policy.json` (follow-up commit).
-
-Inspect / qualify / publish:
-
-1. On **main**, Actions → **Release** → `tag=v1.0.0`,
-   `expected_commit=9847e9f5dd828cf28f1a85320b2142ec4d3f5126`,
-   `edition=lite`, `mode=inspect`.
-2. Download `fitbaus-release-candidate`; note Bridge `apkSha256` + certs from
-   `release-candidate.json`.
-3. Install/qualify that exact Bridge APK on the console; store evidence.
-4. Commit the physical-qualification record + cert pins.
-5. Re-run **Release** with `mode=publish` and `candidate_run_id=<inspect run id>`.
-6. Confirm the GitHub Release is **published** (not draft) and assets match
-   `SHA256SUMS.txt` / `release-candidate.json`.
 
 ## Safe retries
 
 - Draft release, missing asset → uploaded
 - Existing asset with identical SHA-256 → skipped
 - Existing asset with different content → **fails closed**
-- Already **published** release missing/different assets → **fails closed**
-- Failed upload leaves a newly created release as **draft** (publish happens last)
+- Already **published** release with missing or different assets → **fails closed**, nothing is edited
+- A failed upload leaves a newly created release as a **draft** (publish happens last)
 
 ## CI event policy
 
-`.github/workflows/ci.yml` runs on:
-
-- pushes to `main` or `lite/1.x`
-- pushes of version tags matching `v*`
-- pull requests (open / synchronize / reopen)
-
-Ordinary feature-branch pushes do **not** start a push CI run. When a PR is open,
-additional commits are covered by the `pull_request` workflow only, so the same
-commit is not tested twice.
+`.github/workflows/ci.yml` runs on pushes to `main` or `lite/1.x`, pushes of
+version tags matching `v*`, and pull requests (open / synchronize / reopen).
+Ordinary feature-branch pushes do not start a push run, so the same commit is not
+tested twice.
 
 ## Local validation vs GitHub Actions
 
 | Step | Local without production secrets | Needs GitHub Actions + secrets |
 | --- | --- | --- |
-| Tag/commit resolve | yes | yes |
-| Unit tests / version checks | yes | yes |
-| Missing-secret / wrong-pin / unsigned gates | yes (fixtures) | yes |
+| Tag/commit resolution (fixture repos) | yes | yes |
+| Edition/version contract, names, candidate integrity | yes (`tests/releasePipeline.test.mjs`) | yes |
+| Missing-secret / wrong-pin / unqualified gates | yes (fixtures) | yes |
+| Draft-first publication logic | yes (mocked `gh`) | yes |
 | Real `apksigner` / production Bridge assemble | only with local keystores | yes |
-| GitHub Release attach | no (dry-run only) | yes |
+| GitHub Release creation | no | yes |
 | Physical console acceptance | no | hardware |
 
-Do not simulate successful signing or publication when credentials are absent.
+Do not simulate successful signing, qualification or publication when
+credentials or hardware are absent.
 
 ## End-user download guidance
 
-1. Open the GitHub Release for the version you want.
-2. Download the Trainer APK and/or Bike Bridge Lite APK for your console, plus the web zip if self-hosting.
-3. Verify checksums with `SHA256SUMS.txt` when possible.
-4. Install APKs with a file manager or `adb install -r` **using the same certificates** as any already-installed FitBaus apps.
+1. Open the published GitHub Release for your edition (**FitBaus Lite 1.x** or
+   **FitBaus Full 2.x**).
+2. Download the Trainer APK and the Bike Bridge APK for your console, plus the
+   web zip if self-hosting.
+3. Verify downloads with `SHA256SUMS.txt`.
+4. Install with `adb install -r`. Full installs over Lite; Lite cannot be
+   installed over Full without uninstalling first.

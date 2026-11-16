@@ -2,7 +2,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const { fail, normalizeCommitSha, publicArtifactNames, readJson, sha256File } = require("./common.cjs");
+const { fail, normalizeCertSha256, normalizeCommitSha, readJson, sha256File } = require("./common.cjs");
+const { PACKAGES, resolveEdition, resolveRelease } = require("./edition.cjs");
 
 function parseSha256Sums(text) {
   const map = new Map();
@@ -10,6 +11,9 @@ function parseSha256Sums(text) {
     if (!line.trim()) continue;
     const match = /^([0-9a-f]{64})  (.+)$/.exec(line);
     if (!match) fail(`Invalid SHA256SUMS line: ${line}`);
+    if (map.has(match[2])) {
+      fail(`Duplicate SHA256SUMS entry for ${match[2]} (${map.get(match[2])} and ${match[1]})`);
+    }
     map.set(match[2], match[1]);
   }
   return map;
@@ -19,6 +23,31 @@ function expectedVersionFromTag(tag) {
   const match = /^v(\d+\.\d+\.\d+)$/.exec(tag);
   if (!match) fail(`Cannot derive version from tag: ${tag}`);
   return match[1];
+}
+
+function assertArtifactIdentity(candidate, names) {
+  const artifacts = candidate.artifacts || {};
+  for (const key of ["trainerApk", "bridgeApk", "webZip"]) {
+    const declared = artifacts[key]?.name;
+    if (declared !== names[key]) {
+      fail(`Candidate artifact name artifacts.${key}.name=${declared} != canonical ${names[key]}`);
+    }
+  }
+  for (const [key, expected] of [
+    ["trainerApk", PACKAGES.trainer],
+    ["bridgeApk", PACKAGES.bridge],
+  ]) {
+    const entry = artifacts[key];
+    if (entry.applicationId !== expected.applicationId) {
+      fail(`Candidate artifacts.${key}.applicationId ${entry.applicationId} != ${expected.applicationId}`);
+    }
+    if (entry.minSdk !== expected.minSdk) {
+      fail(`Candidate artifacts.${key}.minSdk ${entry.minSdk} != ${expected.minSdk}`);
+    }
+    if (normalizeCertSha256(entry.certSha256) == null) {
+      fail(`Candidate artifacts.${key}.certSha256 is missing`);
+    }
+  }
 }
 
 /**
@@ -32,9 +61,13 @@ function validateReleaseCandidate({
   expectedWorkflowRunId,
   expectedVersionName = null,
 }) {
+  resolveEdition(expectedEdition);
   const candidatePath = path.join(candidateDir, "release-candidate.json");
   if (!fs.existsSync(candidatePath)) fail(`Missing release-candidate.json in ${candidateDir}`);
   const candidate = readJson(candidatePath);
+  if (candidate.schemaVersion !== 1) {
+    fail(`Unsupported release-candidate schemaVersion: ${candidate.schemaVersion}`);
+  }
 
   if (candidate.sourceTag !== expectedTag) {
     fail(`Candidate sourceTag ${candidate.sourceTag} != ${expectedTag}`);
@@ -54,10 +87,24 @@ function validateReleaseCandidate({
     fail(`Candidate versionName ${candidate.versionName} != ${wantVersion}`);
   }
 
-  const names = publicArtifactNames(candidate.versionName, candidate.edition);
+  const release = resolveRelease({
+    edition: candidate.edition,
+    versionName: candidate.versionName,
+    tag: expectedTag,
+  });
+  if (candidate.versionCode !== release.versionCode) {
+    fail(`Candidate versionCode ${candidate.versionCode} != ${release.versionCode} for ${release.versionName}`);
+  }
+  const names = release.artifacts;
+  assertArtifactIdentity(candidate, names);
+
   const sumsPath = path.join(candidateDir, names.checksums);
   if (!fs.existsSync(sumsPath)) fail(`Missing ${names.checksums}`);
   const sums = parseSha256Sums(fs.readFileSync(sumsPath, "utf8"));
+  const expectedSummed = [names.trainerApk, names.bridgeApk, names.webZip, names.manifest, names.candidate];
+  for (const entry of sums.keys()) {
+    if (!expectedSummed.includes(entry)) fail(`${names.checksums} lists unexpected file ${entry}`);
+  }
 
   const binaries = [
     ["trainerApk", names.trainerApk],
@@ -78,6 +125,15 @@ function validateReleaseCandidate({
     if (summed !== actual) {
       fail(`Hash mismatch for ${fileName}: disk=${actual} SHA256SUMS=${summed}`);
     }
+  }
+
+  const manifestPath = path.join(candidateDir, names.manifest);
+  if (!fs.existsSync(manifestPath)) fail(`Missing distribution file: ${names.manifest}`);
+  const manifestSum = sums.get(names.manifest);
+  if (!manifestSum) fail(`${names.checksums} missing entry for ${names.manifest}`);
+  const manifestActual = sha256File(manifestPath);
+  if (manifestSum !== manifestActual) {
+    fail(`Hash mismatch for ${names.manifest}: disk=${manifestActual} SHA256SUMS=${manifestSum}`);
   }
 
   const candidateSum = sums.get(names.candidate);
