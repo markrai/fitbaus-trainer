@@ -1,0 +1,90 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package com.fitbaus.bikebridge.host.youtube
+
+internal data class VideoSummary(
+    val id: String,
+    val title: String,
+    val channel: String?,
+    val durationSeconds: Long,
+    val viewCount: Long,
+    val thumbnailUrl: String,
+    val live: Boolean,
+)
+
+internal interface FeedCursor
+
+internal class FeedPage(val items: List<VideoSummary>, val cursor: FeedCursor?)
+
+internal enum class FailureKind { Network, RateLimited, Unavailable, Restricted, Unsupported, Extraction }
+
+internal class YouTubeException(val kind: FailureKind, message: String, cause: Throwable? = null) : Exception(message, cause)
+
+internal interface ResolvedHandle
+
+internal class ResolvedVideo(
+    val summary: VideoSummary,
+    val options: StreamOptions,
+    val handle: ResolvedHandle,
+)
+
+internal interface YouTubeCatalog {
+    fun discover(): FeedPage
+
+    fun search(query: String): FeedPage
+
+    fun more(cursor: FeedCursor): FeedPage
+
+    fun resolve(videoId: String): ResolvedVideo
+
+    fun release() {}
+}
+
+internal object YouTubeIds {
+    private val ID = Regex("^[A-Za-z0-9_-]{11}$")
+
+    fun isValid(id: String?): Boolean = id != null && ID.matches(id)
+
+    fun thumbnail(id: String): String = "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+}
+
+internal object YouTubeFormat {
+    fun duration(seconds: Long): String {
+        if (seconds <= 0) return ""
+        val h = seconds / 3600
+        val m = (seconds % 3600) / 60
+        val s = seconds % 60
+        return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, s) else String.format(java.util.Locale.US, "%d:%02d", m, s)
+    }
+
+    fun clock(ms: Long): String {
+        val seconds = if (ms <= 0) 0 else ms / 1000
+        return duration(seconds).ifEmpty { "0:00" }
+    }
+
+    fun views(count: Long): String = when {
+        count < 0 -> ""
+        count >= 1_000_000_000 -> String.format(java.util.Locale.US, "%.1fB views", count / 1_000_000_000.0)
+        count >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM views", count / 1_000_000.0)
+        count >= 1_000 -> String.format(java.util.Locale.US, "%.1fK views", count / 1_000.0)
+        count == 1L -> "1 view"
+        else -> "$count views"
+    }
+
+    fun meta(video: VideoSummary): String {
+        val parts = ArrayList<String>(3)
+        if (!video.channel.isNullOrBlank()) parts += video.channel
+        if (video.live) parts += "LIVE" else duration(video.durationSeconds).takeIf { it.isNotEmpty() }?.let { parts += it }
+        views(video.viewCount).takeIf { it.isNotEmpty() }?.let { parts += it }
+        return parts.joinToString("  ·  ")
+    }
+
+    fun failure(kind: FailureKind): String = when (kind) {
+        FailureKind.Network -> "Network problem. Check the console's internet connection and try again."
+        FailureKind.RateLimited -> "YouTube is temporarily limiting requests from this console. Try again in a few minutes."
+        FailureKind.Unavailable -> "This video is unavailable."
+        FailureKind.Restricted -> "This video is restricted and cannot be played here."
+        FailureKind.Unsupported -> "This video has no format this console can play."
+        FailureKind.Extraction -> "YouTube returned something unexpected. Try again, or choose another video."
+    }
+}

@@ -280,6 +280,19 @@ there and is not a detection failure. Targets: at least 80 % detection (goal
 continuous wave, no visible change to head steering or frame rate (frame p90
 in the overlay).
 
+## YouTube tab
+
+A **YouTube** tab follows the game tabs. It browses trending and search
+results and plays public videos natively in the console app (ExoPlayer
+2.19.1 with SkyTube's NewPipeExtractor fork; no WebView, no external app).
+It is a media mode, not a game: it never starts the arcade camera or clock,
+never touches the Bridge service, USB or resistance, and releases its player
+whenever the tab is left or the activity pauses. Quality defaults to 360p
+(240p / 480p selectable). The YouTube code is partly adapted from SkyTube
+(GPL-3.0); see `native/bridge-app/third-party/YOUTUBE-NOTICE`,
+[docs/YOUTUBE-INTEGRATION.md](docs/YOUTUBE-INTEGRATION.md) and
+[docs/YOUTUBE-QUALIFICATION.md](docs/YOUTUBE-QUALIFICATION.md).
+
 ## Build and test
 
 JDK **21**, Android SDK Platform **34**, NDK **26.1.10909125**, CMake **3.22.1**.

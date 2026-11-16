@@ -54,6 +54,8 @@ val noticeAssets = tasks.register<NoticeAssetsTask>("noticeAssets") {
     sources.from(rootProject.file("equipment-protocol/NOTICE"))
     sources.from(rootProject.fileTree("equipment-protocol/licenses"))
     sources.from(rootProject.file("../../../LICENSE"))
+    sources.from(file("third-party/YOUTUBE-NOTICE"))
+    sources.from(fileTree("third-party/licenses"))
     outputDir.set(layout.buildDirectory.dir("generated/notice-assets"))
 }
 
@@ -106,8 +108,9 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     buildTypes {
@@ -139,7 +142,7 @@ androidComponents {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_1_8)
+        jvmTarget.set(JvmTarget.JVM_17)
         allWarningsAsErrors.set(true)
     }
 }
@@ -147,6 +150,13 @@ kotlin {
 dependencies {
     implementation(project(":equipment-protocol"))
     implementation(project(":arcade"))
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.2")
+    implementation("com.github.SkyTubeTeam:NewPipeExtractor:skytube-2026-10-24")
+    implementation("com.google.android.exoplayer:exoplayer-core:2.19.1")
+    implementation("com.google.android.exoplayer:exoplayer-dash:2.19.1")
+    implementation("com.google.android.exoplayer:exoplayer-hls:2.19.1")
+    implementation("androidx.annotation:annotation:1.3.0")
+    implementation("com.google.guava:guava:31.1-android")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")
 }
