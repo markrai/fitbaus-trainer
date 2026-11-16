@@ -25,4 +25,12 @@ internal class RecordingHooks(private val events: MutableList<String> = ArrayLis
         events += "deactivate:$reason"
         onDeactivate(reason)
     }
+
+    override fun startMedia(mode: ArcadeMode) {
+        events += "media:$mode"
+    }
+
+    override fun stopMedia(reason: ArcadeStopReason) {
+        events += "media-stop:$reason"
+    }
 }

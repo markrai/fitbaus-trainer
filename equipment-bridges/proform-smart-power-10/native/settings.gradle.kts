@@ -11,6 +11,15 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        exclusiveContent {
+            forRepository {
+                maven("https://jitpack.io") { name = "JitPack" }
+            }
+            filter {
+                includeModule("com.github.SkyTubeTeam", "NewPipeExtractor")
+                includeModule("com.github.TeamNewPipe", "nanojson")
+            }
+        }
     }
 }
 

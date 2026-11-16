@@ -46,3 +46,9 @@ native/.gradle/
 native/.kotlin/
 native/**/build/
 native/local.properties
+
+# Standalone tool/probe Gradle builds (tools/)
+tools/**/build/
+tools/**/.gradle/
+tools/**/.kotlin/
+tools/**/local.properties

@@ -221,7 +221,141 @@ class ArcadeModeTest {
         assertTrue(ArcadeMode.Flak.isGame)
         assertTrue(ArcadeMode.TrailRide.isGame)
         assertTrue(ArcadeMode.Biketris.isGame)
-        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN", "TRAIL RIDE", "BIKETRIS"), ArcadeMode.values().map { it.caption })
+        assertFalse(ArcadeMode.YouTube.isGame)
+        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN", "TRAIL RIDE", "BIKETRIS", "YouTube"), ArcadeMode.values().map { it.caption })
+    }
+
+    @Test
+    fun youTubeIsAMediaModeAndEveryOtherNonDashboardModeIsAGame() {
+        assertEquals(ModeKind.Media, ArcadeMode.YouTube.kind)
+        assertTrue(ArcadeMode.YouTube.isMedia)
+        assertEquals(ModeKind.Dashboard, ArcadeMode.Dashboard.kind)
+        assertFalse(ArcadeMode.Dashboard.isMedia)
+        val games = ArcadeMode.values().filter { it.isGame }
+        assertEquals(listOf(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris), games)
+        for (game in games) assertFalse(game.isMedia, game.name)
+    }
+
+    @Test
+    fun selectingYouTubeStartsOnlyTheMediaPlayer() {
+        val hooks = RecordingHooks()
+        val controller = ArcadeModeController(hooks)
+        controller.onHostResume()
+        controller.select(ArcadeMode.YouTube)
+        assertEquals(listOf("show:YouTube", "media:YouTube"), hooks.events())
+        assertFalse(controller.isActive, "no camera or arcade clock")
+        assertTrue(controller.isMediaActive)
+    }
+
+    @Test
+    fun switchingFromAGameToYouTubeStopsTheCameraPipelineFirst() {
+        val hooks = RecordingHooks()
+        val controller = ArcadeModeController(hooks)
+        controller.onHostResume()
+        controller.select(ArcadeMode.Biketris)
+        controller.select(ArcadeMode.YouTube)
+        controller.select(ArcadeMode.Flak)
+        controller.select(ArcadeMode.Dashboard)
+        assertEquals(
+            listOf(
+                "show:Biketris", "activate:Biketris",
+                "deactivate:ExitArcade", "show:YouTube", "media:YouTube",
+                "media-stop:ExitArcade", "show:Flak", "activate:Flak",
+                "deactivate:ExitArcade", "show:Dashboard",
+            ),
+            hooks.events(),
+        )
+        assertFalse(controller.isActive)
+        assertFalse(controller.isMediaActive)
+    }
+
+    @Test
+    fun youTubeStopsOnPauseResumesOnResumeAndStopsOnDestroy() {
+        val hooks = RecordingHooks()
+        val controller = ArcadeModeController(hooks)
+        controller.select(ArcadeMode.YouTube)
+        assertEquals(listOf("show:YouTube"), hooks.events(), "nothing starts while the host is paused")
+        controller.onHostResume()
+        controller.onHostResume()
+        controller.onHostPause()
+        controller.onHostPause()
+        controller.onHostResume()
+        controller.onHostDestroy()
+        controller.select(ArcadeMode.Bricks)
+        controller.onHostResume()
+        assertEquals(
+            listOf("show:YouTube", "media:YouTube", "media-stop:HostPaused", "media:YouTube", "media-stop:HostDestroyed"),
+            hooks.events(),
+        )
+    }
+
+    @Test
+    fun dashboardAndYouTubeNeverActivateTheArcadeAcrossManySwitches() {
+        var cameraStarts = 0
+        var mediaStarts = 0
+        var maxConcurrent = 0
+        var running = 0
+        val hooks = object : ArcadeModeHooks {
+            override fun showMode(mode: ArcadeMode) {}
+
+            override fun activateArcade(game: ArcadeMode) {
+                assertTrue(game.isGame, game.name)
+                cameraStarts += 1
+                running += 1
+                maxConcurrent = maxOf(maxConcurrent, running)
+            }
+
+            override fun deactivateArcade(reason: com.fitbaus.arcade.ArcadeStopReason) {
+                running -= 1
+            }
+
+            override fun startMedia(mode: ArcadeMode) {
+                assertEquals(ArcadeMode.YouTube, mode)
+                mediaStarts += 1
+                running += 1
+                maxConcurrent = maxOf(maxConcurrent, running)
+            }
+
+            override fun stopMedia(reason: com.fitbaus.arcade.ArcadeStopReason) {
+                running -= 1
+            }
+        }
+        val controller = ArcadeModeController(hooks)
+        controller.onHostResume()
+        val sequence = listOf(ArcadeMode.YouTube, ArcadeMode.Dashboard, ArcadeMode.YouTube, ArcadeMode.Bricks, ArcadeMode.YouTube, ArcadeMode.Biketris, ArcadeMode.Dashboard, ArcadeMode.YouTube)
+        for (mode in sequence) controller.select(mode)
+        controller.onHostDestroy()
+        assertEquals(2, cameraStarts)
+        assertEquals(4, mediaStarts)
+        assertEquals(1, maxConcurrent, "camera and player are never owned at the same time")
+        assertEquals(0, running)
+    }
+
+    @Test
+    fun youTubeTabIsWiredWithoutCameraClockOrBridgeService() {
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val hooksStart = source.indexOf("object : ArcadeModeHooks")
+        val hooksBody = source.substring(hooksStart, source.indexOf("private val modeController", hooksStart))
+        val start = hooksBody.substring(hooksBody.indexOf("override fun startMedia"), hooksBody.indexOf("override fun stopMedia"))
+        val stop = hooksBody.substring(hooksBody.indexOf("override fun stopMedia"))
+        assertTrue(start.contains("youtubeContent.start()"))
+        assertTrue(stop.contains("youtubeContent.stop()"))
+        for (forbidden in listOf("cameraSession", "arcadeClock", "requestPermissions", "NativeBridgeService", "startService", "session()", "Usb")) {
+            assertFalse(start.contains(forbidden), forbidden)
+            assertFalse(stop.contains(forbidden), forbidden)
+        }
+        assertTrue(source.contains("tabGroup(ArcadeMode.YouTube)"))
+        assertTrue(
+            source.indexOf("tabGroup(ArcadeMode.YouTube)") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris)"),
+            "YouTube follows the game tabs",
+        )
+        assertTrue(source.contains("dashboardContent.visibility = if (mode == ArcadeMode.Dashboard) View.VISIBLE else View.GONE"))
+        assertTrue(source.contains("youtubeContent.visibility = if (mode == ArcadeMode.YouTube) View.VISIBLE else View.GONE"))
+        assertTrue(source.contains("arcadeContent.visibility = if (mode.isGame) View.VISIBLE else View.GONE"))
+        val tab = source.substring(source.indexOf("private fun modeTab("), source.indexOf("private fun savedTrackerSettings()"))
+        assertTrue(tab.contains("if (mode.isGame) {"), "only game tabs open the tracker developer menu")
+        val destroy = source.substring(source.indexOf("override fun onDestroy()"), source.indexOf("override fun onRequestPermissionsResult"))
+        assertTrue(destroy.indexOf("modeController.onHostDestroy()") < destroy.indexOf("youtubeContent.destroy()"))
     }
 
     @Test
