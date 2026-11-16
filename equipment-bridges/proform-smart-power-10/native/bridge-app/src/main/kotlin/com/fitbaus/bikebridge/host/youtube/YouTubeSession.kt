@@ -363,7 +363,8 @@ internal class YouTubeSession(
         val playback = state.playback
         val chosen = selector.select(video.options, playback.maxHeight)
         if (chosen == null) {
-            fail(FailureKind.Unsupported)
+            val lowest = selector.lowestPlayableHeight(video.options)
+            if (lowest != null && lowest > playback.maxHeight) failWith(YouTubeFormat.qualityUnavailable(playback.maxHeight, lowest)) else fail(FailureKind.Unsupported)
             return
         }
         plan = chosen
@@ -449,6 +450,10 @@ internal class YouTubeSession(
                 update(state.copy(playback = state.playback.copy(phase = PlaybackPhase.Resolving, message = "Refreshing stream…", positionMs = position)))
                 resolve(playGeneration, video.summary.id, position)
             }
+            failure == PlaybackFailure.QualityUnavailable -> {
+                releaseEngine()
+                failWith(YouTubeFormat.qualityUnavailable(state.playback.maxHeight, null))
+            }
             failure == PlaybackFailure.Decoder && !decoderFallbackUsed && video != null && current is StreamPlan.Streams -> {
                 decoderFallbackUsed = true
                 selector = selector.withExcluded(current.video.family)
@@ -462,7 +467,7 @@ internal class YouTubeSession(
                 fail(
                     when (failure) {
                         PlaybackFailure.Network, PlaybackFailure.Expired -> FailureKind.Network
-                        PlaybackFailure.Decoder, PlaybackFailure.Unsupported -> FailureKind.Unsupported
+                        PlaybackFailure.Decoder, PlaybackFailure.Unsupported, PlaybackFailure.QualityUnavailable -> FailureKind.Unsupported
                         PlaybackFailure.Other -> FailureKind.Extraction
                     },
                 )
@@ -471,7 +476,11 @@ internal class YouTubeSession(
     }
 
     private fun fail(kind: FailureKind) {
-        update(state.copy(playback = state.playback.copy(phase = PlaybackPhase.Error, message = YouTubeFormat.failure(kind))))
+        failWith(YouTubeFormat.failure(kind))
+    }
+
+    private fun failWith(message: String) {
+        update(state.copy(playback = state.playback.copy(phase = PlaybackPhase.Error, message = message)))
     }
 
     private fun stopPlayback() {

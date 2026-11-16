@@ -25,7 +25,9 @@
  *
  * Modified for FitBaus in 2026: package renamed to
  * com.fitbaus.bikebridge.host.youtube.media, and the SkyTube DownloadUtils
- * user-agent reference replaced by a local constant holding the same value.
+ * user-agent reference replaced by a local constant holding the same value;
+ * HTTP error bodies are read with a 64 KiB bound (readBounded) instead of
+ * Util.toByteArray and the error stream is always closed (closeQuietly).
  * No other changes. See bridge-app/third-party/YOUTUBE-NOTICE.
  */
 
@@ -65,6 +67,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.common.net.HttpHeaders;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
@@ -286,6 +289,7 @@ public final class YoutubeHttpDataSource extends BaseDataSource implements HttpD
     private static final int HTTP_STATUS_TEMPORARY_REDIRECT = 307;
     private static final int HTTP_STATUS_PERMANENT_REDIRECT = 308;
     private static final long MAX_BYTES_TO_DRAIN = 2048;
+    static final int MAX_ERROR_BODY_BYTES = 64 * 1024;
 
     private static final String DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0";
@@ -431,10 +435,12 @@ public final class YoutubeHttpDataSource extends BaseDataSource implements HttpD
             byte[] errorResponseBody;
             try {
                 errorResponseBody = errorStream != null
-                        ? Util.toByteArray(errorStream)
+                        ? readBounded(errorStream, MAX_ERROR_BODY_BYTES)
                         : Util.EMPTY_BYTE_ARRAY;
             } catch (final IOException e) {
                 errorResponseBody = Util.EMPTY_BYTE_ARRAY;
+            } finally {
+                closeQuietly(errorStream);
             }
 
             closeConnectionQuietly();
@@ -940,6 +946,32 @@ public final class YoutubeHttpDataSource extends BaseDataSource implements HttpD
      * @return The corresponding {@code range} parameter, or {@code null} if this parameter is
      * unnecessary because the whole resource is being requested.
      */
+    static byte[] readBounded(@NonNull final InputStream input, final int maxBytes)
+            throws IOException {
+        final ByteArrayOutputStream out = new ByteArrayOutputStream(Math.min(maxBytes, 4096));
+        final byte[] buffer = new byte[4096];
+        int total = 0;
+        while (total < maxBytes) {
+            final int read = input.read(buffer, 0, Math.min(buffer.length, maxBytes - total));
+            if (read == -1) {
+                break;
+            }
+            out.write(buffer, 0, read);
+            total += read;
+        }
+        return out.toByteArray();
+    }
+
+    private static void closeQuietly(@Nullable final InputStream input) {
+        if (input == null) {
+            return;
+        }
+        try {
+            input.close();
+        } catch (final IOException ignored) {
+        }
+    }
+
     @Nullable
     private static String buildRangeParameter(final long position, final long length) {
         if (position == 0 && length == C.LENGTH_UNSET) {

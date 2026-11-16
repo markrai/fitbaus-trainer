@@ -12,7 +12,6 @@ import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
-import java.util.concurrent.Future
 import java.util.concurrent.RejectedExecutionException
 
 internal class ThumbnailLoader(
@@ -29,12 +28,12 @@ internal class ThumbnailLoader(
     private val cache = object : LruCache<String, Bitmap>(maxCacheBytes) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
-    private val pending = HashMap<ImageView, Future<*>>()
+    private val requests = ThumbnailRequests<ImageView>()
     private var closed = false
 
     fun bind(view: ImageView, url: String) {
         if (view.tag == url) return
-        cancel(view)
+        requests.cancel(view)
         view.tag = url
         val cached = cache.get(url)
         if (cached != null) {
@@ -42,30 +41,26 @@ internal class ThumbnailLoader(
             return
         }
         view.setImageDrawable(null)
-        if (closed) return
+        if (closed) {
+            view.tag = null
+            return
+        }
+        val ticket = requests.begin(view, url)
         val future = try {
             executor.submit {
                 val bitmap = fetch(url)
-                main.post {
-                    pending.remove(view)
-                    if (bitmap != null && !closed) {
-                        cache.put(url, bitmap)
-                        if (view.tag == url) view.setImageBitmap(bitmap)
-                    }
-                }
+                main.post { complete(view, ticket, bitmap) }
             }
         } catch (_: RejectedExecutionException) {
+            requests.finish(view, ticket)
+            view.tag = null
             return
         }
-        pending[view] = future
+        ticket.onCancel = { future.cancel(true) }
     }
 
     fun pause() {
-        for ((view, future) in pending) {
-            future.cancel(true)
-            view.tag = null
-        }
-        pending.clear()
+        for (view in requests.cancelAll()) view.tag = null
         cache.evictAll()
     }
 
@@ -75,8 +70,14 @@ internal class ThumbnailLoader(
         executor.shutdownNow()
     }
 
-    private fun cancel(view: ImageView) {
-        pending.remove(view)?.cancel(true)
+    private fun complete(view: ImageView, ticket: ThumbnailRequests.Ticket, bitmap: Bitmap?) {
+        if (!requests.finish(view, ticket)) return
+        if (bitmap != null && !closed) {
+            cache.put(ticket.key, bitmap)
+            view.setImageBitmap(bitmap)
+        } else {
+            view.tag = null
+        }
     }
 
     val cachedBytes: Int
@@ -128,5 +129,41 @@ internal class ThumbnailLoader(
         const val MAX_CACHE_BYTES: Int = 4 * 1024 * 1024
         const val MAX_IMAGE_BYTES: Int = 512 * 1024
         private const val THREADS = 2
+    }
+}
+
+internal class ThumbnailRequests<V : Any> {
+    class Ticket(val key: String) {
+        var onCancel: () -> Unit = {}
+    }
+
+    private val current = HashMap<V, Ticket>()
+
+    val size: Int
+        get() = current.size
+
+    fun begin(view: V, key: String): Ticket {
+        cancel(view)
+        return Ticket(key).also { current[view] = it }
+    }
+
+    fun isCurrent(view: V, ticket: Ticket): Boolean = current[view] === ticket
+
+    fun finish(view: V, ticket: Ticket): Boolean {
+        if (current[view] !== ticket) return false
+        current.remove(view)
+        return true
+    }
+
+    fun cancel(view: V) {
+        current.remove(view)?.onCancel?.invoke()
+    }
+
+    fun cancelAll(): List<V> {
+        val views = current.keys.toList()
+        val tickets = current.values.toList()
+        current.clear()
+        for (ticket in tickets) ticket.onCancel()
+        return views
     }
 }

@@ -13,12 +13,14 @@ import com.google.android.exoplayer2.DefaultRenderersFactory
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
+import com.google.android.exoplayer2.Tracks
 import com.google.android.exoplayer2.audio.AudioAttributes
 import com.google.android.exoplayer2.source.MediaSource
+import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
 import com.google.android.exoplayer2.upstream.HttpDataSource
 import com.google.android.exoplayer2.video.VideoSize
 
-internal enum class PlaybackFailure { Expired, Network, Decoder, Unsupported, Other }
+internal enum class PlaybackFailure { Expired, Network, Decoder, Unsupported, QualityUnavailable, Other }
 
 internal interface PlayerEngineListener {
     fun onBuffering()
@@ -83,7 +85,7 @@ internal object PlaybackFailures {
     }
 }
 
-internal class ExoMedia(val source: MediaSource) : PreparedMedia
+internal class ExoMedia(val source: MediaSource, val maxVideoHeight: Int) : PreparedMedia
 
 internal class ExoPlayerEngine(
     context: Context,
@@ -91,7 +93,9 @@ internal class ExoPlayerEngine(
     private val listener: PlayerEngineListener,
 ) : PlayerEngine {
     private var released = false
+    private val trackSelector = DefaultTrackSelector(context)
     private val player: ExoPlayer = ExoPlayer.Builder(context, DefaultRenderersFactory(context).setEnableDecoderFallback(true))
+        .setTrackSelector(trackSelector)
         .setLoadControl(
             DefaultLoadControl.Builder()
                 .setBufferDurationsMs(MIN_BUFFER_MS, MAX_BUFFER_MS, START_BUFFER_MS, REBUFFER_MS)
@@ -123,6 +127,13 @@ internal class ExoPlayerEngine(
             if (player.playbackState == Player.STATE_READY) listener.onReady(playWhenReady)
         }
 
+        override fun onTracksChanged(tracks: Tracks) {
+            if (released) return
+            if (tracks.containsType(C.TRACK_TYPE_VIDEO) && !tracks.isTypeSelected(C.TRACK_TYPE_VIDEO)) {
+                listener.onFailure(PlaybackFailure.QualityUnavailable, "no video track within the height limit")
+            }
+        }
+
         override fun onPlayerError(error: PlaybackException) {
             if (released) return
             listener.onFailure(PlaybackFailures.classify(error.errorCode, error.cause), error.errorCodeName)
@@ -151,8 +162,13 @@ internal class ExoPlayerEngine(
 
     override fun prepare(media: PreparedMedia, startMs: Long) {
         if (released) return
-        val source = (media as? ExoMedia)?.source ?: throw YouTubeException(FailureKind.Unsupported, "unknown media")
-        player.setMediaSource(source, startMs.coerceAtLeast(0))
+        val exo = media as? ExoMedia ?: throw YouTubeException(FailureKind.Unsupported, "unknown media")
+        trackSelector.setParameters(
+            trackSelector.buildUponParameters()
+                .setMaxVideoSize(Int.MAX_VALUE, exo.maxVideoHeight)
+                .setExceedVideoConstraintsIfNecessary(false),
+        )
+        player.setMediaSource(exo.source, startMs.coerceAtLeast(0))
         player.playWhenReady = true
         player.prepare()
     }

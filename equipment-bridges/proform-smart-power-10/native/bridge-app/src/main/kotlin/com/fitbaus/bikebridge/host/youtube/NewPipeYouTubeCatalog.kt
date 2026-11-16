@@ -26,7 +26,8 @@
  * metadata and stream descriptors; skips upcoming, members-only and paid
  * items; classifies extractor failures into recoverable categories; uses
  * a FitBaus HttpURLConnection downloader instead of the SkyTube OkHttp
- * component. See bridge-app/third-party/YOUTUBE-NOTICE.
+ * component; each page request deduplicates against an immutable copy of the
+ * IDs already shown so a discarded response cannot hide items on retry. See bridge-app/third-party/YOUTUBE-NOTICE.
  */
 
 package com.fitbaus.bikebridge.host.youtube
@@ -73,15 +74,11 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
     private val service = ServiceList.YouTube
 
     override fun discover(): FeedPage = guard {
-        val kiosk = service.kioskList.defaultKioskExtractor
-        kiosk.fetchPage()
-        page(kiosk, kiosk.initialPage, HashSet())
+        firstPage(service.kioskList.defaultKioskExtractor)
     }
 
     override fun search(query: String): FeedPage = guard {
-        val extractor = service.getSearchExtractor(query)
-        extractor.fetchPage()
-        page(extractor, extractor.initialPage, HashSet())
+        firstPage(service.getSearchExtractor(query))
     }
 
     override fun more(cursor: FeedCursor): FeedPage = guard {
@@ -112,7 +109,13 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
         ResolvedVideo(summary, StreamOptions(candidates, info.hlsUrl, live), NewPipeHandle(info, streams))
     }
 
-    private fun page(extractor: ListExtractor<*>, page: ListExtractor.InfoItemsPage<*>, seen: HashSet<String>): FeedPage {
+    internal fun firstPage(extractor: ListExtractor<*>): FeedPage = guard {
+        extractor.fetchPage()
+        page(extractor, extractor.initialPage, emptySet())
+    }
+
+    private fun page(extractor: ListExtractor<*>, page: ListExtractor.InfoItemsPage<*>, previouslySeen: Set<String>): FeedPage {
+        val seen = HashSet(previouslySeen)
         val items = ArrayList<VideoSummary>(page.items.size)
         for (item in page.items) {
             val summary = summarize(item as InfoItem) ?: continue
@@ -149,7 +152,7 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
         throw NewPipeFailures.classify(e)
     }
 
-    private class NewPipeCursor(val extractor: ListExtractor<*>, val page: Page, val seen: HashSet<String>) : FeedCursor
+    private class NewPipeCursor(val extractor: ListExtractor<*>, val page: Page, val seen: Set<String>) : FeedCursor
 }
 
 internal object NewPipeRuntime {

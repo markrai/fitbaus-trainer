@@ -53,7 +53,10 @@ preparation (some NewPipe manifest creators make network requests) run on one
 background thread at below-normal priority; only the ExoPlayer calls run on the
 main thread. Thumbnails use two minimum-priority threads.
 Each list request and each playback attempt carries a generation number, so a
-late response from an older search, page or video is dropped. Engine callbacks
+late response from an older search, page or video is dropped. Each page
+request deduplicates against its own copy of the IDs already shown, and the
+next-page cursor is adopted only when the response is accepted, so a response
+discarded after a tab switch cannot hide videos when the page is retried. Engine callbacks
 are tied to the engine that produced them.
 
 ### Stream selection
@@ -70,10 +73,13 @@ plus the HLS URL. Rules, adapted from SkyTube's `StreamSelectionPolicy`:
 4. Video-only streams are only considered when usable audio exists.
 5. Pick the highest height at or below the cap (default 360p). At equal
    height: combined before split, then H.264, VP9, VP8, MPEG-4, then
-   progressive before DASH, then lower bitrate. If nothing fits, use the
-   lowest height above the cap, never above 720p.
-6. Otherwise fall back to HLS, otherwise report "no format this console can
-   play".
+   progressive before DASH, then lower bitrate. The cap is a strict
+   maximum: a stream above it is never chosen.
+6. Otherwise fall back to HLS with the same cap applied in ExoPlayer's track
+   selector (`setMaxVideoSize`, `setExceedVideoConstraintsIfNecessary(false)`).
+   If HLS has no variant within the cap, playback stops with a quality error.
+7. Otherwise report "isn't available at Np or lower (lowest is Mp)" when only
+   higher qualities exist, or "no format this console can play".
 
 Progressive video-only and audio streams are wrapped in DASH manifests made by
 NewPipe's `YoutubeProgressiveDashManifestCreator` and fetched through
@@ -90,6 +96,7 @@ user agent), exactly as SkyTube does. Separate video and audio are merged with
 | Network, parse or other playback error | release the player and show the message with RETRY |
 | List or page failure | message with RETRY; paging stops until the user taps retry |
 | HTTP 429 or "confirm you're not a bot" | rate-limit message; nothing retries automatically |
+| Only qualities above the selected maximum | quality error naming the lowest available height; no automatic upgrade |
 
 ## Bike Bridge protection
 
@@ -114,8 +121,9 @@ user agent), exactly as SkyTube does. Separate video and audio are merged with
 | ExoPlayer buffer | 15-30 s, start after 1.5 s, rebuffer 3 s, 16 MB target (Java heap) |
 | Disk media cache | none (SkyTube's `SimpleCache` is not used) |
 | NewPipe manifest caches | 4 entries each, cleared before each preparation |
-| Thumbnails | 320x180 `mqdefault.jpg`, RGB_565, 4 MB LRU, cleared when the tab is left |
+| Thumbnails | 320x180 `mqdefault.jpg`, RGB_565, 4 MB LRU, cleared when the tab is left; each request has its own ticket so a stale completion cannot affect a recycled card; failed or cancelled loads retry on the next bind, and the grid rebinds when the tab reopens |
 | Extractor responses | 8 MB maximum body; connect 10 s, read 15-20 s timeouts |
+| Media HTTP error bodies | 64 KiB maximum, error stream always closed (`YoutubeHttpDataSource`) |
 
 The console's Dalvik heap growth limit is 100 MB per process. SkyTube used
 87-115 MB PSS in total (Java plus native) while playing.
@@ -205,6 +213,13 @@ fork at the pinned commit.
   change, controls, live.
 - `youtube/NewPipeMappingTest`: NewPipe items and streams to FitBaus models,
   failure classification, ID validation, formatting.
+- `youtube/NewPipePagingTest`: real NewPipe cursor over a fake list
+  extractor; a discarded page request followed by a retry (directly and via
+  a tab switch in the session) still shows every new video.
+- `youtube/ThumbnailRequestsTest`: stale completions on recycled cards,
+  pause cancellation, retry and rebind on return.
+- `youtube/media/YoutubeHttpDataSourceBoundsTest`: 64 KiB error-body bound,
+  stream closing and attribution of the change.
 - `youtube/HttpUrlDownloaderTest`: POST bodies, headers, gzip, 429, error
   bodies, size bound (loopback server only), playback failure classification.
 - `youtube/YouTubeSafetyTest`: forbidden references, attribution headers,

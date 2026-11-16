@@ -106,6 +106,7 @@ internal class YouTubeContent(
     fun start() {
         refreshVolume()
         session.start()
+        adapter.notifyDataSetChanged()
     }
 
     fun stop() {

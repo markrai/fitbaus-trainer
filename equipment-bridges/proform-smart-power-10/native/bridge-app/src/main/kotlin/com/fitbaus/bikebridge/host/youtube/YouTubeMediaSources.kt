@@ -24,7 +24,8 @@
  * SimpleCache disk cache, subtitles, SmoothStreaming and non-YouTube services;
  * bounds the NewPipe manifest-creator caches to a few entries and clears them
  * before each preparation; preparation runs off the UI thread because the OTF
- * and post-live manifest creators perform network requests. See
+ * and post-live manifest creators perform network requests; passes the
+ * maximum video height to the player so HLS never exceeds it. See
  * bridge-app/third-party/YOUTUBE-NOTICE.
  */
 
@@ -79,7 +80,7 @@ internal class YouTubeMediaSources : MediaPreparer {
     override fun prepare(handle: ResolvedHandle, plan: StreamPlan): PreparedMedia {
         clearCaches()
         return try {
-            ExoMedia(build(handle, plan))
+            ExoMedia(build(handle, plan), maxVideoHeight(plan))
         } catch (e: YouTubeException) {
             throw e
         } catch (e: IOException) {
@@ -87,6 +88,11 @@ internal class YouTubeMediaSources : MediaPreparer {
         } catch (e: Exception) {
             throw YouTubeException(FailureKind.Unsupported, e.message ?: e.javaClass.simpleName, e)
         }
+    }
+
+    private fun maxVideoHeight(plan: StreamPlan): Int = when (plan) {
+        is StreamPlan.Hls -> plan.maxHeight
+        is StreamPlan.Streams -> plan.height
     }
 
     private fun build(handle: ResolvedHandle, plan: StreamPlan): MediaSource {

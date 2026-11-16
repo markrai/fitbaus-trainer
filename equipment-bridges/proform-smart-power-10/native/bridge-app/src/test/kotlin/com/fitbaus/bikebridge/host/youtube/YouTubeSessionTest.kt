@@ -409,6 +409,52 @@ class YouTubeSessionTest {
     }
 
     @Test
+    fun aVideoOnlyAvailableAboveTheLimitShowsAQualityErrorInsteadOfUpscaling() {
+        catalog.resolutions["onlyhigh480"] = {
+            ResolvedVideo(
+                video("onlyhigh480"),
+                StreamOptions(
+                    listOf(
+                        YouTubeStreamSelectorTest.videoOnly(0, Container.Mp4, "avc1.4d401f", 480),
+                        YouTubeStreamSelectorTest.videoOnly(1, Container.Mp4, "avc1.4d401f", 720),
+                        YouTubeStreamSelectorTest.audio(2, Container.M4a, "mp4a.40.2", 128_000),
+                    ),
+                    null,
+                    false,
+                ),
+                FakeHandle("onlyhigh480"),
+            )
+        }
+        session.start()
+        runner.runAll()
+        session.open(video("onlyhigh480"))
+        runner.runAll()
+        assertEquals(PlaybackPhase.Error, session.state.playback.phase)
+        assertEquals(YouTubeFormat.qualityUnavailable(360, 480), session.state.playback.message)
+        assertTrue(preparer.plans.isEmpty())
+        assertTrue(engines.created.isEmpty())
+        session.back()
+        session.setMaxHeight(480)
+        session.open(video("onlyhigh480"))
+        runner.runAll()
+        assertEquals(480, (engines.last.prepared.single().first as StreamPlan.Streams).height, "raising the limit plays it")
+    }
+
+    @Test
+    fun hlsWithNoVariantWithinTheLimitStopsWithAQualityError() {
+        catalog.resolutions["livestream1"] = { playable("livestream1", live = true) }
+        session.start()
+        runner.runAll()
+        session.open(video("livestream1", live = true))
+        runner.runAll()
+        assertEquals(StreamPlan.Hls("https://example.invalid/live.m3u8", 360), engines.last.prepared.single().first)
+        engines.last.listener.onFailure(PlaybackFailure.QualityUnavailable, "no video track within the height limit")
+        assertEquals(YouTubeFormat.qualityUnavailable(360, null), session.state.playback.message)
+        assertEquals(0, engines.live.size)
+        assertEquals(0, runner.pending)
+    }
+
+    @Test
     fun prepareFailureReleasesThePlayer() {
         session.start()
         runner.runAll()

@@ -79,6 +79,13 @@ internal object YouTubeFormat {
         return parts.joinToString("  ·  ")
     }
 
+    fun qualityUnavailable(maxHeight: Int, lowestHeight: Int?): String =
+        if (lowestHeight != null) {
+            "This video isn't available at ${maxHeight}p or lower (lowest is ${lowestHeight}p). Raise the maximum quality to play it."
+        } else {
+            "This video isn't available at ${maxHeight}p or lower. Raise the maximum quality to play it."
+        }
+
     fun failure(kind: FailureKind): String = when (kind) {
         FailureKind.Network -> "Network problem. Check the console's internet connection and try again."
         FailureKind.RateLimited -> "YouTube is temporarily limiting requests from this console. Try again in a few minutes."

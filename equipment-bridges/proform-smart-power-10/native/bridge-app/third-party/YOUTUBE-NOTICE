@@ -53,8 +53,9 @@ its own changes in its header:
   - media sources limited to YouTube progressive, OTF DASH, post-live DVR and
     HLS; the ExoPlayer disk cache, subtitles and SmoothStreaming removed;
     NewPipe manifest caches bounded to four entries;
-  - YoutubeHttpDataSource: package renamed and the SkyTube DownloadUtils
-    user-agent reference replaced by an identical local constant.
+  - YoutubeHttpDataSource: package renamed, the SkyTube DownloadUtils
+    user-agent reference replaced by an identical local constant, and HTTP
+    error bodies read with a 64 KiB bound and the error stream always closed.
 
 The YoutubeHttpDataSource class originates from NewPipe
 (https://github.com/TeamNewPipe/NewPipe, GPL-3.0, Copyright the NewPipe

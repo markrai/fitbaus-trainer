@@ -46,13 +46,14 @@ class YouTubeStreamSelectorTest {
     @Test
     fun hlsIsTheFallbackWhenNoProgressiveOrAdaptivePairExists() {
         val avc = videoOnly(0, Container.Mp4, "avc1.4d401e", 360)
-        assertEquals(StreamPlan.Hls("https://example.invalid/master.m3u8"), selector.select(StreamOptions(listOf(avc), "https://example.invalid/master.m3u8", false), 360))
+        assertEquals(StreamPlan.Hls("https://example.invalid/master.m3u8", 360), selector.select(StreamOptions(listOf(avc), "https://example.invalid/master.m3u8", false), 360))
     }
 
     @Test
     fun liveStreamsUseHls() {
         val muxed = muxed(0, Container.Mp4, "avc1.42001E, mp4a.40.2", 360)
-        assertEquals(StreamPlan.Hls("https://example.invalid/live.m3u8"), selector.select(StreamOptions(listOf(muxed), "https://example.invalid/live.m3u8", true), 360))
+        assertEquals(StreamPlan.Hls("https://example.invalid/live.m3u8", 360), selector.select(StreamOptions(listOf(muxed), "https://example.invalid/live.m3u8", true), 360))
+        assertEquals(StreamPlan.Hls("https://example.invalid/live.m3u8", 240), selector.select(StreamOptions(listOf(muxed), "https://example.invalid/live.m3u8", true), 240), "HLS carries the cap to the player")
     }
 
     @Test
@@ -79,12 +80,21 @@ class YouTubeStreamSelectorTest {
     }
 
     @Test
-    fun lowestHeightAboveTheCapIsUsedWhenNothingFitsButNeverAbove720() {
+    fun theSelectedMaximumIsNeverExceeded() {
         val aac = audio(0, Container.M4a, "mp4a.40.2", 128_000)
         val v480 = videoOnly(1, Container.Mp4, "avc1.4d401f", 480)
         val v720 = videoOnly(2, Container.Mp4, "avc1.4d401f", 720)
-        assertEquals(480, (selector.select(options(aac, v720, v480), 240) as StreamPlan.Streams).height)
-        assertNull(selector.select(options(aac, videoOnly(3, Container.Mp4, "avc1.640028", 1080)), 360))
+        assertNull(selector.select(options(aac, v720, v480), 240), "no silent upgrade from 240p to 480p")
+        assertNull(selector.select(options(aac, v720), 360), "a 720p-only video is not played at a 360p limit")
+        assertEquals(480, selector.lowestPlayableHeight(options(aac, v720, v480)), "the lowest playable height is reported for the error")
+        assertNull(selector.lowestPlayableHeight(options(v480)), "nothing playable without audio")
+        val viaHls = selector.select(StreamOptions(listOf(aac, v720, v480), "https://example.invalid/master.m3u8", false), 240)
+        assertEquals(StreamPlan.Hls("https://example.invalid/master.m3u8", 240), viaHls, "HLS is tried with the same limit")
+        assertNull(selector.select(options(aac, videoOnly(3, Container.Mp4, "avc1.640028", 1080)), 480))
+        for (cap in listOf(240, 360, 480)) {
+            val streams = listOf(144, 240, 360, 480, 720).mapIndexed { i, h -> videoOnly(i + 10, Container.Mp4, "avc1.4d401e", h) } + aac
+            assertTrue((selector.select(options(*streams.toTypedArray()), cap) as StreamPlan.Streams).height <= cap)
+        }
     }
 
     @Test

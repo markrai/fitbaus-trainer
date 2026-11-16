@@ -24,8 +24,9 @@
  * rejects AV1, high-bit-depth VP9 and surround audio for the API 22 console,
  * keeps combined streams ahead of split streams at the same height, retries
  * with combined streams when no audio track exists, prefers HLS for live
- * streams, applies a hard 720p ceiling and supports codec exclusion after a
- * decoder failure. See bridge-app/third-party/YOUTUBE-NOTICE.
+ * streams, treats the quality setting as a strict maximum (no stream above it is
+ * ever chosen; HLS carries the cap for the player's track selector), applies a
+ * hard 720p ceiling and supports codec exclusion after a decoder failure. See bridge-app/third-party/YOUTUBE-NOTICE.
  */
 
 package com.fitbaus.bikebridge.host.youtube
@@ -65,7 +66,7 @@ internal sealed class StreamPlan {
             get() = video.height
     }
 
-    data class Hls(val url: String) : StreamPlan()
+    data class Hls(val url: String, val maxHeight: Int) : StreamPlan()
 }
 
 internal object StreamCodecs {
@@ -102,14 +103,21 @@ internal class YouTubeStreamSelector(
     fun select(options: StreamOptions, maxHeight: Int): StreamPlan? {
         val cap = maxHeight.coerceIn(MIN_HEIGHT, HARD_MAX_HEIGHT)
         val hls = options.hlsUrl?.takeIf { it.isNotBlank() }
-        if (options.live && hls != null) return StreamPlan.Hls(hls)
+        if (options.live && hls != null) return StreamPlan.Hls(hls, cap)
         val audio = pickAudio(options.candidates)
         val videos = options.candidates.filter { usableVideo(it) && (it.kind == CandidateKind.Muxed || audio != null) }
         val video = pickVideo(videos, cap)
         if (video != null) {
             return StreamPlan.Streams(video, if (video.kind == CandidateKind.VideoOnly) audio else null)
         }
-        return hls?.let { StreamPlan.Hls(it) }
+        return hls?.let { StreamPlan.Hls(it, cap) }
+    }
+
+    fun lowestPlayableHeight(options: StreamOptions): Int? {
+        val audio = pickAudio(options.candidates)
+        return options.candidates
+            .filter { usableVideo(it) && (it.kind == CandidateKind.Muxed || audio != null) }
+            .minOfOrNull { it.height }
     }
 
     fun availableHeights(options: StreamOptions): List<Int> {
@@ -138,14 +146,9 @@ internal class YouTubeStreamSelector(
 
     private fun pickVideo(videos: List<StreamCandidate>, cap: Int): StreamCandidate? {
         val within = videos.filter { it.height <= cap }
-        if (within.isNotEmpty()) {
-            val height = within.maxOf { it.height }
-            return within.filter { it.height == height }.minWithOrNull(VIDEO_ORDER)
-        }
-        val above = videos.filter { it.height <= HARD_MAX_HEIGHT }
-        if (above.isEmpty()) return null
-        val height = above.minOf { it.height }
-        return above.filter { it.height == height }.minWithOrNull(VIDEO_ORDER)
+        if (within.isEmpty()) return null
+        val height = within.maxOf { it.height }
+        return within.filter { it.height == height }.minWithOrNull(VIDEO_ORDER)
     }
 
     private fun pickAudio(candidates: List<StreamCandidate>): StreamCandidate? {
