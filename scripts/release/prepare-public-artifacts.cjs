@@ -2,7 +2,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const { fail, publicArtifactNames, sha256File, writeText } = require("./common.cjs");
+const { fail, sha256File, writeText } = require("./common.cjs");
+const { PACKAGES, resolveRelease } = require("./edition.cjs");
 
 function writeChecksums(artifactDir, files) {
   const lines = files.map((name) => {
@@ -24,20 +25,23 @@ function writeArtifactsMarkdown({
   bridgeCert,
   bridgeQualified,
 }) {
-  const names = publicArtifactNames(versionName, edition);
-  const text = `# FitBaus ${versionName} (${edition}) distribution
+  const release = resolveRelease({ edition, versionName });
+  if (Number(versionCode) !== release.versionCode) {
+    fail(`versionCode ${versionCode} does not match ${release.versionCode} derived from ${versionName}`);
+  }
+  const names = release.artifacts;
+  const text = `# FitBaus ${versionName} (${release.edition}) distribution
 
 These are the public installer artifacts for tag \`${sourceTag}\` (commit \`${sourceCommit}\`).
 Release tooling revision: \`${toolingRef}\`.
 
 Product version: **${versionName}** (versionCode **${versionCode}**)
-Edition: **FitBaus Lite ${versionName}** — compact edition for supported, storage-constrained
-ProForm Smart Power 10.0 consoles. Lite is maintained on \`lite/1.x\` without external UVC webcam support.
+Edition: **${release.title}** — ${release.summary}
 
 | File | Package / contents | Notes |
 | --- | --- | --- |
-| \`${names.trainerApk}\` | \`com.markrai.fitbaus.trainer\` | Release-signed Trainer Android APK |
-| \`${names.bridgeApk}\` | \`com.fitbaus.bikebridge\` | Release-signed production Bike Bridge (Lite filename; same package ID) |
+| \`${names.trainerApk}\` | \`${PACKAGES.trainer.applicationId}\` | Release-signed Trainer Android APK |
+| \`${names.bridgeApk}\` | \`${PACKAGES.bridge.applicationId}\` | ${release.bridgeNote} |
 | \`${names.webZip}\` | static web/PWA | Host on HTTPS; not signed |
 | \`${names.checksums}\` | SHA-256 | Verify downloads |
 | \`${names.manifest}\` | this file | |
@@ -78,7 +82,7 @@ function preparePublicArtifacts({
   bridgeCert,
   bridgeQualified,
 }) {
-  const names = publicArtifactNames(versionName, edition);
+  const names = resolveRelease({ edition, versionName }).artifacts;
   fs.mkdirSync(artifactDir, { recursive: true });
 
   const mapping = [

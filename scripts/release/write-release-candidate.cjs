@@ -2,7 +2,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const { fail, publicArtifactNames, sha256File, writeText } = require("./common.cjs");
+const { fail, sha256File, writeText } = require("./common.cjs");
+const { PACKAGES, resolveRelease } = require("./edition.cjs");
 
 function writeReleaseCandidate({
   artifactDir,
@@ -16,7 +17,11 @@ function writeReleaseCandidate({
   bridgeCert,
   workflowRunId = null,
 }) {
-  const names = publicArtifactNames(versionName, edition);
+  const release = resolveRelease({ edition, versionName });
+  if (Number(versionCode) !== release.versionCode) {
+    fail(`versionCode ${versionCode} does not match ${release.versionCode} derived from ${versionName}`);
+  }
+  const names = release.artifacts;
   const required = [names.trainerApk, names.bridgeApk, names.webZip, names.checksums, names.manifest];
   for (const name of required) {
     if (!fs.existsSync(path.join(artifactDir, name))) fail(`Missing public artifact: ${name}`);
@@ -24,9 +29,9 @@ function writeReleaseCandidate({
 
   const candidate = {
     schemaVersion: 1,
-    edition,
-    versionName,
-    versionCode: Number(versionCode),
+    edition: release.edition,
+    versionName: release.versionName,
+    versionCode: release.versionCode,
     sourceTag,
     sourceCommit,
     toolingRef,
@@ -36,16 +41,16 @@ function writeReleaseCandidate({
       trainerApk: {
         name: names.trainerApk,
         sha256: sha256File(path.join(artifactDir, names.trainerApk)),
-        applicationId: "com.markrai.fitbaus.trainer",
+        applicationId: PACKAGES.trainer.applicationId,
         certSha256: trainerCert,
-        minSdk: 24,
+        minSdk: PACKAGES.trainer.minSdk,
       },
       bridgeApk: {
         name: names.bridgeApk,
         sha256: sha256File(path.join(artifactDir, names.bridgeApk)),
-        applicationId: "com.fitbaus.bikebridge",
+        applicationId: PACKAGES.bridge.applicationId,
         certSha256: bridgeCert,
-        minSdk: 22,
+        minSdk: PACKAGES.bridge.minSdk,
       },
       webZip: {
         name: names.webZip,
