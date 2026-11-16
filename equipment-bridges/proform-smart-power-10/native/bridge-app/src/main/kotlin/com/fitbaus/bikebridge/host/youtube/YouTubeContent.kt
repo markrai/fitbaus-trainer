@@ -36,6 +36,7 @@ import com.fitbaus.bikebridge.host.arcade.ExerciseHud
 internal class YouTubeContent(
     context: Context,
     private val prefs: SharedPreferences,
+    private val brightness: BrightnessControl,
 ) : LinearLayout(context) {
     val hud: ExerciseHud = ExerciseHud(context)
     private val handler = Handler(Looper.getMainLooper())
@@ -75,7 +76,9 @@ internal class YouTubeContent(
     private val positionText = label("0:00", 16f, PRIMARY)
     private val durationText = label("0:00", 16f, PRIMARY)
     private val seekBar = SeekBar(context)
-    private val volumeBar = SeekBar(context)
+    private val brightnessBar = SeekBar(context)
+    private val volumeSlider = VerticalSlider(context)
+    private val volumeText = label("", 14f, LABEL)
     private var seeking = false
     private var renderedItems: List<VideoSummary>? = null
     private var ticking = false
@@ -83,6 +86,7 @@ internal class YouTubeContent(
     private val ticker = object : Runnable {
         override fun run() {
             session.tick()
+            refreshVolume()
             if (ticking) handler.postDelayed(this, TICK_MS)
         }
     }
@@ -105,6 +109,7 @@ internal class YouTubeContent(
 
     fun start() {
         refreshVolume()
+        refreshBrightness()
         session.start()
         adapter.notifyDataSetChanged()
     }
@@ -237,10 +242,14 @@ internal class YouTubeContent(
         retryLp.topMargin = dp(16)
         playerOverlay.addView(playerRetry, retryLp)
         area.addView(playerOverlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        val areaLp = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
-        areaLp.topMargin = dp(8)
-        areaLp.bottomMargin = dp(8)
-        playerScreen.addView(area, areaLp)
+        val stage = LinearLayout(context)
+        stage.orientation = HORIZONTAL
+        stage.addView(area, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        stage.addView(buildVolumeColumn(), LayoutParams(dp(VOLUME_COLUMN_DP), ViewGroup.LayoutParams.MATCH_PARENT))
+        val stageLp = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        stageLp.topMargin = dp(8)
+        stageLp.bottomMargin = dp(8)
+        playerScreen.addView(stage, stageLp)
 
         val controls = LinearLayout(context)
         controls.orientation = HORIZONTAL
@@ -268,22 +277,44 @@ internal class YouTubeContent(
         controls.addView(seekBar, LayoutParams(0, dp(TOUCH_DP), 1f))
         durationText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
         controls.addView(durationText, LayoutParams(dp(92), ViewGroup.LayoutParams.WRAP_CONTENT))
-        val volumeLabel = label("VOL", 14f, LABEL)
-        volumeLabel.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
-        controls.addView(volumeLabel, spaced(LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)))
-        volumeBar.setPadding(dp(18), dp(14), dp(18), dp(14))
-        volumeBar.max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-        volumeBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+        val brightnessLabel = label("BRIGHTNESS", 14f, LABEL)
+        brightnessLabel.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        controls.addView(brightnessLabel, spaced(LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)))
+        brightnessBar.setPadding(dp(18), dp(14), dp(18), dp(14))
+        brightnessBar.max = MAX_BRIGHTNESS - MIN_BRIGHTNESS
+        brightnessBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
-                if (fromUser) audio.setStreamVolume(AudioManager.STREAM_MUSIC, progress, 0)
+                if (fromUser) brightness.set(progress + MIN_BRIGHTNESS)
             }
 
             override fun onStartTrackingTouch(bar: SeekBar) {}
 
             override fun onStopTrackingTouch(bar: SeekBar) {}
         })
-        controls.addView(volumeBar, LayoutParams(dp(220), dp(TOUCH_DP)))
+        controls.addView(brightnessBar, LayoutParams(dp(220), dp(TOUCH_DP)))
         playerScreen.addView(controls, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    private fun buildVolumeColumn(): LinearLayout {
+        val column = LinearLayout(context)
+        column.orientation = VERTICAL
+        column.gravity = Gravity.CENTER_HORIZONTAL
+        val title = label("VOL", 14f, LABEL)
+        title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        title.gravity = Gravity.CENTER
+        column.addView(title, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        volumeSlider.max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        volumeSlider.setPadding(0, dp(4), 0, dp(4))
+        volumeSlider.contentDescription = "Volume"
+        volumeSlider.onChange = { level ->
+            audio.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0)
+            showVolume(level)
+        }
+        column.addView(volumeSlider, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        volumeText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+        volumeText.gravity = Gravity.CENTER
+        column.addView(volumeText, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        return column
     }
 
     private fun render(state: YouTubeState) {
@@ -377,7 +408,18 @@ internal class YouTubeContent(
     }
 
     private fun refreshVolume() {
-        volumeBar.progress = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        if (volumeSlider.dragging) return
+        val level = audio.getStreamVolume(AudioManager.STREAM_MUSIC)
+        volumeSlider.progress = level
+        showVolume(level)
+    }
+
+    private fun showVolume(level: Int) {
+        setText(volumeText, "${level * 100 / volumeSlider.max}%")
+    }
+
+    private fun refreshBrightness() {
+        brightnessBar.progress = (brightness.percent().coerceIn(MIN_BRIGHTNESS, MAX_BRIGHTNESS)) - MIN_BRIGHTNESS
     }
 
     private fun startTicker() {
@@ -514,6 +556,9 @@ internal class YouTubeContent(
         private const val COLUMN_DP = 280
         private const val THUMB_WIDTH_DP = 300
         private const val PREFETCH_ITEMS = 6
+        private const val VOLUME_COLUMN_DP = 96
+        const val MIN_BRIGHTNESS: Int = 5
+        const val MAX_BRIGHTNESS: Int = 100
         private val CONTROLLABLE = setOf(PlaybackPhase.Buffering, PlaybackPhase.Playing, PlaybackPhase.Paused, PlaybackPhase.Ended)
         private val BACKGROUND: Int = Color.BLACK
         private val PRIMARY: Int = Color.WHITE
@@ -523,6 +568,12 @@ internal class YouTubeContent(
         private val FIELD: Int = Color.rgb(20, 20, 20)
         private val PRESSED: Int = Color.rgb(64, 64, 64)
     }
+}
+
+internal interface BrightnessControl {
+    fun percent(): Int
+
+    fun set(percent: Int)
 }
 
 internal class AspectFrame(context: Context) : FrameLayout(context) {

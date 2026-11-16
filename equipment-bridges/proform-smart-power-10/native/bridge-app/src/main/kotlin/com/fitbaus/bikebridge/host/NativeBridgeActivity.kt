@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -41,6 +42,7 @@ import com.fitbaus.bikebridge.host.arcade.ArcadeMode
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeController
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
 import com.fitbaus.bikebridge.host.uvc.UvcProcess
+import com.fitbaus.bikebridge.host.youtube.BrightnessControl
 import com.fitbaus.bikebridge.host.youtube.YouTubeContent
 import com.fitbaus.bikebridge.protocol.BridgeHttpJson
 import com.fitbaus.bikebridge.protocol.NativeTelemetrySnapshot
@@ -117,6 +119,15 @@ class NativeBridgeActivity : Activity() {
         }
     }
     private val modeController = ArcadeModeController(arcadeHooks)
+
+    private val youtubeBrightness = object : BrightnessControl {
+        override fun percent(): Int = BridgeProcess.brightness(this@NativeBridgeActivity).percent() ?: systemBrightnessPercent()
+
+        override fun set(percent: Int) {
+            BridgeProcess.brightness(this@NativeBridgeActivity).record(percent)
+            applyStoredBrightness()
+        }
+    }
 
     private val refresh = object : Runnable {
         override fun run() {
@@ -345,6 +356,12 @@ class NativeBridgeActivity : Activity() {
         window.attributes = attrs
     }
 
+    private fun systemBrightnessPercent(): Int = try {
+        Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS) * 100 / 255
+    } catch (_: Settings.SettingNotFoundException) {
+        50
+    }
+
     private fun bindGridValue(view: TextView, value: Int?, live: Int) {
         setIfChanged(view, BridgeUiStateMapper.formatGrid(value))
         val color = if (value != null) live else MUTE
@@ -387,7 +404,7 @@ class NativeBridgeActivity : Activity() {
             arcadeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
-        youtubeContent = YouTubeContent(this, getSharedPreferences(YouTubeContent.PREFS, Context.MODE_PRIVATE))
+        youtubeContent = YouTubeContent(this, getSharedPreferences(YouTubeContent.PREFS, Context.MODE_PRIVATE), youtubeBrightness)
         contentHost.addView(
             youtubeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),

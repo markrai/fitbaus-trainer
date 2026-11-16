@@ -16,8 +16,12 @@ small FitBaus-owned layer.
   "couldn't load more, tap to retry" states are shown in place.
 - **Play:** tapping a card opens the player inside the tab: video surface,
   PLAY/PAUSE (or tap the video), seek bar with buffered range, elapsed and
-  total time, system music-volume slider, a quality menu (240p / 360p
-  default / 480p maximum, persisted) and "‹ RESULTS". Live videos play from
+  total time, a screen-brightness slider (5-100 %, written to the same
+  brightness setting as the Bridge brightness API and applied immediately), a
+  vertical system music-volume slider in its own column right of the video
+  (top loud, bottom silent, with a percentage; follows hardware volume keys), a
+  quality menu (240p / 360p default / 480p maximum, persisted) and
+  "‹ RESULTS". Live videos play from
   HLS and cannot seek. The exercise HUD (RPM / Watts / Resistance / HR) stays
   visible above the tab, fed from the existing 200 ms dashboard refresh.
 - **Leaving:** switching tabs, opening settings or pausing the activity

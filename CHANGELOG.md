@@ -1,137 +1,115 @@
 # Changelog
 
+All notable changes to FitBaus are documented in this file. The format is
+based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and version
+numbers follow [VERSIONING.md](VERSIONING.md).
+
+FitBaus Full is developed on `main`. FitBaus Lite, a compact edition for
+storage-constrained ProForm Smart Power 10.0 consoles without external webcam
+support, is maintained on `lite/1.x`.
+
 ## [Unreleased]
 
-### Added
-
-- Release engineering Point A: `.github/workflows/release.yml` builds an existing
-  immutable tag with newer tooling, signs Trainer + production Bike Bridge,
-  verifies metadata/certificates, and can attach public assets without manual
-  re-upload. See `docs/RELEASE.md`.
-- Local `lite/1.x` maintenance track rooted at `v1.0.0` (no external UVC).
-
-## [2.1.0] - Upcoming (FitBaus Full)
-
-Minor **FitBaus Full** release adding the BIKETRIS arcade game. Product
-version **2.1.0** (`versionCode` **20100**), an in-place upgrade over
-**2.0.0** (`20000`) and published Lite **1.0.1** (`10001`).
+Changes on `main` (FitBaus Full) since 1.0.0 that are not yet part of a
+published release.
 
 ### Added
 
-- **BIKETRIS** arcade game in the Bike Bridge (new title-bar tab): a
-  falling-block puzzle on a 10x20 board with all seven pieces, a seeded
-  seven-piece bag, standard rotation states and wall kicks, next-piece
-  preview, ghost landing outline, lock delay, gradual speed-up per level and
-  1-4 line scoring.
-- Head steering: the piece follows the same mirrored face position as BRICKS,
-  with column hysteresis and one-column-at-a-time movement. Gravity pauses
-  when the face is lost and resumes once it is stable again.
-- Wave-to-rotate: a deliberate sideways hand or arm wave rotates the piece
-  clockwise once. Detection is a lightweight luminance-motion detector that
-  reuses the existing face-tracking camera frames, with no extra camera
-  stream and no new model.
-- Touch fallback: drag across the board to move and tap ROTATE to rotate.
-  Without face tracking, a touch starts persistent touch play until the game
-  ends, the mode exits, or the face is stable again.
-- BIKETRIS developer options (long-press the tab): face tracker preset, head
-  sensitivity, wave on/off, wave sensitivity and cooldown, simulated wave
-  event, restart, and a diagnostics overlay with motion-detector timings.
+- **YouTube tab in the Bike Bridge.** Browse trending videos, search YouTube
+  and play public videos inside the console app, with pause, seeking and
+  resume from the last position. A maximum quality setting (240p, 360p or
+  480p; 360p by default) is never exceeded. The player is released whenever
+  you leave the tab or the app pauses, and the tab never starts the arcade
+  camera or touches the Bike Bridge's equipment connection or resistance
+  control.
+- **YouTube player brightness and volume controls.** A brightness slider below
+  the video adjusts the console screen through the Bike Bridge's existing
+  brightness setting, and a vertical slider beside the video sets the music
+  volume (loudest at the top).
+- **BIKETRIS arcade game.** A falling-block puzzle steered by moving your head
+  left and right; a deliberate sideways hand wave rotates the piece. Dragging
+  across the board moves pieces when face tracking is unavailable.
+- **Cadence-controlled BIKETRIS speed.** Choose on screen between PEDAL TO SLOW
+  (the default; pedaling faster gives you more time) and PEDAL TO SPEED UP
+  (pedaling faster makes pieces fall faster). Without live cadence, pieces
+  fall at the standard speed.
+- **External webcam support.** Arcade games can use an external USB (UVC)
+  webcam, and a new External Webcams settings tab shows a live preview with
+  zoom controls and remembers settings for each camera.
+- **Bike Bridge header settings gear and version label.** The gear opens
+  settings with one tap, and the installed version is shown beside the
+  FITBAUS title. Also released in Lite 1.0.1.
+- **Release workflow.** Signed Trainer and production Bike Bridge artifacts
+  are built from an existing tag, verified, and published with SHA-256
+  checksums. See [docs/RELEASE.md](docs/RELEASE.md).
 
 ### Changed
 
-- Arcade game tabs sit in a horizontal scroller between the FITBAUS title and
-  the settings gear, so the gear stays visible with the extra tab.
+- Arcade game tabs scroll horizontally, so the settings gear stays visible as
+  tabs are added.
+- `deploy-bike.bat` refuses to install a Bike Bridge build with a lower
+  version code or a different signing certificate, and never uninstalls the
+  console app, so pairing is preserved.
 
-### Notes
+### Fixed
 
-- Bike telemetry stays read-only: BIKETRIS never sends resistance or touches
-  the USB session, and pieces fall whether or not you pedal.
-- BIKETRIS and its wave thresholds have not yet been qualified on the
-  physical console.
+- The Bike Bridge HTTP server can bind its port again immediately after the
+  service restarts. Also released in Lite 1.0.1.
 
-## [2.0.0] - Upcoming (FitBaus Full)
+## [1.0.1] - 2026-11-14
 
-Upcoming **FitBaus Full** feature release on the path from
-`feature/external-webcam` into `main`. Product version **2.0.0**
-(`versionCode` **20000**) so in-place upgrades succeed over published Lite
-**1.0.1** (`10001`) without uninstalling the Bike Bridge or clearing pairing
-data.
+Published on GitHub as **FitBaus Lite 1.0.1** from `lite/1.x`, with a signed
+Trainer Android APK, a signed Lite production Bike Bridge APK, the web/PWA
+bundle, and SHA-256 checksums.
 
 ### Added
 
-- External Webcams settings tab with exclusive UVC preview, absolute zoom
-  controls, preference persistence keyed by camera identity, and scoped USB
-  detach handling.
-- `deploy-bike.bat` install preflight: refuses version-code downgrades and
-  signing mismatches; never uninstalls the console package.
+- **Bike Bridge settings gear.** A gear in the upper-right header opens the
+  pairing and settings screen with one tap; long-pressing FITBAUS still works.
+- **Bike Bridge version label.** The installed version (for example `v1.0.1`)
+  is shown beside the FITBAUS title.
 
-### Notes
+### Fixed
 
-- FitBaus **Lite** remains on `lite/1.x` (published **1.0.1** unchanged).
-- Do not merge webcam support into Lite.
+- The Bike Bridge HTTP server can bind its port again immediately after the
+  service restarts, instead of failing while the previous socket is closing.
 
 ## [1.0.0] - 2026-11-12
 
-First unified FitBaus product release. Trainer web/PWA, Capacitor Android and
-iOS, Native Bike Bridge, and arcade (inside the Bridge APK) all report
-**1.0.0**. Historical `0.x` changelog entries below are unchanged development
-records; they are not rewritten as 1.x releases.
+First unified FitBaus version: the Trainer web/PWA, Capacitor Android and iOS
+apps, Native Bike Bridge and the arcade games inside the Bridge all report
+**1.0.0**. The `v1.0.0` tag exists, but its GitHub release was not published.
+Platforms: the hosted PWA, Capacitor Android (minimum API 24), Capacitor iOS
+(source and Xcode project), and the Native Bike Bridge for the ProForm Smart
+Power 10.0 (Android 5.1.1). Historical `0.x` entries below are development
+records and are not renumbered.
 
 ### Added
 
-- Authoritative product version in `version.js`, with Node and Gradle helpers
-  that reject missing, malformed, or out-of-range versions (minor/patch must
-  be 0–99; Android `versionCode` stays in `1..2100000000`).
-- Version-consistency check (`npm run check:version`) in CI, including
-  Gradle-resolved Bike Bridge metadata.
-- Shared web deploy packaging (`scripts/package-web-deploy.cjs`) used by
-  `build-deploy.bat` and the inspection artifact zip.
-- Manual **Release artifacts** workflow: inspection-only `workflow_dispatch`
-  packaging with SHA-256 checksums. It does not tag, push, or publish.
+- A single authoritative product version in `version.js`, with Node and Gradle
+  helpers that reject missing, malformed or out-of-range versions.
+- A version-consistency check (`npm run check:version`) in CI, including the
+  Bike Bridge's Gradle-resolved metadata.
+- Shared web deploy packaging used by `build-deploy.bat` and the release
+  artifact zip.
+- A manual **Release artifacts** workflow that packages inspection artifacts
+  with SHA-256 checksums without tagging or publishing.
 
 ### Changed
 
-- **Unified versioning.** Android Trainer `versionName`, iOS
-  `MARKETING_VERSION`, Bike Bridge `versionName`, and HTTP `bridgeVersion`
-  now derive from `version.js`. Numeric codes use
-  `major * 10000 + minor * 100 + patch` (`1.0.0` → `10000`).
-- **PWA cache identity.** `sw.js` now parses `dist/version.js` correctly, so
-  the release cache name is `fitbaus-trainer-1.0.0`. Persisted workout and
-  athlete data are unchanged.
-- **Bike Bridge CI and tree match Native.** The retired Xamarin/C# host,
-  Legacy build scaffolding, and migration scripts are removed. Automated
-  validation uses Native Gradle unit tests (`equipment-protocol`,
-  `bridge-app`, USB probe, arcade).
+- **Unified versioning.** Android `versionName`, iOS `MARKETING_VERSION`, Bike
+  Bridge `versionName` and the HTTP `bridgeVersion` all derive from
+  `version.js`. Numeric codes use `major * 10000 + minor * 100 + patch`
+  (`1.0.0` is `10000`).
+- **PWA cache identity.** The service worker cache is named after the release
+  (`fitbaus-trainer-1.0.0`). Saved workouts and athlete data are unchanged.
+- Upgrades keep existing package and bundle IDs, so local workout history,
+  profiles, pairing and equipment settings are preserved.
 
-### Platforms in this release
+### Removed
 
-- Hosted/self-hosted PWA (static files)
-- Capacitor Android Trainer (`com.markrai.fitbaus.trainer`, min API 24)
-- Capacitor iOS Trainer (`com.markrai.fitbaus.trainer`) — source and Xcode
-  project; CI does not produce an IPA
-- Native Bike Bridge for **ProForm Smart Power 10.0 only** (Android 5.1.1 /
-  API 22 / x86), staging and production package IDs unchanged
-
-### Install and upgrade
-
-- Web: replace hosted files from the deploy zip; PWA cache busts via the
-  versioned cache name.
-- Android/iOS apps keep their package/bundle IDs. Local workout history,
-  profiles, pairing, and equipment configuration are not reset.
-- Unsigned release APKs are inspection artifacts, not installers.
-- `adb install -r` requires the same signing certificate as the installed
-  app. A CI debug-signed Bridge APK will not upgrade a locally debug-signed
-  install that used a different keystore.
-
-### Release gates still open
-
-- Trainer Android signing for sideload/Play
-- iOS signing and App Store / TestFlight distribution
-- Production Bike Bridge physical-device qualification on the console
-- Explicit opt-in plus signing secrets to package a production Bridge APK
-
-See [VERSIONING.md](VERSIONING.md) for bump steps and the GitHub release
-procedure.
+- The retired Xamarin/C# Bike Bridge host, its build scaffolding and migration
+  scripts. CI now validates the Native Bike Bridge with Gradle unit tests.
 
 ## [0.10.14] - 2026-11-10
 
@@ -163,9 +141,7 @@ procedure.
   identity uses the qualified AuthOnly sequence as normal startup. Staging
   `unlockQualification=off` remains WarmState for rollback. USB reconnect
   re-authenticates once per new USB session and does not inherit write
-  readiness. Production Gradle still rejects staging `auth`/`lockout` flags.
-  Physical acceptance of a production-identity APK is still required before
-  calling this production-ready.
+  readiness. Production Gradle rejects staging `auth`/`lockout` flags.
 
 ### Fixed
 
@@ -216,8 +192,8 @@ procedure.
   local `vo2_evidence.protocol`. Protocol-v1 workloads resolve only within
   commandable resistance 1–10 so current automatic Bike Bridge transport
   cannot silently rewrite a prescribed stage. Machine calibration remains
-  1–15. **VO2 estimation is not yet calculated.**
-  See `VO2-TEST-PROTOCOL-V1.md`.
+  1–15. This version records protocol evidence only; the estimate itself was
+  added in 0.10.12. See `VO2-TEST-PROTOCOL-V1.md`.
 
 ## [0.10.10] - 2026-08-28
 
@@ -408,7 +384,7 @@ procedure.
 
 > Formerly labeled `APP_VERSION` **0.9.4** after the post-0.9.34 reset.
 
-### Enhancements
+### Changed
 
 - **Downregulation play control** - Play button available for all
   downregulation visualizations.
@@ -417,7 +393,7 @@ procedure.
 
 > Formerly labeled `APP_VERSION` **0.9.2** after the post-0.9.34 reset.
 
-### Enhancements
+### Changed
 
 - **Downregulation viz polish** - Improvements across downregulation
   visualizations.
@@ -427,7 +403,7 @@ procedure.
 > Formerly labeled `APP_VERSION` **0.9.1** after an accidental reset from
 > **0.9.34**.
 
-### Enhancements
+### Changed
 
 - **Noise visualization** - Downregulation noise viz enhancements.
 
@@ -481,14 +457,14 @@ procedure.
 
 ## [0.9.21] - 2026-02-12
 
-### Enhancements
+### Changed
 
 - **Faster starfield** - Increased downregulation starfield speed.
 - **Downregulation SISU sync** - Downregulation sessions can sync with SISU.
 
 ## [0.9.20] - 2026-02-12
 
-### Enhancements
+### Changed
 
 - **Downregulation performance** - Optimizations for downregulation rendering
   and session handling.
@@ -598,7 +574,7 @@ procedure.
 
 ## [0.9.5] - 2026-01-28
 
-### Enhancements
+### Changed
 
 - **Already installed** - Clearer indication when the PWA is already installed.
 
@@ -677,7 +653,7 @@ procedure.
 
 ## [0.0.5] - 2026-01-12
 
-### Enhancements
+### Changed
 
 - **BPM layout** - BPM and BPM range aligned with the heart.
 
@@ -689,7 +665,7 @@ procedure.
 - **Workout JSON export** - Export JSON at end of workout.
 - **Logo + data JSON** - Branding logo and corrected workout JSON.
 
-### Enhancements
+### Changed
 
 - **Mobile aesthetics** - Mobile layout polish.
 
@@ -699,13 +675,13 @@ procedure.
 
 - **BLE / ANT+ HR** - Rudimentary chest-strap heart-rate capability.
 
-### Enhancements
+### Changed
 
 - **Sizing consistency** - More consistent control and layout sizing.
 
 ## [0.0.2] - 2025-12-12
 
-### Enhancements
+### Changed
 
 - **4×4 grid + emojis** - Expanded workout grid presentation.
 
@@ -715,3 +691,7 @@ procedure.
 
 - **Initial trainer** - First workout trainer UI with profile, workout data,
   workout logic, and basic controls.
+
+[Unreleased]: https://github.com/markrai/fitbaus-trainer/compare/v1.0.0...HEAD
+[1.0.1]: https://github.com/markrai/fitbaus-trainer/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/markrai/fitbaus-trainer/tree/v1.0.0
