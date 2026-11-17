@@ -11,7 +11,8 @@ support, is maintained on `lite/1.x`.
 ## [Unreleased]
 
 Changes on `main` (FitBaus Full) since 1.0.0 that are not yet part of a
-published release.
+published release. These changes are implemented for Full 2.1.0
+(`versionCode 20100`), which is not yet tagged, qualified, or published.
 
 ### Added
 
