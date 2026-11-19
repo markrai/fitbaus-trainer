@@ -16,6 +16,14 @@ included in this upcoming release.
 
 ### Added
 
+- **Related-video discovery on the Bike Bridge YouTube screen.** Signed-in
+  users can open DISCOVER alongside FROM YOUR CHANNELS to see suggestions
+  obtained from a bounded sample of their subscription uploads. The existing
+  NewPipe extractor supplies related items; results are mixed across seed
+  channels, deduplicated and requested only on demand. No extra Google OAuth
+  permissions, watch-history access or YouTube Data API search calls are used.
+  Discovery has its own cancellable worker, error/retry state and no
+  automated crawl during playback.
 - **Scan-to-authorize Google device sign-in.** MY YOUTUBE now shows an
   offline-generated QR code alongside the Google verification URL and a
   large, case-sensitive device code. Scan from a phone to open Google's
