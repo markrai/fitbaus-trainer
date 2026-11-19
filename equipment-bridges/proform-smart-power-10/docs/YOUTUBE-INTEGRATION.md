@@ -92,10 +92,23 @@ small FitBaus-owned layer.
   list is not the personalized YouTube Home feed; the official API does not
   expose Home recommendations. The account UI uses compact text lists rather
   than the thumbnail browsing grid.
-- **Leaving:** switching tabs, opening settings or pausing the activity
-  releases the player and cancels outstanding work. Coming back shows the
-  results list as it was; reopening the same video resumes where it stopped
-  (positions under 5 s and finished videos start over).
+- **Floating player continuity:** switching from YouTube to Dashboard or
+  any arcade game while a video is resolving, buffering, playing or paused
+  moves the same video view to a compact overlay in the top-right of the
+  content area. Playback continues, including its existing audio, position,
+  subtitle state and decoder. Tap the floating video/header or the YouTube
+  tab to return to the full player without a stream re-resolution. The X
+  closes the overlay, stops playback and releases ExoPlayer. The overlay is
+  not displayed for browse-only, failed or completed videos. Normal game
+  cameras and clocks continue independently of the floating player.
+  This is an in-Activity UI overlay for Android 5.1.1, not Android's system
+  PiP, and does not persist when FitBaus itself loses foreground focus.
+- **Leaving the Activity:** pausing or destroying FitBaus releases video
+  playback, regardless of whether the user is viewing YouTube or a floating
+  player over Dashboard/game content. Returning after a host pause shows
+  browsing results as before; reopening the same video can resume from its
+  saved position (positions under 5 s and finished videos start over).
+  Switching tabs without an active video also retains the old stop behavior.
 
 ## Architecture
 
