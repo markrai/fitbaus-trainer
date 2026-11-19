@@ -20,10 +20,22 @@ small FitBaus-owned layer.
   brightness setting as the Bridge brightness API and applied immediately), a
   vertical system music-volume slider in its own column right of the video
   (top loud, bottom silent, with a percentage; follows hardware volume keys), a
-  quality menu (240p / 360p default / 480p maximum, persisted) and
+  quality menu (240p / 360p default / 480p maximum, persisted), a CC toggle,
+  and
   "‹ RESULTS". Live videos play from
   HLS and cannot seek. The exercise HUD (RPM / Watts / Resistance / HR) stays
   visible above the tab, fed from the existing 200 ms dashboard refresh.
+- **Captions:** NewPipeExtractor supplies available subtitle tracks. FitBaus
+  picks a single supported track, preferring English then human-authored tracks;
+  if only another language is available, it uses that instead. Supported
+  formats are WebVTT, TTML and SRT. Captions start enabled when available,
+  and the CC button enables/disables them without restarting video playback.
+  A small text overlay stays within the video frame, not the exercise HUD.
+  Caption files are capped at 2 MiB and loaded by ExoPlayer independently
+  of audio/video; missing/expired caption URLs are treated as a missing
+  caption rather than a video failure. Videos without usable captions play
+  normally with CC disabled. This lightweight first version selects one
+  language per video, without a language picker or translations.
 - **Leaving:** switching tabs, opening settings or pausing the activity
   releases the player and cancels outstanding work. Coming back shows the
   results list as it was; reopening the same video resumes where it stopped
@@ -39,7 +51,7 @@ host/youtube/
   NewPipeYouTubeCatalog.kt     kiosk / search / paging / stream lookup (NewPipe)   [GPL-3.0 adapted]
   HttpUrlDownloader.kt         NewPipe Downloader over HttpURLConnection
   YouTubeStreamSelector.kt     stream choice from plain descriptors                [GPL-3.0 adapted]
-  YouTubeMediaSources.kt       ExoPlayer DASH / progressive / HLS sources          [GPL-3.0 adapted]
+  YouTubeMediaSources.kt       ExoPlayer DASH / progressive / HLS + captions     [GPL-3.0 adapted]
   PlayerEngine.kt              engine interface + ExoPlayer 2.19.1 implementation
   YouTubeSession.kt            state machine: lists, playback, staleness, retries
   ThumbnailLoader.kt           bounded thumbnail fetch and cache

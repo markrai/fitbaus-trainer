@@ -72,6 +72,8 @@ internal class YouTubeContent(
     private val videoTitle = label("", 18f, PRIMARY)
     private val qualityButton = button("360p")
     private val videoFrame = AspectFrame(context)
+    private val captionsView = label("", 22f, PRIMARY)
+    private val captionsButton = button("CC")
     private val playbackFeedback = ImageView(context)
     private val hidePlaybackFeedback = Runnable { playbackFeedback.visibility = GONE }
     private val playerOverlay = LinearLayout(context)
@@ -251,6 +253,13 @@ internal class YouTubeContent(
         val area = FrameLayout(context)
         area.setBackgroundColor(Color.BLACK)
         videoFrame.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        captionsView.gravity = Gravity.CENTER
+        captionsView.setBackgroundColor(Color.argb(165, 0, 0, 0))
+        captionsView.setShadowLayer(3f, 0f, 2f, Color.BLACK)
+        captionsView.setPadding(dp(12), dp(5), dp(12), dp(5))
+        captionsView.maxLines = 3
+        captionsView.visibility = GONE
+        videoFrame.addView(captionsView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         val feedbackBackground = GradientDrawable()
         feedbackBackground.shape = GradientDrawable.OVAL
         feedbackBackground.setColor(Color.argb(175, 0, 0, 0))
@@ -284,6 +293,9 @@ internal class YouTubeContent(
         controls.gravity = Gravity.CENTER_VERTICAL
         playButton.setOnClickListener { onPlaybackToggle() }
         controls.addView(playButton, LayoutParams(dp(140), dp(TOUCH_DP)))
+        captionsButton.contentDescription = "Toggle captions"
+        captionsButton.setOnClickListener { session.toggleCaptions() }
+        controls.addView(captionsButton, spaced(LayoutParams(dp(90), dp(TOUCH_DP))))
         positionText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
         positionText.gravity = Gravity.END or Gravity.CENTER_VERTICAL
         controls.addView(positionText, spaced(LayoutParams(dp(92), ViewGroup.LayoutParams.WRAP_CONTENT)))
@@ -406,6 +418,13 @@ internal class YouTubeContent(
             },
         )
         playButton.isEnabled = playback.phase in CONTROLLABLE
+        captionsButton.isEnabled = playback.captionsAvailable && playback.phase in CONTROLLABLE
+        setText(captionsButton, if (playback.captionsEnabled) "CC ON" else "CC")
+        val captionText = playback.captionText.takeIf {
+            playback.captionsEnabled && playback.phase in CAPTION_PHASES && it.isNotEmpty()
+        } ?: ""
+        setText(captionsView, captionText)
+        captionsView.visibility = if (captionText.isEmpty()) GONE else VISIBLE
         val durationSeconds = (playback.durationMs / 1000).toInt()
         seekBar.isEnabled = !playback.live && durationSeconds > 0 && playback.phase in CONTROLLABLE
         if (seekBar.max != durationSeconds.coerceAtLeast(1)) seekBar.max = durationSeconds.coerceAtLeast(1)
@@ -608,6 +627,7 @@ internal class YouTubeContent(
         const val MIN_BRIGHTNESS: Int = 5
         const val MAX_BRIGHTNESS: Int = 100
         private val CONTROLLABLE = setOf(PlaybackPhase.Buffering, PlaybackPhase.Playing, PlaybackPhase.Paused, PlaybackPhase.Ended)
+        private val CAPTION_PHASES = setOf(PlaybackPhase.Playing, PlaybackPhase.Paused)
         private val BACKGROUND: Int = Color.BLACK
         private val PRIMARY: Int = Color.WHITE
         private val LABEL: Int = Color.rgb(180, 180, 180)

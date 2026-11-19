@@ -516,6 +516,61 @@ class YouTubeSessionTest {
     }
 
     @Test
+    fun captionsCanBeToggledWithoutRestartingPlaybackAndStaleCuesAreIgnored() {
+        val original = FakeCatalog.playable("captiontest")
+        val caption = CaptionTrack("https://www.youtube.com/api/timedtext?lang=en", "en", "text/vtt", false)
+        catalog.resolutions["captiontest"] = {
+            ResolvedVideo(original.summary, original.options, original.handle, caption)
+        }
+        session.start()
+        runner.runAll()
+        session.open(video("captiontest"))
+        runner.runAll()
+        val engine = engines.last
+        engine.listener.onReady(true)
+        assertTrue(session.state.playback.captionsAvailable)
+        assertTrue(session.state.playback.captionsEnabled)
+        assertEquals(listOf(true), engine.captionsEnabled)
+        engine.listener.onCaptionsChanged("Caption one")
+        assertEquals("Caption one", session.state.playback.captionText)
+        session.toggleCaptions()
+        assertFalse(session.state.playback.captionsEnabled)
+        assertEquals("", session.state.playback.captionText)
+        assertEquals(listOf(true, false), engine.captionsEnabled)
+        engine.listener.onCaptionsChanged("Stale caption")
+        assertEquals("", session.state.playback.captionText)
+        session.toggleCaptions()
+        assertTrue(session.state.playback.captionsEnabled)
+        assertEquals(listOf(true, false, true), engine.captionsEnabled)
+        engine.listener.onCaptionsChanged("Caption two")
+        assertEquals("Caption two", session.state.playback.captionText)
+        session.back()
+        assertEquals("", session.state.playback.captionText)
+        engine.listener.onCaptionsChanged("Too late")
+        assertEquals("", session.state.playback.captionText)
+    }
+
+    @Test
+    fun captionsSurviveQualityReplanAndRespectManualOff() {
+        val original = FakeCatalog.playable("captiontest")
+        val caption = CaptionTrack("https://www.youtube.com/api/timedtext?lang=en", "en", "text/vtt", false)
+        catalog.resolutions["captiontest"] = {
+            ResolvedVideo(original.summary, original.options, original.handle, caption)
+        }
+        session.start()
+        runner.runAll()
+        session.open(video("captiontest"))
+        runner.runAll()
+        session.toggleCaptions()
+        session.setMaxHeight(480)
+        runner.runAll()
+        assertEquals(listOf(false), engines.last.captionsEnabled)
+        assertFalse(session.state.playback.captionsEnabled)
+        session.toggleCaptions()
+        assertEquals(listOf(false, true), engines.last.captionsEnabled)
+    }
+
+    @Test
     fun liveVideosPlayFromHlsAndCannotSeek() {
         catalog.resolutions["livestream1"] = { playable("livestream1", live = true) }
         session.start()

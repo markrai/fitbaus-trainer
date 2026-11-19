@@ -71,6 +71,9 @@ internal data class PlaybackState(
     val activeHeight: Int = 0,
     val live: Boolean = false,
     val videoAspect: Float = 16f / 9f,
+    val captionsAvailable: Boolean = false,
+    val captionsEnabled: Boolean = false,
+    val captionText: String = "",
 )
 
 internal data class YouTubeState(
@@ -247,6 +250,15 @@ internal class YouTubeSession(
         update(state.copy(playback = playback.copy(phase = phase)))
     }
 
+    fun toggleCaptions() {
+        if (!ready() || state.screen != Screen.Player) return
+        val playback = state.playback
+        if (!playback.captionsAvailable) return
+        val enabled = !playback.captionsEnabled
+        engine?.setCaptionsEnabled(enabled)
+        update(state.copy(playback = playback.copy(captionsEnabled = enabled, captionText = "")))
+    }
+
     fun seekTo(positionMs: Long) {
         val active = engine ?: return
         val playback = state.playback
@@ -353,6 +365,9 @@ internal class YouTubeSession(
                             video = playback.video?.let { it.copy(title = summary.title.ifBlank { it.title }, channel = summary.channel ?: it.channel) },
                             live = summary.live,
                             durationMs = if (summary.durationSeconds > 0) summary.durationSeconds * 1000 else playback.durationMs,
+                            captionsAvailable = result.value.caption != null,
+                            captionsEnabled = result.value.caption != null && (!playback.captionsAvailable || playback.captionsEnabled),
+                            captionText = "",
                         ),
                     ),
                 )
@@ -372,7 +387,7 @@ internal class YouTubeSession(
         }
         plan = chosen
         val height = (chosen as? StreamPlan.Streams)?.height ?: 0
-        update(state.copy(playback = playback.copy(phase = PlaybackPhase.Buffering, message = null, activeHeight = height, positionMs = startMs)))
+        update(state.copy(playback = playback.copy(phase = PlaybackPhase.Buffering, message = null, activeHeight = height, positionMs = startMs, captionText = "")))
         playTask = runner.submit {
             val media = attempt { preparer.prepare(video.handle, chosen) }
             main.post { if (generation == playGeneration && !destroyed && state.active) attachEngine(generation, media, startMs) }
@@ -396,6 +411,7 @@ internal class YouTubeSession(
         }
         engine = created
         try {
+            created.setCaptionsEnabled(state.playback.captionsEnabled)
             created.prepare(prepared, startMs)
             if (!wantPlaying) created.setPlaying(false)
         } catch (e: Throwable) {
@@ -438,6 +454,13 @@ internal class YouTubeSession(
             val aspect = width * (if (pixelRatio > 0f) pixelRatio else 1f) / height
             val playback = state.playback
             if (aspect != playback.videoAspect) update(state.copy(playback = playback.copy(videoAspect = aspect)))
+        }
+
+        override fun onCaptionsChanged(text: String) {
+            if (!current() || !state.playback.captionsEnabled) return
+            val playback = state.playback
+            val next = text.take(500)
+            if (next != playback.captionText) update(state.copy(playback = playback.copy(captionText = next)))
         }
     }
 
@@ -483,7 +506,7 @@ internal class YouTubeSession(
     }
 
     private fun failWith(message: String) {
-        update(state.copy(playback = state.playback.copy(phase = PlaybackPhase.Error, message = message)))
+        update(state.copy(playback = state.playback.copy(phase = PlaybackPhase.Error, message = message, captionText = "")))
     }
 
     private fun stopPlayback() {

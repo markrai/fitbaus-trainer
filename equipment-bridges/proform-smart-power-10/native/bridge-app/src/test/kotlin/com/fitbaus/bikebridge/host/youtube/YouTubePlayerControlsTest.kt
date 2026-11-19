@@ -67,6 +67,16 @@ class YouTubePlayerControlsTest {
     }
 
     @Test
+    fun captionsAreDisplayedOnlyInsideTheVideoAndCanBeToggled() {
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
+        val player = content.substringAfter("private fun buildPlayer()").substringBefore("private fun buildVolumeColumn()")
+        assertTrue(player.contains("videoFrame.addView(captionsView"))
+        assertTrue(player.contains("captionsButton.setOnClickListener { session.toggleCaptions() }"))
+        assertTrue(content.contains("captionsView.visibility = if (captionText.isEmpty()) GONE else VISIBLE"))
+        assertTrue(content.contains("captionsButton.isEnabled = playback.captionsAvailable"))
+    }
+
+    @Test
     fun brightnessUsesTheBridgeBrightnessStoreThroughTheActivity() {
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val control = activity.substring(activity.indexOf("private val youtubeBrightness"), activity.indexOf("private val refresh"))

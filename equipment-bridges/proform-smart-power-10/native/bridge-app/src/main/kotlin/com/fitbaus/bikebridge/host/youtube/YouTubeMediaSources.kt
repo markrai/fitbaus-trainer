@@ -21,7 +21,7 @@
  *
  * Modified for FitBaus in 2026: rewritten in Kotlin and reduced to YouTube
  * progressive, OTF DASH, post-live DVR and HLS sources; removes the ExoPlayer
- * SimpleCache disk cache, subtitles, SmoothStreaming and non-YouTube services;
+ * SimpleCache disk cache, SmoothStreaming and non-YouTube services;
  * bounds the NewPipe manifest-creator caches to a few entries and clears them
  * before each preparation; preparation runs off the UI thread because the OTF
  * and post-live manifest creators perform network requests; passes the
@@ -35,14 +35,19 @@ package com.fitbaus.bikebridge.host.youtube
 
 import android.net.Uri
 import com.fitbaus.bikebridge.host.youtube.media.YoutubeHttpDataSource
+import com.google.android.exoplayer2.C
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.MergingMediaSource
 import com.google.android.exoplayer2.source.ProgressiveMediaSource
+import com.google.android.exoplayer2.source.SingleSampleMediaSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
 import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource
 import com.google.android.exoplayer2.source.dash.manifest.DashManifestParser
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
+import com.google.android.exoplayer2.upstream.DataSource
+import com.google.android.exoplayer2.upstream.DataSpec
+import com.google.android.exoplayer2.upstream.TransferListener
 import org.schabi.newpipe.extractor.services.youtube.dashmanifestcreators.YoutubeOtfDashManifestCreator
 import org.schabi.newpipe.extractor.services.youtube.dashmanifestcreators.YoutubePostLiveStreamDvrDashManifestCreator
 import org.schabi.newpipe.extractor.services.youtube.dashmanifestcreators.YoutubeProgressiveDashManifestCreator
@@ -97,7 +102,7 @@ internal class YouTubeMediaSources : MediaPreparer {
 
     private fun build(handle: ResolvedHandle, plan: StreamPlan): MediaSource {
         val resolved = handle as? NewPipeHandle ?: throw YouTubeException(FailureKind.Unsupported, "unknown stream handle")
-        return when (plan) {
+        val videoSource = when (plan) {
             is StreamPlan.Hls -> HlsMediaSource.Factory(hlsData).createMediaSource(MediaItem.fromUri(plan.url))
             is StreamPlan.Streams -> {
                 val video = source(resolved, resolved.streams[plan.video.index])
@@ -105,6 +110,17 @@ internal class YouTubeMediaSources : MediaPreparer {
                 if (audio == null) video else MergingMediaSource(true, video, audio)
             }
         }
+        val caption = resolved.caption ?: return videoSource
+        val config = MediaItem.SubtitleConfiguration.Builder(Uri.parse(caption.url))
+            .setMimeType(caption.mimeType)
+            .setLanguage(caption.languageTag)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+        val captionData = BoundedCaptionDataSource.Factory(hlsData, MAX_CAPTION_BYTES)
+        val captionSource = SingleSampleMediaSource.Factory(captionData)
+            .setTreatLoadErrorsAsEndOfStream(true)
+            .createMediaSource(config, C.TIME_UNSET)
+        return MergingMediaSource(videoSource, captionSource)
     }
 
     private fun clearCaches() {
@@ -161,5 +177,52 @@ internal class YouTubeMediaSources : MediaPreparer {
         const val CONNECT_TIMEOUT_MS = 10_000
         const val READ_TIMEOUT_MS = 15_000
         const val PROGRESSIVE_CHECK_BYTES = 256 * 1024
+        const val MAX_CAPTION_BYTES = 2L * 1024 * 1024
+    }
+}
+
+internal class BoundedCaptionDataSource(
+    private val delegate: DataSource,
+    private val maxBytes: Long,
+) : DataSource {
+    private var count = 0L
+
+    override fun addTransferListener(transferListener: TransferListener) {
+        delegate.addTransferListener(transferListener)
+    }
+
+    override fun open(dataSpec: DataSpec): Long {
+        count = 0L
+        val length = delegate.open(dataSpec)
+        if (length > maxBytes) {
+            delegate.close()
+            throw IOException("caption file exceeds size limit")
+        }
+        return length
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        if (length == 0) return 0
+        val remaining = maxBytes - count
+        if (remaining <= 0) {
+            val extra = delegate.read(buffer, offset, 1)
+            if (extra < 0) return -1
+            throw IOException("caption file exceeds size limit")
+        }
+        val read = delegate.read(buffer, offset, minOf(length.toLong(), remaining).toInt())
+        if (read > 0) count += read
+        return read
+    }
+
+    override fun getUri(): Uri? = delegate.uri
+
+    override fun getResponseHeaders(): Map<String, List<String>> = delegate.responseHeaders
+
+    override fun close() {
+        delegate.close()
+    }
+
+    class Factory(private val upstream: DataSource.Factory, private val maxBytes: Long) : DataSource.Factory {
+        override fun createDataSource(): DataSource = BoundedCaptionDataSource(upstream.createDataSource(), maxBytes)
     }
 }
