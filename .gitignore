@@ -2,6 +2,7 @@
 deploy/
 deploy-upload.bat
 /node_modules/
+/secrets/
 /www/
 
 # Gradle local caches (any module)
