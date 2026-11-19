@@ -61,7 +61,9 @@ channels fetched as they scroll. Search still covers all of YouTube.
 **You provide your own Google Cloud OAuth client**; no Google password is
 entered on the console. See the [step-by-step YouTube Google OAuth setup guide](docs/YOUTUBE-GOOGLE-OAUTH-SETUP.md)
 for current Cloud Console navigation, Windows ADB import, manual entry and
-troubleshooting.
+troubleshooting. Once a TV OAuth client is stored on the bike, opening
+MY YOUTUBE automatically prepares a new Google device code when needed;
+the JSON does not need to be imported again.
 
 Google's official API does not expose personalized Home recommendations,
 Watch History or Watch Later to FitBaus.

@@ -70,6 +70,17 @@ class GoogleYouTubeApiTest {
     }
 
     @Test
+    fun deviceCodeLifetimeComesFromGoogleAndCanExceedItsExampleThirtyMinutes() {
+        val http = Http()
+        http.nextPost = GoogleHttpResponse(200,
+            """{"device_code":"x","user_code":"CODE","verification_url":"https://www.google.com/device","expires_in":3600,"interval":5}""")
+        val code = GoogleYouTubeApi(http).requestCode(client)
+        assertEquals(3600, code.expiresInSeconds)
+        assertEquals(3600_000L, GoogleDeviceCodeLifetime.remainingMs(
+            GoogleDeviceCodeLifetime.deadline(100L, code.expiresInSeconds), 100L))
+    }
+
+    @Test
     fun unexpectedVerificationUrlsAreRejected() {
         val http = Http()
         http.nextPost = GoogleHttpResponse(200,

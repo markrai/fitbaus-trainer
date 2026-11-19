@@ -43,6 +43,7 @@ internal class GoogleAccountView(
     private val subs = button("SUBSCRIPTIONS")
     private val playlists = button("PLAYLISTS")
     private val login = button("CONNECT GOOGLE")
+    private val changeClient = button("CHANGE CLIENT")
     private val logout = button("SIGN OUT")
     private val back = button("BACK")
     private val more = button("MORE")
@@ -68,12 +69,18 @@ internal class GoogleAccountView(
         subs.setOnClickListener { showSubscriptions() }
         playlists.setOnClickListener { showPlaylists() }
         login.setOnClickListener {
-            if (account.status.phase == GoogleAccountPhase.Authorizing) account.cancelAuthorization() else showConfiguration()
+            when {
+                account.status.phase == GoogleAccountPhase.Authorizing -> account.cancelAuthorization()
+                account.hasStoredClient() -> account.requestStoredAuthorization()
+                else -> showConfiguration()
+            }
         }
+        changeClient.setOnClickListener { showConfiguration() }
         logout.setOnClickListener { confirmSignOut() }
         bar.addView(subs, LayoutParams(dp(170), dp(56)))
         bar.addView(playlists, LayoutParams(dp(150), dp(56)))
         bar.addView(login, LayoutParams(dp(180), dp(56)))
+        bar.addView(changeClient, LayoutParams(dp(170), dp(56)))
         bar.addView(logout, LayoutParams(dp(120), dp(56)))
         addView(bar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         message.setPadding(dp(12), dp(10), dp(12), dp(10))
@@ -102,10 +109,16 @@ internal class GoogleAccountView(
         renderStatus(account.status)
     }
 
-    fun open() {
+    fun open(autoAuthorize: Boolean = true) {
         visibility = VISIBLE
+        if (autoAuthorize) account.ensureAuthorizationOnOpen()
         if (account.status.phase == GoogleAccountPhase.Connected && !loaded) showSubscriptions()
         renderStatus(account.status)
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) account.checkAuthorizationExpiry()
     }
 
     fun close() {
@@ -139,15 +152,25 @@ internal class GoogleAccountView(
         subs.visibility = if (connected) VISIBLE else GONE
         playlists.visibility = if (connected) VISIBLE else GONE
         logout.visibility = if (connected) VISIBLE else GONE
-        login.visibility = if (connected) GONE else VISIBLE
-        login.text = if (status.phase == GoogleAccountPhase.Authorizing) "CANCEL" else "CONNECT GOOGLE"
+        val hasClient = account.hasStoredClient()
+        login.visibility = if (connected || status.phase == GoogleAccountPhase.Connecting) GONE else VISIBLE
+        changeClient.visibility = if (!connected && hasClient && status.phase != GoogleAccountPhase.Connecting) VISIBLE else GONE
+        login.text = when {
+            status.phase == GoogleAccountPhase.Authorizing -> "CANCEL"
+            hasClient -> "GET NEW CODE"
+            else -> "CONNECT GOOGLE"
+        }
         list.visibility = if (connected) VISIBLE else GONE
         back.visibility = if (connected && (section == Section.Channel || section == Section.Playlist)) VISIBLE else GONE
         more.visibility = if (connected && next != null) VISIBLE else GONE
         more.isEnabled = !busy
         val statusText = when (status.phase) {
             GoogleAccountPhase.SignedOut ->
-                "Connect your Google account to browse your subscribed channels and playlists. Your personalized YouTube Home feed is not available through Google's API."
+                if (hasClient) {
+                    "Google OAuth client is saved on this bike. Select GET NEW CODE to authorize another account."
+                } else {
+                    "Connect your Google account to browse your subscribed channels and playlists."
+                }
             GoogleAccountPhase.Connecting -> status.message
             GoogleAccountPhase.Authorizing ->
                 "Scan with your phone, then approve YouTube read-only access."
@@ -201,6 +224,11 @@ internal class GoogleAccountView(
 
     private fun renderAuthorization(status: GoogleAccountStatus) {
         if (status.phase != GoogleAccountPhase.Authorizing) {
+            authorizationPanel.visibility = GONE
+            clearQr()
+            return
+        }
+        if (visibility != VISIBLE) {
             authorizationPanel.visibility = GONE
             clearQr()
             return

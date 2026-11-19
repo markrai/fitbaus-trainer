@@ -118,7 +118,7 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
             json.getString("device_code"),
             json.getString("user_code"),
             verificationUrl,
-            json.getInt("expires_in").coerceIn(1, 1800),
+            json.getInt("expires_in").coerceIn(1, 86_400),
             json.optInt("interval", 5).coerceIn(5, 60),
             scanUrl.takeIf { it != verificationUrl },
         )

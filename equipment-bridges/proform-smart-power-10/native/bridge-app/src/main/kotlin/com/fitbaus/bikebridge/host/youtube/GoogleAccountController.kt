@@ -43,13 +43,61 @@ internal class GoogleAccountController(
     private var accessToken: String? = null
     private var accessExpiresAt = 0L
     private val pollRunnable = Runnable { poll() }
+    private val expiryRunnable = Runnable { expireIfNeeded() }
 
     fun hasAccount(): Boolean = store.hasAccount()
+
+    fun hasStoredClient(): Boolean = store.hasStoredClient()
+
+    fun ensureAuthorizationOnOpen() {
+        if (!active || store.hasAccount() || !store.hasStoredClient()) return
+        if (status.phase == GoogleAccountPhase.Connecting) return
+        if (status.phase == GoogleAccountPhase.Authorizing && ticket != null &&
+            GoogleDeviceCodeLifetime.isValid(deadlineMs, SystemClock.elapsedRealtime())) return
+        requestStoredAuthorization()
+    }
+
+    fun checkAuthorizationExpiry() {
+        if (!active || ticket == null) return
+        if (!GoogleDeviceCodeLifetime.isValid(deadlineMs, SystemClock.elapsedRealtime())) expireIfNeeded()
+    }
+
+    fun requestStoredAuthorization() {
+        if (!active || store.hasAccount() || !store.hasStoredClient()) return
+        cancelPending()
+        val current = generation
+        setStatus(GoogleAccountStatus(GoogleAccountPhase.Connecting, "Requesting a fresh code from Google…"))
+        job = runner.submit {
+            val result = runCatching {
+                val client = store.client() ?: throw GoogleCredentialStorageFailure(GoogleCredentialFailurePoint.Missing)
+                api.requestCode(client) to SystemClock.elapsedRealtime()
+            }
+            main.post { completeDeviceCode(current, result) }
+        }
+    }
 
     fun start() {
         if (active) return
         active = true
-        setStatus(GoogleAccountStatus(if (store.hasAccount()) GoogleAccountPhase.Connected else GoogleAccountPhase.SignedOut))
+        val connected = store.hasAccount()
+        val pending = ticket
+        if (!connected && pending != null &&
+            GoogleDeviceCodeLifetime.isValid(deadlineMs, SystemClock.elapsedRealtime())) {
+            setStatus(GoogleAccountStatus(
+                GoogleAccountPhase.Authorizing,
+                "Scan the QR on your phone or enter the code.",
+                pending.verificationUrl,
+                pending.userCode,
+                pending.verificationCompleteUrl ?: pending.verificationUrl,
+            ))
+            handler.postDelayed(expiryRunnable,
+                GoogleDeviceCodeLifetime.remainingMs(deadlineMs, SystemClock.elapsedRealtime()))
+            handler.postDelayed(pollRunnable, interval * 1000L)
+            return
+        }
+        ticket = null
+        deadlineMs = 0L
+        setStatus(GoogleAccountStatus(if (connected) GoogleAccountPhase.Connected else GoogleAccountPhase.SignedOut))
     }
 
     fun stop() {
@@ -58,11 +106,11 @@ internal class GoogleAccountController(
         generation += 1
         feedGeneration += 1
         handler.removeCallbacks(pollRunnable)
+        handler.removeCallbacks(expiryRunnable)
         job?.cancel()
         feedJob?.cancel()
         job = null
         feedJob = null
-        ticket = null
         accessToken = null
         accessExpiresAt = 0
     }
@@ -90,32 +138,52 @@ internal class GoogleAccountController(
         job = runner.submit {
             val saved = runCatching { store.saveClient(client) }
             main.post { onStored?.invoke(saved.isSuccess) }
-            val result = saved.mapCatching { api.requestCode(client) }
-            main.post {
-                if (!valid(current)) return@post
-                result.fold(
-                    onSuccess = { code ->
-                        ticket = code
-                        deadlineMs = SystemClock.elapsedRealtime() + code.expiresInSeconds * 1000L
-                        interval = code.intervalSeconds
-                        setStatus(GoogleAccountStatus(GoogleAccountPhase.Authorizing,
-                            "On your phone, open the URL and enter the code.",
-                            code.verificationUrl, code.userCode,
-                            code.verificationCompleteUrl ?: code.verificationUrl))
-                        handler.postDelayed(pollRunnable, interval * 1000L)
-                    },
-                    onFailure = { failure ->
-                        val diagnostic = if (saved.isFailure) {
-                            (failure as? GoogleCredentialStorageFailure) ?: GoogleCredentialStorageFailure()
-                        } else {
-                            failure
-                        }
-                        val detail = GoogleAuthDiagnostics.message(GoogleAuthStage.DeviceCode, diagnostic)
-                        setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, detail))
-                    },
-                )
+            val result = saved.mapCatching {
+                api.requestCode(client) to SystemClock.elapsedRealtime()
             }
+            main.post { completeDeviceCode(current, result, saved.isFailure) }
         }
+    }
+
+    private fun completeDeviceCode(
+        current: Long,
+        result: Result<Pair<GoogleDeviceCode, Long>>,
+        storageFailed: Boolean = false,
+    ) {
+        if (!valid(current)) return
+        result.fold(
+            onSuccess = { (code, receivedAt) ->
+                val until = GoogleDeviceCodeLifetime.deadline(receivedAt, code.expiresInSeconds)
+                val remaining = GoogleDeviceCodeLifetime.remainingMs(until, SystemClock.elapsedRealtime())
+                if (remaining == 0L) {
+                    setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, "Google authorization code already expired. Select GET NEW CODE."))
+                    return@fold
+                }
+                ticket = code
+                deadlineMs = until
+                interval = code.intervalSeconds
+                setStatus(GoogleAccountStatus(
+                    GoogleAccountPhase.Authorizing,
+                    "Scan the QR on your phone or enter the code.",
+                    code.verificationUrl,
+                    code.userCode,
+                    code.verificationCompleteUrl ?: code.verificationUrl,
+                ))
+                handler.postDelayed(expiryRunnable, remaining)
+                handler.postDelayed(pollRunnable, interval * 1000L)
+            },
+            onFailure = { failure ->
+                val diagnostic = if (storageFailed) {
+                    (failure as? GoogleCredentialStorageFailure) ?: GoogleCredentialStorageFailure()
+                } else {
+                    failure
+                }
+                setStatus(GoogleAccountStatus(
+                    GoogleAccountPhase.Error,
+                    GoogleAuthDiagnostics.message(GoogleAuthStage.DeviceCode, diagnostic),
+                ))
+            },
+        )
     }
 
     fun cancelAuthorization() {
@@ -199,9 +267,8 @@ internal class GoogleAccountController(
     private fun poll() {
         val request = ticket ?: return
         if (!active || status.phase != GoogleAccountPhase.Authorizing) return
-        if (SystemClock.elapsedRealtime() >= deadlineMs) {
-            cancelAuthorization()
-            setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, "Google authorization code expired."))
+        if (!GoogleDeviceCodeLifetime.isValid(deadlineMs, SystemClock.elapsedRealtime())) {
+            expireIfNeeded()
             return
         }
         val current = generation
@@ -247,7 +314,9 @@ internal class GoogleAccountController(
                                 setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, "Google authorization code expired."))
                             }
                             is GooglePollResult.Authorized -> {
+                                handler.removeCallbacks(expiryRunnable)
                                 ticket = null
+                                deadlineMs = 0L
                                 accessToken = response.grant.accessToken
                                 accessExpiresAt = SystemClock.elapsedRealtime() + response.grant.expiresInSeconds * 1000L
                                 setStatus(GoogleAccountStatus(GoogleAccountPhase.Connected))
@@ -266,12 +335,28 @@ internal class GoogleAccountController(
         }
     }
 
+    private fun expireIfNeeded() {
+        if (!active || status.phase != GoogleAccountPhase.Authorizing || ticket == null) return
+        val remaining = GoogleDeviceCodeLifetime.remainingMs(deadlineMs, SystemClock.elapsedRealtime())
+        if (remaining > 0L) {
+            handler.postDelayed(expiryRunnable, remaining)
+            return
+        }
+        cancelPending()
+        setStatus(GoogleAccountStatus(
+            GoogleAccountPhase.Error,
+            "Google authorization code expired. Select GET NEW CODE to continue.",
+        ))
+    }
+
     private fun cancelPending() {
         generation += 1
         handler.removeCallbacks(pollRunnable)
+        handler.removeCallbacks(expiryRunnable)
         job?.cancel()
         job = null
         ticket = null
+        deadlineMs = 0L
     }
 
     private fun valid(requestId: Long): Boolean = active && generation == requestId
