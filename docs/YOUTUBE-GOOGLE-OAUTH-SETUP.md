@@ -202,6 +202,8 @@ your Google Account security settings.
 | `unsupported_grant_type (HTTP 400)` or `invalid_grant (HTTP 400)` | The token request or device code was rejected. Confirm that the installed Bike Bridge build supports the limited-input device flow; request a fresh device code if it has expired or was already used. |
 | A code appears and says “Google rejected token polling: ...” | Follow the **safe OAuth identifier and HTTP status** on the bike. Normal `authorization_pending (HTTP 428)` is not a failure and should keep the code visible. The `slow_down` response requests a longer delay, not a new code. |
 | “Network or TLS error during token polling” | Check the bike's **internet access, clock/date and TLS trust**, not the Trainer-to-Bike local HTTP connection. The bike connects directly to `https://oauth2.googleapis.com/token`. |
+| “FitBaus could not read or save encrypted Google credentials” after a code appears | This is a **local** Android Keystore/credential round-trip error, not evidence that Google refused the code. Install an APK with the API-22 Keystore correction and run `push_youtube_auth.bat` again using the same TV OAuth JSON. Do not reset the bike or clear app data. |
+| “credential storage failed at RSA key unwrapping” or another named stage | FitBaus now identifies which **local cryptographic stage** failed without revealing secrets. Check that the OAuth-enabled APK is updated and that the app's Android Keystore entry is accessible; record only the stage name for a bug report. Do not delete Keystore aliases or wipe app preferences. |
 | “unexpected response” or “encrypted Google credentials” | The failure is likely local response parsing or Android Keystore storage, respectively. Reinstall a build with the diagnostic fix and reproduce before changing Google Cloud settings. |
 | A code appears but login fails or expires | Approve it on the same Google account listed as a test user. Restart authorization to obtain a fresh code; an expired code cannot be reused |
 | Sign-in works, then expires after about seven days | External OAuth apps left in **Testing** generally issue refresh tokens that expire after seven days for YouTube scopes. Consider Google's production verification requirements before distributing to others |
@@ -213,6 +215,32 @@ post bearer tokens in issue reports, or expose the Bridge's ADB endpoint
 to the internet. For public distribution, follow Google's API Services
 and OAuth verification policies; a personal Testing setup is not public
 production approval.
+
+## Android 5.1 Keystore compatibility
+
+FitBaus stores the Google TV client secret and OAuth refresh token encrypted
+with AES-GCM. On Android 5.1 (API 22), the AES key is wrapped by an
+Android Keystore RSA keypair. The corrected implementation explicitly
+selects the platform's legacy `AndroidOpenSSL` provider for RSA operations
+on API 22 and earlier, and uses an explicit 12-byte AES-GCM nonce for
+new ciphertext.
+
+Before presenting Google's verification code, the console now verifies
+that it can encrypt, persist and **reload/decrypt** the TV client secret.
+If this fails, it shows a safe credential-storage stage rather than a
+Google authorization code that would fail on its first poll.
+The old wrapped AES key and Keystore RSA alias are **retained**. The decoder
+also supports older ciphertext with 12- or 16-byte GCM nonces without
+silently accepting a bad authentication tag.
+
+To retry after installing the corrected Bridge APK, run
+`push_youtube_auth.bat` again with your existing TV OAuth JSON, or
+enter the same client details manually. You do **not** need a new
+Google Cloud OAuth client. Do not uninstall the Bridge APK, wipe
+app data, regenerate Keystore keys or clear pairing to diagnose this.
+If the console still reports an RSA or AES failure, the device-specific
+provider behavior needs physical inspection; CI can test the ciphertext
+format but cannot reproduce the console's hardware-backed Keystore.
 
 ## Why the first poll can fail
 
