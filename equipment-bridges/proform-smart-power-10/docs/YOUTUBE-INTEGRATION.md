@@ -92,10 +92,25 @@ small FitBaus-owned layer.
   list is not the personalized YouTube Home feed; the official API does not
   expose Home recommendations. The account UI uses compact text lists rather
   than the thumbnail browsing grid.
-- **Leaving:** switching tabs, opening settings or pausing the activity
-  releases the player and cancels outstanding work. Coming back shows the
-  results list as it was; reopening the same video resumes where it stopped
-  (positions under 5 s and finished videos start over).
+- **Floating player continuity:** switching from YouTube to Dashboard or
+  any arcade game while a video is resolving, buffering, playing or paused
+  moves the same video view to a compact overlay in the top-right of the
+  content area. Playback continues, including its existing audio, position,
+  subtitle state and decoder. Tap the floating video/header or the YouTube
+  tab to return to the full player without a stream re-resolution. The X
+  closes the overlay, stops playback and releases ExoPlayer. The overlay is
+  not created for browse-only, failed or completed videos. A video that
+  finishes or encounters a playback error after floating remains visible
+  until the user taps X or returns to YouTube. Normal game cameras and
+  clocks continue independently of the floating player.
+  This is an in-Activity UI overlay for Android 5.1.1, not Android's system
+  PiP, and does not persist when FitBaus itself loses foreground focus.
+- **Leaving the Activity:** pausing or destroying FitBaus releases video
+  playback, regardless of whether the user is viewing YouTube or a floating
+  player over Dashboard/game content. Returning after a host pause shows
+  browsing results as before; reopening the same video can resume from its
+  saved position (positions under 5 s and finished videos start over).
+  Switching tabs without an active video also retains the old stop behavior.
 
 ## Architecture
 
@@ -120,10 +135,12 @@ host/youtube/
 java/.../youtube/media/YoutubeHttpDataSource.java                                [copied, GPL-3.0 + Apache-2.0]
 ```
 
-`ArcadeMode.isGame` is now true only for game modes. Dashboard and YouTube
-never start the arcade camera or clock. `ArcadeModeController` owns at most one
-of {camera pipeline, media player} at a time and stops the previous owner
-before starting the next one.
+`ArcadeMode.isGame` is true only for game modes. Dashboard and YouTube
+never start the arcade camera or clock. `ArcadeModeController` still owns the
+selected game's camera/clock lifecycle; floating YouTube playback is managed
+separately by the Activity and may coexist with one active game. Only one
+ExoPlayer and one arcade camera pipeline are created. Host pause releases
+both media playback and the game pipeline.
 
 `YouTubeSession` runs on the main thread. Extraction and media-source
 preparation (some NewPipe manifest creators make network requests) run on one

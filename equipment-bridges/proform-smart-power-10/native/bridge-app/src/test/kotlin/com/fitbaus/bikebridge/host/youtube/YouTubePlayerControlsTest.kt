@@ -46,7 +46,8 @@ class YouTubePlayerControlsTest {
     @Test
     fun tappingTheVideoDisplaysTransientPlaybackFeedback() {
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
-        assertTrue(content.contains("videoFrame.setOnClickListener { onPlaybackToggle() }"))
+        assertTrue(content.contains("videoFrame.setOnClickListener {"))
+        assertTrue(content.contains("if (floating) onRestoreRequested() else onPlaybackToggle()"))
         assertTrue(content.contains("playButton.setOnClickListener { onPlaybackToggle() }"))
         assertTrue(content.contains("playbackFeedback.setImageResource(if (playing) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)"))
         assertTrue(content.contains("handler.postDelayed(hidePlaybackFeedback, FEEDBACK_MS)"))
@@ -85,7 +86,8 @@ class YouTubePlayerControlsTest {
         val control = activity.substring(activity.indexOf("private val youtubeBrightness"), activity.indexOf("private val refresh"))
         assertTrue(control.contains("BridgeProcess.brightness(this@NativeBridgeActivity).record(percent)"))
         assertTrue(control.contains("applyStoredBrightness()"))
-        assertTrue(activity.contains("YouTubeContent(this, getSharedPreferences(YouTubeContent.PREFS, Context.MODE_PRIVATE), youtubeBrightness)"))
+        assertTrue(activity.contains("getSharedPreferences(YouTubeContent.PREFS, Context.MODE_PRIVATE)"))
+        assertTrue(activity.contains("youtubeBrightness,"))
         for (forbidden in listOf("Usb", "Resistance", "NativeBridgeService", "startService")) assertFalse(control.contains(forbidden), forbidden)
     }
 }

@@ -70,6 +70,8 @@ class NativeBridgeActivity : Activity() {
     private lateinit var dashboardContent: View
     private lateinit var arcadeContent: ArcadeContent
     private lateinit var youtubeContent: YouTubeContent
+    private lateinit var floatingPlayer: LinearLayout
+    private lateinit var floatingVideoSlot: FrameLayout
     private var resumed = false
     private var pendingYouTubeImport: String? = null
     private val modeTabs = HashMap<ArcadeMode, TextView>()
@@ -115,10 +117,16 @@ class NativeBridgeActivity : Activity() {
 
         override fun startMedia(mode: ArcadeMode) {
             youtubeContent.start()
+            floatingPlayer.visibility = View.GONE
         }
 
         override fun stopMedia(reason: ArcadeStopReason) {
-            youtubeContent.stop()
+            if (reason == ArcadeStopReason.ExitArcade && youtubeContent.minimizeInto(floatingVideoSlot)) {
+                floatingPlayer.visibility = View.VISIBLE
+            } else {
+                youtubeContent.stop()
+                floatingPlayer.visibility = View.GONE
+            }
         }
     }
     private val modeController = ArcadeModeController(arcadeHooks)
@@ -170,6 +178,8 @@ class NativeBridgeActivity : Activity() {
     override fun onPause() {
         resumed = false
         modeController.onHostPause()
+        youtubeContent.stop()
+        floatingPlayer.visibility = View.GONE
         handler.removeCallbacks(refresh)
         super.onPause()
     }
@@ -427,16 +437,69 @@ class NativeBridgeActivity : Activity() {
             arcadeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
-        youtubeContent = YouTubeContent(this, getSharedPreferences(YouTubeContent.PREFS, Context.MODE_PRIVATE), youtubeBrightness)
+        youtubeContent = YouTubeContent(
+            this,
+            getSharedPreferences(YouTubeContent.PREFS, Context.MODE_PRIVATE),
+            youtubeBrightness,
+            onRestoreRequested = { modeController.select(ArcadeMode.YouTube) },
+        )
         contentHost.addView(
             youtubeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+        floatingPlayer = buildFloatingPlayer()
+        contentHost.addView(
+            floatingPlayer,
+            FrameLayout.LayoutParams(dp(296), dp(216), Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(12)
+                rightMargin = dp(12)
+            },
         )
         root.addView(contentHost, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         showContent(modeController.mode)
         applyState()
         return root
+    }
+
+    private fun buildFloatingPlayer(): LinearLayout {
+        val floating = LinearLayout(this)
+        floating.orientation = LinearLayout.VERTICAL
+        floating.setBackgroundColor(Color.BLACK)
+        floating.elevation = dp(12).toFloat()
+        floating.visibility = View.GONE
+
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.HORIZONTAL
+        header.gravity = Gravity.CENTER_VERTICAL
+        header.setBackgroundColor(DIVIDER)
+        val title = label("YOUTUBE", 14f, PRIMARY)
+        title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        title.setPadding(dp(12), 0, 0, 0)
+        title.isClickable = true
+        title.contentDescription = "Return to YouTube player"
+        title.setOnClickListener { modeController.select(ArcadeMode.YouTube) }
+        header.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+
+        val close = label("×", 28f, PRIMARY)
+        close.gravity = Gravity.CENTER
+        close.contentDescription = "Close YouTube floating player"
+        close.isClickable = true
+        close.isFocusable = true
+        close.setOnClickListener {
+            youtubeContent.stop()
+            floatingPlayer.visibility = View.GONE
+        }
+        header.addView(close, LinearLayout.LayoutParams(dp(52), dp(48)))
+        floating.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
+
+        floatingVideoSlot = FrameLayout(this)
+        floatingVideoSlot.setBackgroundColor(Color.BLACK)
+        floating.addView(
+            floatingVideoSlot,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+        )
+        return floating
     }
 
     private fun buildTitleRow(): View {
