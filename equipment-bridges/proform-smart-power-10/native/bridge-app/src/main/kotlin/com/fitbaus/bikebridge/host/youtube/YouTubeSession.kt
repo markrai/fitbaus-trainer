@@ -189,8 +189,8 @@ internal class YouTubeSession(
         if (browse.query != null || browse.feedTitle != "From your channels" || browse.status != ListStatus.Ready) return
         if (!force && state.recommendations.status in setOf(ListStatus.Loading, ListStatus.Ready, ListStatus.Empty)) return
         cancelRecommendation()
-        val seeds = RelatedVideoSuggestions.selectSeeds(browse.items)
-        if (seeds.isEmpty()) {
+        val feed = browse.items
+        if (RelatedVideoSuggestions.selectSeeds(feed).isEmpty()) {
             update(state.copy(recommendations = RecommendationState(
                 status = ListStatus.Empty, message = "No subscription videos available for discovery.",
             )))
@@ -199,7 +199,7 @@ internal class YouTubeSession(
         val generation = recommendationGeneration
         update(state.copy(recommendations = RecommendationState(status = ListStatus.Loading)))
         recommendationTask = recommendationRunner.submit {
-            val result = attempt { catalog().related(seeds) }
+            val result = attempt { catalog().related(feed) }
             main.post {
                 if (generation == recommendationGeneration && !destroyed && state.active &&
                     state.browse.query == null && state.browse.feedTitle == "From your channels") {
