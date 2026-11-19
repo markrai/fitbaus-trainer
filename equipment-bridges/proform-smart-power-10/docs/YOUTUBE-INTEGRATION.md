@@ -46,8 +46,10 @@ small FitBaus-owned layer.
   short-lived device code. Entering MY YOUTUBE with an existing client and no
   connected account automatically requests a new device code on the existing
   Google-account worker, without another ADB import. Re-entering with an
-  unexpired code keeps the same code; a code whose lifetime has elapsed is
-  never reused. Google provides `expires_in` (sample 1800 seconds) and
+  unexpired code keeps the same code, including across tab switches. The
+  authorization ticket remains in memory, but polling is suspended when
+  the YouTube tab is inactive; it resumes on return. A code whose lifetime
+  has elapsed is never reused. Google provides `expires_in` (sample 1800 seconds) and
   `interval` in each device response. FitBaus computes the code deadline
   using `SystemClock.elapsedRealtime()` from receipt, clears the visible
   code/QR at expiry and stops polling. A window-focus check also catches

@@ -195,7 +195,8 @@ can pause in deep sleep. Returning to **MY YOUTUBE** after a
 later tab visit or app restart automatically requests a new code if the
 encrypted TV client is still stored and sign-in is incomplete. While
 an existing code is valid, reopening MY YOUTUBE **reuses it** rather than
-issuing a duplicate. This does not clear equipment pairing, delete the
+issuing a duplicate. An unexpired code also remains in memory across tab
+switches: polling pauses while YouTube is inactive and resumes on return. This does not clear equipment pairing, delete the
 saved OAuth client, or rotate encryption keys.
 
 Codes are **not** fetched at app launch, continuously regenerated after

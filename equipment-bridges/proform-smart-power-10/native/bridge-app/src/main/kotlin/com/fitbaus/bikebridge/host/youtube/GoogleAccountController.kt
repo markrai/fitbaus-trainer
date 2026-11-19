@@ -79,7 +79,25 @@ internal class GoogleAccountController(
     fun start() {
         if (active) return
         active = true
-        setStatus(GoogleAccountStatus(if (store.hasAccount()) GoogleAccountPhase.Connected else GoogleAccountPhase.SignedOut))
+        val connected = store.hasAccount()
+        val pending = ticket
+        if (!connected && pending != null &&
+            GoogleDeviceCodeLifetime.isValid(deadlineMs, SystemClock.elapsedRealtime())) {
+            setStatus(GoogleAccountStatus(
+                GoogleAccountPhase.Authorizing,
+                "Scan the QR on your phone or enter the code.",
+                pending.verificationUrl,
+                pending.userCode,
+                pending.verificationCompleteUrl ?: pending.verificationUrl,
+            ))
+            handler.postDelayed(expiryRunnable,
+                GoogleDeviceCodeLifetime.remainingMs(deadlineMs, SystemClock.elapsedRealtime()))
+            handler.postDelayed(pollRunnable, interval * 1000L)
+            return
+        }
+        ticket = null
+        deadlineMs = 0L
+        setStatus(GoogleAccountStatus(if (connected) GoogleAccountPhase.Connected else GoogleAccountPhase.SignedOut))
     }
 
     fun stop() {
@@ -93,8 +111,6 @@ internal class GoogleAccountController(
         feedJob?.cancel()
         job = null
         feedJob = null
-        ticket = null
-        deadlineMs = 0L
         accessToken = null
         accessExpiresAt = 0
     }
