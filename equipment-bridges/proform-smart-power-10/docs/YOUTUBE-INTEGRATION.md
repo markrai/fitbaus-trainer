@@ -98,8 +98,11 @@ small FitBaus-owned layer.
   content area. Playback continues, including its existing audio, position,
   subtitle state and decoder. The floating preview is a full 16:9 image
   with no title bar; a 48 dp touch target for the X overlays its top-right
-  corner. Tap the video or the YouTube tab to return to the full player
-  without a stream re-resolution. The X closes the overlay, stops playback
+  corner. While floating, captions use 12 sp with tighter padding and room
+  for up to eight lines so they are less likely to clip against the smaller
+  video frame. Returning to full YouTube restores the original 22 sp caption
+  size, three-line limit and padding. Tap the video or the YouTube tab to
+  return to the full player without a stream re-resolution. The X closes the overlay, stops playback
   and releases ExoPlayer. The overlay is
   not created for browse-only, failed or completed videos. A video that
   finishes or encounters a playback error after floating remains visible
