@@ -10,9 +10,27 @@ support, is maintained on `lite/1.x`.
 
 ## [Unreleased]
 
-Changes on `main` (FitBaus Full) since 1.0.0 that are not yet part of a
-published release. These changes are implemented for Full 2.1.0
-(`versionCode 20100`), which is not yet tagged, qualified, or published.
+FitBaus Full 2.1.1 (`versionCode 20101`) is in development on `main`.
+The following changes have not yet been published.
+
+### Added
+
+- **YouTube captions on the Bike Bridge.** Available subtitles appear over
+  the video with a CC toggle. The player prefers English and human-authored
+  captions when available and supports WebVTT, TTML, and SRT. Caption loading
+  is bounded and failures are nonfatal to video playback.
+
+### Changed
+
+- **YouTube play/pause feedback.** Tapping a video or its playback control
+  briefly shows a centered play or pause icon.
+- **YouTube search clear.** An × inside the search field clears entered text
+  without submitting a new search.
+
+## [2.1.0] - 2026-11-16
+
+Published on GitHub as **FitBaus Full 2.1.0**, with the native YouTube
+player, BIKETRIS, and external USB webcam support on the bike console.
 
 ### Added
 

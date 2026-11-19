@@ -13,7 +13,9 @@ import android.graphics.drawable.StateListDrawable
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
 import android.text.InputType
+import android.text.TextWatcher
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.KeyEvent
@@ -57,6 +59,7 @@ internal class YouTubeContent(
 
     private val resultsScreen = LinearLayout(context)
     private val searchField = EditText(context)
+    private val searchClear = label("×", 30f, PRIMARY)
     private val listTitle = label("", 14f, MUTE)
     private val grid = GridView(context)
     private val adapter = VideoAdapter()
@@ -69,6 +72,10 @@ internal class YouTubeContent(
     private val videoTitle = label("", 18f, PRIMARY)
     private val qualityButton = button("360p")
     private val videoFrame = AspectFrame(context)
+    private val captionsView = label("", 22f, PRIMARY)
+    private val captionsButton = button("CC")
+    private val playbackFeedback = ImageView(context)
+    private val hidePlaybackFeedback = Runnable { playbackFeedback.visibility = GONE }
     private val playerOverlay = LinearLayout(context)
     private val playerMessage = label("", 18f, PRIMARY)
     private val playerRetry = button("RETRY")
@@ -116,12 +123,14 @@ internal class YouTubeContent(
 
     fun stop() {
         hideKeyboard()
+        clearPlaybackFeedback()
         stopTicker()
         session.stop()
         loader.pause()
     }
 
     fun destroy() {
+        clearPlaybackFeedback()
         stopTicker()
         session.destroy()
         loader.shutdown()
@@ -140,7 +149,7 @@ internal class YouTubeContent(
         searchField.inputType = InputType.TYPE_CLASS_TEXT
         searchField.imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         searchField.background = outline(DIVIDER, FIELD)
-        searchField.setPadding(dp(14), 0, dp(14), 0)
+        searchField.setPadding(dp(14), 0, dp(TOUCH_DP), 0)
         searchField.setOnEditorActionListener { _, actionId, event ->
             val enter = event != null && event.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN
             if (actionId == EditorInfo.IME_ACTION_SEARCH || enter) {
@@ -150,7 +159,21 @@ internal class YouTubeContent(
                 false
             }
         }
-        bar.addView(searchField, LayoutParams(0, dp(TOUCH_DP), 1f))
+        val fieldSlot = FrameLayout(context)
+        fieldSlot.addView(searchField, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(TOUCH_DP)))
+        searchClear.gravity = Gravity.CENTER
+        searchClear.contentDescription = "Clear search"
+        searchClear.visibility = GONE
+        searchClear.setOnClickListener { searchField.setText("") }
+        fieldSlot.addView(searchClear, FrameLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP), Gravity.END or Gravity.CENTER_VERTICAL))
+        searchField.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                searchClear.visibility = if (s.isNullOrEmpty()) GONE else VISIBLE
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        })
+        bar.addView(fieldSlot, LayoutParams(0, dp(TOUCH_DP), 1f))
         val search = button("SEARCH")
         search.setOnClickListener { submitSearch() }
         bar.addView(search, spaced(LayoutParams(dp(140), dp(TOUCH_DP))))
@@ -230,7 +253,21 @@ internal class YouTubeContent(
         val area = FrameLayout(context)
         area.setBackgroundColor(Color.BLACK)
         videoFrame.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        videoFrame.setOnClickListener { session.togglePlay() }
+        captionsView.gravity = Gravity.CENTER
+        captionsView.setBackgroundColor(Color.argb(165, 0, 0, 0))
+        captionsView.setShadowLayer(3f, 0f, 2f, Color.BLACK)
+        captionsView.setPadding(dp(12), dp(5), dp(12), dp(5))
+        captionsView.maxLines = 3
+        captionsView.visibility = GONE
+        videoFrame.addView(captionsView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+        val feedbackBackground = GradientDrawable()
+        feedbackBackground.shape = GradientDrawable.OVAL
+        feedbackBackground.setColor(Color.argb(175, 0, 0, 0))
+        playbackFeedback.background = feedbackBackground
+        playbackFeedback.setPadding(dp(20), dp(20), dp(20), dp(20))
+        playbackFeedback.visibility = GONE
+        videoFrame.addView(playbackFeedback, FrameLayout.LayoutParams(dp(84), dp(84), Gravity.CENTER))
+        videoFrame.setOnClickListener { onPlaybackToggle() }
         area.addView(videoFrame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         playerOverlay.orientation = VERTICAL
         playerOverlay.gravity = Gravity.CENTER
@@ -254,8 +291,11 @@ internal class YouTubeContent(
         val controls = LinearLayout(context)
         controls.orientation = HORIZONTAL
         controls.gravity = Gravity.CENTER_VERTICAL
-        playButton.setOnClickListener { session.togglePlay() }
+        playButton.setOnClickListener { onPlaybackToggle() }
         controls.addView(playButton, LayoutParams(dp(140), dp(TOUCH_DP)))
+        captionsButton.contentDescription = "Toggle captions"
+        captionsButton.setOnClickListener { session.toggleCaptions() }
+        controls.addView(captionsButton, spaced(LayoutParams(dp(90), dp(TOUCH_DP))))
         positionText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
         positionText.gravity = Gravity.END or Gravity.CENTER_VERTICAL
         controls.addView(positionText, spaced(LayoutParams(dp(92), ViewGroup.LayoutParams.WRAP_CONTENT)))
@@ -323,6 +363,7 @@ internal class YouTubeContent(
         playerScreen.visibility = if (player) VISIBLE else GONE
         renderBrowse(state.browse)
         renderPlayback(state.playback)
+        if (!player || !state.active || state.playback.phase !in CONTROLLABLE) clearPlaybackFeedback()
         if (player && state.active) startTicker() else stopTicker()
     }
 
@@ -377,6 +418,13 @@ internal class YouTubeContent(
             },
         )
         playButton.isEnabled = playback.phase in CONTROLLABLE
+        captionsButton.isEnabled = playback.captionsAvailable && playback.phase in CONTROLLABLE
+        setText(captionsButton, if (playback.captionsEnabled) "CC ON" else "CC")
+        val captionText = playback.captionText.takeIf {
+            playback.captionsEnabled && playback.phase in CAPTION_PHASES && it.isNotEmpty()
+        } ?: ""
+        setText(captionsView, captionText)
+        captionsView.visibility = if (captionText.isEmpty()) GONE else VISIBLE
         val durationSeconds = (playback.durationMs / 1000).toInt()
         seekBar.isEnabled = !playback.live && durationSeconds > 0 && playback.phase in CONTROLLABLE
         if (seekBar.max != durationSeconds.coerceAtLeast(1)) seekBar.max = durationSeconds.coerceAtLeast(1)
@@ -386,6 +434,24 @@ internal class YouTubeContent(
             setText(positionText, YouTubeFormat.clock(playback.positionMs))
         }
         setText(durationText, if (playback.live) "LIVE" else YouTubeFormat.clock(playback.durationMs))
+    }
+
+    private fun onPlaybackToggle() {
+        val state = session.state
+        if (!state.active || state.screen != Screen.Player || !session.hasEngine || state.playback.phase !in CONTROLLABLE) return
+        session.togglePlay()
+        val playing = session.playRequested
+        playbackFeedback.setImageResource(if (playing) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)
+        playbackFeedback.setColorFilter(PRIMARY)
+        playbackFeedback.contentDescription = if (playing) "Playing" else "Paused"
+        handler.removeCallbacks(hidePlaybackFeedback)
+        playbackFeedback.visibility = VISIBLE
+        handler.postDelayed(hidePlaybackFeedback, FEEDBACK_MS)
+    }
+
+    private fun clearPlaybackFeedback() {
+        handler.removeCallbacks(hidePlaybackFeedback)
+        playbackFeedback.visibility = GONE
     }
 
     private fun chooseQuality() {
@@ -552,6 +618,7 @@ internal class YouTubeContent(
         const val PREFS: String = "youtube"
         const val KEY_MAX_HEIGHT: String = "max_height"
         private const val TICK_MS = 500L
+        private const val FEEDBACK_MS = 800L
         private const val TOUCH_DP = 56
         private const val COLUMN_DP = 280
         private const val THUMB_WIDTH_DP = 300
@@ -560,6 +627,7 @@ internal class YouTubeContent(
         const val MIN_BRIGHTNESS: Int = 5
         const val MAX_BRIGHTNESS: Int = 100
         private val CONTROLLABLE = setOf(PlaybackPhase.Buffering, PlaybackPhase.Playing, PlaybackPhase.Paused, PlaybackPhase.Ended)
+        private val CAPTION_PHASES = setOf(PlaybackPhase.Playing, PlaybackPhase.Paused)
         private val BACKGROUND: Int = Color.BLACK
         private val PRIMARY: Int = Color.WHITE
         private val LABEL: Int = Color.rgb(180, 180, 180)

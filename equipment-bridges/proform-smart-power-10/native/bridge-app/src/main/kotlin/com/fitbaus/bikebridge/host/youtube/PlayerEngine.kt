@@ -16,6 +16,7 @@ import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.Tracks
 import com.google.android.exoplayer2.audio.AudioAttributes
 import com.google.android.exoplayer2.source.MediaSource
+import com.google.android.exoplayer2.text.CueGroup
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector
 import com.google.android.exoplayer2.upstream.HttpDataSource
 import com.google.android.exoplayer2.video.VideoSize
@@ -32,6 +33,8 @@ internal interface PlayerEngineListener {
     fun onFailure(failure: PlaybackFailure, detail: String)
 
     fun onVideoSize(width: Int, height: Int, pixelRatio: Float)
+
+    fun onCaptionsChanged(text: String) {}
 }
 
 internal interface PreparedMedia
@@ -48,6 +51,8 @@ internal interface PlayerEngine {
     fun prepare(media: PreparedMedia, startMs: Long)
 
     fun setPlaying(playing: Boolean)
+
+    fun setCaptionsEnabled(enabled: Boolean) {}
 
     fun seekTo(positionMs: Long)
 
@@ -93,6 +98,7 @@ internal class ExoPlayerEngine(
     private val listener: PlayerEngineListener,
 ) : PlayerEngine {
     private var released = false
+    private var captionsEnabled = true
     private val trackSelector = DefaultTrackSelector(context)
     private val player: ExoPlayer = ExoPlayer.Builder(context, DefaultRenderersFactory(context).setEnableDecoderFallback(true))
         .setTrackSelector(trackSelector)
@@ -143,6 +149,15 @@ internal class ExoPlayerEngine(
             if (released) return
             listener.onVideoSize(videoSize.width, videoSize.height, videoSize.pixelWidthHeightRatio)
         }
+
+        override fun onCues(cueGroup: CueGroup) {
+            if (released || !captionsEnabled) return
+            val text = cueGroup.cues.mapNotNull { it.text?.toString()?.trim() }
+                .filter { it.isNotEmpty() }
+                .joinToString("\n")
+                .take(MAX_CAPTION_CHARS)
+            listener.onCaptionsChanged(text)
+        }
     }
 
     init {
@@ -166,7 +181,8 @@ internal class ExoPlayerEngine(
         trackSelector.setParameters(
             trackSelector.buildUponParameters()
                 .setMaxVideoSize(Int.MAX_VALUE, exo.maxVideoHeight)
-                .setExceedVideoConstraintsIfNecessary(false),
+                .setExceedVideoConstraintsIfNecessary(false)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !captionsEnabled),
         )
         player.setMediaSource(exo.source, startMs.coerceAtLeast(0))
         player.playWhenReady = true
@@ -175,6 +191,16 @@ internal class ExoPlayerEngine(
 
     override fun setPlaying(playing: Boolean) {
         if (!released) player.playWhenReady = playing
+    }
+
+    override fun setCaptionsEnabled(enabled: Boolean) {
+        if (released || captionsEnabled == enabled) return
+        captionsEnabled = enabled
+        trackSelector.setParameters(
+            trackSelector.buildUponParameters()
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !enabled),
+        )
+        if (!enabled) listener.onCaptionsChanged("")
     }
 
     override fun seekTo(positionMs: Long) {
@@ -195,5 +221,6 @@ internal class ExoPlayerEngine(
         const val START_BUFFER_MS = 1_500
         const val REBUFFER_MS = 3_000
         const val TARGET_BUFFER_BYTES = 16 * 1024 * 1024
+        const val MAX_CAPTION_CHARS = 500
     }
 }

@@ -11,19 +11,31 @@ small FitBaus-owned layer.
 
 - **Browse:** opening the tab loads YouTube's default kiosk (trending) as a
   thumbnail grid with title, channel, views and duration (or LIVE). A search
-  field, SEARCH and TRENDING buttons sit above the grid. Further pages load
+  field with an × clear control, SEARCH and TRENDING buttons sit above the grid. Further pages load
   as the grid nears its end. Loading, empty, error (with RETRY) and
   "couldn't load more, tap to retry" states are shown in place.
 - **Play:** tapping a card opens the player inside the tab: video surface,
-  PLAY/PAUSE (or tap the video), seek bar with buffered range, elapsed and
+  PLAY/PAUSE (or tap the video, showing a briefly centered play/pause icon), seek bar with buffered range, elapsed and
   total time, a screen-brightness slider (5-100 %, written to the same
   brightness setting as the Bridge brightness API and applied immediately), a
   vertical system music-volume slider in its own column right of the video
   (top loud, bottom silent, with a percentage; follows hardware volume keys), a
-  quality menu (240p / 360p default / 480p maximum, persisted) and
+  quality menu (240p / 360p default / 480p maximum, persisted), a CC toggle,
+  and
   "‹ RESULTS". Live videos play from
   HLS and cannot seek. The exercise HUD (RPM / Watts / Resistance / HR) stays
   visible above the tab, fed from the existing 200 ms dashboard refresh.
+- **Captions:** NewPipeExtractor supplies available subtitle tracks. FitBaus
+  picks a single supported track, preferring English then human-authored tracks;
+  if only another language is available, it uses that instead. Supported
+  formats are WebVTT, TTML and SRT. Captions start enabled when available,
+  and the CC button enables/disables them without restarting video playback.
+  A small text overlay stays within the video frame, not the exercise HUD.
+  Caption files are capped at 2 MiB and loaded by ExoPlayer independently
+  of audio/video; missing/expired caption URLs are treated as a missing
+  caption rather than a video failure. Videos without usable captions play
+  normally with CC disabled. This lightweight first version selects one
+  language per video, without a language picker or translations.
 - **Leaving:** switching tabs, opening settings or pausing the activity
   releases the player and cancels outstanding work. Coming back shows the
   results list as it was; reopening the same video resumes where it stopped
@@ -39,7 +51,7 @@ host/youtube/
   NewPipeYouTubeCatalog.kt     kiosk / search / paging / stream lookup (NewPipe)   [GPL-3.0 adapted]
   HttpUrlDownloader.kt         NewPipe Downloader over HttpURLConnection
   YouTubeStreamSelector.kt     stream choice from plain descriptors                [GPL-3.0 adapted]
-  YouTubeMediaSources.kt       ExoPlayer DASH / progressive / HLS sources          [GPL-3.0 adapted]
+  YouTubeMediaSources.kt       ExoPlayer DASH / progressive / HLS + captions     [GPL-3.0 adapted]
   PlayerEngine.kt              engine interface + ExoPlayer 2.19.1 implementation
   YouTubeSession.kt            state machine: lists, playback, staleness, retries
   ThumbnailLoader.kt           bounded thumbnail fetch and cache

@@ -102,6 +102,7 @@ internal class FakeEngine(val listener: PlayerEngineListener) : PlayerEngine {
     val prepared = ArrayList<Pair<StreamPlan, Long>>()
     val playing = ArrayList<Boolean>()
     val seeks = ArrayList<Long>()
+    val captionsEnabled = ArrayList<Boolean>()
     var released = false
         private set
     var failPrepare: Exception? = null
@@ -117,6 +118,10 @@ internal class FakeEngine(val listener: PlayerEngineListener) : PlayerEngine {
 
     override fun setPlaying(playing: Boolean) {
         this.playing += playing
+    }
+
+    override fun setCaptionsEnabled(enabled: Boolean) {
+        captionsEnabled += enabled
     }
 
     override fun seekTo(positionMs: Long) {
