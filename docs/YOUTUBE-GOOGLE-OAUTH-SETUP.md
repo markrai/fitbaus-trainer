@@ -223,6 +223,15 @@ After approving, the Bike Bridge's default YouTube thumbnail grid shows
 you subscribe to. Scrolling loads additional channel batches. This is not
 Google's private personalized Home recommendations algorithm.
 
+Tap **DISCOVER** beside FROM YOUR CHANNELS to fetch a small, mixed group of
+related videos based on your currently displayed subscription uploads. This
+is an on-demand, unofficial NewPipe recommendation list, not Google's private
+personalized Home ranking. Select a suggestion to play it, or tap
+**‹ FROM YOUR CHANNELS** to return to the original feed. The discovery list
+may be empty or unavailable when extraction is blocked; RETRY is manual.
+Discover is shown only for a signed-in subscription home feed. It requires
+no new OAuth scope and does not query Google's YouTube search endpoint.
+
 Use the search field and the keyboard's **Search** action to search all of
 YouTube; the × clears the query and returns to the home feed. There are no
 separate SEARCH or MY FEED buttons. **MY YOUTUBE** opens the separate

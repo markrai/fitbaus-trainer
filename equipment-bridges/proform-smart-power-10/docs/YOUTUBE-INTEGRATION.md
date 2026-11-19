@@ -19,6 +19,18 @@ small FitBaus-owned layer.
   and playlists. Its top-left back arrow returns to the home grid; the lower
   BACK control remains for channel/playlist hierarchy. This is not Google's
   proprietary Home recommendations.
+- **Discover:** on an authenticated subscription home grid, DISCOVER switches
+  the existing video grid to related-video suggestions. It selects at most
+  three non-live seeds, preferring distinct subscribed channels, then uses
+  NewPipe's `StreamInfo.getRelatedItems()` for up to twelve candidates per
+  seed. Round-robin mixing, filtering and ID deduplication produce at most
+  24 results and exclude videos already visible in the source sample.
+  Suggestions are fetched only when tapped, with an explicit retry and a
+  separate cancellable below-normal-priority worker. Returning to FROM YOUR
+  CHANNELS does not refetch the original feed; searching resets the discovery
+  view. Discovery never requests additional Google scopes or YouTube API
+  search quota. Unauthenticated Trending has no Discover control, and
+  extraction failures never silently replace the subscription feed.
 - **Play:** tapping a card opens the player inside the tab: video surface,
   PLAY/PAUSE (or tap the video, showing a briefly centered play/pause icon), seek bar with buffered range, elapsed and
   total time, a screen-brightness slider (5-100 %, written to the same

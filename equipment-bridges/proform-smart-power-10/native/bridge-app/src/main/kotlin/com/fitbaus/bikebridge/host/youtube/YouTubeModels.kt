@@ -56,6 +56,8 @@ internal interface YouTubeCatalog {
 
     fun search(query: String): FeedPage
 
+    fun related(seeds: List<VideoSummary>): FeedPage = FeedPage(emptyList(), null)
+
     fun more(cursor: FeedCursor): FeedPage
 
     fun resolve(videoId: String): ResolvedVideo
