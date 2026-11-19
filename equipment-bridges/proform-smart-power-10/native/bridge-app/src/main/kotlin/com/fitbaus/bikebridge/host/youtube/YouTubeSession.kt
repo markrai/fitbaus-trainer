@@ -77,11 +77,18 @@ internal data class PlaybackState(
     val captionText: String = "",
 )
 
+internal data class RecommendationState(
+    val items: List<VideoSummary> = emptyList(),
+    val status: ListStatus = ListStatus.Idle,
+    val message: String? = null,
+)
+
 internal data class YouTubeState(
     val active: Boolean,
     val screen: Screen,
     val browse: BrowseState,
     val playback: PlaybackState,
+    val recommendations: RecommendationState = RecommendationState(),
 )
 
 internal class YouTubeSession(
@@ -93,6 +100,7 @@ internal class YouTubeSession(
     initialMaxHeight: Int = YouTubeStreamSelector.DEFAULT_MAX_HEIGHT,
     private val onMaxHeightChanged: (Int) -> Unit = {},
     private val feedTitle: () -> String = { "Trending" },
+    private val recommendationRunner: BackgroundRunner = ExecutorRunner("fitbaus-youtube-related"),
 ) {
     var listener: ((YouTubeState) -> Unit)? = null
 
@@ -105,6 +113,8 @@ internal class YouTubeSession(
     private var playGeneration = 0L
     private var listTask: Cancellable? = null
     private var playTask: Cancellable? = null
+    private var recommendationGeneration = 0L
+    private var recommendationTask: Cancellable? = null
     private var cursor: FeedCursor? = null
     private var engine: PlayerEngine? = null
     private var resolved: ResolvedVideo? = null
@@ -139,6 +149,7 @@ internal class YouTubeSession(
         listGeneration += 1
         listTask?.cancel()
         listTask = null
+        cancelRecommendation()
         stopPlayback()
         val browse = state.browse
         val settled = when {
@@ -146,7 +157,10 @@ internal class YouTubeSession(
             browse.loadingMore -> browse.copy(loadingMore = false)
             else -> browse
         }
-        update(state.copy(active = false, screen = Screen.Results, browse = settled, playback = idlePlayback()))
+        val recommendations = if (state.recommendations.status == ListStatus.Loading) {
+            RecommendationState()
+        } else state.recommendations
+        update(state.copy(active = false, screen = Screen.Results, browse = settled, playback = idlePlayback(), recommendations = recommendations))
     }
 
     fun destroy() {
@@ -155,6 +169,7 @@ internal class YouTubeSession(
         destroyed = true
         listener = null
         runner.shutdown()
+        recommendationRunner.shutdown()
     }
 
     fun showTrending() {
@@ -166,6 +181,44 @@ internal class YouTubeSession(
         if (!ready()) return
         val query = raw.trim().take(MAX_QUERY_LENGTH)
         loadList(query.ifEmpty { null })
+    }
+
+    fun loadRecommendations(force: Boolean = false) {
+        if (!ready() || state.screen != Screen.Results) return
+        val browse = state.browse
+        if (browse.query != null || browse.feedTitle != "From your channels" || browse.status != ListStatus.Ready) return
+        if (!force && state.recommendations.status in setOf(ListStatus.Loading, ListStatus.Ready, ListStatus.Empty)) return
+        cancelRecommendation()
+        val seeds = RelatedVideoSuggestions.selectSeeds(browse.items)
+        if (seeds.isEmpty()) {
+            update(state.copy(recommendations = RecommendationState(
+                status = ListStatus.Empty, message = "No subscription videos available for discovery.",
+            )))
+            return
+        }
+        val generation = recommendationGeneration
+        update(state.copy(recommendations = RecommendationState(status = ListStatus.Loading)))
+        recommendationTask = recommendationRunner.submit {
+            val result = attempt { catalog().related(seeds) }
+            main.post {
+                if (generation == recommendationGeneration && !destroyed && state.active &&
+                    state.browse.query == null && state.browse.feedTitle == "From your channels") {
+                    recommendationTask = null
+                    val next = when (result) {
+                        is Outcome.Success -> RecommendationState(
+                            items = result.value.items,
+                            status = if (result.value.items.isEmpty()) ListStatus.Empty else ListStatus.Ready,
+                            message = if (result.value.items.isEmpty()) "No related videos found. Tap RETRY to try again." else null,
+                        )
+                        is Outcome.Failure -> RecommendationState(
+                            status = ListStatus.Error,
+                            message = YouTubeFormat.failure(result.kind),
+                        )
+                    }
+                    update(state.copy(recommendations = next))
+                }
+            }
+        }
     }
 
     fun loadMore(userInitiated: Boolean) {
@@ -199,6 +252,10 @@ internal class YouTubeSession(
 
     fun open(video: VideoSummary) {
         if (!ready()) return
+        if (state.recommendations.status == ListStatus.Loading) {
+            cancelRecommendation()
+            update(state.copy(recommendations = RecommendationState()))
+        }
         rememberPosition()
         playGeneration += 1
         playTask?.cancel()
@@ -296,18 +353,28 @@ internal class YouTubeSession(
         if (next != playback) update(state.copy(playback = next))
     }
 
+    private fun cancelRecommendation() {
+        recommendationGeneration += 1
+        recommendationTask?.cancel()
+        recommendationTask = null
+    }
+
     private fun ready(): Boolean = !destroyed && state.active
 
     private fun loadList(query: String?) {
+        cancelRecommendation()
         listGeneration += 1
         listTask?.cancel()
         cursor = null
         val generation = listGeneration
-        update(state.copy(browse = BrowseState(
-            query = query,
-            feedTitle = if (query == null) feedTitle() else "Trending",
-            status = ListStatus.Loading,
-        )))
+        update(state.copy(
+            recommendations = RecommendationState(),
+            browse = BrowseState(
+                query = query,
+                feedTitle = if (query == null) feedTitle() else "Trending",
+                status = ListStatus.Loading,
+            ),
+        ))
         listTask = runner.submit {
             val result = attempt { if (query == null) catalog().discover() else catalog().search(query) }
             main.post { if (generation == listGeneration && !destroyed) applyFirstPage(result) }
