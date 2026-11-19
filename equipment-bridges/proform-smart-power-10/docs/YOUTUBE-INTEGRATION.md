@@ -129,6 +129,11 @@ user agent), exactly as SkyTube does. Separate video and audio are merged with
 
 ## Google account setup and limits
 
+For the full end-user Google Cloud setup and troubleshooting instructions,
+including Google Auth Platform navigation, OAuth scopes, ADB import, and the
+successful-`adb push` output regression, see
+[Connect YouTube to FitBaus](../../../docs/YOUTUBE-GOOGLE-OAUTH-SETUP.md).
+
 ### Import Google OAuth credentials with ADB (Windows)
 
 1. Download the **TVs and Limited Input devices** OAuth client JSON from

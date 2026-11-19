@@ -31,6 +31,7 @@ docs/*
 !docs/personalization-architecture.md
 !docs/NATIVE-DEVELOPMENT.MD
 !docs/RELEASE.md
+!docs/YOUTUBE-GOOGLE-OAUTH-SETUP.md
 !docs/release-evidence/
 !docs/release-evidence/**
 

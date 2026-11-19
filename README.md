@@ -52,6 +52,18 @@ Pairing is required for protected commands. Once configured, an authorized struc
 
 See the [ProForm bridge setup and safety notes](equipment-bridges/proform-smart-power-10/README.md) or the [equipment bridge overview](equipment-bridges/README.md). Equipment-control endpoints must stay on a trusted LAN, not the public internet.
 
+### YouTube account on the bike
+
+FitBaus Full Bike Bridge can use Google's TV-device sign-in to browse your
+own YouTube subscriptions and playlists, instead of relying solely on Trending.
+**You provide your own Google Cloud OAuth client**; no Google password is
+entered on the console. See the [step-by-step YouTube Google OAuth setup guide](docs/YOUTUBE-GOOGLE-OAUTH-SETUP.md)
+for current Cloud Console navigation, Windows ADB import, manual entry and
+troubleshooting.
+
+Google's official API does not expose personalized Home recommendations,
+Watch History or Watch Later to FitBaus.
+
 Interested in adding support for another bike? Contributions and hardware research are welcome.
 
 ## Your data stays yours
@@ -62,7 +74,7 @@ Browser and native app storage are separate, and local storage is not a backup. 
 
 ## Build and contribute
 
-FitBaus includes a TypeScript PWA and Capacitor Android/iOS projects. The current product version is **1.0.0**. For development:
+FitBaus includes a TypeScript PWA and Capacitor Android/iOS projects. The current product version is defined in `version.js`. For development:
 
 ```bash
 npm run build
