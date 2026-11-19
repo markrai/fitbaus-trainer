@@ -46,7 +46,8 @@ class YouTubePlayerControlsTest {
     @Test
     fun tappingTheVideoDisplaysTransientPlaybackFeedback() {
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
-        assertTrue(content.contains("videoFrame.setOnClickListener { onPlaybackToggle() }"))
+        assertTrue(content.contains("videoFrame.setOnClickListener {"))
+        assertTrue(content.contains("if (floating) onRestoreRequested() else onPlaybackToggle()"))
         assertTrue(content.contains("playButton.setOnClickListener { onPlaybackToggle() }"))
         assertTrue(content.contains("playbackFeedback.setImageResource(if (playing) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)"))
         assertTrue(content.contains("handler.postDelayed(hidePlaybackFeedback, FEEDBACK_MS)"))
