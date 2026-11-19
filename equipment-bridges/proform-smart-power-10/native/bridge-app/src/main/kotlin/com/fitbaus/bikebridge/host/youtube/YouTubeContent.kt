@@ -68,6 +68,7 @@ internal class YouTubeContent(
         main = MainThread { block -> handler.post { block() } },
     )
     private var accountOpen = false
+    private var discoveryActive = false
     private var previousAccountState: Boolean? = null
     private val accountView = GoogleAccountView(
         context, accountController,
@@ -79,6 +80,7 @@ internal class YouTubeContent(
     private val searchField = EditText(context)
     private val searchClear = label("×", 30f, PRIMARY)
     private val listTitle = label("", 14f, MUTE)
+    private val discoveryButton = button("DISCOVER")
     private val grid = GridView(context)
     private val adapter = VideoAdapter()
     private val listOverlay = LinearLayout(context)
@@ -143,6 +145,7 @@ internal class YouTubeContent(
         if (reloadHome) session.showTrending()
         previousAccountState = connected
         accountOpen = false
+        discoveryActive = false
         accountView.close()
         render(session.state)
         adapter.notifyDataSetChanged()
@@ -234,10 +237,22 @@ internal class YouTubeContent(
         listTitle.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
         listTitle.maxLines = 1
         listTitle.ellipsize = TextUtils.TruncateAt.END
+        val sectionBar = LinearLayout(context)
+        sectionBar.orientation = HORIZONTAL
+        sectionBar.gravity = Gravity.CENTER_VERTICAL
+        sectionBar.addView(listTitle, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        discoveryButton.contentDescription = "Show related video suggestions"
+        discoveryButton.setOnClickListener {
+            discoveryActive = !discoveryActive
+            grid.setSelection(0)
+            if (discoveryActive) session.loadRecommendations()
+            render(session.state)
+        }
+        sectionBar.addView(discoveryButton, spaced(LayoutParams(dp(252), dp(44))))
         val titleLp = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        titleLp.topMargin = dp(10)
+        titleLp.topMargin = dp(6)
         titleLp.bottomMargin = dp(6)
-        resultsScreen.addView(listTitle, titleLp)
+        resultsScreen.addView(sectionBar, titleLp)
 
         val body = FrameLayout(context)
         grid.numColumns = GridView.AUTO_FIT
@@ -257,7 +272,7 @@ internal class YouTubeContent(
             override fun onScrollStateChanged(view: AbsListView?, scrollState: Int) {}
 
             override fun onScroll(view: AbsListView?, firstVisibleItem: Int, visibleItemCount: Int, totalItemCount: Int) {
-                if (totalItemCount > 0 && firstVisibleItem + visibleItemCount >= totalItemCount - PREFETCH_ITEMS) session.loadMore(false)
+                if (!discoveryActive && totalItemCount > 0 && firstVisibleItem + visibleItemCount >= totalItemCount - PREFETCH_ITEMS) session.loadMore(false)
             }
         })
         body.addView(grid, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -266,7 +281,9 @@ internal class YouTubeContent(
         listOverlay.gravity = Gravity.CENTER
         listMessage.gravity = Gravity.CENTER
         listOverlay.addView(listMessage, LayoutParams(dp(720), ViewGroup.LayoutParams.WRAP_CONTENT))
-        listRetry.setOnClickListener { session.retry() }
+        listRetry.setOnClickListener {
+            if (discoveryActive) session.loadRecommendations(force = true) else session.retry()
+        }
         val retryLp = LayoutParams(dp(180), dp(TOUCH_DP))
         retryLp.topMargin = dp(16)
         listOverlay.addView(listRetry, retryLp)
@@ -407,36 +424,52 @@ internal class YouTubeContent(
         resultsScreen.visibility = if (player || accountOpen) GONE else VISIBLE
         playerScreen.visibility = if (player) VISIBLE else GONE
         accountView.visibility = if (!player && accountOpen && state.active) VISIBLE else GONE
-        renderBrowse(state.browse)
+        renderBrowse(state)
         renderPlayback(state.playback)
         if (!player || !state.active || state.playback.phase !in CONTROLLABLE) clearPlaybackFeedback()
         if (player && state.active) startTicker() else stopTicker()
     }
 
-    private fun renderBrowse(browse: BrowseState) {
-        setText(listTitle, browse.title.uppercase())
-        if (browse.items !== renderedItems) {
-            renderedItems = browse.items
-            adapter.submit(browse.items)
-            if (browse.items.isEmpty()) grid.setSelection(0)
+    private fun renderBrowse(state: YouTubeState) {
+        val browse = state.browse
+        val discovering = discoveryActive && browse.query == null && browse.feedTitle == "From your channels"
+        setText(listTitle, if (discovering) "DISCOVER" else browse.title.uppercase())
+        discoveryButton.visibility = if (browse.query == null && browse.feedTitle == "From your channels" &&
+            browse.status == ListStatus.Ready) VISIBLE else GONE
+        setText(discoveryButton, if (discovering) "‹ FROM YOUR CHANNELS" else "DISCOVER")
+        discoveryButton.contentDescription = if (discovering) "Return to subscribed channels" else "Show related video suggestions"
+        val items = if (discovering) state.recommendations.items else browse.items
+        if (items !== renderedItems) {
+            renderedItems = items
+            adapter.submit(items)
+            if (items.isEmpty()) grid.setSelection(0)
         }
-        val overlay = when (browse.status) {
-            ListStatus.Loading -> "Loading…"
-            ListStatus.Idle -> if (browse.items.isEmpty()) "Loading…" else null
-            ListStatus.Empty, ListStatus.Error -> browse.message
-            ListStatus.Ready -> null
+        val status = if (discovering) state.recommendations.status else browse.status
+        val overlay = if (discovering) {
+            when (status) {
+                ListStatus.Idle, ListStatus.Loading -> "Finding related videos…"
+                ListStatus.Empty, ListStatus.Error -> state.recommendations.message
+                ListStatus.Ready -> null
+            }
+        } else {
+            when (status) {
+                ListStatus.Loading -> "Loading…"
+                ListStatus.Idle -> if (browse.items.isEmpty()) "Loading…" else null
+                ListStatus.Empty, ListStatus.Error -> browse.message
+                ListStatus.Ready -> null
+            }
         }
         listOverlay.visibility = if (overlay == null) GONE else VISIBLE
         setText(listMessage, overlay ?: "")
-        listRetry.visibility = if (browse.status == ListStatus.Error || browse.status == ListStatus.Empty) VISIBLE else GONE
-        val more = when {
+        listRetry.visibility = if (status == ListStatus.Error || status == ListStatus.Empty) VISIBLE else GONE
+        val more = if (discovering) "" else when {
             browse.loadingMore -> "Loading more…"
             browse.moreFailed -> "Couldn't load more videos. Tap to retry."
             else -> ""
         }
         setText(moreStatus, more)
         moreStatus.visibility = if (more.isEmpty()) GONE else VISIBLE
-        moreStatus.isClickable = browse.moreFailed
+        moreStatus.isClickable = !discovering && browse.moreFailed
     }
 
     private fun renderPlayback(playback: PlaybackState) {
@@ -517,7 +550,10 @@ internal class YouTubeContent(
     private fun submitSearch() {
         hideKeyboard()
         val query = searchField.text?.toString()?.trim().orEmpty()
-        if (query.isEmpty()) returnToHome() else session.search(query)
+        if (query.isEmpty()) returnToHome() else {
+            discoveryActive = false
+            session.search(query)
+        }
     }
 
     private fun returnToHome() {
@@ -525,6 +561,7 @@ internal class YouTubeContent(
         val connected = accountController.hasAccount()
         val reload = YouTubeHomeNavigation.shouldReload(previousAccountState, connected, session.state.browse)
         searchField.setText("")
+        discoveryActive = false
         accountOpen = false
         accountView.close()
         previousAccountState = connected
