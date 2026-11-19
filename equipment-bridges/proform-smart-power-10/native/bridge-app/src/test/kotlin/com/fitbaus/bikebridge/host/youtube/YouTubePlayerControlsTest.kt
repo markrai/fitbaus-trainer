@@ -81,6 +81,27 @@ class YouTubePlayerControlsTest {
     }
 
     @Test
+    fun captionsButtonKeepsCcLabelAndShowsActivationThroughOutline() {
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
+        val controls = content.substringAfter("private fun buildPlayer()")
+            .substringBefore("private fun buildVolumeColumn()")
+        val playback = content.substringAfter("private fun renderPlayback(playback: PlaybackState)")
+            .substringBefore("private fun onPlaybackToggle()")
+        assertTrue(content.contains("private val captionsButton = button(\"CC\")"))
+        assertTrue(controls.contains("captionsButton.setOnClickListener { session.toggleCaptions() }"))
+        assertTrue(controls.contains("addState(intArrayOf(android.R.attr.state_activated), outline(CAPTIONS_ACTIVE, FIELD))"))
+        assertTrue(controls.contains("addState(intArrayOf(), outline(MUTE, FIELD))"))
+        assertTrue(controls.contains("addState(intArrayOf(-android.R.attr.state_enabled), outline(DIVIDER, FIELD))"))
+        assertTrue(playback.contains("captionsButton.isEnabled = playback.captionsAvailable && playback.phase in CONTROLLABLE"))
+        assertTrue(playback.contains("captionsButton.isActivated = captionsButton.isEnabled && playback.captionsEnabled"))
+        assertTrue(playback.contains("captionsButton.setTextColor(if (captionsButton.isActivated) PRIMARY else MUTE)"))
+        assertTrue(playback.contains("captionsButton.isActivated -> \"Captions on\""))
+        assertTrue(playback.contains("else -> \"Captions off\""))
+        assertFalse(playback.contains("CC ON"))
+        assertFalse(playback.contains("setText(captionsButton"))
+    }
+
+    @Test
     fun brightnessUsesTheBridgeBrightnessStoreThroughTheActivity() {
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val control = activity.substring(activity.indexOf("private val youtubeBrightness"), activity.indexOf("private val refresh"))
