@@ -21,6 +21,7 @@ import javax.security.auth.x500.X500Principal
 
 internal interface GoogleAccountStore {
     fun hasAccount(): Boolean
+    fun hasStoredClient(): Boolean = false
     fun client(): GoogleClient?
     fun saveClient(client: GoogleClient)
     fun refreshToken(): String?
@@ -33,6 +34,9 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
     private val prefs: SharedPreferences = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     override fun hasAccount(): Boolean = prefs.contains(KEY_REFRESH)
+
+    override fun hasStoredClient(): Boolean =
+        prefs.contains(KEY_CLIENT_ID) && prefs.contains(KEY_CLIENT_SECRET)
 
     override fun client(): GoogleClient? {
         val id = prefs.getString(KEY_CLIENT_ID, null)?.takeIf { it.isNotBlank() } ?: return null

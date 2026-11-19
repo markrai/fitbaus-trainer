@@ -153,7 +153,10 @@ The root repository contains `push_youtube_auth.bat`, which calls
    the nonce-scoped importer, and removes temporary files. Successful
    import prints **“Credentials imported and encrypted on the bike.”**
 6. **Import is not authorization.** On **YouTube → MY YOUTUBE**, FitBaus
-   shows a QR code beside Google's exact verification URL and an enlarged,
+   automatically requests a fresh Google device code when its encrypted
+   TV OAuth client credentials are already stored and no Google account is
+   connected. You **do not** need to run the .bat file again. The screen
+   then shows a QR code beside Google's verification URL and an enlarged,
    case-sensitive user code. Scan the QR with your phone camera to open
    Google's sign-in page. If Google requests a code, enter the one on the
    bike exactly as shown, select the intended YouTube account and approve
@@ -172,6 +175,35 @@ arguments. Nevertheless, the JSON exists briefly in Android 5.1's
 broad storage permission. Use a trusted console and ADB connection.
 The importer deletes its staging copy; safely retain or delete the
 original on your PC according to your credential management needs.
+On the bike, the encrypted OAuth client ID/secret persist independently
+of the temporary authorization code. The original JSON is not required
+again for routine account authorization.
+
+### Authorization-code expiry and renewal
+
+Google's [TV OAuth documentation](https://developers.google.com/identity/protocols/oauth2/limited-input-device)
+defines `expires_in` as the **actual number of seconds** for which both
+`device_code` and `user_code` are valid. Google's sample response is
+`1800` seconds (30 minutes), **not** a promise that every code lasts exactly
+30 minutes. A code issued today cannot be used tomorrow.
+
+FitBaus uses Google's returned `expires_in` with an elapsed-time clock.
+When the deadline passes, the code and QR are hidden, polling stops, and
+the screen offers **GET NEW CODE**. Returning to **MY YOUTUBE** after a
+later tab visit or app restart automatically requests a new code if the
+encrypted TV client is still stored and sign-in is incomplete. While
+an existing code is valid, reopening MY YOUTUBE **reuses it** rather than
+issuing a duplicate. This does not clear equipment pairing, delete the
+saved OAuth client, or rotate encryption keys.
+
+Codes are **not** fetched at app launch, continuously regenerated after
+expiry, or pre-generated overnight. This follows
+[RFC 8628 §3.1](https://www.rfc-editor.org/rfc/rfc8628#section-3.1),
+which recommends requesting a device code only in response to user
+interaction. On an expired-code screen, choose **GET NEW CODE** without
+reimporting JSON; **CHANGE CLIENT** remains available if you need to
+replace the Google Cloud OAuth client. An already connected Google
+account continues using its refresh token, not repeated device codes.
 
 ### Alternative: manual entry on the bike
 
@@ -225,7 +257,8 @@ your Google Account security settings.
 | “unexpected response” or “encrypted Google credentials” | The failure is likely local response parsing or Android Keystore storage, respectively. Reinstall a build with the diagnostic fix and reproduce before changing Google Cloud settings. |
 | QR opens Google but the code is not filled in | Expected for Google's documented `verification_url` response. Enter the large, case-sensitive code displayed on the bike. Auto-fill works only if Google supplies a validated `verification_uri_complete` link. |
 | QR is unavailable or won't scan | Type Google's displayed URL manually, then enter the large code exactly as shown. QR generation is local to the bike and never requires an internet QR service. |
-| A code appears but login fails or expires | Approve it on the same Google account listed as a test user. Restart authorization to obtain a fresh code; an expired code cannot be reused |
+| A QR/code from yesterday no longer works | Device codes expire according to Google's `expires_in` (commonly 30 minutes). Return to MY YOUTUBE to request a fresh code automatically, or press GET NEW CODE on the expiry screen. Do not reimport the JSON. |
+| A code appears but login fails or expires | Approve it on the same Google account listed as a test user. On expiry, choose GET NEW CODE; the old code cannot be reused |
 | Sign-in works, then expires after about seven days | External OAuth apps left in **Testing** generally issue refresh tokens that expire after seven days for YouTube scopes. Consider Google's production verification requirements before distributing to others |
 | Personal playlists are blank | Verify you've selected the correct Google/YouTube account or channel; Google only returns the authorized account's available lists |
 | A selected private video doesn't play | Google OAuth authorizes Data API browsing, **not** NewPipe playback. The native player cannot necessarily play account-restricted videos |

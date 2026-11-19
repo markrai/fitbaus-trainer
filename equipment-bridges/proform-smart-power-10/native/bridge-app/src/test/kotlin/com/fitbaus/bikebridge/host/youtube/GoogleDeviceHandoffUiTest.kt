@@ -32,6 +32,7 @@ class GoogleDeviceHandoffUiTest {
     @Test
     fun endingAuthorizationClearsTheRenderedQrAndCode() {
         assertTrue(source.contains("if (status.phase != GoogleAccountPhase.Authorizing)"))
+        assertTrue(source.contains("if (visibility != VISIBLE)"))
         assertTrue(source.contains("clearQr()"))
         assertTrue(source.contains("qrImage.setImageDrawable(null)"))
         assertTrue(source.contains("verificationCode.text = \"\""))

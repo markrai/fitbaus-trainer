@@ -41,6 +41,22 @@ small FitBaus-owned layer.
   caption rather than a video failure. Videos without usable captions play
   normally with CC disabled. This lightweight first version selects one
   language per video, without a language picker or translations.
+- **Google authorization lifecycle:** the TV OAuth client ID/secret are persisted
+  encrypted by the existing importer. They are separate from Google's
+  short-lived device code. Entering MY YOUTUBE with an existing client and no
+  connected account automatically requests a new device code on the existing
+  Google-account worker, without another ADB import. Re-entering with an
+  unexpired code keeps the same code; a code whose lifetime has elapsed is
+  never reused. Google provides `expires_in` (sample 1800 seconds) and
+  `interval` in each device response. FitBaus computes the code deadline
+  using `SystemClock.elapsedRealtime()` from receipt, clears the visible
+  code/QR at expiry and stops polling. Users can choose GET NEW CODE without
+  resupplying the OAuth client. Google token refresh is unchanged.
+  Consistent with RFC 8628, no device codes are requested at app startup
+  or automatically regenerated on a background expiry timer. The existing
+  manual CHANGE CLIENT path remains available. Imported credentials still
+  initiate their original immediate authorization once; imports bypass
+  the stored-client auto-arm path to avoid issuing duplicate codes.
 - **Google authorization handoff:** while awaiting OAuth approval, MY YOUTUBE
   shows a local 256×256-pixel QR code rendered by ZXing Core with a white quiet
   zone and a large, case-sensitive manual code. It encodes only Google's

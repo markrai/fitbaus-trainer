@@ -47,6 +47,14 @@ included in this upcoming release.
 
 ### Changed
 
+- **On-demand Google TV code renewal.** Once a TV OAuth JSON client has
+  been imported, returning to MY YOUTUBE automatically requests a device
+  code if no account is connected. Codes remain valid only for Google's
+  returned `expires_in` lifetime, not a hardcoded day or a permanent
+  QR. Existing unexpired codes are reused; expired codes and QR images are
+  hidden promptly. GET NEW CODE renews on user request without reimporting
+  credentials. No code generation on app startup, periodic regeneration,
+  Google scope changes, or Keystore rotation.
 - **Simplified YouTube navigation.** The YouTube tab always opens the default
   thumbnail feed, showing subscribed-channel uploads for signed-in users and
   Trending for guests. Removed the redundant SEARCH and MY FEED buttons;

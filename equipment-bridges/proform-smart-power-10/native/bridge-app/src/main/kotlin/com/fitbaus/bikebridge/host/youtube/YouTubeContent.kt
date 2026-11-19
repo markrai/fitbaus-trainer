@@ -150,7 +150,7 @@ internal class YouTubeContent(
 
     fun importGoogleCredentials(nonce: String) {
         accountOpen = true
-        accountView.open()
+        accountView.open(autoAuthorize = false)
         runCatching { YouTubeCredentialsImport.loadAndDelete(context, nonce) }.fold(
             onSuccess = { client ->
                 accountController.signIn(client) { stored ->
