@@ -44,6 +44,16 @@ included in this upcoming release.
 - **YouTube search clear.** An × inside the search field clears entered text
   without submitting a new search.
 
+### Fixed
+
+- **Google device authorization diagnostics.** If the first OAuth token poll
+  fails, the bike now distinguishes Google's HTTP status and known OAuth
+  error (for example `invalid_client (HTTP 401)`) from malformed responses,
+  local encrypted-credential failures, and network/TLS errors. Normal
+  `authorization_pending` and `slow_down` responses still continue
+  polling. No client credentials, device codes, tokens or untrusted Google
+  error descriptions are displayed.
+
 ## [2.1.0] - 2026-11-16
 
 Published on GitHub as **FitBaus Full 2.1.0**, with the native YouTube

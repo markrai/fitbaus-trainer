@@ -102,7 +102,7 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
         val json = success(http.post(
             "https://oauth2.googleapis.com/device/code",
             mapOf("client_id" to client.id, "scope" to YOUTUBE_READONLY),
-        ))
+        ), GoogleAuthStage.DeviceCode)
         val verificationUrl = json.getString("verification_url")
         if (verificationUrl != "https://www.google.com/device" &&
             verificationUrl != "https://www.google.com/device/") {
@@ -127,14 +127,16 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
                 "grant_type" to "urn:ietf:params:oauth:grant-type:device_code",
             ),
         )
-        if (response.status in 200..299) return GooglePollResult.Authorized(grant(success(response)))
-        val error = JSONObject(response.body).optString("error")
+        if (response.status in 200..299) {
+            return GooglePollResult.Authorized(grant(success(response, GoogleAuthStage.TokenPoll)))
+        }
+        val error = GoogleAuthDiagnostics.oauthCode(response.body)
         return when (error) {
             "authorization_pending" -> GooglePollResult.Pending
             "slow_down" -> GooglePollResult.SlowDown
             "access_denied" -> GooglePollResult.Denied
             "expired_token" -> GooglePollResult.Expired
-            else -> throw IOException("Google device authorization failed")
+            else -> throw GoogleOAuthHttpFailure(GoogleAuthStage.TokenPoll, response.status, error)
         }
     }
 
@@ -148,10 +150,10 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
                 "grant_type" to "refresh_token",
             ),
         )
-        if (response.status == 400 && JSONObject(response.body).optString("error") == "invalid_grant") {
+        if (response.status == 400 && GoogleAuthDiagnostics.oauthCode(response.body) == "invalid_grant") {
             throw GoogleReauthorizationRequired()
         }
-        return grant(success(response))
+        return grant(success(response, GoogleAuthStage.TokenRefresh))
     }
 
     fun revoke(token: String) {
@@ -227,7 +229,7 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
         val query = args.entries.joinToString("&") {
             URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8")
         }
-        return success(http.get("https://www.googleapis.com/youtube/v3/" + resource + "?" + query, token))
+        return success(http.get("https://www.googleapis.com/youtube/v3/" + resource + "?" + query, token), GoogleAuthStage.AccountBrowse)
     }
 
     private fun nextPage(json: JSONObject): String? =
@@ -246,10 +248,18 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
             json.optInt("expires_in", 3600).coerceIn(60, 86400))
     }
 
-    private fun success(response: GoogleHttpResponse): JSONObject {
-        if (response.status == 401) throw GoogleReauthorizationRequired()
-        if (response.status !in 200..299) throw IOException("Google request failed with HTTP " + response.status)
-        return JSONObject(response.body)
+    private fun success(response: GoogleHttpResponse, stage: GoogleAuthStage): JSONObject {
+        if (stage == GoogleAuthStage.AccountBrowse && response.status == 401) {
+            throw GoogleReauthorizationRequired()
+        }
+        if (response.status !in 200..299) {
+            throw GoogleOAuthHttpFailure(stage, response.status, GoogleAuthDiagnostics.oauthCode(response.body))
+        }
+        return try {
+            JSONObject(response.body)
+        } catch (_: org.json.JSONException) {
+            throw GoogleResponseFormatFailure()
+        }
     }
 
     private fun validId(value: String): Boolean = value.matches(Regex("[A-Za-z0-9_-]{1,100}"))

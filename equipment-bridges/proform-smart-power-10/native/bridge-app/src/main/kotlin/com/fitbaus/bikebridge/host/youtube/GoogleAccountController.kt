@@ -102,7 +102,14 @@ internal class GoogleAccountController(
                             code.verificationUrl, code.userCode))
                         handler.postDelayed(pollRunnable, interval * 1000L)
                     },
-                    onFailure = { setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, "Unable to start Google sign-in.")) },
+                    onFailure = { failure ->
+                        val detail = if (saved.isFailure) {
+                            GoogleAuthDiagnostics.message(GoogleAuthStage.DeviceCode, GoogleCredentialStorageFailure())
+                        } else {
+                            GoogleAuthDiagnostics.message(GoogleAuthStage.DeviceCode, failure)
+                        }
+                        setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, detail))
+                    },
                 )
             }
         }
@@ -197,12 +204,20 @@ internal class GoogleAccountController(
         val current = generation
         job = runner.submit {
             val result = runCatching {
-                val client = store.client() ?: throw GoogleReauthorizationRequired()
+                val client = try {
+                    store.client() ?: throw GoogleCredentialStorageFailure()
+                } catch (_: Exception) {
+                    throw GoogleCredentialStorageFailure()
+                }
                 val response = api.poll(client, request.code)
                 if (response is GooglePollResult.Authorized) {
                     val refresh = response.grant.refreshToken
-                        ?: throw GoogleReauthorizationRequired()
-                    store.saveRefreshToken(refresh)
+                        ?: throw GoogleResponseFormatFailure()
+                    try {
+                        store.saveRefreshToken(refresh)
+                    } catch (_: Exception) {
+                        throw GoogleCredentialStorageFailure()
+                    }
                 }
                 response
             }
@@ -232,9 +247,12 @@ internal class GoogleAccountController(
                             }
                         }
                     },
-                    onFailure = {
+                    onFailure = { failure ->
                         cancelAuthorization()
-                        setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, "Google sign-in failed. Try again."))
+                        setStatus(GoogleAccountStatus(
+                            GoogleAccountPhase.Error,
+                            GoogleAuthDiagnostics.message(GoogleAuthStage.TokenPoll, failure),
+                        ))
                     },
                 )
             }
