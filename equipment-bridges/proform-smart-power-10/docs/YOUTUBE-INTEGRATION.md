@@ -9,14 +9,16 @@ small FitBaus-owned layer.
 
 ## Behaviour
 
-- **Browse:** when signed out, opening YouTube loads Trending videos into
-  the existing thumbnail grid. When signed in, the home grid instead shows
-  **FROM YOUR CHANNELS**, a composite of recent videos from channels in the
-  user's YouTube subscriptions. **MY FEED** refreshes this view; scrolling
-  loads more channel batches. Search, search clearing, and MY YOUTUBE remain
-  available. Explicit Search uses the global YouTube catalog, not a
-  subscription filter. The separate account browser still lists channels
-  and playlists. This is not Google's proprietary Home recommendations.
+- **Browse:** opening the YouTube tab always shows the default thumbnail
+  grid: Trending while signed out, or **FROM YOUR CHANNELS** while signed in.
+  The signed-in grid combines recent uploads from subscribed channels, with
+  more channel batches loaded as the user scrolls. The separate SEARCH and
+  MY FEED buttons are removed. The search field remains, using the keyboard
+  Search action for global YouTube search; its × clears the search and returns
+  to the default feed. **MY YOUTUBE** opens the account browser for channels
+  and playlists. Its top-left back arrow returns to the home grid; the lower
+  BACK control remains for channel/playlist hierarchy. This is not Google's
+  proprietary Home recommendations.
 - **Play:** tapping a card opens the player inside the tab: video surface,
   PLAY/PAUSE (or tap the video, showing a briefly centered play/pause icon), seek bar with buffered range, elapsed and
   total time, a screen-brightness slider (5-100 %, written to the same
@@ -42,10 +44,12 @@ small FitBaus-owned layer.
 - **Account browser:** MY YOUTUBE lists subscribed channels and personal
   playlists, with pagination. Choose a subscribed channel to see its recent
   uploads, or a playlist to see its videos; choose a video to play it in the
-  same native player. The subscribed-channel list is not the personalized
-  YouTube Home feed; the official API does not expose Home recommendations.
-  The account UI uses compact text lists rather than the thumbnail browsing
-  grid.
+  same native player. A top-left arrow replaces the old MY YOUTUBE heading
+  and BROWSE button; it returns to the home grid. Channel or playlist names
+  still appear when browsing a specific collection. The subscribed-channel
+  list is not the personalized YouTube Home feed; the official API does not
+  expose Home recommendations. The account UI uses compact text lists rather
+  than the thumbnail browsing grid.
 - **Leaving:** switching tabs, opening settings or pausing the activity
   releases the player and cancels outstanding work. Coming back shows the
   results list as it was; reopening the same video resumes where it stopped

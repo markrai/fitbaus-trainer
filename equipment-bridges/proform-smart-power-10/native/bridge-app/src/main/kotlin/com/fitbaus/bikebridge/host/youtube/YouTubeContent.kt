@@ -69,15 +69,10 @@ internal class YouTubeContent(
     )
     private var accountOpen = false
     private var previousAccountState: Boolean? = null
-    private val feedButton = button("TRENDING")
     private val accountView = GoogleAccountView(
         context, accountController,
         onVideoSelected = { video -> session.open(video) },
-        onBrowseRequested = {
-            accountOpen = false
-            session.showTrending()
-            render(session.state)
-        },
+        onHomeRequested = { returnToHome() },
     )
 
     private val resultsScreen = LinearLayout(context)
@@ -143,11 +138,12 @@ internal class YouTubeContent(
         refreshBrightness()
         accountController.start()
         val connected = accountController.hasAccount()
-        val changed = previousAccountState != connected
-        session.start(loadDefault = !changed)
-        if (changed) session.showTrending()
+        val reloadHome = YouTubeHomeNavigation.shouldReload(previousAccountState, connected, session.state.browse)
+        session.start(loadDefault = !reloadHome)
+        if (reloadHome) session.showTrending()
         previousAccountState = connected
-        if (accountOpen) accountView.open() else accountView.close()
+        accountOpen = false
+        accountView.close()
         render(session.state)
         adapter.notifyDataSetChanged()
     }
@@ -215,7 +211,7 @@ internal class YouTubeContent(
         searchClear.gravity = Gravity.CENTER
         searchClear.contentDescription = "Clear search"
         searchClear.visibility = GONE
-        searchClear.setOnClickListener { searchField.setText("") }
+        searchClear.setOnClickListener { returnToHome() }
         fieldSlot.addView(searchClear, FrameLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP), Gravity.END or Gravity.CENTER_VERTICAL))
         searchField.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -225,15 +221,6 @@ internal class YouTubeContent(
             override fun afterTextChanged(s: Editable?) {}
         })
         bar.addView(fieldSlot, LayoutParams(0, dp(TOUCH_DP), 1f))
-        val search = button("SEARCH")
-        search.setOnClickListener { submitSearch() }
-        bar.addView(search, spaced(LayoutParams(dp(140), dp(TOUCH_DP))))
-        feedButton.setOnClickListener {
-            hideKeyboard()
-            searchField.setText("")
-            session.showTrending()
-        }
-        bar.addView(feedButton, spaced(LayoutParams(dp(160), dp(TOUCH_DP))))
         val myYouTube = button("MY YOUTUBE")
         myYouTube.setOnClickListener {
             hideKeyboard()
@@ -416,7 +403,6 @@ internal class YouTubeContent(
     }
 
     private fun render(state: YouTubeState) {
-        setText(feedButton, if (accountStore.hasAccount()) "MY FEED" else "TRENDING")
         val player = state.screen == Screen.Player
         resultsScreen.visibility = if (player || accountOpen) GONE else VISIBLE
         playerScreen.visibility = if (player) VISIBLE else GONE
@@ -530,7 +516,20 @@ internal class YouTubeContent(
 
     private fun submitSearch() {
         hideKeyboard()
-        session.search(searchField.text?.toString() ?: "")
+        val query = searchField.text?.toString()?.trim().orEmpty()
+        if (query.isEmpty()) returnToHome() else session.search(query)
+    }
+
+    private fun returnToHome() {
+        hideKeyboard()
+        val connected = accountController.hasAccount()
+        val reload = YouTubeHomeNavigation.shouldReload(previousAccountState, connected, session.state.browse)
+        searchField.setText("")
+        accountOpen = false
+        accountView.close()
+        previousAccountState = connected
+        if (reload) session.showTrending()
+        render(session.state)
     }
 
     private fun refreshVolume() {
