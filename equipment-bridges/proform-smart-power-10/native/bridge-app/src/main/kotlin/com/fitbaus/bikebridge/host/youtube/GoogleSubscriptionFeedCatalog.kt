@@ -33,6 +33,8 @@ internal class GoogleSubscriptionFeedCatalog(
 
     override fun search(query: String): FeedPage = guest.search(query)
 
+    override fun related(seeds: List<VideoSummary>): FeedPage = guest.related(seeds)
+
     override fun more(cursor: FeedCursor): FeedPage = when (cursor) {
         is GoogleSubscriptionFeedCursor -> authenticated {
             if (!store.hasAccount()) throw YouTubeException(FailureKind.Authentication, "Sign in to Google again")
