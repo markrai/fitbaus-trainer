@@ -14,7 +14,7 @@ FitBaus Trainer is a heart-rate-guided fitness coach for people who want more fr
 - **Measure your progress.** Record workout history and use a formal bike VO₂ assessment to estimate cardiovascular fitness.
 - **Connect a chest strap.** Read Bluetooth heart rate through Web Bluetooth in supported browsers or native BLE on Android and iOS.
 - **Let a supported bike adjust itself.** FitBaus can use measured power, cadence, and resistance to guide automatic resistance changes during authorized structured workouts.
-- **Play while you pedal.** On supported console hardware, arcade games use face and hand tracking to bring movement into the game.
+- **Play while you pedal.** On supported console hardware, arcade games use face and hand tracking to bring movement into the game. A floating YouTube video can continue playing over the Dashboard or a game until you close it.
 
 The core Trainer works without an equipment bridge. More advanced athlete-relative watt personalization is being evaluated, but does **not** currently control the bike.
 
