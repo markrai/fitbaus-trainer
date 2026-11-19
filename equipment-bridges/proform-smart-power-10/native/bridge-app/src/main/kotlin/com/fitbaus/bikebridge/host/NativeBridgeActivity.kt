@@ -70,7 +70,7 @@ class NativeBridgeActivity : Activity() {
     private lateinit var dashboardContent: View
     private lateinit var arcadeContent: ArcadeContent
     private lateinit var youtubeContent: YouTubeContent
-    private lateinit var floatingPlayer: LinearLayout
+    private lateinit var floatingPlayer: FrameLayout
     private lateinit var floatingVideoSlot: FrameLayout
     private var resumed = false
     private var pendingYouTubeImport: String? = null
@@ -450,7 +450,7 @@ class NativeBridgeActivity : Activity() {
         floatingPlayer = buildFloatingPlayer()
         contentHost.addView(
             floatingPlayer,
-            FrameLayout.LayoutParams(dp(296), dp(216), Gravity.TOP or Gravity.END).apply {
+            FrameLayout.LayoutParams(dp(296), dp(167), Gravity.TOP or Gravity.END).apply {
                 topMargin = dp(12)
                 rightMargin = dp(12)
             },
@@ -462,42 +462,38 @@ class NativeBridgeActivity : Activity() {
         return root
     }
 
-    private fun buildFloatingPlayer(): LinearLayout {
-        val floating = LinearLayout(this)
-        floating.orientation = LinearLayout.VERTICAL
+    private fun buildFloatingPlayer(): FrameLayout {
+        val floating = FrameLayout(this)
         floating.setBackgroundColor(Color.BLACK)
         floating.elevation = dp(12).toFloat()
         floating.visibility = View.GONE
 
-        val header = LinearLayout(this)
-        header.orientation = LinearLayout.HORIZONTAL
-        header.gravity = Gravity.CENTER_VERTICAL
-        header.setBackgroundColor(DIVIDER)
-        val title = label("YOUTUBE", 14f, PRIMARY)
-        title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
-        title.setPadding(dp(12), 0, 0, 0)
-        title.isClickable = true
-        title.contentDescription = "Return to YouTube player"
-        title.setOnClickListener { modeController.select(ArcadeMode.YouTube) }
-        header.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        floatingVideoSlot = FrameLayout(this)
+        floatingVideoSlot.setBackgroundColor(Color.BLACK)
+        floating.addView(
+            floatingVideoSlot,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
 
         val close = label("×", 28f, PRIMARY)
         close.gravity = Gravity.CENTER
         close.contentDescription = "Close YouTube floating player"
         close.isClickable = true
         close.isFocusable = true
+        close.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.argb(195, 0, 0, 0))
+        }
         close.setOnClickListener {
             youtubeContent.stop()
             floatingPlayer.visibility = View.GONE
         }
-        header.addView(close, LinearLayout.LayoutParams(dp(52), dp(48)))
-        floating.addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
-
-        floatingVideoSlot = FrameLayout(this)
-        floatingVideoSlot.setBackgroundColor(Color.BLACK)
         floating.addView(
-            floatingVideoSlot,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+            close,
+            FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(6)
+                rightMargin = dp(6)
+            },
         )
         return floating
     }

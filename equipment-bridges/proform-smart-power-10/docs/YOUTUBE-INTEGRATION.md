@@ -47,7 +47,10 @@ small FitBaus-owned layer.
   if only another language is available, it uses that instead. Supported
   formats are WebVTT, TTML and SRT. Captions start enabled when available,
   and the CC button enables/disables them without restarting video playback.
-  A small text overlay stays within the video frame, not the exercise HUD.
+  The label stays CC: a green outline marks captions enabled, while a muted
+  gray outline and label mark captions off. When captions are unavailable,
+  the button is disabled and grayed out; accessibility text announces its
+  state. A small text overlay stays within the video frame, not the exercise HUD.
   Caption files are capped at 2 MiB and loaded by ExoPlayer independently
   of audio/video; missing/expired caption URLs are treated as a missing
   caption rather than a video failure. Videos without usable captions play
@@ -96,9 +99,14 @@ small FitBaus-owned layer.
   any arcade game while a video is resolving, buffering, playing or paused
   moves the same video view to a compact overlay in the top-right of the
   content area. Playback continues, including its existing audio, position,
-  subtitle state and decoder. Tap the floating video/header or the YouTube
-  tab to return to the full player without a stream re-resolution. The X
-  closes the overlay, stops playback and releases ExoPlayer. The overlay is
+  subtitle state and decoder. The floating preview is a full 16:9 image
+  with no title bar; a 48 dp touch target for the X overlays its top-right
+  corner. While floating, captions use 12 sp with tighter padding and room
+  for up to eight lines so they are less likely to clip against the smaller
+  video frame. Returning to full YouTube restores the original 22 sp caption
+  size, three-line limit and padding. Tap the video or the YouTube tab to
+  return to the full player without a stream re-resolution. The X closes the overlay, stops playback
+  and releases ExoPlayer. The overlay is
   not created for browse-only, failed or completed videos. A video that
   finishes or encounters a playback error after floating remains visible
   until the user taps X or returns to YouTube. Normal game cameras and

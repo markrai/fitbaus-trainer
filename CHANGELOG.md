@@ -55,6 +55,18 @@ included in this upcoming release.
 
 ### Changed
 
+- **Clearer YouTube CC toggle.** The full-player button always reads CC;
+  it uses a green outline when captions are active, a muted gray style when
+  turned off, and a disabled gray state when captions are unavailable.
+  The button also announces on/off/unavailable state for accessibility.
+- **More compact floating YouTube player.** Removed the separate top bar
+  from the mini-player. Video now occupies the full 16:9 preview; its close
+  button sits directly over the upper-right corner, with a 48 dp touch
+  target and dark background for legibility. Floating captions now use a
+  smaller 12 sp font, tighter padding and an eight-line limit so more text
+  fits in the preview, while the normal player's caption styling is unchanged.
+  Tapping the video still restores the full YouTube player.
+
 - **On-demand Google TV code renewal.** Once a TV OAuth JSON client has
   been imported, returning to MY YOUTUBE automatically requests a device
   code if no account is connected. Codes remain valid only for Google's

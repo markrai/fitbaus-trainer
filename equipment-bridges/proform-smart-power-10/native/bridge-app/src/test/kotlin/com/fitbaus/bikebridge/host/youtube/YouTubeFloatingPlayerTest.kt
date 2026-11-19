@@ -74,6 +74,44 @@ class YouTubeFloatingPlayerTest {
     }
 
     @Test
+    fun floatingPreviewHasNoHeaderAndCloseOverlaysTheVideoCorner() {
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val builder = activity.substringAfter("private fun buildFloatingPlayer(): FrameLayout {")
+            .substringBefore("private fun buildTitleRow(): View {")
+        assertFalse(builder.contains("val header ="))
+        assertFalse(builder.contains("val title ="))
+        assertTrue(builder.contains("floating.addView("))
+        assertTrue(builder.contains("floatingVideoSlot,"))
+        assertTrue(builder.contains("FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END)"))
+        assertTrue(builder.contains("close.background = GradientDrawable().apply"))
+        assertTrue(builder.contains("youtubeContent.stop()"))
+        assertTrue(activity.contains("FrameLayout.LayoutParams(dp(296), dp(167), Gravity.TOP or Gravity.END)"))
+    }
+
+    @Test
+    fun floatingCaptionsShrinkAndFullPlayerCaptionsRemainUnchanged() {
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
+        val minimize = content.substringAfter("fun minimizeInto(floatingSlot: FrameLayout)")
+            .substringBefore("private fun restoreFullPlayer()")
+        val restore = content.substringAfter("private fun restoreFullPlayer()")
+            .substringBefore("private fun styleCaptionsForVideoSize()")
+        val style = content.substringAfter("private fun styleCaptionsForVideoSize()")
+            .substringBefore("fun stop()")
+        val fullPlayer = content.substringAfter("private fun buildPlayer()")
+            .substringBefore("private fun buildVolumeColumn()")
+        assertTrue(minimize.contains("floating = true"))
+        assertTrue(minimize.contains("styleCaptionsForVideoSize()"))
+        assertTrue(restore.contains("floating = false"))
+        assertTrue(restore.contains("styleCaptionsForVideoSize()"))
+        assertTrue(style.contains("captionsView.textSize = if (floating) 12f else 22f"))
+        assertTrue(style.contains("captionsView.maxLines = if (floating) 8 else 3"))
+        assertTrue(style.contains("val horizontal = dp(if (floating) 6 else 12)"))
+        assertTrue(style.contains("val vertical = dp(if (floating) 2 else 5)"))
+        assertTrue(fullPlayer.contains("captionsView.setPadding(dp(12), dp(5), dp(12), dp(5))"))
+        assertTrue(fullPlayer.contains("captionsView.maxLines = 3"))
+    }
+
+    @Test
     fun miniPlayerReusesOneSurfaceAndOneEngine() {
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
         assertTrue(content.contains("private val surface = SurfaceView(context)"))
