@@ -39,6 +39,7 @@ internal class YouTubeContent(
     context: Context,
     private val prefs: SharedPreferences,
     private val brightness: BrightnessControl,
+    private val onRestoreRequested: () -> Unit = {},
 ) : LinearLayout(context) {
     val hud: ExerciseHud = ExerciseHud(context)
     private val handler = Handler(Looper.getMainLooper())
@@ -370,7 +371,7 @@ internal class YouTubeContent(
         playbackFeedback.visibility = GONE
         videoFrame.addView(playbackFeedback, FrameLayout.LayoutParams(dp(84), dp(84), Gravity.CENTER))
         videoFrame.setOnClickListener {
-            if (!floating) onPlaybackToggle()
+            if (floating) onRestoreRequested() else onPlaybackToggle()
         }
         area.addView(videoFrame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         playerOverlay.orientation = VERTICAL
