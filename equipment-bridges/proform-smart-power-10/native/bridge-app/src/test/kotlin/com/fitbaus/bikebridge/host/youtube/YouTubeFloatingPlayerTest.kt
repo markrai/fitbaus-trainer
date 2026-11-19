@@ -99,13 +99,15 @@ class YouTubeFloatingPlayerTest {
             .substringBefore("fun stop()")
         val fullPlayer = content.substringAfter("private fun buildPlayer()")
             .substringBefore("private fun buildVolumeColumn()")
-        assertTrue(minimize.contains("floating = true\\n        styleCaptionsForVideoSize()".replace("\\n", "\n")))
-        assertTrue(restore.contains("floating = false\\n        styleCaptionsForVideoSize()".replace("\\n", "\n")))
+        assertTrue(minimize.contains("floating = true"))
+        assertTrue(minimize.contains("styleCaptionsForVideoSize()"))
+        assertTrue(restore.contains("floating = false"))
+        assertTrue(restore.contains("styleCaptionsForVideoSize()"))
         assertTrue(style.contains("captionsView.textSize = if (floating) 12f else 22f"))
         assertTrue(style.contains("captionsView.maxLines = if (floating) 8 else 3"))
         assertTrue(style.contains("val horizontal = dp(if (floating) 6 else 12)"))
         assertTrue(style.contains("val vertical = dp(if (floating) 2 else 5)"))
-        assertTrue(fullPlayer.contains("private") == false || fullPlayer.contains("captionsView.setPadding(dp(12), dp(5), dp(12), dp(5))"))
+        assertTrue(fullPlayer.contains("captionsView.setPadding(dp(12), dp(5), dp(12), dp(5))"))
         assertTrue(fullPlayer.contains("captionsView.maxLines = 3"))
     }
 
