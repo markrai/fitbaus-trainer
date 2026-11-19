@@ -157,6 +157,7 @@ dependencies {
     implementation("com.google.android.exoplayer:exoplayer-hls:2.19.1")
     implementation("androidx.annotation:annotation:1.3.0")
     implementation("com.google.guava:guava:31.1-android")
+    implementation("com.google.zxing:core:3.5.3")
     testImplementation("org.json:json:20240303")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")

@@ -95,6 +95,14 @@ Protocol Buffers [Lite] 4.36.2
     Copyright 2008 Google Inc.
     License: BSD-3-Clause (licenses/BSD-3-Clause-protobuf.txt)
 
+ZXing Core 3.5.3
+    com.google.zxing:core:3.5.3
+    Source: https://github.com/zxing/zxing/tree/zxing-3.5.3/core
+    Copyright (C) ZXing authors
+    License: Apache License, Version 2.0 (licenses/Apache-2.0.txt)
+    Used locally to generate QR codes for Google's OAuth device-verification URL.
+    No QR code data is sent to a third-party QR generation service.
+
 JSR-305 annotations 3.0.2
     com.google.code.findbugs:jsr305:3.0.2
     License: Apache License, Version 2.0 (licenses/Apache-2.0.txt)

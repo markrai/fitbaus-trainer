@@ -41,6 +41,17 @@ small FitBaus-owned layer.
   caption rather than a video failure. Videos without usable captions play
   normally with CC disabled. This lightweight first version selects one
   language per video, without a language picker or translations.
+- **Google authorization handoff:** while awaiting OAuth approval, MY YOUTUBE
+  shows a local 256×256-pixel QR code rendered by ZXing Core with a white quiet
+  zone and a large, case-sensitive manual code. It encodes only Google's
+  exact `verification_url`, or the validated complete URI if Google's
+  response actually supplies one (`verification_uri_complete` or
+  `verification_url_complete`). Google currently documents the basic URL
+  and separate user code, so prefill is not promised or synthesized.
+  The code and QR are removed when authorization finishes, fails or is
+  cancelled. QR rendering is bounded, occurs only when the URL changes,
+  and degrades to manual URL/code entry if encoding fails. No HTTP QR service,
+  new permissions, on-bike browser, or change to OAuth polling.
 - **Account browser:** MY YOUTUBE lists subscribed channels and personal
   playlists, with pagination. Choose a subscribed channel to see its recent
   uploads, or a playlist to see its videos; choose a video to play it in the

@@ -13,6 +13,7 @@ internal data class GoogleAccountStatus(
     val message: String = "",
     val verificationUrl: String = "",
     val userCode: String = "",
+    val verificationScanUrl: String = "",
 )
 
 internal object GooglePolling {
@@ -99,7 +100,8 @@ internal class GoogleAccountController(
                         interval = code.intervalSeconds
                         setStatus(GoogleAccountStatus(GoogleAccountPhase.Authorizing,
                             "On your phone, open the URL and enter the code.",
-                            code.verificationUrl, code.userCode))
+                            code.verificationUrl, code.userCode,
+                            code.verificationCompleteUrl ?: code.verificationUrl))
                         handler.postDelayed(pollRunnable, interval * 1000L)
                     },
                     onFailure = { failure ->

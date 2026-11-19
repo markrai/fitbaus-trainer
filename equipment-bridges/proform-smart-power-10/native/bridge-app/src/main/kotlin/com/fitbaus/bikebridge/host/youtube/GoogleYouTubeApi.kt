@@ -17,6 +17,7 @@ internal data class GoogleDeviceCode(
     val verificationUrl: String,
     val expiresInSeconds: Int,
     val intervalSeconds: Int,
+    val verificationCompleteUrl: String? = null,
 )
 
 internal data class GoogleAccessGrant(
@@ -110,12 +111,16 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
             verificationUrl != "https://www.google.com/device/") {
             throw IOException("Unexpected Google verification URL")
         }
+        val suppliedComplete = json.optString("verification_uri_complete").takeIf { it.isNotBlank() }
+            ?: json.optString("verification_url_complete").takeIf { it.isNotBlank() }
+        val scanUrl = GoogleDeviceVerification.scanUrl(verificationUrl, suppliedComplete)
         return GoogleDeviceCode(
             json.getString("device_code"),
             json.getString("user_code"),
             verificationUrl,
             json.getInt("expires_in").coerceIn(1, 1800),
             json.optInt("interval", 5).coerceIn(5, 60),
+            scanUrl.takeIf { it != verificationUrl },
         )
     }
 
