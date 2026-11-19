@@ -92,6 +92,8 @@ internal class YouTubeContent(
     private val videoTitle = label("", 18f, PRIMARY)
     private val qualityButton = button("360p")
     private val videoFrame = AspectFrame(context)
+    private lateinit var fullScreenVideoArea: FrameLayout
+    private var floating = false
     private val captionsView = label("", 22f, PRIMARY)
     private val captionsButton = button("CC")
     private val playbackFeedback = ImageView(context)
@@ -136,6 +138,10 @@ internal class YouTubeContent(
     }
 
     fun start() {
+        if (floating) {
+            restoreFullPlayer()
+            return
+        }
         refreshVolume()
         refreshBrightness()
         accountController.start()
@@ -168,7 +174,39 @@ internal class YouTubeContent(
         render(session.state)
     }
 
+    fun minimizeInto(floatingSlot: FrameLayout): Boolean {
+        val current = session.state
+        if (!YouTubeFloatingPlayer.canFloat(current)) {
+            stop()
+            return false
+        }
+        if (floating) return true
+        hideKeyboard()
+        clearPlaybackFeedback()
+        stopTicker()
+        (videoFrame.parent as? ViewGroup)?.removeView(videoFrame)
+        floatingSlot.addView(
+            videoFrame,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER),
+        )
+        floating = true
+        render(current)
+        return true
+    }
+
+    private fun restoreFullPlayer() {
+        if (!floating) return
+        (videoFrame.parent as? ViewGroup)?.removeView(videoFrame)
+        fullScreenVideoArea.addView(
+            videoFrame,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER),
+        )
+        floating = false
+        render(session.state)
+    }
+
     fun stop() {
+        restoreFullPlayer()
         hideKeyboard()
         clearPlaybackFeedback()
         stopTicker()
@@ -179,6 +217,7 @@ internal class YouTubeContent(
     }
 
     fun destroy() {
+        restoreFullPlayer()
         clearPlaybackFeedback()
         stopTicker()
         accountController.destroy()
@@ -313,6 +352,7 @@ internal class YouTubeContent(
         playerScreen.addView(top, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         val area = FrameLayout(context)
+        fullScreenVideoArea = area
         area.setBackgroundColor(Color.BLACK)
         videoFrame.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         captionsView.gravity = Gravity.CENTER
@@ -329,7 +369,9 @@ internal class YouTubeContent(
         playbackFeedback.setPadding(dp(20), dp(20), dp(20), dp(20))
         playbackFeedback.visibility = GONE
         videoFrame.addView(playbackFeedback, FrameLayout.LayoutParams(dp(84), dp(84), Gravity.CENTER))
-        videoFrame.setOnClickListener { onPlaybackToggle() }
+        videoFrame.setOnClickListener {
+            if (!floating) onPlaybackToggle()
+        }
         area.addView(videoFrame, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
         playerOverlay.orientation = VERTICAL
         playerOverlay.gravity = Gravity.CENTER
@@ -427,7 +469,7 @@ internal class YouTubeContent(
         renderBrowse(state)
         renderPlayback(state.playback)
         if (!player || !state.active || state.playback.phase !in CONTROLLABLE) clearPlaybackFeedback()
-        if (player && state.active) startTicker() else stopTicker()
+        if (player && state.active && !floating) startTicker() else stopTicker()
     }
 
     private fun renderBrowse(state: YouTubeState) {
