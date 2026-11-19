@@ -55,6 +55,10 @@ included in this upcoming release.
 
 ### Changed
 
+- **Clearer YouTube CC toggle.** The full-player button always reads CC;
+  it uses a green outline when captions are active, a muted gray style when
+  turned off, and a disabled gray state when captions are unavailable.
+  The button also announces on/off/unavailable state for accessibility.
 - **More compact floating YouTube player.** Removed the separate top bar
   from the mini-player. Video now occupies the full 16:9 preview; its close
   button sits directly over the upper-right corner, with a 48 dp touch
