@@ -1,6 +1,6 @@
 // Centralized version number for the app
 // Update this value when releasing a new version
-const APP_VERSION = "2.1.2";
+const APP_VERSION = "2.1.3";
 
 // Make version globally accessible
 if (typeof window !== 'undefined') {
