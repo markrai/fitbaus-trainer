@@ -29,15 +29,19 @@ class RelatedVideoSuggestionsTest {
         val first = listOf(video("ccccccccccc", "New"), feed[0], video("ddddddddddd", "New"))
         val second = listOf(video("ccccccccccc", "New"), video("eeeeeeeeeee", "New"), video("ffffffffff1", "New"))
         val result = RelatedVideoSuggestions.merge(feed, listOf(first, second))
-        assertEquals(listOf("ccccccccccc", "eeeeeeeeeee", "ffffffffff1", "ddddddddddd"), result.map { it.id })
+        assertEquals(listOf("ccccccccccc", "eeeeeeeeeee", "ddddddddddd", "ffffffffff1"), result.map { it.id })
     }
 
     @Test
     fun suggestionsHaveStrictPerSeedAndTotalBounds() {
-        val group = (0..50).map { index -> video(index.toString().padStart(11, '0'), "New") }
-        val results = RelatedVideoSuggestions.merge(emptyList(), List(4) { group.map { it.copy(id = (it.toString().length + it.id.toLong()).toString().padStart(11, '0')) } })
-        assertTrue(results.size <= RelatedVideoSuggestions.MAX_RESULTS)
-        assertTrue(results.distinctBy { it.id }.size == results.size)
+        val groups = (0 until 4).map { source ->
+            (0 until 40).map { index ->
+                video((source * 100 + index).toString().padStart(11, '0'), "New")
+            }
+        }
+        val results = RelatedVideoSuggestions.merge(emptyList(), groups)
+        assertEquals(RelatedVideoSuggestions.MAX_RESULTS, results.size)
+        assertEquals(results.size, results.map { it.id }.toSet().size)
     }
 
     private fun video(id: String, channel: String, live: Boolean = false): VideoSummary =
