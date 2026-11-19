@@ -191,6 +191,7 @@ internal class YouTubeContent(
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER),
         )
         floating = true
+        styleCaptionsForVideoSize()
         render(current)
         return true
     }
@@ -203,7 +204,16 @@ internal class YouTubeContent(
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER),
         )
         floating = false
+        styleCaptionsForVideoSize()
         render(session.state)
+    }
+
+    private fun styleCaptionsForVideoSize() {
+        captionsView.textSize = if (floating) 12f else 22f
+        captionsView.maxLines = if (floating) 8 else 3
+        val horizontal = dp(if (floating) 6 else 12)
+        val vertical = dp(if (floating) 2 else 5)
+        captionsView.setPadding(horizontal, vertical, horizontal, vertical)
     }
 
     fun stop() {
