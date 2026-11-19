@@ -144,6 +144,23 @@ internal class YouTubeContent(
         adapter.notifyDataSetChanged()
     }
 
+    fun importGoogleCredentials(nonce: String) {
+        accountOpen = true
+        accountView.open()
+        runCatching { YouTubeCredentialsImport.loadAndDelete(context, nonce) }.fold(
+            onSuccess = { client ->
+                accountController.signIn(client) { stored ->
+                    YouTubeCredentialsImport.acknowledge(context, nonce, stored)
+                }
+            },
+            onFailure = {
+                YouTubeCredentialsImport.acknowledge(context, nonce, false)
+                android.widget.Toast.makeText(context, "Google OAuth import failed", android.widget.Toast.LENGTH_LONG).show()
+            },
+        )
+        render(session.state)
+    }
+
     fun stop() {
         hideKeyboard()
         clearPlaybackFeedback()
