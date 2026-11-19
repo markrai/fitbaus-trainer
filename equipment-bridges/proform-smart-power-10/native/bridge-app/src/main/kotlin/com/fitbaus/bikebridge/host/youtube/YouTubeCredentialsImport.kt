@@ -19,7 +19,7 @@ internal object YouTubeCredentialsImport {
         require(validNonce(nonce))
         val file = File(directory(context), "$nonce.json")
         try {
-            require(file.isFile && file.length() in 1..LIMIT.toLong())
+            require(file.isFile && file.length() in 1L..LIMIT.toLong())
             val bytes = FileInputStream(file).use { stream ->
                 val buffer = ByteArray(LIMIT + 1)
                 var count = 0
