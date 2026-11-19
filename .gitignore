@@ -2,7 +2,9 @@
 deploy/
 deploy-upload.bat
 /node_modules/
-/secrets/
+/secrets/**
+!/secrets/youtube/
+!/secrets/youtube/.gitkeep
 /www/
 
 # Gradle local caches (any module)
