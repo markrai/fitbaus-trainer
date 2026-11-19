@@ -85,6 +85,13 @@ included in this upcoming release.
 
 ### Fixed
 
+- **YouTube tab continuity on the bike console.** Switching to Dashboard
+  or a game while a video is playing now keeps playback in a small in-app
+  floating player at the upper right. Tapping the video or its header
+  restores the original full player, preserving playback position and
+  controls. The X closes and releases it. Leaving the Activity still
+  stops playback; no system PiP APIs or second player are used.
+
 - **Android 5.1 Google OAuth credential round-trip.** Select the legacy
   AndroidOpenSSL RSA provider on API 22 and earlier for Keystore-backed
   AES-key wrapping/unwrapping, verify encrypted credentials can be reloaded
