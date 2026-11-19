@@ -74,6 +74,20 @@ class YouTubeFloatingPlayerTest {
     }
 
     @Test
+    fun floatingPreviewHasNoHeaderAndCloseOverlaysTheVideoCorner() {
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val builder = activity.substringAfter("private fun buildFloatingPlayer(): FrameLayout {")
+            .substringBefore("private fun buildTitleRow(): View {")
+        assertFalse(builder.contains("val header ="))
+        assertFalse(builder.contains("val title ="))
+        assertTrue(builder.contains("floating.addView(\\n            floatingVideoSlot"))
+        assertTrue(builder.contains("FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END)"))
+        assertTrue(builder.contains("close.background = GradientDrawable().apply"))
+        assertTrue(builder.contains("youtubeContent.stop()"))
+        assertTrue(activity.contains("FrameLayout.LayoutParams(dp(296), dp(167), Gravity.TOP or Gravity.END)"))
+    }
+
+    @Test
     fun miniPlayerReusesOneSurfaceAndOneEngine() {
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
         assertTrue(content.contains("private val surface = SurfaceView(context)"))
