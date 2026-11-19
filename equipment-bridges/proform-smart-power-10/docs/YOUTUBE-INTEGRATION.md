@@ -99,8 +99,10 @@ small FitBaus-owned layer.
   subtitle state and decoder. Tap the floating video/header or the YouTube
   tab to return to the full player without a stream re-resolution. The X
   closes the overlay, stops playback and releases ExoPlayer. The overlay is
-  not displayed for browse-only, failed or completed videos. Normal game
-  cameras and clocks continue independently of the floating player.
+  not created for browse-only, failed or completed videos. A video that
+  finishes or encounters a playback error after floating remains visible
+  until the user taps X or returns to YouTube. Normal game cameras and
+  clocks continue independently of the floating player.
   This is an in-Activity UI overlay for Android 5.1.1, not Android's system
   PiP, and does not persist when FitBaus itself loses foreground focus.
 - **Leaving the Activity:** pausing or destroying FitBaus releases video
