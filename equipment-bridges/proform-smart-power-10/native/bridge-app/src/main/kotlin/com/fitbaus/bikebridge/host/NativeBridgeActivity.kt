@@ -44,6 +44,7 @@ import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
 import com.fitbaus.bikebridge.host.uvc.UvcProcess
 import com.fitbaus.bikebridge.host.youtube.BrightnessControl
 import com.fitbaus.bikebridge.host.youtube.YouTubeContent
+import com.fitbaus.bikebridge.host.youtube.YouTubeCredentialsImport
 import com.fitbaus.bikebridge.protocol.BridgeHttpJson
 import com.fitbaus.bikebridge.protocol.NativeTelemetrySnapshot
 
@@ -69,6 +70,8 @@ class NativeBridgeActivity : Activity() {
     private lateinit var dashboardContent: View
     private lateinit var arcadeContent: ArcadeContent
     private lateinit var youtubeContent: YouTubeContent
+    private var resumed = false
+    private var pendingYouTubeImport: String? = null
     private val modeTabs = HashMap<ArcadeMode, TextView>()
     private val handInput = HandPositionInput()
     private val bikeMotion = BikeMotionMonitor()
@@ -141,12 +144,14 @@ class NativeBridgeActivity : Activity() {
         UvcProcess.acquire(this, this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(buildUi())
+        queueYouTubeImport(intent)
         startBridgeService()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        queueYouTubeImport(intent)
         startBridgeService()
     }
 
@@ -158,12 +163,30 @@ class NativeBridgeActivity : Activity() {
         handler.removeCallbacks(refresh)
         handler.post(refresh)
         modeController.onHostResume()
+        resumed = true
+        processYouTubeImport()
     }
 
     override fun onPause() {
+        resumed = false
         modeController.onHostPause()
         handler.removeCallbacks(refresh)
         super.onPause()
+    }
+
+    private fun queueYouTubeImport(intent: Intent?) {
+        if (intent?.action != YouTubeCredentialsImport.ACTION) return
+        pendingYouTubeImport = intent.getStringExtra(YouTubeCredentialsImport.EXTRA_NONCE)
+        processYouTubeImport()
+    }
+
+    private fun processYouTubeImport() {
+        if (!resumed) return
+        val nonce = pendingYouTubeImport ?: return
+        pendingYouTubeImport = null
+        if (!YouTubeCredentialsImport.validNonce(nonce)) return
+        modeController.select(ArcadeMode.YouTube)
+        youtubeContent.importGoogleCredentials(nonce)
     }
 
     override fun onDestroy() {
