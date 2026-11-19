@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+@file:Suppress("DEPRECATION")
+
 package com.fitbaus.bikebridge.host.youtube
 
 import android.content.Context
