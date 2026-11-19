@@ -3,7 +3,6 @@
 package com.fitbaus.bikebridge.host.youtube
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class RelatedVideoSuggestionsTest {
