@@ -129,6 +129,47 @@ user agent), exactly as SkyTube does. Separate video and audio are merged with
 
 ## Google account setup and limits
 
+### Import Google OAuth credentials with ADB (Windows)
+
+1. Download the **TVs and Limited Input devices** OAuth client JSON from
+   Google Cloud Console. Keep its original filename.
+2. Create `secrets/youtube/` under the repository root and put **exactly
+   one** `.json` file there. Git ignores the entire `secrets/` directory.
+3. Install a Bike Bridge build containing the importer, enable ADB on
+   the console, and from the repository root run:
+
+   ```bat
+   push_youtube_auth.bat
+   ```
+
+   By default this targets `192.168.1.226:5555`, just like `deploy-bike.bat`.
+   Set `FITBAUS_BIKE_ADB` or supply a target address to override. For staging:
+
+   ```bat
+   push_youtube_auth.bat 192.168.1.200 staging
+   ```
+
+4. The script validates the Google `installed.client_id` and
+   `installed.client_secret`, checks the exact ADB target and installed app,
+   briefly pushes the JSON to the app-specific external files directory,
+   and invokes the app's one-time nonce-based import action.
+5. FitBaus immediately deletes the staging JSON, encrypts the secret with
+   its existing Android Keystore-backed credential store, and initiates
+   the same Google device-code login flow as manual entry. The script
+   reports success only when storage acknowledges the import, then cleans
+   up any remaining staging and status files even if import fails.
+6. Approve the code displayed on the bike with your phone. The client
+   JSON alone cannot authorize your YouTube account.
+
+The JSON and secret are never passed in shell arguments, logs, APK builds
+or Bridge HTTP APIs. This is not a new network service or Android permission.
+Android 5.1's app-specific **external** storage is not private against
+other apps with broad storage access; plaintext exists there briefly.
+Keep ADB private, import promptly, and delete your local JSON when no longer
+needed. Never commit or share the downloaded file.
+
+### Manual entry
+
 1. In Google Cloud Console (https://console.cloud.google.com/), select or
    create a project and enable **YouTube Data API v3**.
 2. Configure the OAuth consent screen and create an OAuth client with type

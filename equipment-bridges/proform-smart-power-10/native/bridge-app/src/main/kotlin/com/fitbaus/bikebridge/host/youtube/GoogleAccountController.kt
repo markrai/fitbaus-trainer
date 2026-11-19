@@ -72,21 +72,24 @@ internal class GoogleAccountController(
         runner.shutdown()
     }
 
-    fun signIn(client: GoogleClient) {
-        if (!active) return
+    fun signIn(client: GoogleClient, onStored: ((Boolean) -> Unit)? = null) {
+        if (!active) {
+            onStored?.invoke(false)
+            return
+        }
         if (!client.id.endsWith(".apps.googleusercontent.com") || client.secret.isBlank() ||
             client.id.length > 256 || client.secret.length > 256) {
             setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, "Enter a TV OAuth client ID and secret."))
+            onStored?.invoke(false)
             return
         }
         cancelPending()
         val current = generation
         setStatus(GoogleAccountStatus(GoogleAccountPhase.Connecting, "Requesting authorization from Google…"))
         job = runner.submit {
-            val result = runCatching {
-                store.saveClient(client)
-                api.requestCode(client)
-            }
+            val saved = runCatching { store.saveClient(client) }
+            main.post { onStored?.invoke(saved.isSuccess) }
+            val result = saved.mapCatching { api.requestCode(client) }
             main.post {
                 if (!valid(current)) return@post
                 result.fold(

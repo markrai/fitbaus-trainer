@@ -1,6 +1,6 @@
 {
   "name": "fitbaus-trainer",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "private": true,
   "description": "FitBaus Trainer — heart-rate workout trainer with BLE HR, optional bike bridge, and Capacitor Android/iOS shells",
   "license": "AGPL-3.0-only",

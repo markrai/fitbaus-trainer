@@ -10,12 +10,18 @@ support, is maintained on `lite/1.x`.
 
 ## [Unreleased]
 
-FitBaus Full 2.1.2 (`versionCode 20102`) is in development on `main`.
+FitBaus Full 2.1.3 (`versionCode 20103`) is in development on `main`.
 Full 2.1.1 was prepared but not published; its YouTube improvements remain
 included in this upcoming release.
 
 ### Added
 
+- **Local Google OAuth JSON import for Bike Bridge.** A root-level
+  `push_youtube_auth.bat` detects a Google TV client JSON file in a
+  Git-ignored `secrets/youtube/` directory, transfers it over ADB, and
+  triggers encrypted credential storage and the existing Google device-code
+  flow. Temporary files are cleaned up without exposing the secret in shell
+  arguments, APKs, logs or Bridge APIs.
 - **Google account connection and account-first discovery for Bike Bridge
   YouTube.** Authorize a Google account from a phone using Google's
   limited-input device OAuth flow. Browse your subscriptions, recent channel
