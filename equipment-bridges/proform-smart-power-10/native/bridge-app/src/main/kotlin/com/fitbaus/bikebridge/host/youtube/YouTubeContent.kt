@@ -57,6 +57,23 @@ internal class YouTubeContent(
         onMaxHeightChanged = { prefs.edit().putInt(KEY_MAX_HEIGHT, it).apply() },
     )
 
+    private val accountController = GoogleAccountController(
+        store = AndroidGoogleAccountStore(context),
+        api = GoogleYouTubeApi(GoogleUrlConnectionHttp()),
+        runner = ExecutorRunner("fitbaus-google-account"),
+        main = MainThread { block -> handler.post { block() } },
+    )
+    private var accountOpen = false
+    private val accountView = GoogleAccountView(
+        context, accountController,
+        onVideoSelected = { video -> session.open(video) },
+        onBrowseRequested = {
+            accountOpen = false
+            session.showTrending()
+            render(session.state)
+        },
+    )
+
     private val resultsScreen = LinearLayout(context)
     private val searchField = EditText(context)
     private val searchClear = label("×", 30f, PRIMARY)
@@ -110,6 +127,7 @@ internal class YouTubeContent(
         buildPlayer()
         host.addView(resultsScreen, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         host.addView(playerScreen, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        host.addView(accountView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         session.listener = { render(it) }
         render(session.state)
     }
@@ -117,7 +135,12 @@ internal class YouTubeContent(
     fun start() {
         refreshVolume()
         refreshBrightness()
-        session.start()
+        accountController.start()
+        val connected = accountController.hasAccount()
+        session.start(loadDefault = !connected)
+        accountOpen = connected
+        if (connected) accountView.open() else accountView.close()
+        render(session.state)
         adapter.notifyDataSetChanged()
     }
 
@@ -125,6 +148,8 @@ internal class YouTubeContent(
         hideKeyboard()
         clearPlaybackFeedback()
         stopTicker()
+        accountView.close()
+        accountController.stop()
         session.stop()
         loader.pause()
     }
@@ -132,6 +157,7 @@ internal class YouTubeContent(
     fun destroy() {
         clearPlaybackFeedback()
         stopTicker()
+        accountController.destroy()
         session.destroy()
         loader.shutdown()
     }
@@ -184,6 +210,14 @@ internal class YouTubeContent(
             session.showTrending()
         }
         bar.addView(trending, spaced(LayoutParams(dp(160), dp(TOUCH_DP))))
+        val myYouTube = button("MY YOUTUBE")
+        myYouTube.setOnClickListener {
+            hideKeyboard()
+            accountOpen = true
+            accountView.open()
+            render(session.state)
+        }
+        bar.addView(myYouTube, spaced(LayoutParams(dp(170), dp(TOUCH_DP))))
         resultsScreen.addView(bar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         listTitle.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
@@ -359,8 +393,9 @@ internal class YouTubeContent(
 
     private fun render(state: YouTubeState) {
         val player = state.screen == Screen.Player
-        resultsScreen.visibility = if (player) GONE else VISIBLE
+        resultsScreen.visibility = if (player || accountOpen) GONE else VISIBLE
         playerScreen.visibility = if (player) VISIBLE else GONE
+        accountView.visibility = if (!player && accountOpen && state.active) VISIBLE else GONE
         renderBrowse(state.browse)
         renderPlayback(state.playback)
         if (!player || !state.active || state.playback.phase !in CONTROLLABLE) clearPlaybackFeedback()

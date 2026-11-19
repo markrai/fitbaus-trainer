@@ -9,11 +9,12 @@ small FitBaus-owned layer.
 
 ## Behaviour
 
-- **Browse:** opening the tab loads YouTube's default kiosk (trending) as a
-  thumbnail grid with title, channel, views and duration (or LIVE). A search
-  field with an × clear control, SEARCH and TRENDING buttons sit above the grid. Further pages load
-  as the grid nears its end. Loading, empty, error (with RETRY) and
-  "couldn't load more, tap to retry" states are shown in place.
+- **Browse:** when not connected to Google, opening the tab loads trending
+  videos as a thumbnail grid with title, channel, views and duration (or LIVE).
+  Search, clear search, TRENDING and MY YOUTUBE controls are available above the
+  grid. When connected, the account browser opens by default instead of
+  trending. The regular search and trending browser remain available through
+  BROWSE. List pages are loaded on demand.
 - **Play:** tapping a card opens the player inside the tab: video surface,
   PLAY/PAUSE (or tap the video, showing a briefly centered play/pause icon), seek bar with buffered range, elapsed and
   total time, a screen-brightness slider (5-100 %, written to the same
@@ -36,6 +37,13 @@ small FitBaus-owned layer.
   caption rather than a video failure. Videos without usable captions play
   normally with CC disabled. This lightweight first version selects one
   language per video, without a language picker or translations.
+- **Account browser:** MY YOUTUBE lists subscribed channels and personal
+  playlists, with pagination. Choose a subscribed channel to see its recent
+  uploads, or a playlist to see its videos; choose a video to play it in the
+  same native player. The subscribed-channel list is not the personalized
+  YouTube Home feed; the official API does not expose Home recommendations.
+  The account UI uses compact text lists rather than the thumbnail browsing
+  grid.
 - **Leaving:** switching tabs, opening settings or pausing the activity
   releases the player and cancels outstanding work. Coming back shows the
   results list as it was; reopening the same video resumes where it stopped
@@ -56,6 +64,10 @@ host/youtube/
   YouTubeSession.kt            state machine: lists, playback, staleness, retries
   ThumbnailLoader.kt           bounded thumbnail fetch and cache
   YouTubeContent.kt            programmatic UI
+  GoogleYouTubeApi.kt           Google OAuth and YouTube Data API HTTP client
+  GoogleAccountStore.kt         Android Keystore-encrypted credential storage
+  GoogleAccountController.kt    authorization polling and account requests
+  GoogleAccountView.kt          native account browser and login controls
 java/.../youtube/media/YoutubeHttpDataSource.java                                [copied, GPL-3.0 + Apache-2.0]
 ```
 
@@ -113,6 +125,54 @@ user agent), exactly as SkyTube does. Separate video and audio are merged with
 | List or page failure | message with RETRY; paging stops until the user taps retry |
 | HTTP 429 or "confirm you're not a bot" | rate-limit message; nothing retries automatically |
 | Only qualities above the selected maximum | quality error naming the lowest available height; no automatic upgrade |
+
+
+## Google account setup and limits
+
+1. In Google Cloud Console (https://console.cloud.google.com/), select or
+   create a project and enable **YouTube Data API v3**.
+2. Configure the OAuth consent screen and create an OAuth client with type
+   **TVs and Limited Input devices**. If the consent screen is in Testing,
+   add the intended Google account as a test user. Google may expire Testing
+   refresh tokens after seven days.
+3. On the console, open **YouTube → MY YOUTUBE → CONNECT GOOGLE**. Enter the
+   TV OAuth client ID and its client secret. Do not commit these credentials
+   to the repository or add them to CI logs.
+4. FitBaus displays Google's device-verification URL and user code. Open that
+   URL on a phone already signed in to Google, enter the displayed code, and
+   consent to **YouTube read-only access**.
+5. Once authorized, open Subscriptions or Playlists. The selected video is
+   resolved and played using FitBaus's existing NewPipe/ExoPlayer player.
+   Sign out using the account browser's **SIGN OUT** control.
+
+The Google credentials are configured per bike. The TV client credentials are
+not privileged server secrets and cannot be kept truly secret in a distributed
+app; FitBaus nevertheless keeps them out of source control and encrypts the
+locally stored client secret and refresh token using an Android Keystore-backed
+AES-GCM key. Access tokens are kept only in memory. Neither OAuth tokens nor
+Google passwords are passed to NewPipe, to the Bridge HTTP server, or to the
+Trainer. App backup is disabled in the Bridge manifest.
+
+Google grants only the requested youtube.readonly scope. The official
+YouTube Data API provides the authorized user's subscriptions, playlists, and
+playlist items, but not the personalized Home recommendation feed, Watch Later,
+or Watch History. Videos unavailable to unauthenticated NewPipe playback will
+still be unavailable in the FitBaus player. Account data is fetched on demand
+with paginated requests (up to 50 items per page), not a background bulk-sync.
+
+The account worker, token polling and HTTPS calls are independent of the
+Bridge's USB/resistance/control workers. No new Android permissions or network
+listeners are introduced. Network responses are capped at 512 KiB, connections
+have fixed timeouts and redirects are disabled; Google API tokens are sent only
+in bearer headers to fixed Google API endpoints. Leaving the YouTube tab cancels
+authorization polling and UI request delivery. Signing out removes the saved
+refresh token locally before attempting server-side revocation; a failed
+revocation can still be completed through Google Account access settings.
+
+Before any production release, physically qualify the Google code flow,
+token refresh/revocation, expired authorization, app/process restart,
+subscriptions with many pages, playlist videos, console memory, and continuous
+bike telemetry while watching video.
 
 ## Bike Bridge protection
 

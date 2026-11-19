@@ -15,6 +15,14 @@ The following changes have not yet been published.
 
 ### Added
 
+- **Google account connection for Bike Bridge YouTube.** Authorize a Google
+  account from a phone using Google's limited-input device OAuth flow,
+  then browse subscribed channels, recent channel uploads, and personal
+  playlists inside FitBaus. The existing player continues to handle playback.
+  Credentials and refresh tokens are protected by Android Keystore, and
+  disconnecting clears the local authorization and requests revocation.
+  Google's personalized Home recommendations are not available through the
+  official YouTube Data API.
 - **YouTube captions on the Bike Bridge.** Available subtitles appear over
   the video with a CC toggle. The player prefers English and human-authored
   captions when available and supports WebVTT, TTML, and SRT. Caption loading

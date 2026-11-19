@@ -125,11 +125,11 @@ internal class YouTubeSession(
     val playRequested: Boolean
         get() = wantPlaying
 
-    fun start() {
+    fun start(loadDefault: Boolean = true) {
         if (destroyed || state.active) return
         update(state.copy(active = true))
         val browse = state.browse
-        if (browse.items.isEmpty() && browse.status != ListStatus.Loading) loadList(browse.query)
+        if (loadDefault && browse.items.isEmpty() && browse.status != ListStatus.Loading) loadList(browse.query)
     }
 
     fun stop() {
