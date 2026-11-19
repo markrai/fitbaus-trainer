@@ -12,6 +12,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
@@ -31,6 +32,13 @@ internal class GoogleAccountView(
 
     private val title = text("", 20f)
     private val message = text("", 18f)
+    private val authorizationPanel = LinearLayout(context)
+    private val qrImage = ImageView(context)
+    private val qrHint = text("", 18f)
+    private val verificationAddress = text("", 18f)
+    private val verificationCode = text("", 30f)
+    private val qrFallback = text("", 15f)
+    private var renderedScanUrl: String? = null
     private val homeBack = button("‹")
     private val subs = button("SUBSCRIPTIONS")
     private val playlists = button("PLAYLISTS")
@@ -70,6 +78,7 @@ internal class GoogleAccountView(
         addView(bar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         message.setPadding(dp(12), dp(10), dp(12), dp(10))
         addView(message, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        buildAuthorizationPanel()
         list.adapter = adapter
         list.setBackgroundColor(Color.BLACK)
         list.dividerHeight = dp(1)
@@ -101,6 +110,7 @@ internal class GoogleAccountView(
 
     fun close() {
         visibility = GONE
+        clearQr()
     }
 
     fun reset() {
@@ -139,8 +149,8 @@ internal class GoogleAccountView(
             GoogleAccountPhase.SignedOut ->
                 "Connect your Google account to browse your subscribed channels and playlists. Your personalized YouTube Home feed is not available through Google's API."
             GoogleAccountPhase.Connecting -> status.message
-            GoogleAccountPhase.Authorizing -> "On your phone open " + status.verificationUrl +
-                "\nEnter code: " + status.userCode + "\nApprove YouTube read-only access."
+            GoogleAccountPhase.Authorizing ->
+                "Scan with your phone, then approve YouTube read-only access."
             GoogleAccountPhase.Error -> status.message
             GoogleAccountPhase.Connected -> when {
                 busy -> "Loading…"
@@ -154,7 +164,73 @@ internal class GoogleAccountView(
             }
         }
         message.text = statusText
+        renderAuthorization(status)
         title.text = selected?.title?.takeIf { section == Section.Channel || section == Section.Playlist } ?: ""
+    }
+
+    private fun buildAuthorizationPanel() {
+        authorizationPanel.orientation = HORIZONTAL
+        authorizationPanel.gravity = Gravity.CENTER_VERTICAL
+        authorizationPanel.setPadding(dp(18), dp(12), dp(18), dp(12))
+        authorizationPanel.visibility = GONE
+
+        qrImage.setBackgroundColor(Color.WHITE)
+        qrImage.scaleType = ImageView.ScaleType.FIT_CENTER
+        qrImage.contentDescription = "Scan to open Google device authorization on your phone"
+        authorizationPanel.addView(qrImage, LayoutParams(dp(224), dp(224)))
+
+        val instructions = LinearLayout(context).apply {
+            orientation = VERTICAL
+            setPadding(dp(24), 0, 0, 0)
+        }
+        qrHint.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        instructions.addView(qrHint, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        verificationAddress.setTextIsSelectable(true)
+        verificationAddress.setPadding(0, dp(10), 0, dp(6))
+        instructions.addView(verificationAddress, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        verificationCode.typeface = Typeface.MONOSPACE
+        verificationCode.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+        verificationCode.setTextIsSelectable(true)
+        verificationCode.setSingleLine(true)
+        instructions.addView(verificationCode, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        qrFallback.setPadding(0, dp(8), 0, 0)
+        instructions.addView(qrFallback, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        authorizationPanel.addView(instructions, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        addView(authorizationPanel, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    private fun renderAuthorization(status: GoogleAccountStatus) {
+        if (status.phase != GoogleAccountPhase.Authorizing) {
+            authorizationPanel.visibility = GONE
+            clearQr()
+            return
+        }
+        authorizationPanel.visibility = VISIBLE
+        verificationAddress.text = status.verificationUrl
+        verificationCode.text = status.userCode
+        val url = status.verificationScanUrl.ifEmpty { status.verificationUrl }
+        val direct = url != status.verificationUrl
+        qrHint.text = if (direct) "SCAN TO OPEN GOOGLE" else "SCAN, THEN ENTER CODE"
+        qrFallback.text = if (direct) {
+            "Google supplied a direct sign-in link. Confirm the code on your phone if requested."
+        } else {
+            "The QR opens Google's website. Enter the code above on your phone."
+        }
+        if (renderedScanUrl != url) {
+            qrImage.setImageDrawable(null)
+            renderedScanUrl = url
+            val qr = runCatching { GoogleDeviceQr.bitmap(url) }.getOrNull()
+            qrImage.visibility = if (qr == null) GONE else VISIBLE
+            if (qr != null) qrImage.setImageBitmap(qr)
+            if (qr == null) qrFallback.text = "QR unavailable. Open the URL above and enter the code manually."
+        }
+    }
+
+    private fun clearQr() {
+        qrImage.setImageDrawable(null)
+        renderedScanUrl = null
+        verificationCode.text = ""
+        verificationAddress.text = ""
     }
 
     private fun showSubscriptions() {

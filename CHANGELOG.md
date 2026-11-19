@@ -16,6 +16,13 @@ included in this upcoming release.
 
 ### Added
 
+- **Scan-to-authorize Google device sign-in.** MY YOUTUBE now shows an
+  offline-generated QR code alongside the Google verification URL and a
+  large, case-sensitive device code. Scan from a phone to open Google's
+  approval page; the user can still enter the code manually. When Google
+  supplies an optional complete verification URI, use it without modifying
+  it to support direct code handoff. No third-party QR service, additional
+  OAuth scope or device-code query parameter is introduced.
 - **Local Google OAuth JSON import for Bike Bridge.** A root-level
   `push_youtube_auth.bat` detects a Google TV client JSON file in a
   Git-ignored `secrets/youtube/` directory, transfers it over ADB, and

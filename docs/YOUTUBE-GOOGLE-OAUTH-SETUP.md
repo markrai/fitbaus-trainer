@@ -152,10 +152,19 @@ The root repository contains `push_youtube_auth.bat`, which calls
    transfers the JSON to a temporary app-specific directory, invokes
    the nonce-scoped importer, and removes temporary files. Successful
    import prints **“Credentials imported and encrypted on the bike.”**
-6. **Import is not authorization.** Look at the bike's **YouTube**
-   screen. Google presents a verification URL and user code. Open the
-   URL on your phone/PC, choose your YouTube account, enter the code,
-   and approve the requested **YouTube read-only** access.
+6. **Import is not authorization.** On **YouTube → MY YOUTUBE**, FitBaus
+   shows a QR code beside Google's exact verification URL and an enlarged,
+   case-sensitive user code. Scan the QR with your phone camera to open
+   Google's sign-in page. If Google requests a code, enter the one on the
+   bike exactly as shown, select the intended YouTube account and approve
+   **YouTube read-only** access. You can also type the URL on your phone/PC.
+
+   Google's documented device response usually includes **only** a URL and
+   separate code. A QR scan therefore opens the page but does **not**
+   automatically fill the code. If Google supplies an optional complete
+   verification URI, FitBaus uses that exact URI for the QR, potentially
+   removing the manual code step. FitBaus does not construct undocumented
+   query parameters or redirect through an external website.
 
 The script does not take the JSON contents or secret as command-line
 arguments. Nevertheless, the JSON exists briefly in Android 5.1's
@@ -168,8 +177,9 @@ original on your PC according to your credential management needs.
 
 If you prefer not to use ADB, open **YouTube → MY YOUTUBE → CONNECT
 GOOGLE**, and type/paste the **TV client ID** and **client secret** from
-Google Cloud. Select **Start**, then approve the Google device code using
-your phone or PC. This enters the same authorization flow.
+Google Cloud. Select **Start**, then scan the QR code or use the displayed
+Google URL and code on your phone or PC. The same handoff is available for
+manual entry and ADB-imported credentials.
 
 ## 5. Verify it works
 
@@ -213,6 +223,8 @@ your Google Account security settings.
 | “FitBaus could not read or save encrypted Google credentials” after a code appears | This is a **local** Android Keystore/credential round-trip error, not evidence that Google refused the code. Install an APK with the API-22 Keystore correction and run `push_youtube_auth.bat` again using the same TV OAuth JSON. Do not reset the bike or clear app data. |
 | “encrypted Google credentials at RSA key unwrapping” or another named stage | FitBaus now identifies which **local cryptographic stage** failed without revealing secrets. Check that the OAuth-enabled APK is updated and that the app's Android Keystore entry is accessible; record only the stage name for a bug report. Do not delete Keystore aliases or wipe app preferences. |
 | “unexpected response” or “encrypted Google credentials” | The failure is likely local response parsing or Android Keystore storage, respectively. Reinstall a build with the diagnostic fix and reproduce before changing Google Cloud settings. |
+| QR opens Google but the code is not filled in | Expected for Google's documented `verification_url` response. Enter the large, case-sensitive code displayed on the bike. Auto-fill works only if Google supplies a validated `verification_uri_complete` link. |
+| QR is unavailable or won't scan | Type Google's displayed URL manually, then enter the large code exactly as shown. QR generation is local to the bike and never requires an internet QR service. |
 | A code appears but login fails or expires | Approve it on the same Google account listed as a test user. Restart authorization to obtain a fresh code; an expired code cannot be reused |
 | Sign-in works, then expires after about seven days | External OAuth apps left in **Testing** generally issue refresh tokens that expire after seven days for YouTube scopes. Consider Google's production verification requirements before distributing to others |
 | Personal playlists are blank | Verify you've selected the correct Google/YouTube account or channel; Google only returns the authorized account's available lists |

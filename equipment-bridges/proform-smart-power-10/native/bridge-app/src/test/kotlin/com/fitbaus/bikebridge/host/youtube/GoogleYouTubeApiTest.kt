@@ -41,10 +41,32 @@ class GoogleYouTubeApiTest {
         val code = GoogleYouTubeApi(http).requestCode(client)
         assertEquals("ABCD-EFGH", code.userCode)
         assertEquals("internal-device-code", code.code)
+        assertEquals(null, code.verificationCompleteUrl)
         assertEquals(5, code.intervalSeconds)
         assertEquals("https://oauth2.googleapis.com/device/code", http.url)
         assertEquals(mapOf("client_id" to client.id, "scope" to GoogleYouTubeApi.YOUTUBE_READONLY), http.fields)
         assertFalse(http.fields.containsKey("client_secret"))
+    }
+
+    @Test
+    fun serverSuppliedCompleteUrlIsPreservedForQrHandoff() {
+        val http = Http()
+        val direct = "https://www.google.com/device?user_code=ABCD-EFGH"
+        http.nextPost = GoogleHttpResponse(200,
+            """{"device_code":"internal-device-code","user_code":"ABCD-EFGH","verification_url":"https://www.google.com/device","verification_uri_complete":"${direct}","expires_in":900,"interval":5}""")
+        val code = GoogleYouTubeApi(http).requestCode(client)
+        assertEquals(direct, code.verificationCompleteUrl)
+        assertEquals("https://www.google.com/device", code.verificationUrl)
+    }
+
+    @Test
+    fun untrustedServerCompleteUrlIsIgnoredWithoutBreakingManualAuthorization() {
+        val http = Http()
+        http.nextPost = GoogleHttpResponse(200,
+            """{"device_code":"x","user_code":"CODE","verification_url":"https://www.google.com/device","verification_uri_complete":"https://www.google.com.evil.invalid/device?code=CODE","expires_in":900,"interval":5}""")
+        val code = GoogleYouTubeApi(http).requestCode(client)
+        assertEquals(null, code.verificationCompleteUrl)
+        assertEquals("https://www.google.com/device", code.verificationUrl)
     }
 
     @Test
