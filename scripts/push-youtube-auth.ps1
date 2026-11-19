@@ -15,7 +15,14 @@ try {
     if ($files.Count -ne 1) {
         throw "Expected exactly one .json file in secrets\youtube; found $($files.Count)."
     }
-    $installed = (Get-Content -LiteralPath $files[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json).installed
+    if ($files[0].Length -gt 16384) {
+        throw "The OAuth JSON file exceeds the 16 KiB import limit."
+    }
+    try {
+        $installed = (Get-Content -LiteralPath $files[0].FullName -Raw -Encoding UTF8 | ConvertFrom-Json).installed
+    } catch {
+        throw "The OAuth file is not valid Google client JSON."
+    }
     if ($null -eq $installed -or
         $installed.client_id -notmatch '^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$' -or
         [string]::IsNullOrWhiteSpace($installed.client_secret) -or
