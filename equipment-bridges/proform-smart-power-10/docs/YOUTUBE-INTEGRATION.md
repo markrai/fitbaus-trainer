@@ -47,7 +47,10 @@ small FitBaus-owned layer.
   if only another language is available, it uses that instead. Supported
   formats are WebVTT, TTML and SRT. Captions start enabled when available,
   and the CC button enables/disables them without restarting video playback.
-  A small text overlay stays within the video frame, not the exercise HUD.
+  The label stays CC: a green outline marks captions enabled, while a muted
+  gray outline and label mark captions off. When captions are unavailable,
+  the button is disabled and grayed out; accessibility text announces its
+  state. A small text overlay stays within the video frame, not the exercise HUD.
   Caption files are capped at 2 MiB and loaded by ExoPlayer independently
   of audio/video; missing/expired caption URLs are treated as a missing
   caption rather than a video failure. Videos without usable captions play
