@@ -82,6 +82,29 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
         firstPage(service.getSearchExtractor(query))
     }
 
+    override fun related(seeds: List<VideoSummary>): FeedPage = guard {
+        val batches = ArrayList<List<VideoSummary>>()
+        var firstFailure: Throwable? = null
+        for (seed in RelatedVideoSuggestions.selectSeeds(seeds)) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException("Discovery cancelled")
+            try {
+                val extractor = service.getStreamExtractor(service.streamLHFactory.fromId(seed.id))
+                val info = StreamInfo.getInfo(extractor)
+                batches += info.relatedItems.orEmpty()
+                    .asSequence()
+                    .take(RelatedVideoSuggestions.MAX_ITEMS_PER_SEED)
+                    .mapNotNull { summarize(it) }
+                    .toList()
+            } catch (e: Throwable) {
+                if (Thread.currentThread().isInterrupted) throw e
+                if (firstFailure == null) firstFailure = e
+                batches += emptyList()
+            }
+        }
+        if (batches.all { it.isEmpty() }) firstFailure?.let { throw it }
+        FeedPage(RelatedVideoSuggestions.merge(seeds, batches), null)
+    }
+
     override fun more(cursor: FeedCursor): FeedPage = guard {
         val next = cursor as NewPipeCursor
         page(next.extractor, next.extractor.getPage(next.page), next.seen)
