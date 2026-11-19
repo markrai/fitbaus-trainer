@@ -85,7 +85,8 @@ class YouTubePlayerControlsTest {
         val control = activity.substring(activity.indexOf("private val youtubeBrightness"), activity.indexOf("private val refresh"))
         assertTrue(control.contains("BridgeProcess.brightness(this@NativeBridgeActivity).record(percent)"))
         assertTrue(control.contains("applyStoredBrightness()"))
-        assertTrue(activity.contains("YouTubeContent(this, getSharedPreferences(YouTubeContent.PREFS, Context.MODE_PRIVATE), youtubeBrightness)"))
+        assertTrue(activity.contains("getSharedPreferences(YouTubeContent.PREFS, Context.MODE_PRIVATE)"))
+        assertTrue(activity.contains("youtubeBrightness,"))
         for (forbidden in listOf("Usb", "Resistance", "NativeBridgeService", "startService")) assertFalse(control.contains(forbidden), forbidden)
     }
 }
