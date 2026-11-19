@@ -197,6 +197,12 @@ your Google Account security settings.
 | “The selected FitBaus app is not installed” | Install the OAuth-enabled APK; choose **production** for `com.fitbaus.bikebridge` or **staging** for `com.fitbaus.bikebridge.native` |
 | The output says `1 file pushed, 0 skipped` and then `ERROR` | ADB has **successfully transferred** the file. Older `push-youtube-auth.ps1` revisions treated normal ADB transfer progress on stderr as a PowerShell error. Update the helper to the version that checks ADB's **exit code** independently of its output, and retry; the Google client JSON itself does not need to be regenerated |
 | “No import acknowledgment” | Verify an OAuth-enabled Bridge APK is installed, the selected package matches, and the app can open on the bike. Retry after confirming connectivity |
+| The bike shows a code, then fails after 3–5 seconds | That aligns with the **first token poll**, not the normal code expiry. Google requires both `client_id` **and** `client_secret` when polling, whereas requesting the code requires only `client_id`. With a Bridge build containing OAuth diagnostics, inspect the on-bike failure message before changing credentials. |
+| `invalid_client (HTTP 401)` during token polling | Confirm that the downloaded JSON is from a **TVs and Limited Input devices** OAuth client and that `installed.client_id` and `installed.client_secret` are from the **same** Google Cloud OAuth client. Re-import that matching JSON if needed. Do not paste the secret into bug reports. |
+| `unsupported_grant_type (HTTP 400)` or `invalid_grant (HTTP 400)` | The token request or device code was rejected. Confirm that the installed Bike Bridge build supports the limited-input device flow; request a fresh device code if it has expired or was already used. |
+| A code appears and says “Google rejected token polling: ...” | Follow the **safe OAuth identifier and HTTP status** on the bike. Normal `authorization_pending (HTTP 428)` is not a failure and should keep the code visible. The `slow_down` response requests a longer delay, not a new code. |
+| “Network or TLS error during token polling” | Check the bike's **internet access, clock/date and TLS trust**, not the Trainer-to-Bike local HTTP connection. The bike connects directly to `https://oauth2.googleapis.com/token`. |
+| “unexpected response” or “encrypted Google credentials” | The failure is likely local response parsing or Android Keystore storage, respectively. Reinstall a build with the diagnostic fix and reproduce before changing Google Cloud settings. |
 | A code appears but login fails or expires | Approve it on the same Google account listed as a test user. Restart authorization to obtain a fresh code; an expired code cannot be reused |
 | Sign-in works, then expires after about seven days | External OAuth apps left in **Testing** generally issue refresh tokens that expire after seven days for YouTube scopes. Consider Google's production verification requirements before distributing to others |
 | Personal playlists are blank | Verify you've selected the correct Google/YouTube account or channel; Google only returns the authorized account's available lists |
@@ -207,6 +213,28 @@ post bearer tokens in issue reports, or expose the Bridge's ADB endpoint
 to the internet. For public distribution, follow Google's API Services
 and OAuth verification policies; a personal Testing setup is not public
 production approval.
+
+## Why the first poll can fail
+
+Google's device authorization flow first asks for a display code using only
+the OAuth **client ID**. Five seconds later (or after the server's specified
+polling interval), the bike makes a different request to exchange that code
+for tokens. This second request includes **both client ID and client secret**.
+
+Getting a visible code therefore confirms that the initial request succeeded;
+it does **not** prove that the client secret will be accepted by the token
+endpoint. Google's documented `invalid_client` response is HTTP 401, and
+can indicate a mismatched secret or incorrect OAuth client type.
+
+Before approval, Google normally responds with `authorization_pending`
+(HTTP 428) and the app must keep polling. The bike's local HTTP Bridge URL
+is unrelated: Google OAuth requests use direct **HTTPS** connections.
+
+The updated Bike Bridge shows only a fixed, safe OAuth error identifier and
+HTTP status, or a generic local error category. It deliberately does not show
+or log raw Google responses, `error_description`, secrets or tokens. If your
+installed APK predates this change, it may still say only "Google sign-in
+failed" even when the actual cause is known to Google.
 
 ## References
 

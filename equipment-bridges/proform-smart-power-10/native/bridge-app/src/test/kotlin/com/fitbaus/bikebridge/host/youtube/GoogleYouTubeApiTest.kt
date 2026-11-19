@@ -70,6 +70,59 @@ class GoogleYouTubeApiTest {
     }
 
     @Test
+    fun invalidClientOnFirstPollKeepsGoogleStatusAndSafeError() {
+        val http = Http()
+        http.nextPost = GoogleHttpResponse(401,
+            """{"error":"invalid_client","error_description":"client_secret=DO-NOT-PRINT"}""")
+        val error = assertThrows(GoogleOAuthHttpFailure::class.java) {
+            GoogleYouTubeApi(http).poll(client, "device-secret")
+        }
+        assertEquals(GoogleAuthStage.TokenPoll, error.stage)
+        assertEquals(401, error.httpStatus)
+        assertEquals("invalid_client", error.oauthError)
+        assertFalse(GoogleAuthDiagnostics.message(GoogleAuthStage.TokenPoll, error).contains("DO-NOT-PRINT"))
+    }
+
+    @Test
+    fun unsupportedGrantAndUnknownGoogleErrorStaySafelyClassified() {
+        val http = Http()
+        val api = GoogleYouTubeApi(http)
+        http.nextPost = GoogleHttpResponse(400, """{"error":"unsupported_grant_type"}""")
+        val unsupported = assertThrows(GoogleOAuthHttpFailure::class.java) {
+            api.poll(client, "device-secret")
+        }
+        assertEquals("unsupported_grant_type", unsupported.oauthError)
+        http.nextPost = GoogleHttpResponse(500,
+            """{"error":"client_secret_DO-NOT-PRINT","error_description":"device-secret"}""")
+        val unknown = assertThrows(GoogleOAuthHttpFailure::class.java) {
+            api.poll(client, "device-secret")
+        }
+        assertEquals("unrecognized_error", unknown.oauthError)
+        assertEquals(500, unknown.httpStatus)
+        assertFalse(GoogleAuthDiagnostics.message(GoogleAuthStage.TokenPoll, unknown).contains("device-secret"))
+    }
+
+    @Test
+    fun deviceCodeRequestClassifiesGoogleRejectionInsteadOfReauthorization() {
+        val http = Http()
+        http.nextPost = GoogleHttpResponse(401, """{"error":"invalid_client"}""")
+        val error = assertThrows(GoogleOAuthHttpFailure::class.java) {
+            GoogleYouTubeApi(http).requestCode(client)
+        }
+        assertEquals(GoogleAuthStage.DeviceCode, error.stage)
+        assertEquals("invalid_client", error.oauthError)
+    }
+
+    @Test
+    fun malformedGoogleSuccessIsDistinguishedFromNetworkFailure() {
+        val http = Http()
+        http.nextPost = GoogleHttpResponse(200, "this is not json")
+        assertThrows(GoogleResponseFormatFailure::class.java) {
+            GoogleYouTubeApi(http).poll(client, "device-secret")
+        }
+    }
+
+    @Test
     fun authorizationRequiresTheRequestedScopeAndBearerToken() {
         val http = Http()
         val api = GoogleYouTubeApi(http)
