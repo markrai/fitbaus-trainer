@@ -408,7 +408,13 @@ internal class YouTubeContent(
         controls.gravity = Gravity.CENTER_VERTICAL
         playButton.setOnClickListener { onPlaybackToggle() }
         controls.addView(playButton, LayoutParams(dp(140), dp(TOUCH_DP)))
-        captionsButton.contentDescription = "Toggle captions"
+        captionsButton.contentDescription = "Captions unavailable"
+        captionsButton.background = StateListDrawable().apply {
+            addState(intArrayOf(-android.R.attr.state_enabled), outline(DIVIDER, FIELD))
+            addState(intArrayOf(android.R.attr.state_activated), outline(CAPTIONS_ACTIVE, FIELD))
+            addState(intArrayOf(android.R.attr.state_pressed), outline(PRESSED, PRESSED))
+            addState(intArrayOf(), outline(MUTE, FIELD))
+        }
         captionsButton.setOnClickListener { session.toggleCaptions() }
         controls.addView(captionsButton, spaced(LayoutParams(dp(90), dp(TOUCH_DP))))
         positionText.setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
@@ -551,7 +557,13 @@ internal class YouTubeContent(
         )
         playButton.isEnabled = playback.phase in CONTROLLABLE
         captionsButton.isEnabled = playback.captionsAvailable && playback.phase in CONTROLLABLE
-        setText(captionsButton, if (playback.captionsEnabled) "CC ON" else "CC")
+        captionsButton.isActivated = captionsButton.isEnabled && playback.captionsEnabled
+        captionsButton.setTextColor(if (captionsButton.isActivated) PRIMARY else MUTE)
+        captionsButton.contentDescription = when {
+            !captionsButton.isEnabled -> "Captions unavailable"
+            captionsButton.isActivated -> "Captions on"
+            else -> "Captions off"
+        }
         val captionText = playback.captionText.takeIf {
             playback.captionsEnabled && playback.phase in CAPTION_PHASES && it.isNotEmpty()
         } ?: ""
@@ -781,6 +793,7 @@ internal class YouTubeContent(
         private val PRIMARY: Int = Color.WHITE
         private val LABEL: Int = Color.rgb(180, 180, 180)
         private val MUTE: Int = Color.rgb(140, 140, 140)
+        private val CAPTIONS_ACTIVE: Int = Color.rgb(70, 200, 110)
         private val DIVIDER: Int = Color.rgb(48, 48, 48)
         private val FIELD: Int = Color.rgb(20, 20, 20)
         private val PRESSED: Int = Color.rgb(64, 64, 64)
