@@ -10,7 +10,7 @@ support, is maintained on `lite/1.x`.
 
 ## [Unreleased]
 
-FitBaus Full 2.1.2 (`versionCode 20102`) is in development on `main`.
+FitBaus Full 2.1.3 (`versionCode 20103`) is in development on `main`.
 Full 2.1.1 was prepared but not published; its YouTube improvements remain
 included in this upcoming release.
 
