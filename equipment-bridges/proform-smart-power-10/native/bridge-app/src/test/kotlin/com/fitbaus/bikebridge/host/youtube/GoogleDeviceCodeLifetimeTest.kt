@@ -67,6 +67,9 @@ class GoogleDeviceCodeLifetimeTest {
         assertTrue(store.contains("override fun hasStoredClient(): Boolean"))
         assertTrue(view.contains("if (autoAuthorize) account.ensureAuthorizationOnOpen()"))
         assertTrue(view.contains("account.requestStoredAuthorization()"))
+        assertTrue(controller.contains("fun checkAuthorizationExpiry()"))
+        assertTrue(view.contains("override fun onWindowFocusChanged(hasWindowFocus: Boolean)"))
+        assertTrue(view.contains("if (hasWindowFocus) account.checkAuthorizationExpiry()"))
         assertTrue(view.contains("button(\"CHANGE CLIENT\")"))
         assertTrue(content.contains("accountView.open(autoAuthorize = false)"))
     }

@@ -57,6 +57,11 @@ internal class GoogleAccountController(
         requestStoredAuthorization()
     }
 
+    fun checkAuthorizationExpiry() {
+        if (!active || ticket == null) return
+        if (!GoogleDeviceCodeLifetime.isValid(deadlineMs, SystemClock.elapsedRealtime())) expireIfNeeded()
+    }
+
     fun requestStoredAuthorization() {
         if (!active || store.hasAccount() || !store.hasStoredClient()) return
         cancelPending()

@@ -116,6 +116,11 @@ internal class GoogleAccountView(
         renderStatus(account.status)
     }
 
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) account.checkAuthorizationExpiry()
+    }
+
     fun close() {
         visibility = GONE
         clearQr()

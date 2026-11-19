@@ -50,7 +50,8 @@ small FitBaus-owned layer.
   never reused. Google provides `expires_in` (sample 1800 seconds) and
   `interval` in each device response. FitBaus computes the code deadline
   using `SystemClock.elapsedRealtime()` from receipt, clears the visible
-  code/QR at expiry and stops polling. Users can choose GET NEW CODE without
+  code/QR at expiry and stops polling. A window-focus check also catches
+  codes that expired while Android delayed callbacks were suspended in sleep. Users can choose GET NEW CODE without
   resupplying the OAuth client. Google token refresh is unchanged.
   Consistent with RFC 8628, no device codes are requested at app startup
   or automatically regenerated on a background expiry timer. The existing

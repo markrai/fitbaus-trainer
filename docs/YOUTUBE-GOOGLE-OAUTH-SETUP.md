@@ -189,7 +189,9 @@ defines `expires_in` as the **actual number of seconds** for which both
 
 FitBaus uses Google's returned `expires_in` with an elapsed-time clock.
 When the deadline passes, the code and QR are hidden, polling stops, and
-the screen offers **GET NEW CODE**. Returning to **MY YOUTUBE** after a
+the screen offers **GET NEW CODE**. The same expiry is checked when the
+console regains focus after sleeping, since Android's delayed callbacks
+can pause in deep sleep. Returning to **MY YOUTUBE** after a
 later tab visit or app restart automatically requests a new code if the
 encrypted TV client is still stored and sign-in is incomplete. While
 an existing code is valid, reopening MY YOUTUBE **reuses it** rather than
