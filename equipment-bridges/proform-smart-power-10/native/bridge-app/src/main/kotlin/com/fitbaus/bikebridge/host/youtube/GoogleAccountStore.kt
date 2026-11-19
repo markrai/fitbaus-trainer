@@ -42,8 +42,8 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
     override fun saveClient(client: GoogleClient) {
         require(client.id.length in 10..256 && client.secret.length in 1..256)
         val encrypted = encrypt(client.secret)
-        prefs.edit().putString(KEY_CLIENT_ID, client.id).putString(KEY_CLIENT_SECRET, encrypted)
-            .remove(KEY_REFRESH).apply()
+        check(prefs.edit().putString(KEY_CLIENT_ID, client.id).putString(KEY_CLIENT_SECRET, encrypted)
+            .remove(KEY_REFRESH).commit())
     }
 
     override fun refreshToken(): String? =
@@ -51,11 +51,11 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
 
     override fun saveRefreshToken(token: String) {
         require(token.isNotBlank() && token.length <= 8192)
-        prefs.edit().putString(KEY_REFRESH, encrypt(token)).apply()
+        check(prefs.edit().putString(KEY_REFRESH, encrypt(token)).commit())
     }
 
     override fun clearRefreshToken() {
-        prefs.edit().remove(KEY_REFRESH).apply()
+        check(prefs.edit().remove(KEY_REFRESH).commit())
     }
 
     private fun aesKey(): SecretKeySpec {
@@ -72,7 +72,7 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
         val rsa = Cipher.getInstance(RSA_TRANSFORM)
         rsa.init(Cipher.ENCRYPT_MODE, publicKey())
         val encrypted = rsa.doFinal(generated)
-        prefs.edit().putString(KEY_WRAPPED_AES, Base64.encodeToString(encrypted, Base64.NO_WRAP)).commit()
+        check(prefs.edit().putString(KEY_WRAPPED_AES, Base64.encodeToString(encrypted, Base64.NO_WRAP)).commit())
         return SecretKeySpec(generated, "AES")
     }
 

@@ -17,7 +17,7 @@ internal data class GoogleAccountStatus(
 
 internal object GooglePolling {
     fun interval(seconds: Int, slowDown: Boolean): Int =
-        (seconds.coerceIn(5, 60) + if (slowDown) 5 else 0).coerceAtMost(120)
+        (seconds.coerceIn(5, 120) + if (slowDown) 5 else 0).coerceAtMost(120)
 }
 
 internal class GoogleAccountController(
@@ -116,14 +116,16 @@ internal class GoogleAccountController(
         cancelPending()
         feedGeneration += 1
         feedJob?.cancel()
+        val old = runCatching { store.refreshToken() }.getOrNull()
+        val cleared = runCatching { store.clearRefreshToken() }.isSuccess
+        if (!cleared) {
+            setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, "Unable to remove saved Google authorization."))
+            return
+        }
         accessToken = null
         accessExpiresAt = 0
         setStatus(GoogleAccountStatus(GoogleAccountPhase.SignedOut))
-        runner.submit {
-            val old = runCatching { store.refreshToken() }.getOrNull()
-            store.clearRefreshToken()
-            if (!old.isNullOrBlank()) runCatching { api.revoke(old) }
-        }
+        if (!old.isNullOrBlank()) runner.submit { runCatching { api.revoke(old) } }
     }
 
     fun subscriptions(page: String? = null, done: (Result<GooglePage<GoogleEntry>>) -> Unit) {
