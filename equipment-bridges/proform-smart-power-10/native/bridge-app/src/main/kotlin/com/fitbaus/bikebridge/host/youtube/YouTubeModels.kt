@@ -16,7 +16,7 @@ internal interface FeedCursor
 
 internal class FeedPage(val items: List<VideoSummary>, val cursor: FeedCursor?)
 
-internal enum class FailureKind { Network, RateLimited, Unavailable, Restricted, Unsupported, Extraction }
+internal enum class FailureKind { Network, RateLimited, Unavailable, Restricted, Unsupported, Extraction, Authentication }
 
 internal class YouTubeException(val kind: FailureKind, message: String, cause: Throwable? = null) : Exception(message, cause)
 
@@ -116,5 +116,6 @@ internal object YouTubeFormat {
         FailureKind.Restricted -> "This video is restricted and cannot be played here."
         FailureKind.Unsupported -> "This video has no format this console can play."
         FailureKind.Extraction -> "YouTube returned something unexpected. Try again, or choose another video."
+        FailureKind.Authentication -> "Google authorization is unavailable. Open MY YOUTUBE and sign in again."
     }
 }

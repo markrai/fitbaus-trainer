@@ -9,12 +9,14 @@ small FitBaus-owned layer.
 
 ## Behaviour
 
-- **Browse:** when not connected to Google, opening the tab loads trending
-  videos as a thumbnail grid with title, channel, views and duration (or LIVE).
-  Search, clear search, TRENDING and MY YOUTUBE controls are available above the
-  grid. When connected, the account browser opens by default instead of
-  trending. The regular search and trending browser remain available through
-  BROWSE. List pages are loaded on demand.
+- **Browse:** when signed out, opening YouTube loads Trending videos into
+  the existing thumbnail grid. When signed in, the home grid instead shows
+  **FROM YOUR CHANNELS**, a composite of recent videos from channels in the
+  user's YouTube subscriptions. **MY FEED** refreshes this view; scrolling
+  loads more channel batches. Search, search clearing, and MY YOUTUBE remain
+  available. Explicit Search uses the global YouTube catalog, not a
+  subscription filter. The separate account browser still lists channels
+  and playlists. This is not Google's proprietary Home recommendations.
 - **Play:** tapping a card opens the player inside the tab: video surface,
   PLAY/PAUSE (or tap the video, showing a briefly centered play/pause icon), seek bar with buffered range, elapsed and
   total time, a screen-brightness slider (5-100 %, written to the same
@@ -68,6 +70,7 @@ host/youtube/
   GoogleAccountStore.kt         Android Keystore-encrypted credential storage
   GoogleAccountController.kt    authorization polling and account requests
   GoogleAccountView.kt          native account browser and login controls
+  GoogleSubscriptionFeedCatalog.kt  bounded subscribed-channel home grid
 java/.../youtube/media/YoutubeHttpDataSource.java                                [copied, GPL-3.0 + Apache-2.0]
 ```
 
@@ -126,6 +129,35 @@ user agent), exactly as SkyTube does. Separate video and audio are merged with
 | HTTP 429 or "confirm you're not a bot" | rate-limit message; nothing retries automatically |
 | Only qualities above the selected maximum | quality error naming the lowest available height; no automatic upgrade |
 
+
+## Composite subscribed-channel home grid
+
+When Google authentication is present, the console requests the user's
+subscriptions using `subscriptions.list(mine=true, order=unread)`. For each
+visible batch of at most eight channels, `channels.list` resolves the
+channel uploads playlists in one request, followed by at most one
+`playlistItems.list` request per channel (up to four recent videos).
+The result is deduplicated and sorted newest-first **within the sampled
+batch**. Further batches are fetched only through the existing grid's
+pagination behavior; the complete channel library is not fetched at
+startup. The API may return fewer uploads for channels with private or
+unavailable content.
+
+This uses at most approximately **10 units** for the first feed batch
+(one subscription page, one channel lookup, and up to eight uploads
+playlist requests), and about nine more for each further eight-channel
+batch. Each API read costs one unit under Google's published quota
+schedule. It does not use the costly `search.list` API to discover
+channel uploads. Browsing and playback remain in the existing YouTube
+worker, never on the UI thread or equipment-control worker. Cached access
+tokens remain memory-only; switching Google accounts invalidates them
+before subsequent feed requests.
+
+The composite does **not** claim to reproduce Google's exact Home
+recommendations, global chronological ordering across all subscriptions,
+or user's watch history. Unauthenticated users continue to receive
+NewPipe Trending. An authenticated API failure is not silently replaced
+with Trending.
 
 ## Google account setup and limits
 

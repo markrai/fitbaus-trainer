@@ -55,7 +55,9 @@ See the [ProForm bridge setup and safety notes](equipment-bridges/proform-smart-
 ### YouTube account on the bike
 
 FitBaus Full Bike Bridge can use Google's TV-device sign-in to browse your
-own YouTube subscriptions and playlists, instead of relying solely on Trending.
+own YouTube subscriptions and playlists. Signed-in users get a thumbnail
+feed that combines recent uploads from their subscribed channels, with more
+channels fetched as they scroll. Search still covers all of YouTube.
 **You provide your own Google Cloud OAuth client**; no Google password is
 entered on the console. See the [step-by-step YouTube Google OAuth setup guide](docs/YOUTUBE-GOOGLE-OAUTH-SETUP.md)
 for current Cloud Console navigation, Windows ADB import, manual entry and

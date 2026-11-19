@@ -49,6 +49,7 @@ internal enum class PlaybackPhase { Idle, Resolving, Buffering, Playing, Paused,
 
 internal data class BrowseState(
     val query: String? = null,
+    val feedTitle: String = "Trending",
     val items: List<VideoSummary> = emptyList(),
     val status: ListStatus = ListStatus.Idle,
     val message: String? = null,
@@ -57,7 +58,7 @@ internal data class BrowseState(
     val moreFailed: Boolean = false,
 ) {
     val title: String
-        get() = if (query == null) "Trending" else "Results for “$query”"
+        get() = if (query == null) feedTitle else "Results for “$query”"
 }
 
 internal data class PlaybackState(
@@ -91,6 +92,7 @@ internal class YouTubeSession(
     private val preparer: MediaPreparer,
     initialMaxHeight: Int = YouTubeStreamSelector.DEFAULT_MAX_HEIGHT,
     private val onMaxHeightChanged: (Int) -> Unit = {},
+    private val feedTitle: () -> String = { "Trending" },
 ) {
     var listener: ((YouTubeState) -> Unit)? = null
 
@@ -170,7 +172,7 @@ internal class YouTubeSession(
         if (!ready()) return
         val browse = state.browse
         val next = cursor ?: return
-        if (browse.status != ListStatus.Ready || browse.loadingMore) return
+        if (browse.status != ListStatus.Ready && browse.status != ListStatus.Empty || browse.loadingMore) return
         if (browse.moreFailed && !userInitiated) return
         val generation = listGeneration
         update(state.copy(browse = browse.copy(loadingMore = true, moreFailed = false)))
@@ -189,6 +191,7 @@ internal class YouTubeSession(
         }
         val browse = state.browse
         when {
+            browse.status == ListStatus.Empty && browse.canLoadMore -> loadMore(true)
             browse.status == ListStatus.Error || browse.status == ListStatus.Empty || browse.status == ListStatus.Idle -> loadList(browse.query)
             browse.moreFailed -> loadMore(true)
         }
@@ -300,7 +303,11 @@ internal class YouTubeSession(
         listTask?.cancel()
         cursor = null
         val generation = listGeneration
-        update(state.copy(browse = BrowseState(query = query, status = ListStatus.Loading)))
+        update(state.copy(browse = BrowseState(
+            query = query,
+            feedTitle = if (query == null) feedTitle() else "Trending",
+            status = ListStatus.Loading,
+        )))
         listTask = runner.submit {
             val result = attempt { if (query == null) catalog().discover() else catalog().search(query) }
             main.post { if (generation == listGeneration && !destroyed) applyFirstPage(result) }
@@ -317,7 +324,12 @@ internal class YouTubeSession(
                 browse.copy(
                     items = items,
                     status = if (items.isEmpty()) ListStatus.Empty else ListStatus.Ready,
-                    message = if (items.isEmpty()) (if (browse.query == null) "Nothing to show right now." else "No videos found.") else null,
+                    message = if (items.isEmpty()) when {
+                        browse.query != null -> "No videos found."
+                        browse.feedTitle == "From your channels" && cursor != null -> "No videos in this group. Tap RETRY to check more channels."
+                        browse.feedTitle == "From your channels" -> "No recent videos found in your subscribed channels."
+                        else -> "Nothing to show right now."
+                    } else null,
                     canLoadMore = cursor != null,
                 )
             }

@@ -35,6 +35,8 @@ internal sealed class GooglePollResult {
 
 internal data class GoogleEntry(val id: String, val title: String)
 
+internal data class GoogleDatedVideo(val video: VideoSummary, val publishedAt: String)
+
 internal data class GooglePage<T>(val items: List<T>, val next: String?)
 
 internal data class GoogleHttpResponse(val status: Int, val body: String)
@@ -160,8 +162,9 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
         http.post("https://oauth2.googleapis.com/revoke", mapOf("token" to token))
     }
 
-    fun subscriptions(token: String, page: String? = null): GooglePage<GoogleEntry> {
-        val json = list(token, "subscriptions", mapOf("part" to "snippet", "mine" to "true", "order" to "alphabetical"), page)
+    fun subscriptions(token: String, page: String? = null, order: String = "alphabetical"): GooglePage<GoogleEntry> {
+        require(order == "alphabetical" || order == "unread")
+        val json = list(token, "subscriptions", mapOf("part" to "snippet", "mine" to "true", "order" to order), page)
         val rows = json.getJSONArray("items")
         val entries = (0 until rows.length()).mapNotNull { index ->
             val snippet = rows.optJSONObject(index)?.optJSONObject("snippet") ?: return@mapNotNull null
@@ -194,22 +197,53 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
         return playlistItems(token, uploadsId, page)
     }
 
+    fun uploadPlaylists(token: String, channelIds: List<String>): Map<String, String> {
+        require(channelIds.size in 1..50 && channelIds.all { validId(it) })
+        val json = list(token, "channels", mapOf("part" to "contentDetails", "id" to channelIds.joinToString(",")), null)
+        val items = json.getJSONArray("items")
+        val requested = channelIds.toHashSet()
+        val result = LinkedHashMap<String, String>()
+        for (index in 0 until items.length()) {
+            val item = items.optJSONObject(index) ?: continue
+            val channelId = item.optString("id")
+            val uploads = item.optJSONObject("contentDetails")?.optJSONObject("relatedPlaylists")
+                ?.optString("uploads") ?: continue
+            if (channelId in requested && validId(uploads)) result[channelId] = uploads
+        }
+        return result
+    }
+
+    fun recentUploads(token: String, uploadsPlaylistId: String, maxResults: Int = 4): List<GoogleDatedVideo> {
+        require(validId(uploadsPlaylistId))
+        val json = list(
+            token, "playlistItems",
+            mapOf("part" to "snippet,contentDetails", "playlistId" to uploadsPlaylistId),
+            null, maxResults.coerceIn(1, 8),
+        )
+        return parseVideos(json)
+    }
+
     fun playlistItems(token: String, playlistId: String, page: String? = null): GooglePage<VideoSummary> {
         require(validId(playlistId))
         val json = list(
             token, "playlistItems",
             mapOf("part" to "snippet,contentDetails", "playlistId" to playlistId), page,
         )
+        return GooglePage(parseVideos(json).map { it.video }, nextPage(json))
+    }
+
+    private fun parseVideos(json: JSONObject): List<GoogleDatedVideo> {
         val items = json.getJSONArray("items")
-        val videos = (0 until items.length()).mapNotNull { index ->
+        return (0 until items.length()).mapNotNull { index ->
             val item = items.optJSONObject(index) ?: return@mapNotNull null
             val snippet = item.optJSONObject("snippet") ?: return@mapNotNull null
-            val id = item.optJSONObject("contentDetails")?.optString("videoId")
+            val details = item.optJSONObject("contentDetails")
+            val id = details?.optString("videoId")
                 ?: snippet.optJSONObject("resourceId")?.optString("videoId")
                 ?: return@mapNotNull null
             if (!YouTubeIds.isValid(id) || snippet.optString("title") == "Deleted video" ||
                 snippet.optString("title") == "Private video") return@mapNotNull null
-            VideoSummary(
+            val video = VideoSummary(
                 id = id,
                 title = snippet.optString("title", id).take(200),
                 channel = snippet.optString("videoOwnerChannelTitle", snippet.optString("channelTitle")).take(120),
@@ -218,13 +252,20 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
                 thumbnailUrl = YouTubeIds.thumbnail(id),
                 live = false,
             )
+            GoogleDatedVideo(video, details?.optString("videoPublishedAt")?.take(40)
+                ?.takeIf { it.isNotBlank() } ?: snippet.optString("publishedAt").take(40))
         }
-        return GooglePage(videos, nextPage(json))
     }
 
-    private fun list(token: String, resource: String, params: Map<String, String>, page: String?): JSONObject {
+    private fun list(
+        token: String,
+        resource: String,
+        params: Map<String, String>,
+        page: String?,
+        maxResults: Int = 50,
+    ): JSONObject {
         val args = LinkedHashMap(params)
-        args["maxResults"] = "50"
+        args["maxResults"] = maxResults.coerceIn(1, 50).toString()
         if (page != null) args["pageToken"] = page.take(256)
         val query = args.entries.joinToString("&") {
             URLEncoder.encode(it.key, "UTF-8") + "=" + URLEncoder.encode(it.value, "UTF-8")
