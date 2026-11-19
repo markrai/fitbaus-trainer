@@ -46,6 +46,13 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Android 5.1 Google OAuth credential round-trip.** Select the legacy
+  AndroidOpenSSL RSA provider on API 22 and earlier for Keystore-backed
+  AES-key wrapping/unwrapping, verify encrypted credentials can be reloaded
+  before displaying a Google device code, and use an explicit AES-GCM nonce.
+  Preserve existing Keystore aliases and support old encrypted payloads.
+  Fail safely with a specific crypto stage when verification fails, without
+  clearing pairing or other Bridge settings.
 - **Google device authorization diagnostics.** If the first OAuth token poll
   fails, the bike now distinguishes Google's HTTP status and known OAuth
   error (for example `invalid_client (HTTP 401)`) from malformed responses,

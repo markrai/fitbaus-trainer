@@ -21,7 +21,21 @@ internal class GoogleOAuthHttpFailure(
     val oauthError: String = GoogleAuthDiagnostics.allowedCode(rawCode)
 }
 
-internal class GoogleCredentialStorageFailure : IOException()
+internal enum class GoogleCredentialFailurePoint(val label: String) {
+    Missing("stored credentials missing"),
+    Keystore("Android Keystore key access"),
+    RsaUnwrap("RSA key unwrapping"),
+    RsaWrap("RSA key wrapping"),
+    AesDecrypt("AES-GCM decryption"),
+    AesEncrypt("AES-GCM encryption"),
+    Persistence("credential persistence"),
+    Verification("credential round-trip verification"),
+    Unknown("credential retrieval"),
+}
+
+internal class GoogleCredentialStorageFailure(
+    val point: GoogleCredentialFailurePoint = GoogleCredentialFailurePoint.Unknown,
+) : IOException()
 
 internal class GoogleResponseFormatFailure : IOException()
 
@@ -50,7 +64,7 @@ internal object GoogleAuthDiagnostics {
             "Google rejected ${stage.label}: ${failure.oauthError} (HTTP $status). ${advice(failure.oauthError)}"
         }
         is GoogleCredentialStorageFailure ->
-            "FitBaus could not read or save encrypted Google credentials on this bike. Check device storage and Android Keystore."
+            "FitBaus could not read or save encrypted Google credentials at ${failure.point.label}. Re-import the same TV OAuth JSON without clearing app data."
         is GoogleResponseFormatFailure, is JSONException ->
             "Google returned an unexpected response during ${stage.label}. The app could not parse it."
         is GoogleReauthorizationRequired ->

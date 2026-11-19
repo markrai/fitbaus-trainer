@@ -103,11 +103,12 @@ internal class GoogleAccountController(
                         handler.postDelayed(pollRunnable, interval * 1000L)
                     },
                     onFailure = { failure ->
-                        val detail = if (saved.isFailure) {
-                            GoogleAuthDiagnostics.message(GoogleAuthStage.DeviceCode, GoogleCredentialStorageFailure())
+                        val diagnostic = if (saved.isFailure) {
+                            (failure as? GoogleCredentialStorageFailure) ?: GoogleCredentialStorageFailure()
                         } else {
-                            GoogleAuthDiagnostics.message(GoogleAuthStage.DeviceCode, failure)
+                            failure
                         }
+                        val detail = GoogleAuthDiagnostics.message(GoogleAuthStage.DeviceCode, diagnostic)
                         setStatus(GoogleAccountStatus(GoogleAccountPhase.Error, detail))
                     },
                 )
@@ -205,7 +206,9 @@ internal class GoogleAccountController(
         job = runner.submit {
             val result = runCatching {
                 val client = try {
-                    store.client() ?: throw GoogleCredentialStorageFailure()
+                    store.client() ?: throw GoogleCredentialStorageFailure(GoogleCredentialFailurePoint.Missing)
+                } catch (failure: GoogleCredentialStorageFailure) {
+                    throw failure
                 } catch (_: Exception) {
                     throw GoogleCredentialStorageFailure()
                 }
@@ -215,6 +218,8 @@ internal class GoogleAccountController(
                         ?: throw GoogleResponseFormatFailure()
                     try {
                         store.saveRefreshToken(refresh)
+                    } catch (failure: GoogleCredentialStorageFailure) {
+                        throw failure
                     } catch (_: Exception) {
                         throw GoogleCredentialStorageFailure()
                     }

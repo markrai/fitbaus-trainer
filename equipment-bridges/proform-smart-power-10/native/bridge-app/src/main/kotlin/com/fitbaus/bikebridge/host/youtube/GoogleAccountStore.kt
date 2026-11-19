@@ -6,6 +6,7 @@ package com.fitbaus.bikebridge.host.youtube
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import android.security.KeyPairGeneratorSpec
 import android.util.Base64
 import java.math.BigInteger
@@ -42,8 +43,14 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
     override fun saveClient(client: GoogleClient) {
         require(client.id.length in 10..256 && client.secret.length in 1..256)
         val encrypted = encrypt(client.secret)
-        check(prefs.edit().putString(KEY_CLIENT_ID, client.id).putString(KEY_CLIENT_SECRET, encrypted)
-            .remove(KEY_REFRESH).commit())
+        guarded(GoogleCredentialFailurePoint.Verification) {
+            check(decrypt(encrypted) == client.secret)
+        }
+        persist(prefs.edit().putString(KEY_CLIENT_ID, client.id)
+            .putString(KEY_CLIENT_SECRET, encrypted).remove(KEY_REFRESH))
+        guarded(GoogleCredentialFailurePoint.Verification) {
+            check(client() == client)
+        }
     }
 
     override fun refreshToken(): String? =
@@ -51,45 +58,73 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
 
     override fun saveRefreshToken(token: String) {
         require(token.isNotBlank() && token.length <= 8192)
-        check(prefs.edit().putString(KEY_REFRESH, encrypt(token)).commit())
+        val encrypted = encrypt(token)
+        guarded(GoogleCredentialFailurePoint.Verification) {
+            check(decrypt(encrypted) == token)
+        }
+        persist(prefs.edit().putString(KEY_REFRESH, encrypted))
+        guarded(GoogleCredentialFailurePoint.Verification) {
+            check(refreshToken() == token)
+        }
     }
 
     override fun clearRefreshToken() {
-        check(prefs.edit().remove(KEY_REFRESH).commit())
+        persist(prefs.edit().remove(KEY_REFRESH))
+    }
+
+    private fun persist(editor: SharedPreferences.Editor) {
+        guarded(GoogleCredentialFailurePoint.Persistence) {
+            check(editor.commit())
+        }
     }
 
     private fun aesKey(): SecretKeySpec {
         val wrapped = prefs.getString(KEY_WRAPPED_AES, null)
         if (wrapped != null) {
-            val cipher = Cipher.getInstance(RSA_TRANSFORM)
-            cipher.init(Cipher.DECRYPT_MODE, privateKey())
-            val bytes = cipher.doFinal(Base64.decode(wrapped, Base64.NO_WRAP))
-            require(bytes.size == 16)
+            val privateKey = guarded(GoogleCredentialFailurePoint.Keystore) { privateKey() }
+            val bytes = guarded(GoogleCredentialFailurePoint.RsaUnwrap) {
+                val cipher = rsaCipher()
+                cipher.init(Cipher.DECRYPT_MODE, privateKey)
+                cipher.doFinal(Base64.decode(wrapped, Base64.NO_WRAP))
+            }
+            if (bytes.size != 16) throw GoogleCredentialStorageFailure(GoogleCredentialFailurePoint.RsaUnwrap)
             return SecretKeySpec(bytes, "AES")
         }
         val generated = ByteArray(16)
         SecureRandom().nextBytes(generated)
-        val rsa = Cipher.getInstance(RSA_TRANSFORM)
-        rsa.init(Cipher.ENCRYPT_MODE, publicKey())
-        val encrypted = rsa.doFinal(generated)
-        check(prefs.edit().putString(KEY_WRAPPED_AES, Base64.encodeToString(encrypted, Base64.NO_WRAP)).commit())
+        val publicKey = guarded(GoogleCredentialFailurePoint.Keystore) { publicKey() }
+        val encrypted = guarded(GoogleCredentialFailurePoint.RsaWrap) {
+            val rsa = rsaCipher()
+            rsa.init(Cipher.ENCRYPT_MODE, publicKey)
+            rsa.doFinal(generated)
+        }
+        persist(prefs.edit().putString(KEY_WRAPPED_AES, Base64.encodeToString(encrypted, Base64.NO_WRAP)))
         return SecretKeySpec(generated, "AES")
     }
 
     private fun encrypt(clear: String): String {
-        val cipher = Cipher.getInstance(AES_TRANSFORM)
-        cipher.init(Cipher.ENCRYPT_MODE, aesKey())
-        val ciphertext = cipher.doFinal(clear.toByteArray(Charsets.UTF_8))
-        return Base64.encodeToString(cipher.iv + ciphertext, Base64.NO_WRAP)
+        val key = aesKey()
+        val bytes = guarded(GoogleCredentialFailurePoint.AesEncrypt) {
+            GoogleCredentialCodec.encrypt(clear, key)
+        }
+        return GoogleCredentialCodec.FORMAT_PREFIX + Base64.encodeToString(bytes, Base64.NO_WRAP)
     }
 
     private fun decrypt(encoded: String): String {
-        val bytes = Base64.decode(encoded, Base64.NO_WRAP)
-        require(bytes.size >= 12 + 16)
-        val cipher = Cipher.getInstance(AES_TRANSFORM)
-        cipher.init(Cipher.DECRYPT_MODE, aesKey(), javax.crypto.spec.GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
-        return String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+        val isCurrentFormat = encoded.startsWith(GoogleCredentialCodec.FORMAT_PREFIX)
+        val payload = if (isCurrentFormat) encoded.substring(GoogleCredentialCodec.FORMAT_PREFIX.length) else encoded
+        val key = aesKey()
+        return guarded(GoogleCredentialFailurePoint.AesDecrypt) {
+            GoogleCredentialCodec.decrypt(Base64.decode(payload, Base64.NO_WRAP), key, legacy = !isCurrentFormat)
+        }
     }
+
+    private fun rsaCipher(): Cipher =
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            Cipher.getInstance(RSA_TRANSFORM, "AndroidOpenSSL")
+        } else {
+            Cipher.getInstance(RSA_TRANSFORM)
+        }
 
     private fun keyStore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
 
@@ -116,6 +151,16 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
 
     private fun publicKey() = ensureKey().getCertificate(KEY_ALIAS).publicKey
 
+    private inline fun <T> guarded(point: GoogleCredentialFailurePoint, block: () -> T): T {
+        try {
+            return block()
+        } catch (failure: GoogleCredentialStorageFailure) {
+            throw failure
+        } catch (_: Exception) {
+            throw GoogleCredentialStorageFailure(point)
+        }
+    }
+
     private companion object {
         const val PREFS = "fitbaus_google_youtube_account"
         const val KEY_ALIAS = "fitbaus_youtube_account_v1"
@@ -124,6 +169,5 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
         const val KEY_REFRESH = "refresh_token_encrypted"
         const val KEY_WRAPPED_AES = "wrapped_aes"
         const val RSA_TRANSFORM = "RSA/ECB/PKCS1Padding"
-        const val AES_TRANSFORM = "AES/GCM/NoPadding"
     }
 }
