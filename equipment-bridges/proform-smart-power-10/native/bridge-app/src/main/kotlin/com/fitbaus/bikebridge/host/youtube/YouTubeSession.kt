@@ -119,6 +119,9 @@ internal class YouTubeSession(
     val hasEngine: Boolean
         get() = engine != null
 
+    val playRequested: Boolean
+        get() = wantPlaying
+
     fun start() {
         if (destroyed || state.active) return
         update(state.copy(active = true))

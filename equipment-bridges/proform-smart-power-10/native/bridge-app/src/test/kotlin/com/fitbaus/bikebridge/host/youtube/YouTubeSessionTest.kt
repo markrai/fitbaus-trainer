@@ -494,10 +494,13 @@ class YouTubeSessionTest {
         runner.runAll()
         val engine = engines.last
         engine.listener.onReady(true)
+        assertTrue(session.playRequested)
         session.togglePlay()
         assertEquals(PlaybackPhase.Paused, session.state.playback.phase)
+        assertFalse(session.playRequested)
         session.togglePlay()
         assertEquals(PlaybackPhase.Playing, session.state.playback.phase)
+        assertTrue(session.playRequested)
         session.seekTo(60_000)
         session.seekTo(-5)
         session.seekTo(10_000_000)

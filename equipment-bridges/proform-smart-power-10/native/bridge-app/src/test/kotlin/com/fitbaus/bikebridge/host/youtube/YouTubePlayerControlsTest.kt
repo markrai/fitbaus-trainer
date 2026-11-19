@@ -44,6 +44,29 @@ class YouTubePlayerControlsTest {
     }
 
     @Test
+    fun tappingTheVideoDisplaysTransientPlaybackFeedback() {
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
+        assertTrue(content.contains("videoFrame.setOnClickListener { onPlaybackToggle() }"))
+        assertTrue(content.contains("playButton.setOnClickListener { onPlaybackToggle() }"))
+        assertTrue(content.contains("playbackFeedback.setImageResource(if (playing) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause)"))
+        assertTrue(content.contains("handler.postDelayed(hidePlaybackFeedback, FEEDBACK_MS)"))
+        assertTrue(content.contains("handler.removeCallbacks(hidePlaybackFeedback)"))
+        assertTrue(content.contains("if (!player || !state.active || state.playback.phase !in CONTROLLABLE) clearPlaybackFeedback()"))
+        assertTrue(content.contains("if (!state.active || state.screen != Screen.Player || !session.hasEngine || state.playback.phase !in CONTROLLABLE) return"))
+    }
+
+    @Test
+    fun searchHasAnAccessibleOneTapClearActionThatDoesNotSubmit() {
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
+        val results = content.substringAfter("private fun buildResults()").substringBefore("private fun buildPlayer()")
+        assertTrue(results.contains("searchClear.contentDescription = \"Clear search\""))
+        assertTrue(results.contains("searchClear.setOnClickListener { searchField.setText(\"\") }"))
+        assertTrue(results.contains("searchClear.visibility = if (s.isNullOrEmpty()) GONE else VISIBLE"))
+        assertTrue(results.contains("FrameLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP), Gravity.END or Gravity.CENTER_VERTICAL)"))
+        assertFalse(results.substringAfter("searchClear.setOnClickListener").substringBefore("fieldSlot.addView(searchClear").contains("session.search("))
+    }
+
+    @Test
     fun brightnessUsesTheBridgeBrightnessStoreThroughTheActivity() {
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val control = activity.substring(activity.indexOf("private val youtubeBrightness"), activity.indexOf("private val refresh"))

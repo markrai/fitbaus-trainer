@@ -11,11 +11,11 @@ small FitBaus-owned layer.
 
 - **Browse:** opening the tab loads YouTube's default kiosk (trending) as a
   thumbnail grid with title, channel, views and duration (or LIVE). A search
-  field, SEARCH and TRENDING buttons sit above the grid. Further pages load
+  field with an × clear control, SEARCH and TRENDING buttons sit above the grid. Further pages load
   as the grid nears its end. Loading, empty, error (with RETRY) and
   "couldn't load more, tap to retry" states are shown in place.
 - **Play:** tapping a card opens the player inside the tab: video surface,
-  PLAY/PAUSE (or tap the video), seek bar with buffered range, elapsed and
+  PLAY/PAUSE (or tap the video, showing a briefly centered play/pause icon), seek bar with buffered range, elapsed and
   total time, a screen-brightness slider (5-100 %, written to the same
   brightness setting as the Bridge brightness API and applied immediately), a
   vertical system music-volume slider in its own column right of the video
