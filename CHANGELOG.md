@@ -58,8 +58,10 @@ included in this upcoming release.
 - **More compact floating YouTube player.** Removed the separate top bar
   from the mini-player. Video now occupies the full 16:9 preview; its close
   button sits directly over the upper-right corner, with a 48 dp touch
-  target and dark background for legibility. Tapping the video still
-  restores the full YouTube player.
+  target and dark background for legibility. Floating captions now use a
+  smaller 12 sp font, tighter padding and an eight-line limit so more text
+  fits in the preview, while the normal player's caption styling is unchanged.
+  Tapping the video still restores the full YouTube player.
 
 - **On-demand Google TV code renewal.** Once a TV OAuth JSON client has
   been imported, returning to MY YOUTUBE automatically requests a device
