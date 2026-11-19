@@ -73,18 +73,35 @@ try {
         throw "adb.exe not found. Install Android SDK platform-tools or add adb to PATH."
     }
 
+    function Invoke-AdbCommand {
+        param([string[]]$CommandArgs)
+
+        $priorPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $output = & $adb @CommandArgs 2>&1 | Out-String
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $priorPreference
+        }
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Output = $output.Trim()
+        }
+    }
+
     Write-Host "FitBaus YouTube OAuth import"
     Write-Host "  bike: $serial"
     Write-Host "  app: $package"
     if ($serial -match ':\d+$') {
-        & $adb connect $serial > $null 2>&1
+        $null = Invoke-AdbCommand -CommandArgs @("connect", $serial)
     }
-    $state = (& $adb -s $serial get-state 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $state -ne "device") {
+    $state = Invoke-AdbCommand -CommandArgs @("-s", $serial, "get-state")
+    if ($state.ExitCode -ne 0 -or $state.Output -ne "device") {
         throw "ADB device '$serial' is not connected or authorized."
     }
-    $installedPackage = (& $adb -s $serial shell pm path $package 2>$null | Out-String).Trim()
-    if ($LASTEXITCODE -ne 0 -or $installedPackage -notmatch 'package:') {
+    $installedPackage = Invoke-AdbCommand -CommandArgs @("-s", $serial, "shell", "pm", "path", $package)
+    if ($installedPackage.ExitCode -ne 0 -or $installedPackage.Output -notmatch 'package:') {
         throw "The selected FitBaus app is not installed on this bike. Deploy the OAuth-enabled APK first."
     }
 
@@ -92,24 +109,30 @@ try {
     $stage = "/sdcard/Android/data/$package/files/youtube-auth-import"
     $remoteJson = "$stage/$nonce.json"
     $remoteStatus = "$stage/$nonce.status"
-    & $adb -s $serial shell mkdir -p $stage > $null 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $mkdir = Invoke-AdbCommand -CommandArgs @("-s", $serial, "shell", "mkdir", "-p", $stage)
+    if ($mkdir.ExitCode -ne 0) {
         throw "Cannot create the temporary app-specific import directory on the bike."
     }
 
     try {
-        & $adb -s $serial push $files[0].FullName $remoteJson > $null 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $push = Invoke-AdbCommand -CommandArgs @("-s", $serial, "push", $files[0].FullName, $remoteJson)
+        if ($push.ExitCode -ne 0) {
             throw "ADB failed to transfer the JSON."
         }
-        & $adb -s $serial shell am start -n "$package/com.fitbaus.bikebridge.host.NativeBridgeActivity" -a "com.fitbaus.bikebridge.action.IMPORT_YOUTUBE_AUTH" --es "com.fitbaus.bikebridge.extra.IMPORT_NONCE" $nonce > $null 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $launch = Invoke-AdbCommand -CommandArgs @(
+            "-s", $serial, "shell", "am", "start",
+            "-n", "$package/com.fitbaus.bikebridge.host.NativeBridgeActivity",
+            "-a", "com.fitbaus.bikebridge.action.IMPORT_YOUTUBE_AUTH",
+            "--es", "com.fitbaus.bikebridge.extra.IMPORT_NONCE", $nonce
+        )
+        if ($launch.ExitCode -ne 0) {
             throw "Could not launch FitBaus's OAuth importer. Is the new APK installed?"
         }
         $deadline = (Get-Date).AddSeconds(30)
         do {
             Start-Sleep -Milliseconds 400
-            $result = (& $adb -s $serial shell "cat $remoteStatus 2>/dev/null" | Out-String).Trim()
+            $ack = Invoke-AdbCommand -CommandArgs @("-s", $serial, "shell", "cat $remoteStatus 2>/dev/null")
+            $result = $ack.Output
             if ($result -eq "OK") {
                 Write-Host "Credentials imported and encrypted on the bike."
                 Write-Host "On the bike's YouTube screen, approve the displayed Google code using your phone."
@@ -121,7 +144,7 @@ try {
         } while ((Get-Date) -lt $deadline)
         throw "No import acknowledgment from FitBaus. Check that the OAuth-enabled APK is installed."
     } finally {
-        & $adb -s $serial shell rm -f $remoteJson $remoteStatus > $null 2>&1
+        $null = Invoke-AdbCommand -CommandArgs @("-s", $serial, "shell", "rm", "-f", $remoteJson, $remoteStatus)
     }
 } catch {
     Write-Host ("ERROR: " + $_.Exception.Message)
