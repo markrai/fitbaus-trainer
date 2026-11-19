@@ -133,10 +133,12 @@ host/youtube/
 java/.../youtube/media/YoutubeHttpDataSource.java                                [copied, GPL-3.0 + Apache-2.0]
 ```
 
-`ArcadeMode.isGame` is now true only for game modes. Dashboard and YouTube
-never start the arcade camera or clock. `ArcadeModeController` owns at most one
-of {camera pipeline, media player} at a time and stops the previous owner
-before starting the next one.
+`ArcadeMode.isGame` is true only for game modes. Dashboard and YouTube
+never start the arcade camera or clock. `ArcadeModeController` still owns the
+selected game's camera/clock lifecycle; floating YouTube playback is managed
+separately by the Activity and may coexist with one active game. Only one
+ExoPlayer and one arcade camera pipeline are created. Host pause releases
+both media playback and the game pipeline.
 
 `YouTubeSession` runs on the main thread. Extraction and media-source
 preparation (some NewPipe manifest creators make network requests) run on one
