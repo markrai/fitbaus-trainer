@@ -4,13 +4,13 @@ FitBaus uses one unified product version across Trainer web/PWA, Capacitor
 Android and iOS, Native Bike Bridge, and arcade (shipped inside the Bridge
 APK). **1.0.0** was the first unified release. **FitBaus Full 2.1.0**
 (`versionCode 20100`) is published. Full 2.1.1 was prepared but not
-published. The next Full patch, **2.1.2** (`versionCode 20102`), is in
+published. The next Full patch, **2.1.3** (`versionCode 20103`), is in
 development on `main`.
 
 There is one authoritative source: [`version.js`](version.js).
 
 ```js
-const APP_VERSION = "2.1.2";
+const APP_VERSION = "2.1.3";
 ```
 
 Do not treat persistence schema versions, protocol identifiers, API versions,
@@ -86,7 +86,8 @@ on the Native Bike Bridge job.
 - **FitBaus Full 2.x** — feature edition on `main`, including external USB
   (UVC) webcam support and native YouTube playback. **2.1.0** / `20100` is
   published. **2.1.1** / `20101` was prepared but not published;
-  **2.1.2** / `20102` is the next Full patch in development.
+  **2.1.2** / `20102` was the preceding development version;
+  **2.1.3** / `20103` is the next Full patch in development.
   Do not merge webcam into Lite.
 
 Product versioning stays unified via `version.js`. Edition differences use
