@@ -11,6 +11,14 @@ import java.io.IOException
 
 class GoogleAuthDiagnosticsTest {
     @Test
+    fun pendingAndSlowDownAreAllowedButRemainNonfatal() {
+        assertEquals("authorization_pending",
+            GoogleAuthDiagnostics.oauthCode("""{"error":"authorization_pending"}"""))
+        assertEquals("slow_down",
+            GoogleAuthDiagnostics.oauthCode("""{"error":"slow_down"}"""))
+    }
+
+    @Test
     fun invalidClientExplainsWhyDeviceCodeCanAppearThenPollingFails() {
         val failure = GoogleOAuthHttpFailure(GoogleAuthStage.TokenPoll, 401, "invalid_client")
         val message = GoogleAuthDiagnostics.message(GoogleAuthStage.TokenPoll, failure)

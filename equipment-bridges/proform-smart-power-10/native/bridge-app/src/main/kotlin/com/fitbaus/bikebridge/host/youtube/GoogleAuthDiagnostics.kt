@@ -27,6 +27,7 @@ internal class GoogleResponseFormatFailure : IOException()
 
 internal object GoogleAuthDiagnostics {
     private val knownErrors = setOf(
+        "authorization_pending", "slow_down",
         "invalid_client", "invalid_request", "invalid_grant", "invalid_scope",
         "unauthorized_client", "unsupported_grant_type", "access_denied",
         "expired_token", "admin_policy_enforced", "org_internal",
