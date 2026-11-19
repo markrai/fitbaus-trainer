@@ -109,7 +109,7 @@ try {
         $deadline = (Get-Date).AddSeconds(30)
         do {
             Start-Sleep -Milliseconds 400
-            $result = (& $adb -s $serial shell cat $remoteStatus 2>$null | Out-String).Trim()
+            $result = (& $adb -s $serial shell "cat $remoteStatus 2>/dev/null" | Out-String).Trim()
             if ($result -eq "OK") {
                 Write-Host "Credentials imported and encrypted on the bike."
                 Write-Host "On the bike's YouTube screen, approve the displayed Google code using your phone."
