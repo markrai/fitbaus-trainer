@@ -64,7 +64,7 @@ internal object GoogleAuthDiagnostics {
             "Google rejected ${stage.label}: ${failure.oauthError} (HTTP $status). ${advice(failure.oauthError)}"
         }
         is GoogleCredentialStorageFailure ->
-            "FitBaus credential storage failed at ${failure.point.label}. Google sign-in was not completed. Re-import the same TV OAuth JSON without clearing app data."
+            "FitBaus could not read or save encrypted Google credentials at ${failure.point.label}. Re-import the same TV OAuth JSON without clearing app data."
         is GoogleResponseFormatFailure, is JSONException ->
             "Google returned an unexpected response during ${stage.label}. The app could not parse it."
         is GoogleReauthorizationRequired ->
