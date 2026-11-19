@@ -10,11 +10,22 @@ support, is maintained on `lite/1.x`.
 
 ## [Unreleased]
 
-FitBaus Full 2.1.1 (`versionCode 20101`) is in development on `main`.
-The following changes have not yet been published.
+FitBaus Full 2.1.2 (`versionCode 20102`) is in development on `main`.
+Full 2.1.1 was prepared but not published; its YouTube improvements remain
+included in this upcoming release.
 
 ### Added
 
+- **Google account connection and account-first discovery for Bike Bridge
+  YouTube.** Authorize a Google account from a phone using Google's
+  limited-input device OAuth flow. Browse your subscriptions, recent channel
+  uploads, and personal playlists with pagination, and open videos in the
+  existing native player. When connected, MY YOUTUBE takes the place of
+  random Trending videos as the default view while Search and Trending remain
+  available. Credentials and refresh tokens are protected by Android
+  Keystore; sign-out clears local authorization and requests revocation.
+  Google's personalized Home recommendations are not available through the
+  official YouTube Data API.
 - **YouTube captions on the Bike Bridge.** Available subtitles appear over
   the video with a CC toggle. The player prefers English and human-authored
   captions when available and supports WebVTT, TTML, and SRT. Caption loading
