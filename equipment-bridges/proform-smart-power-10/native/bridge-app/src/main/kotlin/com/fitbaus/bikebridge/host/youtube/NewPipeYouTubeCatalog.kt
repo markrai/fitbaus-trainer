@@ -90,15 +90,17 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
             try {
                 val extractor = service.getStreamExtractor(service.streamLHFactory.fromId(seed.id))
                 val info = StreamInfo.getInfo(extractor)
-                batches += info.relatedItems.orEmpty()
-                    .asSequence()
-                    .take(RelatedVideoSuggestions.MAX_ITEMS_PER_SEED)
-                    .mapNotNull { summarize(it) }
-                    .toList()
+                batches.add(
+                    info.relatedItems.orEmpty()
+                        .asSequence()
+                        .take(RelatedVideoSuggestions.MAX_ITEMS_PER_SEED)
+                        .mapNotNull { summarize(it) }
+                        .toList(),
+                )
             } catch (e: Throwable) {
                 if (Thread.currentThread().isInterrupted) throw e
                 if (firstFailure == null) firstFailure = e
-                batches += emptyList()
+                batches.add(emptyList())
             }
         }
         if (batches.all { it.isEmpty() }) firstFailure?.let { throw it }
