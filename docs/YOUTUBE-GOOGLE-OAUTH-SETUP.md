@@ -173,10 +173,16 @@ your phone or PC. This enters the same authorization flow.
 
 ## 5. Verify it works
 
-After approving, **MY YOUTUBE** should show **SUBSCRIPTIONS** and
-**PLAYLISTS**. Select a channel to see its recent uploads or open a
-playlist to choose a video. **BROWSE** returns to FitBaus's unauthenticated
-search and Trending view.
+After approving, the Bike Bridge's default YouTube thumbnail grid shows
+**FROM YOUR CHANNELS**, a composite of recent videos uploaded by channels
+you subscribe to. The **MY FEED** control refreshes that composite,
+and scrolling loads additional channel batches. This is not Google's private
+personalized Home recommendations algorithm.
+
+**SEARCH** continues searching all of YouTube. **MY YOUTUBE** opens the
+separate **SUBSCRIPTIONS** and **PLAYLISTS** lists; choose a channel to view
+its uploads or a playlist to browse its videos. **BROWSE** returns to the
+thumbnail grid. Signed-out users see the ordinary Trending grid instead.
 
 FitBaus stores its client secret and refresh token encrypted in app-private
 preferences using an Android Keystore-backed key. Access tokens are

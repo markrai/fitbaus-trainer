@@ -47,23 +47,29 @@ internal class YouTubeContent(
     private val surface = SurfaceView(context)
     private val mediaSources by lazy { YouTubeMediaSources() }
 
+    private val accountStore = AndroidGoogleAccountStore(context)
+    private val googleApi = GoogleYouTubeApi(GoogleUrlConnectionHttp())
+
     val session: YouTubeSession = YouTubeSession(
-        catalogFactory = { NewPipeYouTubeCatalog() },
+        catalogFactory = { GoogleSubscriptionFeedCatalog(NewPipeYouTubeCatalog(), accountStore, googleApi) },
         runner = ExecutorRunner("fitbaus-youtube"),
         main = MainThread { block -> handler.post { block() } },
         engineFactory = PlayerEngineFactory { listener -> ExoPlayerEngine(context, surface, listener) },
         preparer = MediaPreparer { handle, plan -> mediaSources.prepare(handle, plan) },
         initialMaxHeight = prefs.getInt(KEY_MAX_HEIGHT, YouTubeStreamSelector.DEFAULT_MAX_HEIGHT),
         onMaxHeightChanged = { prefs.edit().putInt(KEY_MAX_HEIGHT, it).apply() },
+        feedTitle = { if (accountStore.hasAccount()) "From your channels" else "Trending" },
     )
 
     private val accountController = GoogleAccountController(
-        store = AndroidGoogleAccountStore(context),
-        api = GoogleYouTubeApi(GoogleUrlConnectionHttp()),
+        store = accountStore,
+        api = googleApi,
         runner = ExecutorRunner("fitbaus-google-account"),
         main = MainThread { block -> handler.post { block() } },
     )
     private var accountOpen = false
+    private var previousAccountState: Boolean? = null
+    private val feedButton = button("TRENDING")
     private val accountView = GoogleAccountView(
         context, accountController,
         onVideoSelected = { video -> session.open(video) },
@@ -137,9 +143,11 @@ internal class YouTubeContent(
         refreshBrightness()
         accountController.start()
         val connected = accountController.hasAccount()
-        session.start(loadDefault = !connected)
-        accountOpen = connected
-        if (connected) accountView.open() else accountView.close()
+        val changed = previousAccountState != connected
+        session.start(loadDefault = !changed)
+        if (changed) session.showTrending()
+        previousAccountState = connected
+        if (accountOpen) accountView.open() else accountView.close()
         render(session.state)
         adapter.notifyDataSetChanged()
     }
@@ -220,13 +228,12 @@ internal class YouTubeContent(
         val search = button("SEARCH")
         search.setOnClickListener { submitSearch() }
         bar.addView(search, spaced(LayoutParams(dp(140), dp(TOUCH_DP))))
-        val trending = button("TRENDING")
-        trending.setOnClickListener {
+        feedButton.setOnClickListener {
             hideKeyboard()
             searchField.setText("")
             session.showTrending()
         }
-        bar.addView(trending, spaced(LayoutParams(dp(160), dp(TOUCH_DP))))
+        bar.addView(feedButton, spaced(LayoutParams(dp(160), dp(TOUCH_DP))))
         val myYouTube = button("MY YOUTUBE")
         myYouTube.setOnClickListener {
             hideKeyboard()
@@ -409,6 +416,7 @@ internal class YouTubeContent(
     }
 
     private fun render(state: YouTubeState) {
+        setText(feedButton, if (accountStore.hasAccount()) "MY FEED" else "TRENDING")
         val player = state.screen == Screen.Player
         resultsScreen.visibility = if (player || accountOpen) GONE else VISIBLE
         playerScreen.visibility = if (player) VISIBLE else GONE

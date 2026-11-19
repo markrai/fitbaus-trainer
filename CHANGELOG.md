@@ -39,6 +39,14 @@ included in this upcoming release.
 
 ### Changed
 
+- **Subscribed-channel YouTube home feed.** When signed in, the console's
+  thumbnail home grid merges recent uploads from subscribed channels instead
+  of showing unrelated Trending videos. Channels are fetched in bounded
+  batches, sorted by upload time within each batch, and extended as the user
+  scrolls. Explicit Search remains global; MY YOUTUBE retains the separate
+  subscriptions and playlists browser. When signed out, Trending remains
+  the default. This is a composite subscription feed, not Google's private
+  personalized Home algorithm.
 - **YouTube play/pause feedback.** Tapping a video or its playback control
   briefly shows a centered play or pause icon.
 - **YouTube search clear.** An × inside the search field clears entered text
