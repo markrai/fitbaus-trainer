@@ -7,8 +7,10 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class YouTubeRecommendationsTest {
-    private fun video(id: String, channel: String) =
-        VideoSummary(id, id, channel, 120, 10, YouTubeIds.thumbnail(id), false)
+    private companion object {
+        fun video(id: String, channel: String) =
+            VideoSummary(id, id, channel, 120, 10, YouTubeIds.thumbnail(id), false)
+    }
 
     private class Catalog : YouTubeCatalog {
         val seeds = ArrayList<List<VideoSummary>>()
