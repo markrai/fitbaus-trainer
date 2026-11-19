@@ -26,9 +26,10 @@ included in this upcoming release.
   YouTube.** Authorize a Google account from a phone using Google's
   limited-input device OAuth flow. Browse your subscriptions, recent channel
   uploads, and personal playlists with pagination, and open videos in the
-  existing native player. When connected, MY YOUTUBE takes the place of
-  random Trending videos as the default view while Search and Trending remain
-  available. Credentials and refresh tokens are protected by Android
+  existing native player. When connected, the default home grid combines
+  recent uploads from subscribed channels; MY YOUTUBE provides separate
+  subscriptions and playlists. Global Search remains available. Credentials
+  and refresh tokens are protected by Android
   Keystore; sign-out clears local authorization and requests revocation.
   Google's personalized Home recommendations are not available through the
   official YouTube Data API.
@@ -39,6 +40,13 @@ included in this upcoming release.
 
 ### Changed
 
+- **Simplified YouTube navigation.** The YouTube tab always opens the default
+  thumbnail feed, showing subscribed-channel uploads for signed-in users and
+  Trending for guests. Removed the redundant SEARCH and MY FEED buttons;
+  searching uses the keyboard Search action and clearing search restores home.
+  MY YOUTUBE replaces its title and BROWSE button with a top-left arrow to
+  return home, while preserving the in-list BACK control for channel and
+  playlist navigation.
 - **Subscribed-channel YouTube home feed.** When signed in, the console's
   thumbnail home grid merges recent uploads from subscribed channels instead
   of showing unrelated Trending videos. Channels are fetched in bounded
@@ -50,7 +58,7 @@ included in this upcoming release.
 - **YouTube play/pause feedback.** Tapping a video or its playback control
   briefly shows a centered play or pause icon.
 - **YouTube search clear.** An × inside the search field clears entered text
-  without submitting a new search.
+  and returns to the default video feed without submitting a search.
 
 ### Fixed
 

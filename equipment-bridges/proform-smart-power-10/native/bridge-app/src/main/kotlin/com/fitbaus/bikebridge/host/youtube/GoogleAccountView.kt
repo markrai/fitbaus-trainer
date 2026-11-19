@@ -20,7 +20,7 @@ internal class GoogleAccountView(
     context: Context,
     private val account: GoogleAccountController,
     private val onVideoSelected: (VideoSummary) -> Unit,
-    private val onBrowseRequested: () -> Unit,
+    private val onHomeRequested: () -> Unit,
 ) : LinearLayout(context) {
     private sealed class Row {
         data class Collection(val entry: GoogleEntry) : Row()
@@ -29,9 +29,9 @@ internal class GoogleAccountView(
 
     private enum class Section { Subscriptions, Playlists, Channel, Playlist }
 
-    private val title = text("MY YOUTUBE", 20f)
+    private val title = text("", 20f)
     private val message = text("", 18f)
-    private val browse = button("BROWSE")
+    private val homeBack = button("‹")
     private val subs = button("SUBSCRIPTIONS")
     private val playlists = button("PLAYLISTS")
     private val login = button("CONNECT GOOGLE")
@@ -53,9 +53,10 @@ internal class GoogleAccountView(
         setBackgroundColor(Color.BLACK)
         visibility = GONE
         val bar = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        homeBack.contentDescription = "Back to YouTube videos"
+        homeBack.setOnClickListener { onHomeRequested() }
+        bar.addView(homeBack, LayoutParams(dp(64), dp(56)))
         bar.addView(title, LayoutParams(0, dp(56), 1f))
-        browse.setOnClickListener { onBrowseRequested() }
-        bar.addView(browse, LayoutParams(dp(115), dp(56)))
         subs.setOnClickListener { showSubscriptions() }
         playlists.setOnClickListener { showPlaylists() }
         login.setOnClickListener {
@@ -153,7 +154,7 @@ internal class GoogleAccountView(
             }
         }
         message.text = statusText
-        title.text = selected?.title?.takeIf { section == Section.Channel || section == Section.Playlist } ?: "MY YOUTUBE"
+        title.text = selected?.title?.takeIf { section == Section.Channel || section == Section.Playlist } ?: ""
     }
 
     private fun showSubscriptions() {
