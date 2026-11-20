@@ -9,11 +9,12 @@ separate from the USB bike controller and the UVC external-camera stack.
 Open the gear icon, then **Controllers** beside **Pairing** and **External Webcams**.
 The screen lists input devices recognized by Android, their input classes and
 vendor/product IDs, and the selected controller. D-pad keys and joystick axes
-appear in a live diagnostic field. Normal Android D-pad focus navigation remains
-available in Settings. In the Controllers diagnostic tab only, delivered
-Back, Escape, Menu, app-switch, search and Mode button events from recognized
-gamepads are shown **without** forwarding them to Android's Activity Back
-handler. The touchscreen Done button and non-controller Back still exit settings.
+appear in a live diagnostic field. FitBaus now consumes all controller-origin
+key, joystick and pointer events delivered to its foreground activities,
+including in Settings. The Controllers tab reports their keycodes without
+forwarding them to Android's Activity handlers. Controller D-pad navigation
+of Settings is intentionally disabled while FitBaus owns its events;
+touchscreen Done and non-controller Back still exit settings.
 
 The **Choose game controller** dialog supports:
 
@@ -28,26 +29,47 @@ Mouse-only devices are listed to aid diagnosis, but are not treated as gamepad
 controls. Android recognizing D-pad navigation is useful evidence of key events,
 but does not prove the availability of analog axes or gamepad face buttons.
 
-## Supported gameplay
+## Per-game controller mappings
 
-**Bricks** currently accepts left/right D-pad keys and the joystick X or
-D-pad HAT_X axis for paddle steering. A deadzone prevents analog drift, and
-frame-time clamping prevents an excessive jump after a stall. An explicitly
-selected controller takes priority over face tracking while Bricks is running;
-touching the screen temporarily overrides it. All other games retain their
-camera/cadence controls, and all bike command/USB control paths are unchanged.
+When Settings is opened from a game, the Controllers tab shows that game's
+available gameplay actions and the saved button assignment for each action.
+Tap an action and then press any Android-delivered key on the connected
+controller to bind it. Assignments persist per game **and per physical
+controller descriptor**, with Clear and Restore Defaults operations. Reusing
+a button for another action unbinds its previous assignment in that game.
+Entering Settings from Dashboard or YouTube provides no game-context extra,
+so the entire per-game mapping section is hidden.
 
-While any arcade game is active, the selected controller's delivered
-D-pad, face/shoulder, Start/Select, Back, Escape, Menu, and common generic
-button events are consumed before Android's default activity key handling.
-Only Bricks currently assigns a gameplay action (left/right steering); the
-other buttons are reserved for later game-specific mappings. This prevents
-a gamepad button mapped to Android Back from accidentally closing FitBaus,
-provided Android actually delivers that event to the app. Press and release
-events are both consumed. Unselected devices, physical Android navigation
-keys, Dashboard, YouTube, and the Settings screen keep normal behavior.
-Key-up, mode change, and host pause clear held steering to prevent phantom
-motion.
+- Bricks: move left, move right, restart
+- Biketris: move left, move right, restart
+- Finger Math: restart
+- Flak Run: restart
+- Trail Ride: restart
+
+**Head recentering, calibration, camera-tracking sensitivity and other webcam
+controls are not controller gameplay actions.** They remain in the existing
+tracking/developer settings. Button-based boosts, jumps or answers are not
+currently implemented; the app does not spoof bicycle cadence or invent
+actions that the game engine does not support. Existing face tracking,
+physical pedaling and touch remain unchanged.
+
+Bricks routes left/right button mappings through its controller steering
+path, and Biketris uses its touch-steering fallback. The joystick X
+remains supported for Bricks; per-axis remapping is not part of the current
+keycode binding format. Mapping controls require Android to deliver the
+button as a keycode. Raw HID report learning is a separate experimental
+path described below.
+
+## Foreground controller event capture
+
+For a recognized external controller, FitBaus consumes **every delivered
+keycode**, including A, Back, Home and vendor-specific keycodes, and
+controller-origin joystick or pointer motion before forwarding to regular
+Activity handlers. This applies throughout the foreground native app,
+not only during gameplay. Ordinary touchscreen input remains available
+for Settings and exiting the app. Keycodes that Android handles entirely
+before Activity dispatch are not available to be intercepted this way.
+The raw HID claim mode described below attempts to bypass that limitation.
 
 **System-reserved controller buttons are different.** Android normally
 handles Home, app switching and some vendor-specific system shortcuts

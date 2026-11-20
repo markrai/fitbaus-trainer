@@ -45,6 +45,7 @@ import com.fitbaus.bikebridge.host.arcade.ArcadeModeController
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
 import com.fitbaus.bikebridge.host.controller.ControllerDevices
 import com.fitbaus.bikebridge.host.controller.GameControllerInput
+import com.fitbaus.bikebridge.host.controller.GameControlBindings
 import com.fitbaus.bikebridge.host.controller.ExclusiveHid
 import com.fitbaus.bikebridge.host.uvc.UvcProcess
 import com.fitbaus.bikebridge.host.youtube.BrightnessControl
@@ -82,6 +83,9 @@ class NativeBridgeActivity : Activity() {
     private val modeTabs = HashMap<ArcadeMode, TextView>()
     private val handInput = HandPositionInput()
     private val exclusiveHid by lazy { ExclusiveHid(this) }
+    private val gameBindings by lazy {
+        GameControlBindings(getSharedPreferences(ControllerDevices.PREFS, Context.MODE_PRIVATE))
+    }
     private val gameController by lazy {
         GameControllerInput(getSharedPreferences(ControllerDevices.PREFS, Context.MODE_PRIVATE))
     }
@@ -225,21 +229,60 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (modeController.isActive && modeController.mode.isGame) {
-            if (exclusiveHid.isActive() && exclusiveHid.belongsTo(event.device) &&
-                com.fitbaus.bikebridge.host.controller.ControllerGameplayKeys.consumes(event.keyCode)
-            ) {
-                exclusiveHid.noteAndroidEvent()
-                return true
+        if (ControllerDevices.belongsToController(event.device)) {
+            if (exclusiveHid.isActive() && exclusiveHid.belongsTo(event.device)) exclusiveHid.noteAndroidEvent()
+            gameController.refresh()
+            val mode = modeController.mode
+            val selected = ControllerDevices.chosen(
+                ControllerDevices.visible(),
+                getSharedPreferences(ControllerDevices.PREFS, Context.MODE_PRIVATE)
+                    .getString(ControllerDevices.SELECTED, null),
+            )
+            val matches = selected != null && event.device != null &&
+                selected.vendorId == event.device.vendorId && selected.productId == event.device.productId
+            val action = if (mode.isGame && modeController.isActive && matches) {
+                gameBindings.action(mode, selected!!.descriptor, event.keyCode)?.id
+            } else null
+            if (action != null && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                performMappedGameAction(mode, action)
             }
-            if (gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks)) return true
+            gameController.handleKey(
+                event,
+                steerBricks = modeController.isActive && (mode == ArcadeMode.Bricks || mode == ArcadeMode.Biketris),
+                mappedAction = action,
+            )
+            return true
         }
         return super.dispatchKeyEvent(event)
     }
 
+    private fun performMappedGameAction(mode: ArcadeMode, action: String) {
+        when (action) {
+            "restart" -> when (mode) {
+                ArcadeMode.Bricks -> arcadeContent.playground.restartGame()
+                ArcadeMode.Math -> arcadeContent.math.restartGame()
+                ArcadeMode.Flak -> arcadeContent.flak.restartGame()
+                ArcadeMode.TrailRide -> arcadeContent.trail.restartGame()
+                ArcadeMode.Biketris -> arcadeContent.biketris.restartGame()
+                else -> Unit
+            }
+        }
+    }
+
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if (modeController.mode == ArcadeMode.Bricks && modeController.isActive && gameController.handleMotion(event)) return true
+        if (com.fitbaus.bikebridge.host.controller.ControllerDevices.belongsToController(event.device)) {
+            gameController.refresh()
+            if (modeController.mode == ArcadeMode.Bricks && modeController.isActive) gameController.handleMotion(event)
+            return true
+        }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.isFromSource(android.view.InputDevice.SOURCE_MOUSE) &&
+            com.fitbaus.bikebridge.host.controller.ControllerDevices.belongsToController(event.device)
+        ) return true
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -348,6 +391,9 @@ class NativeBridgeActivity : Activity() {
             return
         }
         if (modeController.mode == ArcadeMode.Biketris) {
+            gameController.refresh()
+            val steering = if (gameController.steeringHeld()) gameController.sample(now)?.x else null
+            arcadeContent.biketris.setControllerSteering(steering)
             arcadeContent.biketris.render(
                 handInput.latest(now),
                 cameraSession.state(),
@@ -626,7 +672,9 @@ class NativeBridgeActivity : Activity() {
     }
 
     private fun openPairingSettings() {
-        startActivity(Intent(this, PairingActivity::class.java))
+        val intent = Intent(this, PairingActivity::class.java)
+        if (modeController.mode.isGame) intent.putExtra(CONTROLLER_GAME_CONTEXT, modeController.mode.name)
+        startActivity(intent)
     }
 
     private fun tabGroup(vararg modes: ArcadeMode): LinearLayout {

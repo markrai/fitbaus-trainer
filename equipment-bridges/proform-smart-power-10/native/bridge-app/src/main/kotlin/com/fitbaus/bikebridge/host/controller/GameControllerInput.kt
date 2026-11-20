@@ -35,6 +35,17 @@ internal object ControllerDevices {
         else candidates.firstOrNull { it.descriptor == descriptor }
     }
 
+    fun belongsToController(device: InputDevice?): Boolean {
+        if (device == null || device.isVirtual) return false
+        if (supportsGames(device)) return true
+        if (device.vendorId <= 0 || device.productId <= 0) return false
+        return visible().any { candidate ->
+            supportsGames(candidate) &&
+                candidate.vendorId == device.vendorId &&
+                candidate.productId == device.productId
+        }
+    }
+
     fun category(device: InputDevice): String = when {
         hasSource(device.sources, InputDevice.SOURCE_JOYSTICK) -> "Joystick"
         hasSource(device.sources, InputDevice.SOURCE_GAMEPAD) -> "Gamepad"
@@ -69,47 +80,7 @@ internal object ControllerSteering {
 }
 
 internal object ControllerGameplayKeys {
-    fun trapsSettingsNavigation(keyCode: Int): Boolean = when (keyCode) {
-        KeyEvent.KEYCODE_BACK,
-        KeyEvent.KEYCODE_ESCAPE,
-        KeyEvent.KEYCODE_MENU,
-        KeyEvent.KEYCODE_APP_SWITCH,
-        KeyEvent.KEYCODE_SEARCH,
-        KeyEvent.KEYCODE_BUTTON_MODE -> true
-        else -> false
-    }
-
-    fun consumes(keyCode: Int): Boolean = when (keyCode) {
-        KeyEvent.KEYCODE_DPAD_LEFT,
-        KeyEvent.KEYCODE_DPAD_RIGHT,
-        KeyEvent.KEYCODE_DPAD_UP,
-        KeyEvent.KEYCODE_DPAD_DOWN,
-        KeyEvent.KEYCODE_DPAD_CENTER,
-        KeyEvent.KEYCODE_BACK,
-        KeyEvent.KEYCODE_ESCAPE,
-        KeyEvent.KEYCODE_MENU,
-        KeyEvent.KEYCODE_APP_SWITCH,
-        KeyEvent.KEYCODE_SEARCH,
-        KeyEvent.KEYCODE_ENTER,
-        KeyEvent.KEYCODE_SPACE,
-        KeyEvent.KEYCODE_BUTTON_A,
-        KeyEvent.KEYCODE_BUTTON_B,
-        KeyEvent.KEYCODE_BUTTON_X,
-        KeyEvent.KEYCODE_BUTTON_Y,
-        KeyEvent.KEYCODE_BUTTON_C,
-        KeyEvent.KEYCODE_BUTTON_Z,
-        KeyEvent.KEYCODE_BUTTON_L1,
-        KeyEvent.KEYCODE_BUTTON_R1,
-        KeyEvent.KEYCODE_BUTTON_L2,
-        KeyEvent.KEYCODE_BUTTON_R2,
-        KeyEvent.KEYCODE_BUTTON_START,
-        KeyEvent.KEYCODE_BUTTON_SELECT,
-        KeyEvent.KEYCODE_BUTTON_MODE,
-        KeyEvent.KEYCODE_BUTTON_THUMBL,
-        KeyEvent.KEYCODE_BUTTON_THUMBR,
-        in KeyEvent.KEYCODE_BUTTON_1..KeyEvent.KEYCODE_BUTTON_16 -> true
-        else -> false
-    }
+    fun consumes(keyCode: Int): Boolean = keyCode >= KeyEvent.KEYCODE_UNKNOWN
 }
 
 internal class GameControllerInput(private val prefs: SharedPreferences) {
@@ -138,25 +109,26 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         previousNanos = -1L
     }
 
-    fun handleKey(event: KeyEvent, steerBricks: Boolean): Boolean {
-        if (event.deviceId != activeDeviceId || activeDeviceId < 0) return false
-        val down = event.action == KeyEvent.ACTION_DOWN
-        if (!down && event.action != KeyEvent.ACTION_UP) return false
-        if (!ControllerGameplayKeys.consumes(event.keyCode)) return false
-        if (steerBricks) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> leftDown = down
-                KeyEvent.KEYCODE_DPAD_RIGHT -> rightDown = down
+    fun ownsDevice(deviceId: Int): Boolean = deviceId >= 0 && deviceId == activeDeviceId
+
+    fun handleKey(event: KeyEvent, steerBricks: Boolean, mappedAction: String? = null): Boolean {
+        if (!ownsDevice(event.deviceId)) return false
+        if (steerBricks && (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP)) {
+            val down = event.action == KeyEvent.ACTION_DOWN
+            when (mappedAction) {
+                "left" -> leftDown = down
+                "right" -> rightDown = down
             }
         }
         return true
     }
 
+    fun steeringHeld(): Boolean = leftDown || rightDown
+
     fun handleMotion(event: MotionEvent): Boolean {
-        if (event.deviceId != activeDeviceId || activeDeviceId < 0 ||
-            !event.isFromSource(InputDevice.SOURCE_JOYSTICK)
-        ) return false
-        val device = event.device ?: return false
+        if (!ownsDevice(event.deviceId)) return false
+        if (!event.isFromSource(InputDevice.SOURCE_JOYSTICK)) return true
+        val device = event.device ?: return true
         val stick = if (device.getMotionRange(MotionEvent.AXIS_X) != null) event.getAxisValue(MotionEvent.AXIS_X) else 0f
         val hat = if (device.getMotionRange(MotionEvent.AXIS_HAT_X) != null) event.getAxisValue(MotionEvent.AXIS_HAT_X) else 0f
         axisX = if (abs(hat) > 0.1f) hat else stick
