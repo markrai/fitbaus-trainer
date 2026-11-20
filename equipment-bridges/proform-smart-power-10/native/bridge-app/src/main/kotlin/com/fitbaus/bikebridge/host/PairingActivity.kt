@@ -237,6 +237,15 @@ class PairingActivity : Activity() {
             hidStatus.text = "Waiting for an automatically claimed controller and neutral HID reports"
             return
         }
+        val candidate = exclusiveHid.activeCandidate() ?: return
+        val prefs = controllerPrefs()
+        if (prefs.getString(ExclusiveHidPolicy.PREF_KEY, null) != candidate.key) {
+            prefs.edit()
+                .putString(ExclusiveHidPolicy.PREF_KEY, candidate.key)
+                .remove(ExclusiveHidPolicy.PREF_LEFT)
+                .remove(ExclusiveHidPolicy.PREF_RIGHT)
+                .apply()
+        }
         learnBaselines = baselines
         learnSide = side
         learnSignature = null
