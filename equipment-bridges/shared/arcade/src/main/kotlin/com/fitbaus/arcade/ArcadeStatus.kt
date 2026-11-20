@@ -11,6 +11,7 @@ public enum class ArcadeStatus(public val label: String) {
     Tracking("Tracking hand"),
     TrackingLost("Hand lost - raise a hand"),
     TouchOnly("Touch to play"),
+    ControllerReady("Controller steering"),
 }
 
 public object ArcadeStatusResolver {
