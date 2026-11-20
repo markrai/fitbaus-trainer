@@ -107,6 +107,15 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Controller Back/menu keys leaving FitBaus during games.** In active games,
+  recognized buttons delivered from the selected controller are consumed by
+  FitBaus before Android's default Activity navigation handler. This includes
+  D-pad, face/shoulder buttons, Start/Select, Back, Escape and Menu; existing
+  Bricks steering remains the only mapped gameplay action. Dashboard,
+  YouTube, settings, other input devices and system-owned Home handling
+  are unchanged. No system-wide key interception or kiosk privileges.
+
+
 - **YouTube tab continuity on the bike console.** Switching to Dashboard
   or a game while a video is playing now keeps playback in a small in-app
   floating player at the upper right. Tapping the video or its header
