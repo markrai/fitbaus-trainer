@@ -16,6 +16,7 @@ import android.os.Looper
 internal class AutoControllerOwnership(
     private val context: Context,
     private val hid: ExclusiveHid,
+    private val canClaim: () -> Boolean = { true },
     private val manager: UsbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager,
 ) {
     private val handler = Handler(Looper.getMainLooper())
@@ -97,8 +98,13 @@ internal class AutoControllerOwnership(
     private fun reconcile() {
         if (!running) return
         if (hid.disabledByUser()) {
-            hid.stop()
+            if (hid.isActive()) hid.stop()
             statusText = "Controller input disabled in settings"
+            return
+        }
+        if (!canClaim()) {
+            if (hid.isActive()) hid.stop()
+            statusText = "Using Android controller events until device-specific raw HID steering is calibrated"
             return
         }
         val names = manager.deviceList.keys
