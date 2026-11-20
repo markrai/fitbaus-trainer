@@ -48,6 +48,7 @@ import com.fitbaus.bikebridge.host.controller.ControllerDevices
 import com.fitbaus.bikebridge.host.controller.GameControllerInput
 import com.fitbaus.bikebridge.host.controller.GameControlBindings
 import com.fitbaus.bikebridge.host.controller.ExclusiveHid
+import com.fitbaus.bikebridge.host.controller.AutoControllerOwnership
 import com.fitbaus.bikebridge.host.uvc.UvcProcess
 import com.fitbaus.bikebridge.host.youtube.BrightnessControl
 import com.fitbaus.bikebridge.host.youtube.YouTubeContent
@@ -84,6 +85,7 @@ class NativeBridgeActivity : Activity() {
     private val modeTabs = HashMap<ArcadeMode, TextView>()
     private val handInput = HandPositionInput()
     private val exclusiveHid by lazy { ExclusiveHid(this) }
+    private val controllerOwnership by lazy { AutoControllerOwnership(this, exclusiveHid) }
     private val gameBindings by lazy {
         GameControlBindings(getSharedPreferences(ControllerDevices.PREFS, Context.MODE_PRIVATE))
     }
@@ -118,7 +120,6 @@ class NativeBridgeActivity : Activity() {
             bikeMotion.reset()
             gameController.refresh()
             gameController.resetTransient()
-            exclusiveHid.startFromPreference()
             cameraSession.updateSettings(trackerSettingsFor(game))
             cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)
             cameraSession.start()
@@ -126,7 +127,6 @@ class NativeBridgeActivity : Activity() {
         }
 
         override fun deactivateArcade(reason: ArcadeStopReason) {
-            exclusiveHid.stop()
             gameController.resetTransient()
             arcadeClock.stop()
             cameraSession.stop(reason)
@@ -184,6 +184,7 @@ class NativeBridgeActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        controllerOwnership.onHostResume()
         appliedBrightnessRevision = -1
         applyStoredBrightness()
         bindHttpEndpoint(force = true)
@@ -195,7 +196,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun onPause() {
-        exclusiveHid.stop()
+        controllerOwnership.onHostPause()
         gameController.resetTransient()
         resumed = false
         modeController.onHostPause()
@@ -221,7 +222,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun onDestroy() {
-        exclusiveHid.stop()
+        controllerOwnership.onHostPause()
         modeController.onHostDestroy()
         youtubeContent.destroy()
         handler.removeCallbacks(refresh)
@@ -263,7 +264,6 @@ class NativeBridgeActivity : Activity() {
     private fun performMappedGameAction(mode: ArcadeMode, action: String) {
         when (action) {
             "restart" -> when (mode) {
-                ArcadeMode.Bricks -> arcadeContent.playground.restartGame()
                 ArcadeMode.Math -> arcadeContent.math.restartGame()
                 ArcadeMode.Flak -> arcadeContent.flak.restartGame()
                 ArcadeMode.TrailRide -> arcadeContent.trail.restartGame()

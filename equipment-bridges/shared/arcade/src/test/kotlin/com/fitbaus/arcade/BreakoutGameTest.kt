@@ -184,6 +184,69 @@ class BreakoutGameTest {
     }
 
     @Test
+    fun gameOverCountsDownAndAutomaticallyRestartsWithoutTouchOrTracking() {
+        val g = BreakoutGame(BreakoutConfig(lives = 1))
+        val events = mutableListOf<String>()
+        g.events = events::add
+        g.placeBallForTest(0.05f, g.config.height - 0.01f, 0f, 0.5f, paddle = 0.9f)
+        repeat(40) {
+            if (g.phase != GamePhase.GameOver) g.advance(g.config.stepSeconds, present)
+        }
+        assertEquals(GamePhase.GameOver, g.phase)
+        assertEquals(3f, g.restartIn, 0.01f)
+        assertEquals(0, g.lives)
+        assertEquals("GAME OVER  -  SCORE 0", PlaygroundGeometry.banner(g, InputAvailability.HandLost))
+        g.run(1f, lost)
+        assertEquals(GamePhase.GameOver, g.phase)
+        assertTrue(g.restartIn in 1.9f..2.1f)
+        g.run(1f, lost)
+        assertEquals(GamePhase.GameOver, g.phase)
+        assertTrue(g.restartIn in 0.9f..1.1f)
+        g.run(1.1f, lost)
+        assertEquals(GamePhase.Serving, g.phase)
+        assertEquals(0f, g.restartIn)
+        assertEquals(g.config.lives, g.lives)
+        assertEquals(0, g.score)
+        assertTrue(events.any { it == "auto restart after countdown" })
+        g.run(2f, lost)
+        assertEquals(GamePhase.Serving, g.phase)
+    }
+
+    @Test
+    fun clearedBoardCountsDownAndRestartsWithFullBricks() {
+        val g = BreakoutGame(BreakoutConfig(rows = 1, columns = 1))
+        val x = g.brickLeft(0) + g.config.brickWidth / 2f
+        g.placeBallForTest(x, g.brickTop(0) + g.config.brickHeight + 0.03f, 0f, -0.5f)
+        repeat(60) {
+            if (g.phase != GamePhase.Cleared) g.advance(g.config.stepSeconds, present)
+        }
+        assertEquals(GamePhase.Cleared, g.phase)
+        assertEquals(3f, g.restartIn, 0.01f)
+        assertEquals("CLEARED!  SCORE ${g.score}", PlaygroundGeometry.banner(g, InputAvailability.Present))
+        g.run(3.2f, lost)
+        assertEquals(GamePhase.Serving, g.phase)
+        assertEquals(g.config.rows * g.config.columns, g.bricksLeft)
+        assertEquals(0, g.score)
+        assertEquals(0f, g.restartIn)
+    }
+
+    @Test
+    fun countdownTimeIsClampedAfterLongClockGaps() {
+        val g = BreakoutGame(BreakoutConfig(lives = 1))
+        g.placeBallForTest(0.05f, g.config.height - 0.01f, 0f, 0.5f, paddle = 0.9f)
+        repeat(40) {
+            if (g.phase != GamePhase.GameOver) g.advance(g.config.stepSeconds, present)
+        }
+        assertEquals(GamePhase.GameOver, g.phase)
+        g.update(1_000_000_000L, lost)
+        g.update(60_000_000_000L, lost)
+        assertTrue(g.restartIn > 2.8f)
+        g.resetClock()
+        g.update(120_000_000_000L, lost)
+        assertTrue(g.restartIn > 2.8f)
+    }
+
+    @Test
     fun losingTheHandPausesAndResumesAfterADelay() {
         val g = BreakoutGame()
         g.placeBallForTest(0.5f, 0.3f, 0.2f, -0.3f)

@@ -12,7 +12,7 @@ import java.io.File
 
 class ExclusiveHidTest {
     @Test
-    fun usbClaimPolicyExcludesBikeCameraAndCompositeDevices() {
+    fun usbClaimPolicyExcludesBikeCameraAndMixedClassDevices() {
         val hid = UsbConstants.USB_CLASS_HID
         assertFalse(ExclusiveHidPolicy.permittedDevice(0x213C, 0x0002, listOf(hid)))
         assertFalse(ExclusiveHidPolicy.permittedDevice(0x10C4, 0xEA60, listOf(hid)))
@@ -61,19 +61,49 @@ class ExclusiveHidTest {
     }
 
     @Test
+    fun rawHidBindingsStayWithTheSourceInterfaceAndEndpoint() {
+        val neutral = HidReport(byteArrayOf(0x08, 0x00), 1L, 0, 1)
+        val pressed = HidReport(byteArrayOf(0x06, 0x00), 2L, 0, 1)
+        val anotherInterface = HidReport(byteArrayOf(0x06, 0x00), 3L, 1, 1)
+        val anotherEndpoint = HidReport(byteArrayOf(0x06, 0x00), 4L, 0, 2)
+        val binding = HidBinding.learn(neutral, pressed)!!
+        assertEquals(0, binding.interfaceIndex)
+        assertEquals(1, binding.endpointIndex)
+        assertTrue(binding.matches(pressed))
+        assertFalse(binding.matches(neutral))
+        assertFalse(binding.matches(anotherInterface))
+        assertFalse(binding.matches(anotherEndpoint))
+        assertNull(HidBinding.learn(neutral, anotherInterface))
+        assertNull(HidBinding.learn(neutral, anotherEndpoint))
+        assertEquals(binding, HidBinding.decode(binding.encode()))
+        assertNull(HidBinding.decode("0:15:6:256:1"))
+        assertNull(HidBinding.decode("0:15:6:0:256"))
+        assertNull(HidBinding.decode("0:15:6:0"))
+        assertEquals(HidBinding(0, 15, 6), HidBinding.decode("0:15:6"))
+    }
+
+    @Test
     fun claimLifecycleIsScopedAndDoesNotModifyBikeUsbStack() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/controller/ExclusiveHid.kt").readText()
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val autoClaim = File("src/main/kotlin/com/fitbaus/bikebridge/host/controller/AutoControllerOwnership.kt").readText()
         assertTrue(source.contains("claimInterface(usbInterface, true)"))
         assertTrue(source.contains("reader.initialize(handle, endpoint)"))
         assertTrue(source.contains("handle.requestWait()"))
-        assertTrue(source.contains("oldRequest?.cancel()"))
-        assertTrue(source.contains("oldConnection.releaseInterface(oldInterface)"))
+        assertTrue(source.contains("it.request.cancel()"))
+        assertTrue(source.contains("oldConnection.releaseInterface(it)"))
         assertTrue(source.contains("oldConnection.close()"))
-        assertTrue(source.contains("device.interfaceCount != 1"))
-        assertTrue(activity.contains("exclusiveHid.startFromPreference()"))
+        assertTrue(source.contains("for (i in 0 until device.interfaceCount)"))
+        assertTrue(source.contains("sources.map { it.interfaceIndex }.distinct().size != device.interfaceCount"))
+        assertFalse(source.contains("device.interfaceCount != 1"))
+        assertTrue(autoClaim.contains("manager.requestPermission(device, pending)"))
+        assertTrue(autoClaim.contains("deniedDevices.add(device.deviceName)"))
+        assertTrue(autoClaim.contains("context.registerReceiver(receiver, filter)"))
+        assertTrue(autoClaim.contains("context.unregisterReceiver(receiver)"))
+        assertTrue(autoClaim.contains("hid.stop()"))
+        assertTrue(activity.contains("controllerOwnership.onHostResume()"))
+        assertTrue(activity.contains("controllerOwnership.onHostPause()"))
         assertTrue(activity.contains("override fun deactivateArcade(reason: ArcadeStopReason)"))
-        assertTrue(activity.contains("exclusiveHid.stop()"))
         assertFalse(source.contains("NativeBridgeService"))
         assertFalse(source.contains("requestResistance"))
     }
