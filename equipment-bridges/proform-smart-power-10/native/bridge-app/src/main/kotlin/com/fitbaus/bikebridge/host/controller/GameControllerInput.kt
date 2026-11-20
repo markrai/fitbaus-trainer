@@ -23,7 +23,7 @@ internal object ControllerDevices {
             hasSource(device.sources, InputDevice.SOURCE_JOYSTICK)
         )
 
-    fun visible(): List<InputDevice> = InputDevice.getDeviceIds()
+    fun visible(): List<InputDevice> = InputDevice.getDeviceIds().toList()
         .mapNotNull { InputDevice.getDevice(it) }
         .filter { supportsGames(it) || hasSource(it.sources, InputDevice.SOURCE_MOUSE) }
         .sortedWith(compareByDescending<InputDevice> { supportsGames(it) }.thenBy { it.name })
