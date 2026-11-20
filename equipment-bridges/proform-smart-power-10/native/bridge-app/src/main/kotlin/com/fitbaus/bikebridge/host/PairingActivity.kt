@@ -71,7 +71,11 @@ class PairingActivity : Activity() {
     private lateinit var hidStatus: TextView
     private lateinit var hidReports: TextView
     private val exclusiveHid by lazy { ExclusiveHid(this) }
-    private val controllerOwnership by lazy { AutoControllerOwnership(this, exclusiveHid) }
+    private var rawLearningRequested = false
+    private var rawNeutralPending = false
+    private val controllerOwnership by lazy {
+        AutoControllerOwnership(this, exclusiveHid, canClaim = { rawLearningRequested })
+    }
     private var learnSide: String? = null
     private var learnBaselines: Map<Pair<Int, Int>, HidReport> = emptyMap()
     private var learnSignature: String? = null
@@ -187,7 +191,13 @@ class PairingActivity : Activity() {
         styleTab(webcamTab, tab == SettingsTab.Webcams)
         styleTab(controllerTab, tab == SettingsTab.Controllers)
         uiHandler.removeCallbacks(controllerPoll)
-        if (tab != SettingsTab.Controllers) awaitingGameButton = null
+        if (tab != SettingsTab.Controllers) {
+            awaitingGameButton = null
+            learnSide = null
+            rawNeutralPending = false
+            rawLearningRequested = false
+            controllerOwnership.refreshNow()
+        }
         if (tab == SettingsTab.Webcams) {
             refreshWebcams(startPreview = true)
         } else {
@@ -232,9 +242,20 @@ class PairingActivity : Activity() {
     private fun controllerPrefs() = getSharedPreferences(ControllerDevices.PREFS, MODE_PRIVATE)
 
     private fun beginHidLearn(side: String) {
+        learnSide = side
+        learnBaselines = emptyMap()
+        learnSignature = null
+        learnStable = 0
+        rawNeutralPending = true
+        rawLearningRequested = true
+        controllerOwnership.refreshNow()
+        hidStatus.text = "Preparing raw HID learning; keep all controls neutral until ready"
+    }
+
+    private fun prepareRawNeutral() {
         val baselines = exclusiveHid.snapshots()
         if (!exclusiveHid.isActive() || baselines.isEmpty()) {
-            hidStatus.text = "Waiting for an automatically claimed controller and neutral HID reports"
+            hidStatus.text = "Waiting for USB access and neutral HID reports; keep controls released"
             return
         }
         val candidate = exclusiveHid.activeCandidate() ?: return
@@ -247,10 +268,8 @@ class PairingActivity : Activity() {
                 .apply()
         }
         learnBaselines = baselines
-        learnSide = side
-        learnSignature = null
-        learnStable = 0
-        hidStatus.text = "Press and HOLD " + side + " for one second; do not move other controls"
+        rawNeutralPending = false
+        hidStatus.text = "Press and HOLD " + learnSide + " steadily; avoid other controls"
     }
 
     private fun refreshExclusiveHid() {
@@ -262,6 +281,8 @@ class PairingActivity : Activity() {
         val right = HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_RIGHT, null))
         if (learnSide == null) {
             hidStatus.text = controllerOwnership.status()
+        } else if (rawNeutralPending) {
+            prepareRawNeutral()
         } else if (raw != null) {
             val baseline = learnBaselines[raw.interfaceIndex to raw.endpointIndex]
             val binding = if (baseline == null || baseline.sequence == raw.sequence) null else HidBinding.learn(baseline, raw)
