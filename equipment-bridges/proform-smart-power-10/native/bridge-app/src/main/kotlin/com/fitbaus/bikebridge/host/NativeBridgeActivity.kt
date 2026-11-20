@@ -33,6 +33,7 @@ import com.fitbaus.arcade.ArcadeCameraInfo
 import com.fitbaus.arcade.ArcadeCameraSession
 import com.fitbaus.arcade.ArcadeClock
 import com.fitbaus.arcade.ArcadeStatusResolver
+import com.fitbaus.arcade.BricksInputSource
 import com.fitbaus.arcade.ArcadeStopReason
 import com.fitbaus.arcade.ArcadeTrackerMode
 import com.fitbaus.arcade.ArcadeTrackerSettings
@@ -409,7 +410,10 @@ class NativeBridgeActivity : Activity() {
             return
         }
         gameController.refresh()
-        val controllerPosition = if (handInput.isTouching()) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)
+        arcadeContent.playground.controllerAvailable = gameController.hasController() || exclusiveHid.isActive()
+        val controllerPosition = if (handInput.isTouching() ||
+            arcadeContent.playground.inputSource != BricksInputSource.Controller
+        ) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)
         val position = controllerPosition ?: handInput.latest(now)
         val status = if (controllerPosition != null) com.fitbaus.arcade.ArcadeStatus.ControllerReady else ArcadeStatusResolver.resolve(
             cameraSession.state(),
