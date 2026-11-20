@@ -181,6 +181,7 @@ internal class ExclusiveHid(
         return true
     }
 
+    @Suppress("DEPRECATION")
     private fun readLoop(handle: UsbDeviceConnection, reader: UsbRequest, packetSize: Int, token: Long) {
         val buffer = ByteBuffer.allocateDirect(packetSize)
         try {
