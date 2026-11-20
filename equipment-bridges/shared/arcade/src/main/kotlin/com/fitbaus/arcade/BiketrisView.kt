@@ -82,6 +82,11 @@ public class BiketrisView(context: Context) : View(context) {
 
     private var touchX = Float.NaN
     private var dragging = false
+    private var controllerTouchX: Float = Float.NaN
+    public fun setControllerSteering(x: Float?) {
+        controllerTouchX = x?.coerceIn(0f, 1f) ?: Float.NaN
+        if (!controllerTouchX.isNaN()) session.noteTouchIntent()
+    }
     private var pressedMode: CadenceMode? = null
     private var restartPressed = false
     private var lastRenderNanos = Long.MIN_VALUE
@@ -170,7 +175,7 @@ public class BiketrisView(context: Context) : View(context) {
         diagnosticsText = if (failure != null && camera != CameraState.Ready) failure else diagnostics
         val start = System.nanoTime()
         val wave = gestures
-        session.update(position, camera, if (dragging) touchX else Float.NaN, wave?.latest(), now, connected, initialized, rpm, rpmCurrent, rpmObservedAt)
+        session.update(position, camera, if (dragging) touchX else controllerTouchX, wave?.latest(), now, connected, initialized, rpm, rpmCurrent, rpmObservedAt)
         if (wave != null) waveRate.update(wave.observations, now)
         updateWindow.record((System.nanoTime() - start) / 1_000_000f)
         invalidate()
@@ -179,6 +184,7 @@ public class BiketrisView(context: Context) : View(context) {
     /** Host pause or game switch: stop the clock and forget transient input so nothing stale is replayed. */
     public fun pause() {
         session.pause()
+        controllerTouchX = Float.NaN
         dragging = false
         touchX = Float.NaN
         pressedMode = null
