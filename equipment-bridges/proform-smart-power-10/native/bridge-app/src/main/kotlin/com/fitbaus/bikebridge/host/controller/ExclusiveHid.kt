@@ -128,6 +128,22 @@ internal data class HidBinding(
     }
 }
 
+internal object BricksRawHidReadiness {
+    fun canDecode(
+        candidate: HidCandidate?,
+        boundDevice: String?,
+        left: HidBinding?,
+        right: HidBinding?,
+        endpoints: Set<Pair<Int, Int>>,
+    ): Boolean {
+        if (candidate == null || boundDevice != candidate.key) return false
+        return listOf(left, right).all { binding ->
+            binding != null && binding.interfaceIndex >= 0 &&
+                (binding.interfaceIndex to binding.endpointIndex) in endpoints
+        }
+    }
+}
+
 internal class ExclusiveHid(
     context: Context,
     private val prefs: SharedPreferences = context.getSharedPreferences(ControllerDevices.PREFS, Context.MODE_PRIVATE),
@@ -176,14 +192,15 @@ internal class ExclusiveHid(
 
     fun hasCalibratedBricksInput(): Boolean {
         val candidate = selected() ?: return false
-        if (prefs.getString(ExclusiveHidPolicy.PREF_KEY, null) != candidate.key) return false
         val endpoints = candidates().filter { it.deviceName == candidate.deviceName }
             .map { it.interfaceIndex to it.endpointIndex }.toSet()
-        val left = HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_LEFT, null))
-        val right = HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_RIGHT, null))
-        return listOf(left, right).all {
-            it != null && it.interfaceIndex >= 0 && (it.interfaceIndex to it.endpointIndex) in endpoints
-        }
+        return BricksRawHidReadiness.canDecode(
+            candidate,
+            prefs.getString(ExclusiveHidPolicy.PREF_KEY, null),
+            HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_LEFT, null)),
+            HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_RIGHT, null)),
+            endpoints,
+        )
     }
 
     fun startFromPreference(): Boolean = start()
