@@ -68,6 +68,50 @@ internal object ControllerSteering {
     }
 }
 
+internal object ControllerGameplayKeys {
+    fun trapsSettingsNavigation(keyCode: Int): Boolean = when (keyCode) {
+        KeyEvent.KEYCODE_BACK,
+        KeyEvent.KEYCODE_ESCAPE,
+        KeyEvent.KEYCODE_MENU,
+        KeyEvent.KEYCODE_APP_SWITCH,
+        KeyEvent.KEYCODE_SEARCH,
+        KeyEvent.KEYCODE_BUTTON_MODE -> true
+        else -> false
+    }
+
+    fun consumes(keyCode: Int): Boolean = when (keyCode) {
+        KeyEvent.KEYCODE_DPAD_LEFT,
+        KeyEvent.KEYCODE_DPAD_RIGHT,
+        KeyEvent.KEYCODE_DPAD_UP,
+        KeyEvent.KEYCODE_DPAD_DOWN,
+        KeyEvent.KEYCODE_DPAD_CENTER,
+        KeyEvent.KEYCODE_BACK,
+        KeyEvent.KEYCODE_ESCAPE,
+        KeyEvent.KEYCODE_MENU,
+        KeyEvent.KEYCODE_APP_SWITCH,
+        KeyEvent.KEYCODE_SEARCH,
+        KeyEvent.KEYCODE_ENTER,
+        KeyEvent.KEYCODE_SPACE,
+        KeyEvent.KEYCODE_BUTTON_A,
+        KeyEvent.KEYCODE_BUTTON_B,
+        KeyEvent.KEYCODE_BUTTON_X,
+        KeyEvent.KEYCODE_BUTTON_Y,
+        KeyEvent.KEYCODE_BUTTON_C,
+        KeyEvent.KEYCODE_BUTTON_Z,
+        KeyEvent.KEYCODE_BUTTON_L1,
+        KeyEvent.KEYCODE_BUTTON_R1,
+        KeyEvent.KEYCODE_BUTTON_L2,
+        KeyEvent.KEYCODE_BUTTON_R2,
+        KeyEvent.KEYCODE_BUTTON_START,
+        KeyEvent.KEYCODE_BUTTON_SELECT,
+        KeyEvent.KEYCODE_BUTTON_MODE,
+        KeyEvent.KEYCODE_BUTTON_THUMBL,
+        KeyEvent.KEYCODE_BUTTON_THUMBR,
+        in KeyEvent.KEYCODE_BUTTON_1..KeyEvent.KEYCODE_BUTTON_16 -> true
+        else -> false
+    }
+}
+
 internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var activeDeviceId = -1
     private var positionX = 0.5f
@@ -94,15 +138,18 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         previousNanos = -1L
     }
 
-    fun handleKey(event: KeyEvent): Boolean {
+    fun handleKey(event: KeyEvent, steerBricks: Boolean): Boolean {
         if (event.deviceId != activeDeviceId || activeDeviceId < 0) return false
         val down = event.action == KeyEvent.ACTION_DOWN
         if (!down && event.action != KeyEvent.ACTION_UP) return false
-        return when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT -> { leftDown = down; true }
-            KeyEvent.KEYCODE_DPAD_RIGHT -> { rightDown = down; true }
-            else -> false
+        if (!ControllerGameplayKeys.consumes(event.keyCode)) return false
+        if (steerBricks) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> leftDown = down
+                KeyEvent.KEYCODE_DPAD_RIGHT -> rightDown = down
+            }
         }
+        return true
     }
 
     fun handleMotion(event: MotionEvent): Boolean {

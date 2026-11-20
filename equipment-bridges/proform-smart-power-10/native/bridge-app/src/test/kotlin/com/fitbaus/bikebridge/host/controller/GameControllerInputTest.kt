@@ -39,6 +39,67 @@ class GameControllerInputTest {
     }
 
     @Test
+    fun controllerGameplayConsumesDeliveredNavigationAndFaceButtons() {
+        val intercepted = listOf(
+            android.view.KeyEvent.KEYCODE_BACK,
+            android.view.KeyEvent.KEYCODE_ESCAPE,
+            android.view.KeyEvent.KEYCODE_MENU,
+            android.view.KeyEvent.KEYCODE_APP_SWITCH,
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+            android.view.KeyEvent.KEYCODE_DPAD_UP,
+            android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+            android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+            android.view.KeyEvent.KEYCODE_BUTTON_A,
+            android.view.KeyEvent.KEYCODE_BUTTON_B,
+            android.view.KeyEvent.KEYCODE_BUTTON_X,
+            android.view.KeyEvent.KEYCODE_BUTTON_Y,
+            android.view.KeyEvent.KEYCODE_BUTTON_START,
+            android.view.KeyEvent.KEYCODE_BUTTON_SELECT,
+            android.view.KeyEvent.KEYCODE_BUTTON_MODE,
+            android.view.KeyEvent.KEYCODE_BUTTON_1,
+            android.view.KeyEvent.KEYCODE_BUTTON_16,
+        )
+        for (key in intercepted) assertTrue(ControllerGameplayKeys.consumes(key), "gameplay key: $key")
+    }
+
+    @Test
+    fun controllerDiagnosticsTrapsBackButKeepsDpadNavigation() {
+        val trapped = listOf(
+            android.view.KeyEvent.KEYCODE_BACK,
+            android.view.KeyEvent.KEYCODE_ESCAPE,
+            android.view.KeyEvent.KEYCODE_MENU,
+            android.view.KeyEvent.KEYCODE_APP_SWITCH,
+            android.view.KeyEvent.KEYCODE_BUTTON_MODE,
+        )
+        for (key in trapped) assertTrue(ControllerGameplayKeys.trapsSettingsNavigation(key))
+        val navigable = listOf(
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+            android.view.KeyEvent.KEYCODE_DPAD_UP,
+            android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+            android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+            android.view.KeyEvent.KEYCODE_ENTER,
+            android.view.KeyEvent.KEYCODE_HOME,
+            android.view.KeyEvent.KEYCODE_VOLUME_UP,
+        )
+        for (key in navigable) assertFalse(ControllerGameplayKeys.trapsSettingsNavigation(key))
+    }
+
+    @Test
+    fun systemKeysAndUnrecognizedInputAreNotClaimed() {
+        val excluded = listOf(
+            android.view.KeyEvent.KEYCODE_HOME,
+            android.view.KeyEvent.KEYCODE_VOLUME_UP,
+            android.view.KeyEvent.KEYCODE_VOLUME_DOWN,
+            android.view.KeyEvent.KEYCODE_POWER,
+            android.view.KeyEvent.KEYCODE_UNKNOWN,
+            android.view.KeyEvent.KEYCODE_A,
+        )
+        for (key in excluded) assertFalse(ControllerGameplayKeys.consumes(key), "reserved key: $key")
+    }
+
+    @Test
     fun sourceBitmaskRecognizesCombinedDpadAndGamepadSources() {
         assertTrue(ControllerDevices.hasSource(0x00000201, 0x00000201))
         assertTrue(ControllerDevices.hasSource(0x00000401 or 0x00000201, 0x00000201))

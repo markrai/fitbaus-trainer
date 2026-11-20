@@ -107,6 +107,23 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Opt-in exclusive USB HID experiment for bike gamepads.** The Controllers
+  settings tab can request USB Host permission, claim a single safe HID
+  interface with kernel-driver detachment if supported, display raw interrupt
+  reports, and learn Bricks left/right buttons. Approved sessions reopen only
+  during games and release on exit/pause; ambiguous/composite, bike and webcam
+  devices are excluded. Android Home capture remains unverified until physical
+  console testing, and released interfaces may require USB reconnection.
+
+- **Controller Back/menu keys leaving FitBaus during games.** In active games,
+  recognized buttons delivered from the selected controller are consumed by
+  FitBaus before Android's default Activity navigation handler. This includes
+  D-pad, face/shoulder buttons, Start/Select, Back, Escape and Menu; existing
+  Bricks steering remains the only mapped gameplay action. Dashboard,
+  YouTube, settings, other input devices and system-owned Home handling
+  are unchanged. No system-wide key interception or kiosk privileges.
+
+
 - **YouTube tab continuity on the bike console.** Switching to Dashboard
   or a game while a video is playing now keeps playback in a small in-app
   floating player at the upper right. Tapping the video or its header

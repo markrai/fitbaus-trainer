@@ -45,6 +45,7 @@ import com.fitbaus.bikebridge.host.arcade.ArcadeModeController
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
 import com.fitbaus.bikebridge.host.controller.ControllerDevices
 import com.fitbaus.bikebridge.host.controller.GameControllerInput
+import com.fitbaus.bikebridge.host.controller.ExclusiveHid
 import com.fitbaus.bikebridge.host.uvc.UvcProcess
 import com.fitbaus.bikebridge.host.youtube.BrightnessControl
 import com.fitbaus.bikebridge.host.youtube.YouTubeContent
@@ -80,6 +81,7 @@ class NativeBridgeActivity : Activity() {
     private var pendingYouTubeImport: String? = null
     private val modeTabs = HashMap<ArcadeMode, TextView>()
     private val handInput = HandPositionInput()
+    private val exclusiveHid by lazy { ExclusiveHid(this) }
     private val gameController by lazy {
         GameControllerInput(getSharedPreferences(ControllerDevices.PREFS, Context.MODE_PRIVATE))
     }
@@ -111,6 +113,7 @@ class NativeBridgeActivity : Activity() {
             bikeMotion.reset()
             gameController.refresh()
             gameController.resetTransient()
+            exclusiveHid.startFromPreference()
             cameraSession.updateSettings(trackerSettingsFor(game))
             cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)
             cameraSession.start()
@@ -118,6 +121,7 @@ class NativeBridgeActivity : Activity() {
         }
 
         override fun deactivateArcade(reason: ArcadeStopReason) {
+            exclusiveHid.stop()
             gameController.resetTransient()
             arcadeClock.stop()
             cameraSession.stop(reason)
@@ -186,6 +190,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun onPause() {
+        exclusiveHid.stop()
         gameController.resetTransient()
         resumed = false
         modeController.onHostPause()
@@ -211,6 +216,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun onDestroy() {
+        exclusiveHid.stop()
         modeController.onHostDestroy()
         youtubeContent.destroy()
         handler.removeCallbacks(refresh)
@@ -219,7 +225,15 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (modeController.mode == ArcadeMode.Bricks && modeController.isActive && gameController.handleKey(event)) return true
+        if (modeController.isActive && modeController.mode.isGame) {
+            if (exclusiveHid.isActive() && exclusiveHid.belongsTo(event.device) &&
+                com.fitbaus.bikebridge.host.controller.ControllerGameplayKeys.consumes(event.keyCode)
+            ) {
+                exclusiveHid.noteAndroidEvent()
+                return true
+            }
+            if (gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks)) return true
+        }
         return super.dispatchKeyEvent(event)
     }
 
@@ -349,7 +363,7 @@ class NativeBridgeActivity : Activity() {
             return
         }
         gameController.refresh()
-        val controllerPosition = if (handInput.isTouching()) null else gameController.sample(now)
+        val controllerPosition = if (handInput.isTouching()) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)
         val position = controllerPosition ?: handInput.latest(now)
         val status = if (controllerPosition != null) com.fitbaus.arcade.ArcadeStatus.ControllerReady else ArcadeStatusResolver.resolve(
             cameraSession.state(),

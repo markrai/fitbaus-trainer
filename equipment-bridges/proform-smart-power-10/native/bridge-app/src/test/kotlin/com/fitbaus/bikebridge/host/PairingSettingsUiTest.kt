@@ -45,12 +45,33 @@ class PairingSettingsUiTest {
         assertTrue(source.contains("override fun dispatchKeyEvent(event: KeyEvent)"))
         assertTrue(source.contains("override fun dispatchGenericMotionEvent(event: MotionEvent)"))
         assertTrue(source.contains("return super.dispatchKeyEvent(event)"))
+        assertTrue(source.contains("ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)"))
+        assertTrue(source.contains("if (ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)) return true"))
         assertTrue(source.contains("return super.dispatchGenericMotionEvent(event)"))
         assertTrue(source.contains("uiHandler.removeCallbacks(controllerPoll)"))
         assertTrue(activity.contains("modeController.mode == ArcadeMode.Bricks"))
-        assertTrue(activity.contains("gameController.handleKey(event)"))
+        assertTrue(activity.contains("gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks)"))
+        assertTrue(activity.contains("modeController.isActive && modeController.mode.isGame"))
         assertTrue(activity.contains("gameController.handleMotion(event)"))
-        assertTrue(activity.contains("if (handInput.isTouching()) null else gameController.sample(now)"))
+        assertTrue(activity.contains("if (handInput.isTouching()) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)"))
+    }
+
+    @Test
+    fun exclusiveHidRequiresExplicitPermissionAndHasAReleasePath() {
+        val settings = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(settings.contains("private fun chooseHidCandidate()"))
+        assertTrue(settings.contains("private fun requestExclusiveHid()"))
+        assertTrue(settings.contains("private fun releaseExclusiveHid()"))
+        assertTrue(settings.contains("manager.requestPermission(device, pi)"))
+        assertTrue(settings.contains("manager.hasPermission(device)"))
+        assertTrue(settings.contains("device.deviceName != pendingHidName"))
+        assertTrue(settings.contains("if (tab != SettingsTab.Controllers) exclusiveHid.stop()"))
+        assertTrue(settings.contains("exclusiveHid.stop()"))
+        assertTrue(settings.contains("beginHidLearn(\"LEFT\")"))
+        assertTrue(settings.contains("beginHidLearn(\"RIGHT\")"))
+        assertTrue(activity.contains("exclusiveHid.sampleBricks(now)"))
+        assertTrue(activity.contains("exclusiveHid.noteAndroidEvent()"))
     }
 
     @Test
