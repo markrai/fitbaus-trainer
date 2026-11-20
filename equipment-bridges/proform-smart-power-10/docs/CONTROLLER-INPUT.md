@@ -34,9 +34,27 @@ selected controller takes priority over face tracking while Bricks is running;
 touching the screen temporarily overrides it. All other games retain their
 camera/cadence controls, and all bike command/USB control paths are unchanged.
 
-The controller's directional keys are intercepted only when Bricks is active,
-not on the Dashboard, YouTube, or the settings screen. Key-up and mode change
-clear held inputs to prevent phantom motion.
+While any arcade game is active, the selected controller's delivered
+D-pad, face/shoulder, Start/Select, Back, Escape, Menu, and common generic
+button events are consumed before Android's default activity key handling.
+Only Bricks currently assigns a gameplay action (left/right steering); the
+other buttons are reserved for later game-specific mappings. This prevents
+a gamepad button mapped to Android Back from accidentally closing FitBaus,
+provided Android actually delivers that event to the app. Press and release
+events are both consumed. Unselected devices, physical Android navigation
+keys, Dashboard, YouTube, and the Settings screen keep normal behavior.
+Key-up, mode change, and host pause clear held steering to prevent phantom
+motion.
+
+**System-reserved controller buttons are different.** Android normally
+handles Home, app switching and some vendor-specific system shortcuts
+*before* app key dispatch. FitBaus cannot guarantee intercepting those from
+an ordinary Activity. If a button produces no input event in the Controllers
+diagnostics but opens Android Home or another app, capturing more keycodes
+inside FitBaus will not fix it. Potential system-level solutions include a
+properly provisioned device-owner lock-task/kiosk configuration or carefully
+verified OS key-layout remapping on a rooted console. Neither is enabled by
+this PR; those changes require a separate recovery and access plan.
 
 No extra USB Host permission is requested for Android-input events, no direct
 USB endpoints are opened, and no controller-specific vendor protocol is used.
@@ -50,9 +68,15 @@ USB endpoints are opened, and no controller-specific vendor protocol is used.
 3. If analog controls are exposed, verify joystick center is still and full
    stick travel moves the paddle in both directions.
 4. Unplug during play, reconnect, and confirm old pressed states do not persist.
-5. Confirm settings focus navigation, camera-based games, USB resistance control,
-   and external webcam functionality still work.
-6. Test multiple connected gamepads; auto-select should not guess between them.
+5. With each game selected, press the controller button that previously
+   acted as Back; verify FitBaus remains foreground and the game does not close.
+6. Confirm a touchscreen/system Back action, settings focus navigation,
+   camera-based games, USB resistance control, and external webcam functionality
+   still work.
+7. Test multiple connected gamepads; auto-select should not guess between them.
+8. If a controller's Home/shortcut button still leaves FitBaus, test its
+   input code in Controllers diagnostics. Document it as system-reserved if
+   the Activity receives no event; do not claim in-app capture.
 
 Future game-specific action mappings (firing, jumps, gestures, pause/restart) and
 multi-controller gameplay should follow real input-capability observations
