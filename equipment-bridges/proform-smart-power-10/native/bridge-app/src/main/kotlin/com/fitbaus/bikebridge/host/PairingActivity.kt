@@ -254,7 +254,8 @@ class PairingActivity : Activity() {
         if (learnSide == null) {
             hidStatus.text = controllerOwnership.status()
         } else if (raw != null && raw.sequence != learnNeutral?.sequence) {
-            val binding = HidBinding.learn(learnNeutral?.bytes ?: byteArrayOf(), raw.bytes)
+            val baseline = learnNeutral
+            val binding = if (baseline == null) null else HidBinding.learn(baseline, raw)
             if (binding != null) {
                 if (binding.encode() == learnSignature) learnStable++ else {
                     learnSignature = binding.encode()
@@ -269,10 +270,10 @@ class PairingActivity : Activity() {
                 }
             }
         }
-        val leftText = if (left == null) "not learned" else if (raw != null && left.matches(raw.bytes)) "PRESSED" else "released"
-        val rightText = if (right == null) "not learned" else if (raw != null && right.matches(raw.bytes)) "PRESSED" else "released"
+        val leftText = if (left == null) "not learned" else if (raw != null && left.matches(raw)) "PRESSED" else "released"
+        val rightText = if (right == null) "not learned" else if (raw != null && right.matches(raw)) "PRESSED" else "released"
         hidReports.text = "USB HID: " + (selected?.label ?: "none selected") +
-            "\n" + (raw?.let { "Packet #" + it.sequence + ": " + it.hex() } ?: "No raw reports received") +
+            "\n" + (raw?.let { "IF " + it.interfaceIndex + " EP " + it.endpointIndex + " packet #" + it.sequence + ": " + it.hex() } ?: "No raw reports received") +
             "\nLeft: " + leftText + " | Right: " + rightText
     }
 
