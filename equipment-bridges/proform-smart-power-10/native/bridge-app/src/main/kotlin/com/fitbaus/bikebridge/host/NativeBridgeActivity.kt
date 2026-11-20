@@ -225,21 +225,29 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (modeController.isActive && modeController.mode.isGame) {
-            if (exclusiveHid.isActive() && exclusiveHid.belongsTo(event.device) &&
-                com.fitbaus.bikebridge.host.controller.ControllerGameplayKeys.consumes(event.keyCode)
-            ) {
-                exclusiveHid.noteAndroidEvent()
-                return true
-            }
-            if (gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks)) return true
+        if (com.fitbaus.bikebridge.host.controller.ControllerDevices.belongsToController(event.device)) {
+            if (exclusiveHid.isActive() && exclusiveHid.belongsTo(event.device)) exclusiveHid.noteAndroidEvent()
+            gameController.refresh()
+            gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks && modeController.isActive)
+            return true
         }
         return super.dispatchKeyEvent(event)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
-        if (modeController.mode == ArcadeMode.Bricks && modeController.isActive && gameController.handleMotion(event)) return true
+        if (com.fitbaus.bikebridge.host.controller.ControllerDevices.belongsToController(event.device)) {
+            gameController.refresh()
+            if (modeController.mode == ArcadeMode.Bricks && modeController.isActive) gameController.handleMotion(event)
+            return true
+        }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.isFromSource(android.view.InputDevice.SOURCE_MOUSE) &&
+            com.fitbaus.bikebridge.host.controller.ControllerDevices.belongsToController(event.device)
+        ) return true
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
