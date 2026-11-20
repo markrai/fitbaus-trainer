@@ -59,8 +59,63 @@ properly provisioned device-owner lock-task/kiosk configuration or carefully
 verified OS key-layout remapping on a rooted console. Neither is enabled by
 this PR; those changes require a separate recovery and access plan.
 
-No extra USB Host permission is requested for Android-input events, no direct
-USB endpoints are opened, and no controller-specific vendor protocol is used.
+The regular Android-input route requires no extra USB Host permission and
+still works when exclusive HID mode is disabled.
+
+## Optional exclusive USB HID mode (experimental)
+
+This is an opt-in, device-specific alternative to Android key dispatch. In
+**Settings → Controllers**, choose **Choose USB HID**, then **Claim input**.
+The user explicitly approves Android's device-level USB Host permission if
+needed. FitBaus calls `UsbDeviceConnection.claimInterface(interface, true)`
+to request exclusive control of that HID interface, with kernel-driver
+disconnection if Android supports it. It then reads the interrupt-IN reports
+on a dedicated thread using `UsbRequest` and displays raw hex bytes and
+packet numbers. It does **not** use `InputDevice` key events to decode the
+raw reports.
+
+The candidate policy is deliberately conservative:
+
+- Only a single-interface, non-boot USB HID device with an interrupt-IN
+  endpoint (at most 256 bytes) is eligible. Composite USB devices, UVC
+  cameras, known bike-controller VID 213C and CP210x 10C4:EA60 are excluded.
+- Identical VID/PID/interface identities are ambiguous; auto-selection
+  refuses them rather than claim the wrong device.
+- No USB HID interface is claimed during app installation/startup, and
+  nothing is requested without a Settings user action.
+- A successful claim is **not** proof that Android stopped receiving all
+  buttons, or that every button is encoded in that interface. If Android
+  still delivers a controller key while the raw interface is claimed,
+  FitBaus displays a warning. Verify actual Home/Back behavior on the
+  physical console.
+
+For Bricks, keep all controls neutral until a raw report appears, then tap
+**Learn LEFT** and hold left for about one second. Repeat for **Learn RIGHT**.
+Learning succeeds only when one report byte changes consistently; the
+decoder uses a changed-bit mask for digital buttons and full low-nibble
+matching for neutral-centered HID hats. If your gamepad uses multi-byte or
+vendor-specific reports, learning will refuse or may be insufficient.
+Compare the on-screen `PRESSED` flags against the physical buttons before
+relying on the mapping. Both the mappings and the explicit enable setting
+are stored locally. Returning to a game attempts to reclaim the same
+approved interface, with no new USB dialog if Android permission is still
+valid; a failed or unavailable claim falls back to the normal Android
+controller input path. If raw HID is active without learned mappings,
+Bricks retains its camera/touch input rather than guessing the report
+format.
+
+**Release** stops reading, cancels the pending request, releases the HID
+interface and closes the connection. Switching settings tabs, closing
+Settings, leaving a game, pausing the app, or losing the device also
+releases the session. The touchscreen remains available for recovery.
+Some Android kernels may not automatically reattach the original HID
+driver on release: unplug and reconnect the controller if Android D-pad
+navigation does not return. Never experiment without touchscreen access.
+
+Exclusive mode does not change system key policies or require root, HID
+report writes, firmware modifications, kiosk mode, or bike USB control.
+No claim of universal controller support is made until on-device USB
+descriptor, raw report and system-dispatch checks pass.
 
 ## Acceptance on a physical bike
 
@@ -79,9 +134,17 @@ USB endpoints are opened, and no controller-specific vendor protocol is used.
 7. Test multiple connected gamepads; auto-select should not guess between them.
 8. In Controllers diagnostics, press the controller's formerly dangerous
    Back button. Its keycode should appear without closing the settings tab.
-9. If a controller's Home/shortcut button still leaves FitBaus, test its
-   input code in Controllers diagnostics. Document it as system-reserved if
-   the Activity receives no event; do not claim in-app capture.
+9. In exclusive mode, verify the intended USB HID interface is listed,
+   permission is explicitly granted, raw reports actually arrive, and no
+   system Back/Home action escapes during a representative button test.
+10. Learn raw LEFT/RIGHT, observe both PRESSED flags separately, then verify
+    Bricks steering and touch override.
+11. Use Release, game exit, backgrounding and physical disconnect to verify
+    the reader and interface are freed. Reconnect USB if Android does not
+    reattach the original HID driver automatically.
+12. If a controller's Home/shortcut button still leaves FitBaus despite a
+    successful raw claim, document the result and stop claiming complete
+    exclusivity: other interfaces or system-level control may be involved.
 
 Future game-specific action mappings (firing, jumps, gestures, pause/restart) and
 multi-controller gameplay should follow real input-capability observations
