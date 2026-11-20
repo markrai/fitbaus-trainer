@@ -96,6 +96,11 @@ internal class AutoControllerOwnership(
 
     private fun reconcile() {
         if (!running) return
+        if (hid.disabledByUser()) {
+            hid.stop()
+            statusText = "Controller input disabled in settings"
+            return
+        }
         val names = manager.deviceList.keys
         deniedDevices.retainAll(names)
         requestedDevices.retainAll(names)
