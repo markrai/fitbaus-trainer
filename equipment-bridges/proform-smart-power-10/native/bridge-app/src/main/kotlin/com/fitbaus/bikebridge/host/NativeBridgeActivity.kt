@@ -349,7 +349,7 @@ class NativeBridgeActivity : Activity() {
             return
         }
         gameController.refresh()
-        val controllerPosition = gameController.sample(now)
+        val controllerPosition = if (handInput.isTouching()) null else gameController.sample(now)
         val position = controllerPosition ?: handInput.latest(now)
         val status = if (controllerPosition != null) com.fitbaus.arcade.ArcadeStatus.ControllerReady else ArcadeStatusResolver.resolve(
             cameraSession.state(),
