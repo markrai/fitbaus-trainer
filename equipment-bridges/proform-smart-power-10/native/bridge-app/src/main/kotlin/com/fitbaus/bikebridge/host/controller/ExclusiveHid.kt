@@ -76,18 +76,42 @@ internal data class HidReport(
     fun hex(): String = bytes.take(64).joinToString(" ") { "%02X".format(it.toInt() and 255) }
 }
 
-internal data class HidBinding(val index: Int, val mask: Int, val pressed: Int) {
+internal data class HidBinding(
+    val index: Int,
+    val mask: Int,
+    val pressed: Int,
+    val interfaceIndex: Int = -1,
+    val endpointIndex: Int = -1,
+) {
     fun matches(report: ByteArray): Boolean = index in report.indices && (report[index].toInt() and mask) == pressed
-    fun encode(): String = "$index:$mask:$pressed"
+
+    fun matches(report: HidReport): Boolean =
+        (interfaceIndex < 0 || (interfaceIndex == report.interfaceIndex && endpointIndex == report.endpointIndex)) &&
+            matches(report.bytes)
+
+    fun encode(): String = if (interfaceIndex < 0) "$index:$mask:$pressed"
+        else "$index:$mask:$pressed:$interfaceIndex:$endpointIndex"
 
     companion object {
         fun decode(encoded: String?): HidBinding? {
             val parts = encoded?.split(":") ?: return null
-            if (parts.size != 3) return null
+            if (parts.size != 3 && parts.size != 5) return null
             val i = parts[0].toIntOrNull() ?: return null
             val m = parts[1].toIntOrNull() ?: return null
             val p = parts[2].toIntOrNull() ?: return null
-            return if (i in 0..255 && m in 1..255 && p in 0..255 && p and m == p) HidBinding(i, m, p) else null
+            val iface = if (parts.size == 5) parts[3].toIntOrNull() ?: return null else -1
+            val endpoint = if (parts.size == 5) parts[4].toIntOrNull() ?: return null else -1
+            return if (i in 0..255 && m in 1..255 && p in 0..255 && p and m == p &&
+                (iface == -1 && endpoint == -1 || iface in 0..255 && endpoint in 0..255)
+            ) HidBinding(i, m, p, iface, endpoint) else null
+        }
+
+        fun learn(neutral: HidReport, pressed: HidReport): HidBinding? {
+            if (neutral.interfaceIndex != pressed.interfaceIndex || neutral.endpointIndex != pressed.endpointIndex) return null
+            return learn(neutral.bytes, pressed.bytes)?.copy(
+                interfaceIndex = neutral.interfaceIndex,
+                endpointIndex = neutral.endpointIndex,
+            )
         }
 
         fun learn(neutral: ByteArray, pressed: ByteArray): HidBinding? {
@@ -111,6 +135,7 @@ internal class ExclusiveHid(
 ) {
     private val lock = Any()
     private val report = AtomicReference<HidReport?>(null)
+    private val reportByEndpoint = HashMap<Pair<Int, Int>, HidReport>()
     private val counter = AtomicLong(0L)
     private var connection: UsbDeviceConnection? = null
     private var claimedInterfaces: List<UsbInterface> = emptyList()
@@ -220,6 +245,7 @@ internal class ExclusiveHid(
         generation++
         val token = generation
         report.set(null)
+        reportByEndpoint.clear()
         androidLeak = false
         stateText = "Claimed ${interfaces.size} HID interfaces; awaiting reports"
         Thread({ readLoop(handle, opened, token) }, "FitbausHid").apply { isDaemon = true; start() }
@@ -243,7 +269,9 @@ internal class ExclusiveHid(
                     reader.buffer.get(bytes)
                     synchronized(lock) {
                         if (token == generation && connection === handle) {
-                            report.set(HidReport(bytes, counter.incrementAndGet(), reader.candidate.interfaceIndex, reader.candidate.endpointIndex))
+                            val nextReport = HidReport(bytes, counter.incrementAndGet(), reader.candidate.interfaceIndex, reader.candidate.endpointIndex)
+                            report.set(nextReport)
+                            reportByEndpoint[nextReport.interfaceIndex to nextReport.endpointIndex] = nextReport
                             if (!androidLeak) stateText = "Reading USB HID reports from ${claimedInterfaces.size} claimed interfaces"
                         }
                     }
@@ -273,6 +301,7 @@ internal class ExclusiveHid(
         claimedInterfaces = emptyList()
         active = null
         report.set(null)
+        reportByEndpoint.clear()
         lastTick = -1L
         stateText = reason
         androidLeak = false
@@ -298,14 +327,23 @@ internal class ExclusiveHid(
         }
     }
 
+    private fun boundInputPressed(binding: HidBinding?): Boolean {
+        if (binding == null) return false
+        val reading = synchronized(lock) {
+            if (binding.interfaceIndex < 0) report.get()
+            else reportByEndpoint[binding.interfaceIndex to binding.endpointIndex]
+        }
+        return reading?.let(binding::matches) ?: false
+    }
+
     fun sampleBricks(nowNanos: Long): HandPosition? {
         if (!isActive()) return null
-        val reading = report.get() ?: return null
+        if (report.get() == null) return null
         val leftBinding = HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_LEFT, null))
         val rightBinding = HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_RIGHT, null))
         if (leftBinding == null && rightBinding == null) return null
-        val left = leftBinding?.matches(reading.bytes) ?: false
-        val right = rightBinding?.matches(reading.bytes) ?: false
+        val left = boundInputPressed(leftBinding)
+        val right = boundInputPressed(rightBinding)
         val delta = if (lastTick < 0L) 0L else nowNanos - lastTick
         lastTick = nowNanos
         positionX = ControllerSteering.advance(positionX, 0f, left, right, delta)
