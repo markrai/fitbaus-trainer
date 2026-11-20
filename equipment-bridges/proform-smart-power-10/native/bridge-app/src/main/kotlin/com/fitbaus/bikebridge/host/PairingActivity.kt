@@ -12,6 +12,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -24,6 +27,7 @@ import android.widget.TextView
 import com.fitbaus.arcade.ExternalWebcamPreview
 import com.fitbaus.arcade.UvcZoomCapability
 import com.fitbaus.arcade.UvcZoomPreference
+import com.fitbaus.bikebridge.host.controller.ControllerDevices
 import com.fitbaus.bikebridge.host.uvc.UvcCameraHost
 import com.fitbaus.bikebridge.host.uvc.UvcDeviceInfo
 import com.fitbaus.bikebridge.host.uvc.UvcDeviceSelector
@@ -35,15 +39,20 @@ import com.fitbaus.bikebridge.protocol.PairingToken
 import java.util.concurrent.atomic.AtomicInteger
 
 class PairingActivity : Activity() {
-    private enum class SettingsTab { Pairing, Webcams }
+    private enum class SettingsTab { Pairing, Webcams, Controllers }
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private lateinit var endpointValue: TextView
     private lateinit var tokenValue: TextView
     private lateinit var pairingPanel: View
     private lateinit var webcamPanel: View
+    private lateinit var controllerPanel: View
     private lateinit var pairingTab: TextView
     private lateinit var webcamTab: TextView
+    private lateinit var controllerTab: TextView
+    private lateinit var controllerList: TextView
+    private lateinit var controllerSelection: TextView
+    private lateinit var controllerEvents: TextView
     private lateinit var cameraList: TextView
     private lateinit var statusText: TextView
     private lateinit var zoomStatus: TextView
@@ -63,6 +72,13 @@ class PairingActivity : Activity() {
     private var updatingSeek = false
     private var destroyed = false
     private val zoomRequestSeq = AtomicInteger(0)
+    private val controllerPoll = object : Runnable {
+        override fun run() {
+            if (!uiAlive(SettingsTab.Controllers)) return
+            refreshControllers()
+            uiHandler.postDelayed(this, 1_000L)
+        }
+    }
     private var pendingZoomRequestId: Int = -1
     private var uiBitmap: Bitmap? = null
     private var uiPixels: IntArray? = null
@@ -94,15 +110,18 @@ class PairingActivity : Activity() {
         super.onResume()
         bindPairing()
         if (activeTab == SettingsTab.Webcams) refreshWebcams(startPreview = true)
+        if (activeTab == SettingsTab.Controllers) startControllerPolling()
     }
 
     override fun onPause() {
+        uiHandler.removeCallbacks(controllerPoll)
         stopPreview()
         super.onPause()
     }
 
     override fun onDestroy() {
         destroyed = true
+        uiHandler.removeCallbacks(controllerPoll)
         stopPreview()
         UvcProcess.hostOrNull()?.removeDetachListener(detachListener)
         UvcProcess.release(this)
@@ -136,13 +155,94 @@ class PairingActivity : Activity() {
         activeTab = tab
         pairingPanel.visibility = if (tab == SettingsTab.Pairing) View.VISIBLE else View.GONE
         webcamPanel.visibility = if (tab == SettingsTab.Webcams) View.VISIBLE else View.GONE
+        controllerPanel.visibility = if (tab == SettingsTab.Controllers) View.VISIBLE else View.GONE
         styleTab(pairingTab, tab == SettingsTab.Pairing)
         styleTab(webcamTab, tab == SettingsTab.Webcams)
+        styleTab(controllerTab, tab == SettingsTab.Controllers)
+        uiHandler.removeCallbacks(controllerPoll)
         if (tab == SettingsTab.Webcams) {
             refreshWebcams(startPreview = true)
         } else {
             stopPreview()
         }
+        if (tab == SettingsTab.Controllers) startControllerPolling()
+    }
+
+    private fun startControllerPolling() {
+        uiHandler.removeCallbacks(controllerPoll)
+        if (!uiAlive(SettingsTab.Controllers)) return
+        refreshControllers()
+        uiHandler.postDelayed(controllerPoll, 1_000L)
+    }
+
+    private fun refreshControllers() {
+        val devices = ControllerDevices.visible()
+        controllerList.text = if (devices.isEmpty()) {
+            "No controllers or pointers detected"
+        } else devices.joinToString("\n\n") { device ->
+            val kind = ControllerDevices.category(device)
+            val playable = if (ControllerDevices.supportsGames(device)) "Game input available" else "Pointer only; no game input"
+            device.name + "\n" + device.vendorId.toString(16) + ":" + device.productId.toString(16) +
+                " | " + kind + "\n" + playable
+        }
+        val selected = getSharedPreferences(ControllerDevices.PREFS, MODE_PRIVATE)
+            .getString(ControllerDevices.SELECTED, null)
+        val active = ControllerDevices.chosen(devices, selected)
+        controllerSelection.text = when {
+            selected == ControllerDevices.DISABLED -> "Game controls disabled"
+            active != null -> "Selected: " + active.name
+            selected == null -> "Auto-select: " + (
+                if (devices.any(ControllerDevices::supportsGames)) "choose a device if multiple are connected"
+                else "no game controller available"
+            )
+            else -> "Selected controller disconnected; reconnect it or choose another"
+        }
+    }
+
+    private fun chooseController() {
+        val devices = ControllerDevices.visible().filter(ControllerDevices::supportsGames)
+        val options = listOf("Auto-select (one controller only)", "Disable controller steering") +
+            devices.map { it.name + " (" + ControllerDevices.category(it) + ")" }
+        AlertDialog.Builder(this)
+            .setTitle("Game controller")
+            .setItems(options.toTypedArray()) { _, index ->
+                val descriptor = when (index) {
+                    0 -> null
+                    1 -> ControllerDevices.DISABLED
+                    else -> devices[index - 2].descriptor
+                }
+                getSharedPreferences(ControllerDevices.PREFS, MODE_PRIVATE).edit()
+                    .putString(ControllerDevices.SELECTED, descriptor)
+                    .apply()
+                refreshControllers()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val device = InputDevice.getDevice(event.deviceId)
+        if (activeTab == SettingsTab.Controllers && device != null && ControllerDevices.supportsGames(device)) {
+            if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
+                val action = if (event.action == KeyEvent.ACTION_DOWN) "pressed" else "released"
+                controllerEvents.text = device.name + ": " + KeyEvent.keyCodeToString(event.keyCode) + " " + action
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        val device = InputDevice.getDevice(event.deviceId)
+        if (activeTab == SettingsTab.Controllers && device != null &&
+            ControllerDevices.supportsGames(device) && event.isFromSource(InputDevice.SOURCE_JOYSTICK)
+        ) {
+            val x = event.getAxisValue(MotionEvent.AXIS_X)
+            val y = event.getAxisValue(MotionEvent.AXIS_Y)
+            val hat = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+            controllerEvents.text = device.name + ": stick X=" + "%.2f".format(x) +
+                " Y=" + "%.2f".format(y) + "  D-pad axis=" + "%.2f".format(hat)
+        }
+        return super.dispatchGenericMotionEvent(event)
     }
 
     private fun styleTab(tab: TextView, selected: Boolean) {
@@ -396,8 +496,10 @@ class PairingActivity : Activity() {
         body.orientation = LinearLayout.VERTICAL
         pairingPanel = buildPairingPanel()
         webcamPanel = buildWebcamPanel()
+        controllerPanel = buildControllerPanel()
         body.addView(pairingPanel)
         body.addView(webcamPanel)
+        body.addView(controllerPanel)
         val scroll = ScrollView(this)
         scroll.isFillViewport = true
         scroll.addView(body)
@@ -429,8 +531,12 @@ class PairingActivity : Activity() {
         webcamTab = tabLabel(getString(R.string.settings_tab_webcams)) {
             showTab(SettingsTab.Webcams)
         }
+        controllerTab = tabLabel(getString(R.string.settings_tab_controllers)) {
+            showTab(SettingsTab.Controllers)
+        }
         row.addView(pairingTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(webcamTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(controllerTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         return row
     }
 
@@ -468,6 +574,40 @@ class PairingActivity : Activity() {
         regenerate.setText(R.string.pairing_regenerate)
         regenerate.setOnClickListener { confirmRegenerate() }
         root.addView(regenerate)
+        return root
+    }
+
+    private fun buildControllerPanel(): View {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.setPadding(0, dp(8), 0, 0)
+        val heading = label("CONNECTED INPUT DEVICES", 11f, MUTE)
+        heading.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        root.addView(heading, marginBottom(dp(8)))
+
+        controllerList = label("", 13f, Color.WHITE)
+        root.addView(controllerList, marginBottom(dp(12)))
+
+        controllerSelection = label("", 13f, Color.WHITE)
+        root.addView(controllerSelection, marginBottom(dp(8)))
+
+        val choose = Button(this)
+        choose.text = "Choose game controller"
+        choose.setOnClickListener { chooseController() }
+        root.addView(choose, marginBottom(dp(12)))
+
+        val hint = label(
+            "Use the D-pad or left stick to steer the paddle in BRICKS. In other games, camera and bike controls are unchanged. Pointer-only USB devices can navigate Android but do not supply gamepad buttons.",
+            13f,
+            MUTE,
+        )
+        root.addView(hint, marginBottom(dp(12)))
+
+        val eventLabel = label("LIVE INPUT DIAGNOSTICS", 11f, MUTE)
+        eventLabel.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        root.addView(eventLabel, marginBottom(dp(6)))
+        controllerEvents = label("Press D-pad buttons or move the stick to test input", 13f, Color.WHITE)
+        root.addView(controllerEvents)
         return root
     }
 

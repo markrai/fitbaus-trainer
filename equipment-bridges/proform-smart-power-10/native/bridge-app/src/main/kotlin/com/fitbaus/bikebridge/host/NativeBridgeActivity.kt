@@ -18,6 +18,8 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -41,6 +43,8 @@ import com.fitbaus.bikebridge.host.arcade.ArcadeContent
 import com.fitbaus.bikebridge.host.arcade.ArcadeMode
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeController
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
+import com.fitbaus.bikebridge.host.controller.ControllerDevices
+import com.fitbaus.bikebridge.host.controller.GameControllerInput
 import com.fitbaus.bikebridge.host.uvc.UvcProcess
 import com.fitbaus.bikebridge.host.youtube.BrightnessControl
 import com.fitbaus.bikebridge.host.youtube.YouTubeContent
@@ -76,6 +80,9 @@ class NativeBridgeActivity : Activity() {
     private var pendingYouTubeImport: String? = null
     private val modeTabs = HashMap<ArcadeMode, TextView>()
     private val handInput = HandPositionInput()
+    private val gameController by lazy {
+        GameControllerInput(getSharedPreferences(ControllerDevices.PREFS, Context.MODE_PRIVATE))
+    }
     private val bikeMotion = BikeMotionMonitor()
     private val trackerRate = RateMeter()
     private var arcadeDiagnostics = ""
@@ -102,6 +109,8 @@ class NativeBridgeActivity : Activity() {
             trackerRate.reset()
             arcadeDiagnostics = ""
             bikeMotion.reset()
+            gameController.refresh()
+            gameController.resetTransient()
             cameraSession.updateSettings(trackerSettingsFor(game))
             cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)
             cameraSession.start()
@@ -109,6 +118,7 @@ class NativeBridgeActivity : Activity() {
         }
 
         override fun deactivateArcade(reason: ArcadeStopReason) {
+            gameController.resetTransient()
             arcadeClock.stop()
             cameraSession.stop(reason)
             arcadeContent.trail.pause()
@@ -176,6 +186,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun onPause() {
+        gameController.resetTransient()
         resumed = false
         modeController.onHostPause()
         youtubeContent.stop()
@@ -205,6 +216,16 @@ class NativeBridgeActivity : Activity() {
         handler.removeCallbacks(refresh)
         UvcProcess.release(this)
         super.onDestroy()
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (modeController.mode == ArcadeMode.Bricks && modeController.isActive && gameController.handleKey(event)) return true
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (modeController.mode == ArcadeMode.Bricks && modeController.isActive && gameController.handleMotion(event)) return true
+        return super.dispatchGenericMotionEvent(event)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -327,8 +348,10 @@ class NativeBridgeActivity : Activity() {
             )
             return
         }
-        val position = handInput.latest(now)
-        val status = ArcadeStatusResolver.resolve(
+        gameController.refresh()
+        val controllerPosition = if (handInput.isTouching()) null else gameController.sample(now)
+        val position = controllerPosition ?: handInput.latest(now)
+        val status = if (controllerPosition != null) com.fitbaus.arcade.ArcadeStatus.ControllerReady else ArcadeStatusResolver.resolve(
             cameraSession.state(),
             handInput.cameraTracking(now),
             handInput.hasEverTracked(),
