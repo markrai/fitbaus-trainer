@@ -35,6 +35,9 @@ import com.fitbaus.arcade.ExternalWebcamPreview
 import com.fitbaus.arcade.UvcZoomCapability
 import com.fitbaus.arcade.UvcZoomPreference
 import com.fitbaus.bikebridge.host.controller.ControllerDevices
+import com.fitbaus.bikebridge.host.controller.GameControlCatalog
+import com.fitbaus.bikebridge.host.controller.GameControlBindings
+import com.fitbaus.bikebridge.host.arcade.ArcadeMode
 import com.fitbaus.bikebridge.host.controller.ControllerGameplayKeys
 import com.fitbaus.bikebridge.host.controller.ExclusiveHid
 import com.fitbaus.bikebridge.host.controller.ExclusiveHidPolicy
@@ -51,6 +54,8 @@ import com.fitbaus.bikebridge.protocol.BridgeHttpRouter
 import com.fitbaus.bikebridge.protocol.PairingToken
 import java.util.concurrent.atomic.AtomicInteger
 
+internal const val CONTROLLER_GAME_CONTEXT = "com.fitbaus.bikebridge.CONTROLLER_GAME"
+
 class PairingActivity : Activity() {
     private enum class SettingsTab { Pairing, Webcams, Controllers }
 
@@ -66,6 +71,11 @@ class PairingActivity : Activity() {
     private lateinit var controllerList: TextView
     private lateinit var controllerSelection: TextView
     private lateinit var controllerEvents: TextView
+    private lateinit var controllerMappingPanel: LinearLayout
+    private var gameContext: ArcadeMode? = null
+    private var awaitingGameButton: String? = null
+    private var renderedMappingState = ""
+    private val gameBindings by lazy { GameControlBindings(getSharedPreferences(ControllerDevices.PREFS, MODE_PRIVATE)) }
     private lateinit var hidStatus: TextView
     private lateinit var hidReports: TextView
     private val exclusiveHid by lazy { ExclusiveHid(this) }
@@ -137,12 +147,13 @@ class PairingActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        gameContext = GameControlCatalog.fromContext(intent.getStringExtra(CONTROLLER_GAME_CONTEXT))
         UvcProcess.acquire(this, this).addDetachListener(detachListener)
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(hidPermissionReceiver, IntentFilter(ACTION_HID_PERMISSION), android.content.Context.RECEIVER_NOT_EXPORTED)
         else registerReceiver(hidPermissionReceiver, IntentFilter(ACTION_HID_PERMISSION))
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(buildUi())
-        showTab(SettingsTab.Pairing)
+        showTab(if (gameContext != null) SettingsTab.Controllers else SettingsTab.Pairing)
     }
 
     override fun onResume() {
@@ -202,7 +213,10 @@ class PairingActivity : Activity() {
         styleTab(webcamTab, tab == SettingsTab.Webcams)
         styleTab(controllerTab, tab == SettingsTab.Controllers)
         uiHandler.removeCallbacks(controllerPoll)
-        if (tab != SettingsTab.Controllers) exclusiveHid.stop()
+        if (tab != SettingsTab.Controllers) {
+            exclusiveHid.stop()
+            awaitingGameButton = null
+        }
         if (tab == SettingsTab.Webcams) {
             refreshWebcams(startPreview = true)
         } else {
@@ -220,6 +234,7 @@ class PairingActivity : Activity() {
 
     private fun refreshControllers() {
         refreshExclusiveHid()
+        refreshGameMappings()
         val devices = ControllerDevices.visible()
         controllerList.text = if (devices.isEmpty()) {
             "No controllers or pointers detected"
@@ -364,6 +379,71 @@ class PairingActivity : Activity() {
             "\nLeft: " + leftText + " | Right: " + rightText
     }
 
+    private fun mappingDevice() = ControllerDevices.chosen(
+        ControllerDevices.visible(),
+        controllerPrefs().getString(ControllerDevices.SELECTED, null),
+    )
+
+    private fun refreshGameMappings() {
+        if (!::controllerMappingPanel.isInitialized) return
+        val mode = gameContext
+        controllerMappingPanel.visibility = if (mode == null) View.GONE else View.VISIBLE
+        if (mode == null) return
+        val selected = mappingDevice()
+        val descriptor = selected?.descriptor
+        val actions = GameControlCatalog.actions(mode)
+        val snapshot = listOf(
+            mode.name, descriptor ?: "unselected", awaitingGameButton ?: "",
+        ).plus(actions.map { if (descriptor == null) "none" else gameBindings.describe(mode, descriptor, it) }).joinToString("|")
+        if (snapshot == renderedMappingState) return
+        renderedMappingState = snapshot
+        controllerMappingPanel.removeAllViews()
+        val heading = label(mode.caption + " CONTROLS", 13f, Color.WHITE)
+        heading.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        controllerMappingPanel.addView(heading, marginBottom(dp(8)))
+        val description = if (descriptor == null) {
+            "Choose a single game controller above before assigning buttons."
+        } else {
+            "Tap an action, then press ANY button on the selected controller. Assignments are saved separately for each game and controller."
+        }
+        controllerMappingPanel.addView(label(description, 12f, MUTE), marginBottom(dp(8)))
+        for (action in actions) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            val button = Button(this)
+            val current = if (descriptor == null) "No controller" else gameBindings.describe(mode, descriptor, action)
+            button.text = if (awaitingGameButton == action.id) "PRESS BUTTON: " + action.label else action.label + ": " + current
+            button.isEnabled = descriptor != null
+            button.setOnClickListener {
+                awaitingGameButton = action.id
+                renderedMappingState = ""
+                refreshGameMappings()
+            }
+            row.addView(button, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val clear = Button(this)
+            clear.text = "Clear"
+            clear.isEnabled = descriptor != null
+            clear.setOnClickListener {
+                if (descriptor != null) gameBindings.unbind(mode, descriptor, action.id)
+                awaitingGameButton = null
+                renderedMappingState = ""
+                refreshGameMappings()
+            }
+            row.addView(clear)
+            controllerMappingPanel.addView(row, marginBottom(dp(3)))
+        }
+        val reset = Button(this)
+        reset.text = "Restore defaults for " + mode.caption
+        reset.isEnabled = descriptor != null
+        reset.setOnClickListener {
+            if (descriptor != null) gameBindings.reset(mode, descriptor)
+            awaitingGameButton = null
+            renderedMappingState = ""
+            refreshGameMappings()
+        }
+        controllerMappingPanel.addView(reset)
+    }
+
     private fun chooseController() {
         val devices = ControllerDevices.visible().filter(ControllerDevices::supportsGames)
         val options = listOf("Auto-select (one controller only)", "Disable controller steering") +
@@ -379,6 +459,7 @@ class PairingActivity : Activity() {
                 getSharedPreferences(ControllerDevices.PREFS, MODE_PRIVATE).edit()
                     .putString(ControllerDevices.SELECTED, descriptor)
                     .apply()
+                renderedMappingState = ""
                 refreshControllers()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -395,6 +476,20 @@ class PairingActivity : Activity() {
                     else -> "multiple"
                 }
                 controllerEvents.text = device!!.name + ": " + KeyEvent.keyCodeToString(event.keyCode) + " " + action
+                val mode = gameContext
+                val selected = mappingDevice()
+                val pending = awaitingGameButton
+                if (mode != null && selected != null && pending != null &&
+                    event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 &&
+                    selected.vendorId == device.vendorId && selected.productId == device.productId
+                ) {
+                    val saved = gameBindings.assign(mode, selected.descriptor, pending, event.keyCode)
+                    controllerEvents.text = if (saved) "Saved " + KeyEvent.keyCodeToString(event.keyCode) +
+                        " for " + pending + " in " + mode.caption else "Unable to save mapping"
+                    awaitingGameButton = null
+                    renderedMappingState = ""
+                    refreshGameMappings()
+                }
             }
             if (exclusiveHid.isActive() && exclusiveHid.belongsTo(device)) exclusiveHid.noteAndroidEvent()
             return true
@@ -787,6 +882,11 @@ class PairingActivity : Activity() {
         root.addView(eventLabel, marginBottom(dp(6)))
         controllerEvents = label("Press D-pad buttons or move the stick to test input", 13f, Color.WHITE)
         root.addView(controllerEvents, marginBottom(dp(14)))
+
+        controllerMappingPanel = LinearLayout(this)
+        controllerMappingPanel.orientation = LinearLayout.VERTICAL
+        controllerMappingPanel.visibility = View.GONE
+        root.addView(controllerMappingPanel, marginBottom(dp(16)))
 
         val rawLabel = label("EXCLUSIVE USB HID (EXPERIMENTAL)", 11f, MUTE)
         rawLabel.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
