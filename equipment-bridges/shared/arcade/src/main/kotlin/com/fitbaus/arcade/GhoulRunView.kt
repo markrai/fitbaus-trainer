@@ -16,8 +16,9 @@ import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
-/** Grey-box 2:1 isometric presentation for the pure [GhoulRunGame] simulation. */
+/** Readable grey-box 2:1 isometric presentation for [GhoulRunGame]. */
 public class GhoulRunView(context: Context) : View(context) {
     public var diagnosticsOverlay: Boolean = false
     public var controllerAvailable: Boolean = false
@@ -81,7 +82,7 @@ public class GhoulRunView(context: Context) : View(context) {
         rpmCurrent: Boolean,
         rpmObservedAt: String?,
         diagnostics: String,
-        cameraInfo: ArcadeCameraInfo?,
+        @Suppress("UNUSED_PARAMETER") cameraInfo: ArcadeCameraInfo?,
         controller: GhoulRunControllerInput? = null,
     ) {
         val now = System.nanoTime()
@@ -95,14 +96,12 @@ public class GhoulRunView(context: Context) : View(context) {
             controllerAvailable = controllerAvailable,
             controller = if (source == GhoulRunInputSource.Webcam) null else controller,
         )
-        val pursuer = game.monsters.filter { it.state != MonsterState.Inactive && it.state != MonsterState.Patrol }
-            .minByOrNull { hypot(it.row - game.riderRow, it.col - game.riderCol) }
-        val chase = game.nearestPursuerGap()?.let { (1f - it / 8f).coerceIn(0f, 1f) } ?: 0f
-        val targetRow = game.riderRow + ((pursuer?.row ?: game.riderRow) - game.riderRow) * chase * 0.28f
-        val targetCol = game.riderCol + ((pursuer?.col ?: game.riderCol) - game.riderCol) * chase * 0.28f
+        val hunt = game.ghoul.state == GhoulState.Hunting
+        val shift = if (hunt) 0.28f else 0f
+        val targetRow = game.riderRow + (game.ghoul.row - game.riderRow) * shift
+        val targetCol = game.riderCol + (game.ghoul.col - game.riderCol) * shift
         cameraRow += (targetRow - cameraRow) * 0.12f
         cameraCol += (targetCol - cameraCol) * 0.12f
-        @Suppress("UNUSED_VARIABLE") val cameraDiagnostics = cameraInfo
         invalidate()
     }
 
@@ -113,7 +112,7 @@ public class GhoulRunView(context: Context) : View(context) {
 
     public fun restartGame() {
         seed += 1L
-        game.restart(seed)
+        session.restart(seed)
         session.pause()
         invalidate()
     }
@@ -122,6 +121,7 @@ public class GhoulRunView(context: Context) : View(context) {
         "Sprint difficulty: +${SPRINT_DELTAS[difficultyIndex]} RPM (tap to change)",
         "Input source: ${inputSource.name} (use in-game selector)",
         "Recenter head now (look straight ahead)",
+        "Recalibrate pace (25 second warm-up)",
         "Restart maze now",
     )
 
@@ -131,11 +131,13 @@ public class GhoulRunView(context: Context) : View(context) {
                 difficultyIndex = (difficultyIndex + 1) % SPRINT_DELTAS.size
                 prefs?.edit()?.putInt(DIFFICULTY_KEY, difficultyIndex)?.apply()
                 seed += 1L
+                val lockedPace = session.pace
                 game = newGame(seed)
-                session = GhoulRunSession(game)
+                session = GhoulRunSession(game, pace = lockedPace)
             }
             2 -> session.recenter()
-            3 -> restartGame()
+            3 -> session.recalibratePace()
+            4 -> restartGame()
         }
         invalidate()
     }
@@ -144,108 +146,165 @@ public class GhoulRunView(context: Context) : View(context) {
         super.onDraw(canvas)
         if (width <= 0 || height <= 0) return
         drawSelectors(canvas)
-        val chase = game.nearestPursuerGap()?.let { (1f - it / 8f).coerceIn(0f, 1f) } ?: 0f
-        val tileW = min(width / 8.5f, (height - TOP_UI) / 5.2f) * (1f - chase * 0.22f)
+        val hunted = game.ghoul.state == GhoulState.Hunting
+        val zoom = if (hunted) 0.80f else 1f
+        val tileW = min(width / 13f, (height - TOP_UI * density) / 8f) * zoom
         val tileH = tileW / 2f
         val originX = width / 2f
-        val originY = TOP_UI + (height - TOP_UI) * 0.48f
-        val cells = ArrayList<MazeCell>(game.config.width * game.config.height)
-        for (row in 0 until game.config.height) for (col in 0 until game.config.width) cells += MazeCell(row, col)
-        cells.sortBy { it.row + it.col }
-        for (cell in cells) drawCell(canvas, cell, originX, originY, tileW, tileH)
-        drawJunctionHighlight(canvas, originX, originY, tileW, tileH)
+        val originY = TOP_UI * density + (height - TOP_UI * density) * 0.50f
+        drawMaze(canvas, originX, originY, tileW, tileH)
+        drawChoice(canvas, originX, originY, tileW, tileH)
         drawEntities(canvas, originX, originY, tileW, tileH)
         drawHud(canvas)
         drawPhase(canvas)
+        drawThreat(canvas, originX, originY, tileW, tileH)
         session.message()?.let { banner(canvas, it, height * 0.35f, Color.WHITE) }
         if (diagnosticsOverlay) drawDiagnostics(canvas)
     }
 
-    private fun drawCell(canvas: Canvas, cell: MazeCell, ox: Float, oy: Float, tw: Float, th: Float) {
-        val centre = project(cell.row.toFloat(), cell.col.toFloat(), ox, oy, tw, th)
-        val distance = hypot(cell.row - game.riderRow, cell.col - game.riderCol)
-        val visible = game.lightRadius > 0f && distance <= game.lightRadius
-        val explored = cell in game.explored
-        paint.color = when {
-            visible -> FLOOR_LIT
-            explored -> FLOOR_EXPLORED
-            else -> FLOOR_DARK
-        }
-        diamond(canvas, centre.first, centre.second, tw / 2f, th / 2f, paint)
-        if (!visible && !explored) return
-        val wallAlpha = if (visible) 255 else 90
-        stroke.strokeWidth = max(2f, tw * 0.10f)
-        stroke.color = Color.argb(wallAlpha, 112, 116, 124)
-        for (direction in listOf(MazeDirection.North, MazeDirection.West, MazeDirection.East, MazeDirection.South)) {
-            if (game.world.isOpen(cell, direction)) continue
-            val a: Pair<Float, Float>
-            val b: Pair<Float, Float>
-            when (direction) {
-                MazeDirection.North -> { a = centre.first to centre.second - th / 2f; b = centre.first + tw / 2f to centre.second }
-                MazeDirection.East -> { a = centre.first + tw / 2f to centre.second; b = centre.first to centre.second + th / 2f }
-                MazeDirection.South -> { a = centre.first to centre.second + th / 2f; b = centre.first - tw / 2f to centre.second }
-                MazeDirection.West -> { a = centre.first - tw / 2f to centre.second; b = centre.first to centre.second - th / 2f }
+    private fun drawMaze(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float) {
+        val tiles = ArrayList<MazeTile>(game.world.tileRows * game.world.tileCols)
+        for (row in 0 until game.world.tileRows) for (col in 0 until game.world.tileCols) tiles += MazeTile(row, col)
+        tiles.sortBy { it.row + it.col }
+        for (tile in tiles) {
+            val explored = tile in game.exploredTiles
+            val lit = game.lightRadius > 0f && game.tileDistance(tile) <= game.lightRadius
+            if (!explored && !lit) continue
+            val centre = projectTile(tile.row.toFloat(), tile.col.toFloat(), ox, oy, tw, th)
+            if (game.world.isFloorTile(tile)) {
+                paint.color = if (lit) FLOOR_LIT else FLOOR_EXPLORED
+                diamond(canvas, centre.first, centre.second, tw / 2f, th / 2f, paint)
+                drawObjective(canvas, tile, centre, tw, th, lit)
+            } else {
+                drawWallBlock(canvas, centre.first, centre.second, tw, th, lit)
             }
-            canvas.drawLine(a.first, a.second - th * 0.22f, b.first, b.second - th * 0.22f, stroke)
-            canvas.drawLine(a.first, a.second, a.first, a.second - th * 0.22f, stroke)
-            canvas.drawLine(b.first, b.second, b.first, b.second - th * 0.22f, stroke)
         }
+    }
+
+    private fun drawWallBlock(canvas: Canvas, cx: Float, cy: Float, tw: Float, th: Float, lit: Boolean) {
+        val rise = th * 0.55f
+        val topColor = if (lit) WALL_TOP else dim(WALL_TOP)
+        val leftColor = if (lit) WALL_LEFT else dim(WALL_LEFT)
+        val rightColor = if (lit) WALL_RIGHT else dim(WALL_RIGHT)
+        paint.color = leftColor
+        path.reset()
+        path.moveTo(cx - tw / 2f, cy)
+        path.lineTo(cx, cy + th / 2f)
+        path.lineTo(cx, cy + th / 2f - rise)
+        path.lineTo(cx - tw / 2f, cy - rise)
+        path.close()
+        canvas.drawPath(path, paint)
+        paint.color = rightColor
+        path.reset()
+        path.moveTo(cx + tw / 2f, cy)
+        path.lineTo(cx, cy + th / 2f)
+        path.lineTo(cx, cy + th / 2f - rise)
+        path.lineTo(cx + tw / 2f, cy - rise)
+        path.close()
+        canvas.drawPath(path, paint)
+        paint.color = topColor
+        diamond(canvas, cx, cy - rise, tw / 2f, th / 2f, paint)
+    }
+
+    private fun drawObjective(
+        canvas: Canvas,
+        tile: MazeTile,
+        centre: Pair<Float, Float>,
+        tw: Float,
+        th: Float,
+        lit: Boolean,
+    ) {
+        if (tile.row % 2 == 0 || tile.col % 2 == 0) return
+        val cell = MazeCell((tile.row - 1) / 2, (tile.col - 1) / 2)
         when {
             cell in game.world.keys && cell !in game.collectedKeys -> {
-                paint.color = KEY
-                canvas.drawCircle(centre.first, centre.second - th * 0.25f, tw * 0.08f, paint)
-                stroke.color = KEY; stroke.strokeWidth = tw * 0.035f
-                canvas.drawLine(centre.first, centre.second - th * 0.25f, centre.first + tw * 0.14f, centre.second - th * 0.25f, stroke)
+                paint.color = if (lit) KEY else dim(KEY)
+                canvas.drawCircle(centre.first, centre.second - th * 0.18f, tw * 0.08f, paint)
             }
             cell in game.world.shrines -> {
-                paint.color = if (cell == game.activeShrine && game.shrineProtectionLeft > 0f) SHRINE_ACTIVE else SHRINE
-                diamond(canvas, centre.first, centre.second - th * 0.12f, tw * 0.15f, th * 0.15f, paint)
+                val ready = (game.shrineCooldowns[cell] ?: 0f) <= 0f
+                paint.color = if (ready && lit) SHRINE_READY else SHRINE_DIM
+                diamond(canvas, centre.first, centre.second - th * 0.08f, tw * 0.18f, th * 0.18f, paint)
             }
             cell == game.world.exit -> {
                 paint.color = if (game.exitOpen) EXIT_OPEN else EXIT_LOCKED
-                canvas.drawRect(centre.first - tw * 0.13f, centre.second - th * 0.55f, centre.first + tw * 0.13f, centre.second, paint)
+                canvas.drawRect(
+                    centre.first - tw * 0.14f,
+                    centre.second - th * 0.58f,
+                    centre.first + tw * 0.14f,
+                    centre.second,
+                    paint,
+                )
             }
         }
     }
 
-    private fun drawJunctionHighlight(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float) {
+    private fun drawChoice(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float) {
         val junction = game.riderCell.moved(game.heading)
+        val choice = game.activeChoice ?: return
         if (!game.world.contains(junction)) return
-        val choice = game.lockedChoice ?: game.choiceFor(junction, game.heading, session.lane) ?: return
-        val a = project(junction.row.toFloat(), junction.col.toFloat(), ox, oy, tw, th)
-        val b = project(junction.row + choice.dr * 0.65f, junction.col + choice.dc * 0.65f, ox, oy, tw, th)
-        stroke.color = HIGHLIGHT
-        stroke.strokeWidth = max(3f, tw * 0.07f)
-        canvas.drawLine(a.first, a.second - th * 0.08f, b.first, b.second - th * 0.08f, stroke)
+        paint.color = Color.argb(145, 255, 220, 55)
+        for (amount in listOf(0.5f, 1f, 1.5f)) {
+            val row = 2f * junction.row + 1f + choice.dr * amount
+            val col = 2f * junction.col + 1f + choice.dc * amount
+            val p = projectTile(row, col, ox, oy, tw, th)
+            diamond(canvas, p.first, p.second, tw * 0.42f, th * 0.42f, paint)
+        }
     }
 
     private fun drawEntities(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float) {
-        for (monster in game.monsters) {
-            if (monster.state == MonsterState.Inactive) continue
-            val p = project(monster.row, monster.col, ox, oy, tw, th)
-            if (p.first !in -tw..width + tw || p.second !in TOP_UI - th..height + th) {
-                paint.color = monsterColor(monster.kind)
-                canvas.drawCircle(p.first.coerceIn(12f, width - 12f), p.second.coerceIn(TOP_UI + 12f, height - 12f), 8f * density, paint)
-                continue
-            }
-            paint.color = monsterColor(monster.kind)
-            when (monster.kind) {
-                GhoulMonsterKind.Ghoul -> canvas.drawRect(p.first - tw * 0.11f, p.second - th * 0.6f, p.first + tw * 0.11f, p.second, paint)
-                GhoulMonsterKind.Hound -> canvas.drawOval(RectF(p.first - tw * 0.16f, p.second - th * 0.36f, p.first + tw * 0.16f, p.second), paint)
-                GhoulMonsterKind.Wraith -> diamond(canvas, p.first, p.second - th * 0.3f, tw * 0.12f, th * 0.3f, paint)
-            }
-            if (monster.lungeLeft > 0f) {
-                text.textSize = 12f * density; text.color = HIGHLIGHT
-                canvas.drawText("${monster.lungeLane.name.uppercase(Locale.US)}!", p.first, p.second - th * 0.8f, text)
+        if (game.ghoul.state != GhoulState.Inactive) {
+            val ghoulPoint = projectWorld(game.ghoul.row, game.ghoul.col, ox, oy, tw, th)
+            if (ghoulPoint.first in -tw..width + tw && ghoulPoint.second in TOP_UI * density - th..height + th) {
+                paint.color = if (game.ghoul.state == GhoulState.Stunned) GHOUL_STUNNED else GHOUL
+                canvas.drawRect(
+                    ghoulPoint.first - tw * 0.16f,
+                    ghoulPoint.second - th * 0.78f,
+                    ghoulPoint.first + tw * 0.16f,
+                    ghoulPoint.second,
+                    paint,
+                )
             }
         }
-        val rider = project(game.riderRow, game.riderCol, ox, oy, tw, th)
-        val laneOffset = (session.lane.ordinal - 1) * tw * 0.12f
+        val rider = projectWorld(game.riderRow, game.riderCol, ox, oy, tw, th)
         paint.color = if (game.invulnerableLeft > 0f) RIDER_INVULNERABLE else RIDER
         path.reset()
-        path.moveTo(rider.first + laneOffset, rider.second - th * 0.65f)
-        path.lineTo(rider.first + laneOffset - tw * 0.12f, rider.second)
-        path.lineTo(rider.first + laneOffset + tw * 0.12f, rider.second)
+        path.moveTo(rider.first, rider.second - th * 0.72f)
+        path.lineTo(rider.first - tw * 0.14f, rider.second)
+        path.lineTo(rider.first + tw * 0.14f, rider.second)
+        path.close()
+        canvas.drawPath(path, paint)
+
+        val exitDx = (game.world.exit.col - game.riderCol) - (game.world.exit.row - game.riderRow)
+        val exitDy = ((game.world.exit.col - game.riderCol) + (game.world.exit.row - game.riderRow)) * 0.5f
+        drawArrow(canvas, rider.first, rider.second - th * 0.9f, exitDx, exitDy, COMPASS, tw * 0.38f)
+        game.activeChoice?.let { direction ->
+            drawArrow(
+                canvas,
+                rider.first,
+                rider.second - th * 1.20f,
+                direction.screenDx.toFloat(),
+                (direction.dc + direction.dr) * 0.5f,
+                HIGHLIGHT,
+                tw * 0.52f,
+            )
+        }
+    }
+
+    private fun drawArrow(canvas: Canvas, x: Float, y: Float, dx: Float, dy: Float, color: Int, length: Float) {
+        val magnitude = hypot(dx, dy).coerceAtLeast(0.001f)
+        val ux = dx / magnitude
+        val uy = dy / magnitude
+        val ex = x + ux * length
+        val ey = y + uy * length
+        stroke.color = color
+        stroke.strokeWidth = max(3f, length * 0.14f)
+        canvas.drawLine(x, y, ex, ey, stroke)
+        paint.color = color
+        path.reset()
+        path.moveTo(ex, ey)
+        path.lineTo(ex - ux * length * 0.28f - uy * length * 0.18f, ey - uy * length * 0.28f + ux * length * 0.18f)
+        path.lineTo(ex - ux * length * 0.28f + uy * length * 0.18f, ey - uy * length * 0.28f - ux * length * 0.18f)
         path.close()
         canvas.drawPath(path, paint)
     }
@@ -253,28 +312,97 @@ public class GhoulRunView(context: Context) : View(context) {
     private fun drawHud(canvas: Canvas) {
         text.textSize = 17f * density
         text.color = Color.WHITE
-        canvas.drawText("${"♥".repeat(game.hearts)}", 12f * density, TOP_UI + 18f * density, text)
-        canvas.drawText("KEYS ${game.keysFound}/${game.config.keyCount}", 12f * density, TOP_UI + 39f * density, text)
-        canvas.drawText("LAMP ${(game.lampLevel * 100f).toInt()}%", 12f * density, TOP_UI + 60f * density, text)
-        game.nearestPursuerGap()?.let {
-            val meterLeft = width - 190f * density
-            val meterTop = TOP_UI + 10f * density
-            paint.color = Color.rgb(42, 42, 48)
-            canvas.drawRect(meterLeft, meterTop, width - 12f * density, meterTop + 16f * density, paint)
-            paint.color = if (it < 2f) Color.RED else Color.rgb(230, 150, 50)
-            val fraction = (1f - it / 10f).coerceIn(0f, 1f)
-            canvas.drawRect(meterLeft, meterTop, meterLeft + (width - 12f * density - meterLeft) * fraction, meterTop + 16f * density, paint)
-            text.textSize = 11f * density
-            canvas.drawText(String.format(Locale.US, "PURSUER %.1f", it), meterLeft, meterTop + 31f * density, text)
+        canvas.drawText("♥".repeat(game.hearts), 12f * density, TOP_UI * density + 21f * density, text)
+        if (game.config.keyCount > 0) {
+            canvas.drawText("KEYS ${game.keysFound}/${game.config.keyCount}", 12f * density, TOP_UI * density + 43f * density, text)
         }
+        drawSpeedGauge(canvas)
+    }
+
+    private fun drawSpeedGauge(canvas: Canvas) {
+        val reading = session.cadenceReading
+        val left = width * 0.26f
+        val right = width * 0.76f
+        val top = TOP_UI * density + 9f * density
+        val bottom = top + 28f * density
+        val baseline = if (reading.baseline.isFinite()) reading.baseline else 70f
+        val low = baseline - game.config.baselineCreepDelta
+        val high = baseline + game.config.sprintDelta
+        val baselineX = left + (right - left) * game.config.baselineCreepDelta /
+            (game.config.baselineCreepDelta + game.config.sprintDelta)
+        paint.color = GAUGE_CREEP
+        canvas.drawRect(left, top, baselineX, bottom, paint)
+        paint.color = GAUGE_SPRINT
+        canvas.drawRect(baselineX, top, right, bottom, paint)
+        stroke.strokeWidth = 3f * density
+        stroke.color = Color.WHITE
+        canvas.drawLine(baselineX, top - 4f * density, baselineX, bottom + 4f * density, stroke)
+        val marker = left + (right - left) * ((reading.filteredRpm - low) / (high - low)).coerceIn(0f, 1f)
+        paint.color = Color.WHITE
+        path.reset()
+        path.moveTo(marker, top - 7f * density)
+        path.lineTo(marker - 6f * density, top)
+        path.lineTo(marker + 6f * density, top)
+        path.close()
+        canvas.drawPath(path, paint)
+        text.textSize = 11f * density
+        text.color = Color.WHITE
+        canvas.drawText("CREEP", left, bottom + 15f * density, text)
+        text.textAlign = Paint.Align.CENTER
+        canvas.drawText("CRUISE", baselineX, bottom + 15f * density, text)
+        text.textAlign = Paint.Align.RIGHT
+        canvas.drawText("SPRINT  ${reading.filteredRpm.toInt()} RPM", right, bottom + 15f * density, text)
+        text.textAlign = Paint.Align.LEFT
     }
 
     private fun drawPhase(canvas: Canvas) {
         when (game.phase) {
-            GhoulPhase.BreakFree -> banner(canvas, "BREAK FREE! +${String.format(Locale.US, "%.1f", game.config.breakFreeSeconds - game.breakFreeProgress)}s ABOVE BASELINE", height * 0.40f, Color.rgb(255, 100, 80))
-            GhoulPhase.Results -> game.results?.let { banner(canvas, "ESCAPED  ${it.seconds.toInt()}s  CATCHES ${it.catches}  KEYS ${it.keys}", height * 0.40f, Color.rgb(120, 255, 150)) }
-            GhoulPhase.Countdown -> banner(canvas, "NEW MAZE IN ${ceil(game.phaseLeft).toInt().coerceAtLeast(1)}", height * 0.40f, Color.WHITE)
+            GhoulPhase.WarmUp -> banner(
+                canvas,
+                "WARM UP - PEDAL AT YOUR NORMAL PACE  ${ceil(session.cadenceReading.warmupRemaining).toInt()}",
+                height * 0.40f,
+                Color.WHITE,
+            )
+            GhoulPhase.Results -> game.results?.let {
+                banner(canvas, "ESCAPED  ${it.seconds.toInt()}s  CATCHES ${it.catches}", height * 0.40f, EXIT_OPEN)
+            }
+            GhoulPhase.Countdown -> banner(
+                canvas,
+                "NEW MAZE IN ${ceil(game.phaseLeft).toInt().coerceAtLeast(1)}",
+                height * 0.40f,
+                Color.WHITE,
+            )
             GhoulPhase.Playing -> Unit
+        }
+    }
+
+    private fun drawThreat(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float) {
+        val state = game.ghoul.state
+        if (state != GhoulState.Hunting && state != GhoulState.Searching) return
+        val hunted = state == GhoulState.Hunting
+        val pulse = ((sin(System.nanoTime() / 160_000_000.0) + 1.0) * 0.5).toFloat()
+        if (hunted) {
+            stroke.style = Paint.Style.STROKE
+            stroke.strokeWidth = (6f + pulse * 7f) * density
+            stroke.color = Color.argb((130 + pulse * 100).toInt(), 255, 35, 35)
+            canvas.drawRect(3f * density, 3f * density, width - 3f * density, height - 3f * density, stroke)
+        }
+        val label = if (hunted) "HUNTED" else "SEARCHING"
+        banner(
+            canvas,
+            "$label  GAP ${String.format(Locale.US, "%.1f", game.pathGap)}",
+            TOP_UI * density + 92f * density,
+            if (hunted) Color.rgb(255, 75, 60) else Color.rgb(210, 145, 55),
+        )
+        val p = projectWorld(game.ghoul.row, game.ghoul.col, ox, oy, tw, th)
+        if (p.first !in 0f..width.toFloat() || p.second !in TOP_UI * density..height.toFloat()) {
+            paint.color = if (hunted) Color.RED else Color.rgb(205, 135, 45)
+            canvas.drawCircle(
+                p.first.coerceIn(14f * density, width - 14f * density),
+                p.second.coerceIn(TOP_UI * density + 14f * density, height - 14f * density),
+                9f * density,
+                paint,
+            )
         }
     }
 
@@ -293,7 +421,11 @@ public class GhoulRunView(context: Context) : View(context) {
     }
 
     private fun selector(canvas: Canvas, rect: RectF, label: String, selected: Boolean, enabled: Boolean) {
-        paint.color = when { !enabled -> Color.rgb(35, 35, 38); selected -> Color.rgb(40, 118, 76); else -> Color.rgb(68, 68, 74) }
+        paint.color = when {
+            !enabled -> Color.rgb(35, 35, 38)
+            selected -> Color.rgb(40, 118, 76)
+            else -> Color.rgb(68, 68, 74)
+        }
         canvas.drawRect(rect, paint)
         text.textSize = 11f * density
         text.textAlign = Paint.Align.CENTER
@@ -303,49 +435,71 @@ public class GhoulRunView(context: Context) : View(context) {
     }
 
     private fun drawDiagnostics(canvas: Canvas) {
-        val c = session.cadenceReading
-        val lines = ArrayList<String>()
-        lines += String.format(Locale.US, "baseline %s rpm %s speed %.2f light %.1f noise %.1f", if (c.baseline.isNaN()) "-" else "%.1f".format(c.baseline), c.rpm ?: "-", game.speed, game.lightRadius, game.noiseRadius)
-        lines += "lane ${session.lane} locked ${game.lockedChoice ?: "-"} brake ${game.brakingForChoice} hold ${session.hold}"
-        game.monsters.forEachIndexed { i, m -> lines += String.format(Locale.US, "m%d %s %s speed %.2f gap %.1f", i, m.kind, m.state, m.speed, hypot(m.row - game.riderRow, m.col - game.riderCol)) }
-        lines += diagnosticsText
+        val cadence = session.cadenceReading
+        val lines = listOf(
+            String.format(
+                Locale.US,
+                "baseline %s filtered %.1f speed %.2f light %.1f noise %.1f",
+                if (cadence.baseline.isNaN()) "-" else "%.1f".format(Locale.US, cadence.baseline),
+                cadence.filteredRpm,
+                game.speed,
+                game.lightRadius,
+                game.noiseRadius,
+            ),
+            "lean ${String.format(Locale.US, "%.2f", game.lean)} locked ${game.lockedChoice ?: "-"} brake ${game.brakingForChoice} hold ${session.hold}",
+            String.format(
+                Locale.US,
+                "ghoul %s gap %.2f stun %.1f inv %.1f",
+                game.ghoul.state,
+                game.pathGap,
+                game.ghoul.stunLeft,
+                game.invulnerableLeft,
+            ),
+            diagnosticsText,
+        )
         text.textSize = 10f * density
         val lineHeight = 14f * density
         val left = 8f * density
-        val top = TOP_UI + 76f * density
+        val top = TOP_UI * density + 124f * density
         paint.color = Color.argb(210, 0, 0, 0)
         canvas.drawRect(left, top, width - 8f * density, top + lines.size * lineHeight + 8f * density, paint)
         text.color = Color.WHITE
-        lines.forEachIndexed { i, line -> canvas.drawText(line, left + 4f * density, top + (i + 1) * lineHeight, text) }
+        lines.forEachIndexed { index, line ->
+            canvas.drawText(line, left + 4f * density, top + (index + 1) * lineHeight, text)
+        }
     }
 
     private fun banner(canvas: Canvas, value: String, y: Float, color: Int) {
         text.textSize = 19f * density
         text.textAlign = Paint.Align.CENTER
         paint.color = Color.argb(220, 0, 0, 0)
-        val half = text.measureText(value) / 2f + 14f * density
+        val half = min(width * 0.47f, text.measureText(value) / 2f + 14f * density)
         canvas.drawRect(width / 2f - half, y - 27f * density, width / 2f + half, y + 12f * density, paint)
         text.color = color
         canvas.drawText(value, width / 2f, y, text)
         text.textAlign = Paint.Align.LEFT
     }
 
-    private fun project(row: Float, col: Float, ox: Float, oy: Float, tw: Float, th: Float): Pair<Float, Float> {
-        val dr = row - cameraRow
-        val dc = col - cameraCol
+    private fun projectWorld(row: Float, col: Float, ox: Float, oy: Float, tw: Float, th: Float): Pair<Float, Float> =
+        projectTile(row * 2f + 1f, col * 2f + 1f, ox, oy, tw, th)
+
+    private fun projectTile(row: Float, col: Float, ox: Float, oy: Float, tw: Float, th: Float): Pair<Float, Float> {
+        val dr = row - (cameraRow * 2f + 1f)
+        val dc = col - (cameraCol * 2f + 1f)
         return ox + (dc - dr) * tw / 2f to oy + (dc + dr) * th / 2f
     }
 
-    private fun diamond(canvas: Canvas, cx: Float, cy: Float, hw: Float, hh: Float, p: Paint) {
-        path.reset(); path.moveTo(cx, cy - hh); path.lineTo(cx + hw, cy); path.lineTo(cx, cy + hh); path.lineTo(cx - hw, cy); path.close()
-        canvas.drawPath(path, p)
+    private fun diamond(canvas: Canvas, cx: Float, cy: Float, hw: Float, hh: Float, source: Paint) {
+        path.reset()
+        path.moveTo(cx, cy - hh)
+        path.lineTo(cx + hw, cy)
+        path.lineTo(cx, cy + hh)
+        path.lineTo(cx - hw, cy)
+        path.close()
+        canvas.drawPath(path, source)
     }
 
-    private fun monsterColor(kind: GhoulMonsterKind): Int = when (kind) {
-        GhoulMonsterKind.Ghoul -> Color.rgb(105, 185, 90)
-        GhoulMonsterKind.Hound -> Color.rgb(190, 105, 65)
-        GhoulMonsterKind.Wraith -> Color.rgb(160, 130, 220)
-    }
+    private fun dim(color: Int): Int = Color.rgb(Color.red(color) / 3, Color.green(color) / 3, Color.blue(color) / 3)
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked != MotionEvent.ACTION_UP) return true
@@ -359,9 +513,13 @@ public class GhoulRunView(context: Context) : View(context) {
         return true
     }
 
-    override fun performClick(): Boolean { super.performClick(); return true }
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
 
-    private fun newGame(seed: Long): GhoulRunGame = GhoulRunGame(GhoulRunConfig(sprintDelta = SPRINT_DELTAS[difficultyIndex].toFloat()), seed)
+    private fun newGame(seed: Long): GhoulRunGame =
+        GhoulRunGame(GhoulRunConfig(sprintDelta = SPRINT_DELTAS[difficultyIndex].toFloat()), seed)
 
     private companion object {
         const val PREFS = "fitbaus_arcade"
@@ -369,17 +527,24 @@ public class GhoulRunView(context: Context) : View(context) {
         const val STALL_NANOS = 500_000_000L
         val SPRINT_DELTAS = intArrayOf(10, 20, 30)
         val BACKGROUND = Color.rgb(7, 8, 12)
-        val FLOOR_LIT = Color.rgb(72, 76, 82)
-        val FLOOR_EXPLORED = Color.rgb(28, 30, 35)
-        val FLOOR_DARK = Color.rgb(10, 11, 15)
+        val FLOOR_LIT = Color.rgb(78, 82, 88)
+        val FLOOR_EXPLORED = Color.rgb(25, 27, 31)
+        val WALL_TOP = Color.rgb(118, 122, 130)
+        val WALL_LEFT = Color.rgb(72, 75, 82)
+        val WALL_RIGHT = Color.rgb(54, 57, 64)
         val KEY = Color.rgb(250, 210, 65)
-        val SHRINE = Color.rgb(48, 75, 90)
-        val SHRINE_ACTIVE = Color.rgb(70, 225, 230)
+        val SHRINE_READY = Color.rgb(70, 225, 230)
+        val SHRINE_DIM = Color.rgb(35, 67, 72)
         val EXIT_LOCKED = Color.rgb(115, 45, 48)
         val EXIT_OPEN = Color.rgb(70, 220, 105)
         val HIGHLIGHT = Color.rgb(255, 225, 70)
+        val COMPASS = Color.rgb(70, 225, 240)
         val RIDER = Color.rgb(70, 155, 255)
         val RIDER_INVULNERABLE = Color.WHITE
+        val GHOUL = Color.rgb(105, 185, 90)
+        val GHOUL_STUNNED = Color.rgb(120, 210, 230)
+        val GAUGE_CREEP = Color.rgb(60, 105, 165)
+        val GAUGE_SPRINT = Color.rgb(205, 82, 52)
         const val TOP_UI = 54f
     }
 }
