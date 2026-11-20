@@ -111,17 +111,19 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
 
     fun ownsDevice(deviceId: Int): Boolean = deviceId >= 0 && deviceId == activeDeviceId
 
-    fun handleKey(event: KeyEvent, steerBricks: Boolean): Boolean {
+    fun handleKey(event: KeyEvent, steerBricks: Boolean, mappedAction: String? = null): Boolean {
         if (!ownsDevice(event.deviceId)) return false
         if (steerBricks && (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP)) {
             val down = event.action == KeyEvent.ACTION_DOWN
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> leftDown = down
-                KeyEvent.KEYCODE_DPAD_RIGHT -> rightDown = down
+            when (mappedAction) {
+                "left" -> leftDown = down
+                "right" -> rightDown = down
             }
         }
         return true
     }
+
+    fun steeringHeld(): Boolean = leftDown || rightDown
 
     fun handleMotion(event: MotionEvent): Boolean {
         if (!ownsDevice(event.deviceId)) return false
