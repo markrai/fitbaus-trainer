@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test
 class BiketrisControllerIntegrationTest {
     private val host = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
     private val controller = File("src/main/kotlin/com/fitbaus/bikebridge/host/controller/GameControllerInput.kt").readText()
-    private val view = File("../..").canonicalFile
 
     @Test
     fun biketrisGetsSelectedControllerInputWithoutWebcamSteering() {
