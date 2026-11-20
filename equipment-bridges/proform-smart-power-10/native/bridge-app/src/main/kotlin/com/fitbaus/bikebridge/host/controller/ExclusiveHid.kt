@@ -327,6 +327,8 @@ internal class ExclusiveHid(
         }
     }
 
+    fun isBindingPressed(binding: HidBinding?): Boolean = boundInputPressed(binding)
+
     private fun boundInputPressed(binding: HidBinding?): Boolean {
         if (binding == null) return false
         val reading = synchronized(lock) {
