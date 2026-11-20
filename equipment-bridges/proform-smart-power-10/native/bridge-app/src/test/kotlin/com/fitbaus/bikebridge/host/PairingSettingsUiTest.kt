@@ -56,7 +56,9 @@ class PairingSettingsUiTest {
         assertTrue(activity.contains("mappedAction = action"))
         assertTrue(activity.contains("if (modeController.mode.isGame) intent.putExtra(CONTROLLER_GAME_CONTEXT, modeController.mode.name)"))
         assertTrue(activity.contains("gameController.handleMotion(event)"))
-        assertTrue(activity.contains("if (handInput.isTouching()) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)"))
+        assertTrue(activity.contains("val controllerPosition = if (handInput.isTouching() ||"))
+        assertTrue(activity.contains("arcadeContent.playground.inputSource != BricksInputSource.Controller"))
+        assertTrue(activity.contains(") null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)"))
     }
 
     @Test
