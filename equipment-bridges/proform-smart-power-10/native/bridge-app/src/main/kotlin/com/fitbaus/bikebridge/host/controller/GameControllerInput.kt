@@ -69,6 +69,16 @@ internal object ControllerSteering {
 }
 
 internal object ControllerGameplayKeys {
+    fun trapsSettingsNavigation(keyCode: Int): Boolean = when (keyCode) {
+        KeyEvent.KEYCODE_BACK,
+        KeyEvent.KEYCODE_ESCAPE,
+        KeyEvent.KEYCODE_MENU,
+        KeyEvent.KEYCODE_APP_SWITCH,
+        KeyEvent.KEYCODE_SEARCH,
+        KeyEvent.KEYCODE_BUTTON_MODE -> true
+        else -> false
+    }
+
     fun consumes(keyCode: Int): Boolean = when (keyCode) {
         KeyEvent.KEYCODE_DPAD_LEFT,
         KeyEvent.KEYCODE_DPAD_RIGHT,
