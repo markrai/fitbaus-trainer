@@ -16,6 +16,21 @@ included in this upcoming release.
 
 ### Added
 
+- **Hands-free Bricks restart.** After the last life or a cleared board,
+  Bricks displays the final score with a 3-2-1 countdown and automatically
+  starts a new round without touchscreen interaction. The Bricks controller
+  mapping now offers only left and right steering; the manual Restart game
+  binding has been removed.
+- **Automatic connected-gamepad USB HID ownership.** Removed the manual
+  Claim input, Release, and Choose USB HID controls. Foreground FitBaus
+  attempts to claim every safe HID interface of a recognized gamepad,
+  requesting Android's USB Host permission only when needed and not
+  aggressively retrying a denial. USB interfaces release on pause,
+  disconnect, or exit. Mixed-class equipment including bike control and
+  external webcams is never claimed, and the normal Android event route
+  remains a fallback if exclusive claiming is unavailable.
+
+
 - **Bricks input source selector.** Matching webcam/controller buttons now
   appear immediately to the left of the existing 1×/2×/3× speed buttons.
   A connected and selected controller is the default unless the player has
