@@ -58,6 +58,30 @@ class GameControlBindingsTest {
         assertEquals(KeyEvent.KEYCODE_DPAD_LEFT, bindings.keyCode(ArcadeMode.Bricks, "pad-one", bricksLeft))
     }
 
+    @Test
+    fun biketrisBindingsAreIndependentAndSupportAllFourControls() {
+        val bindings = GameControlBindings(memoryPreferences())
+        val mode = ArcadeMode.Biketris
+        val actions = GameControlCatalog.actions(mode)
+        assertEquals(listOf("left", "right", "down", "rotate"), actions.map { it.id })
+        assertEquals(KeyEvent.KEYCODE_DPAD_LEFT, bindings.keyCode(mode, "pad-01", actions[0]))
+        assertEquals(KeyEvent.KEYCODE_DPAD_RIGHT, bindings.keyCode(mode, "pad-01", actions[1]))
+        assertEquals(KeyEvent.KEYCODE_DPAD_DOWN, bindings.keyCode(mode, "pad-01", actions[2]))
+        assertEquals(KeyEvent.KEYCODE_BUTTON_A, bindings.keyCode(mode, "pad-01", actions[3]))
+        assertTrue(bindings.assign(mode, "pad-01", "rotate", KeyEvent.KEYCODE_BUTTON_X))
+        assertTrue(bindings.assign(mode, "pad-01", "down", KeyEvent.KEYCODE_BUTTON_Y))
+        assertEquals("rotate", bindings.action(mode, "pad-01", KeyEvent.KEYCODE_BUTTON_X)?.id)
+        assertEquals("down", bindings.action(mode, "pad-01", KeyEvent.KEYCODE_BUTTON_Y)?.id)
+        assertEquals(KeyEvent.KEYCODE_BUTTON_A, bindings.keyCode(mode, "pad-02", actions[3]))
+        assertEquals(null, bindings.action(ArcadeMode.Bricks, "pad-01", KeyEvent.KEYCODE_BUTTON_X))
+        assertTrue(bindings.assign(mode, "pad-01", "rotate", KeyEvent.KEYCODE_BUTTON_Y))
+        assertEquals(null, bindings.keyCode(mode, "pad-01", actions[2]))
+        assertEquals("rotate", bindings.action(mode, "pad-01", KeyEvent.KEYCODE_BUTTON_Y)?.id)
+        assertFalse(bindings.assign(mode, "pad-01", "restart", KeyEvent.KEYCODE_BUTTON_START))
+        assertTrue(bindings.reset(mode, "pad-01"))
+        assertEquals(KeyEvent.KEYCODE_BUTTON_A, bindings.keyCode(mode, "pad-01", actions[3]))
+    }
+
     private fun memoryPreferences(): SharedPreferences {
         val stored = mutableMapOf<String, Any>()
         fun newEditor(): SharedPreferences.Editor {
