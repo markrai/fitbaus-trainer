@@ -257,7 +257,7 @@ class NativeBridgeActivity : Activity() {
                 selected.vendorId == event.device.vendorId && selected.productId == event.device.productId
             val controllerEnabled = when (mode) {
                 ArcadeMode.Bricks -> arcadeContent.playground.inputSource == BricksInputSource.Controller
-                ArcadeMode.Biketris -> arcadeContent.biketris.inputSource == BiketrisInputSource.Controller
+                ArcadeMode.Biketris -> arcadeContent.biketris.inputSource != BiketrisInputSource.Webcam
                 else -> true
             }
             val action = if (mode.isGame && modeController.isActive && matches && controllerEnabled) {
@@ -296,7 +296,7 @@ class NativeBridgeActivity : Activity() {
                 modeController.mode == ArcadeMode.Bricks &&
                     arcadeContent.playground.inputSource == BricksInputSource.Controller ||
                 modeController.mode == ArcadeMode.Biketris &&
-                    arcadeContent.biketris.inputSource == BiketrisInputSource.Controller
+                    arcadeContent.biketris.inputSource != BiketrisInputSource.Webcam
             )) gameController.handleMotion(event)
             return true
         }
@@ -419,10 +419,12 @@ class NativeBridgeActivity : Activity() {
             if (exclusiveHid.isActive()) controllerOwnership.refreshNow()
             gameController.refresh()
             arcadeContent.biketris.controllerAvailable = gameController.hasController()
-            val usingController = arcadeContent.biketris.inputSource == BiketrisInputSource.Controller
+            val source = arcadeContent.biketris.inputSource
+            val usingController = source != BiketrisInputSource.Webcam
+            val controllerOnly = source == BiketrisInputSource.Controller
             val gamepadInput = if (usingController) gameController.takeBiketrisInput() else null
             arcadeContent.biketris.render(
-                if (usingController) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost)
+                if (controllerOnly) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost)
                 else handInput.latest(now),
                 cameraSession.state(),
                 cameraSession.failureReason(),
@@ -432,7 +434,7 @@ class NativeBridgeActivity : Activity() {
                 rpmCurrent = telemetry?.rpm?.current == true,
                 rpmObservedAt = telemetry?.rpm?.observedAt,
                 diagnostics = arcadeDiagnosticsText(now, info),
-                cameraInfo = if (usingController) null else info,
+                cameraInfo = if (controllerOnly) null else info,
                 controller = gamepadInput,
             )
             return

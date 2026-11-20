@@ -20,6 +20,8 @@ class BiketrisControllerTest {
         assertEquals(BiketrisInputSource.Controller, BiketrisInputSelection.effective("Controller", true))
         assertEquals(BiketrisInputSource.Webcam, BiketrisInputSelection.effective("Controller", false))
         assertEquals(BiketrisInputSource.Controller, BiketrisInputSelection.effective("Controller", true))
+        assertEquals(BiketrisInputSource.Both, BiketrisInputSelection.effective("Both", true))
+        assertEquals(BiketrisInputSource.Webcam, BiketrisInputSelection.effective("Both", false))
         assertEquals("biketris_input_source", BiketrisInputSelection.PREF_KEY)
         assertFalse(BiketrisInputSelection.PREF_KEY == BricksInputSelection.PREF_KEY)
     }
@@ -147,9 +149,82 @@ class BiketrisControllerTest {
         assertTrue(source.contains("prefs?.edit()?.putString(BiketrisInputSelection.PREF_KEY, source.name)?.apply()"))
         assertTrue(source.contains("onInputSourceChanged?.invoke(inputSource)"))
         assertTrue(source.contains("drawInputSourceSelector(canvas)"))
-        assertTrue(source.contains("controller = if (inputSource == BiketrisInputSource.Controller) controller else null"))
-        assertTrue(source.contains("if (inputSource == BiketrisInputSource.Webcam) wave?.latest() else null"))
+        assertTrue(source.contains("controller = if (source != BiketrisInputSource.Webcam) controller else null"))
+        assertTrue(source.contains("if (source != BiketrisInputSource.Controller) wave?.latest() else null"))
+        assertTrue(source.contains("allowWebcamWithController = source == BiketrisInputSource.Both"))
         assertTrue(source.contains("webcamRect.contains(x, y)"))
         assertTrue(source.contains("controllerRect.contains(x, y)"))
+        assertTrue(source.contains("bothRect.contains(x, y)"))
     }
+    @Test
+    fun combinedModeUsesHeadWhenControllerIsIdleAndLetsControllerOverrideIt() {
+        val game = BiketrisGame(seed = 9L)
+        val session = BiketrisSession(game)
+        var now = initialNanos
+        repeat(20) {
+            now += 33_000_000L
+            session.update(
+                HandPosition(1f, 0.5f, 1f, now, HandSource.Camera),
+                CameraState.Ready, Float.NaN, null, now,
+                controller = BiketrisControllerInput(),
+                allowWebcamWithController = true,
+            )
+        }
+        assertEquals(BiketrisHold.None, session.hold)
+        assertEquals(BiketrisControl.Face, session.reading.control)
+        assertEquals(game.maxLeft, game.pieceLeft)
+        repeat(18) {
+            now += 33_000_000L
+            session.update(
+                HandPosition(1f, 0.5f, 1f, now, HandSource.Camera),
+                CameraState.Ready, Float.NaN, null, now,
+                controller = BiketrisControllerInput(left = true),
+                allowWebcamWithController = true,
+            )
+        }
+        val overridden = game.pieceLeft
+        assertTrue(overridden < game.maxLeft, "controller left overrides the head on the right")
+        repeat(20) {
+            now += 33_000_000L
+            session.update(
+                HandPosition(1f, 0.5f, 1f, now, HandSource.Camera),
+                CameraState.Ready, Float.NaN, null, now,
+                controller = BiketrisControllerInput(),
+                allowWebcamWithController = true,
+            )
+        }
+        assertTrue(game.pieceLeft > overridden, "head resumes steering after controller is released")
+        assertEquals(BiketrisControl.Face, session.reading.control)
+    }
+
+    @Test
+    fun combinedModeOperatesWithCameraUnavailableIncludingRotationAndFastDrop() {
+        val game = BiketrisGame(seed = 7L)
+        val session = BiketrisSession(game)
+        val start = game.pieceLeft
+        var now = initialNanos
+        repeat(8) {
+            now += 33_000_000L
+            session.update(
+                HandPosition(0f, 0f, 0f, now, HandSource.Lost),
+                CameraState.Unavailable, Float.NaN, null, now,
+                controller = BiketrisControllerInput(right = true, softDrop = true, rotate = it == 0),
+                allowWebcamWithController = true,
+            )
+        }
+        assertEquals(BiketrisHold.None, session.hold)
+        assertEquals(BiketrisControl.Lost, session.reading.control)
+        assertTrue(game.softDropActive)
+        assertTrue(game.pieceLeft > start)
+        assertEquals(1, game.rotations)
+        now += 33_000_000L
+        session.update(
+            HandPosition(0f, 0f, 0f, now, HandSource.Lost),
+            CameraState.Unavailable, Float.NaN, null, now,
+            controller = BiketrisControllerInput(),
+            allowWebcamWithController = true,
+        )
+        assertFalse(game.softDropActive)
+    }
+
 }

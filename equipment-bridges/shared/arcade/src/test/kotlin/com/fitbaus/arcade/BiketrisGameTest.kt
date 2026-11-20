@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.File
 
 class BiketrisGameTest {
     private fun cellsOf(piece: BlockPiece, state: Int): Set<Pair<Int, Int>> {
@@ -421,4 +422,63 @@ class BiketrisGameTest {
         game.resetClock()
         assertEquals(0, game.update(t0 + 60_000_000_000L), "first update after a reset only arms the clock")
     }
+    @Test
+    fun difficultyHasFiveDistinctSpeedsAndDefaultPreservesExistingGravity() {
+        val game = BiketrisGame(seed = 12L)
+        assertEquals(3, game.difficultyLevel)
+        assertEquals(0.42f, game.effectiveGravitySeconds, 1e-4f)
+        val expected = floatArrayOf(0.84f, 0.63f, 0.42f, 0.315f, 0.21f)
+        for (level in 1..5) {
+            game.difficultyLevel = level
+            assertEquals(expected[level - 1], game.effectiveGravitySeconds, 1e-4f)
+            assertEquals(level, BiketrisDifficulty.fromFraction((level - 1) / 4f))
+        }
+        game.difficultyLevel = -100
+        assertEquals(1, game.difficultyLevel)
+        game.difficultyLevel = 999
+        assertEquals(5, game.difficultyLevel)
+        assertEquals(1, BiketrisDifficulty.fromFraction(-1f))
+        assertEquals(5, BiketrisDifficulty.fromFraction(2f))
+    }
+
+    @Test
+    fun cadenceStillRewardsPedalingAtEveryDifficulty() {
+        val game = BiketrisGame(seed = 12L)
+        for (level in 1..5) {
+            game.difficultyLevel = level
+            game.gravityScale = 0.75f
+            val fast = game.effectiveGravitySeconds
+            game.gravityScale = 1f
+            val neutral = game.effectiveGravitySeconds
+            game.gravityScale = 1.25f
+            val slow = game.effectiveGravitySeconds
+            assertTrue(fast < neutral, "difficulty $level must speed up below neutral cadence")
+            assertTrue(slow > neutral, "difficulty $level must slow down above neutral cadence")
+        }
+    }
+
+    @Test
+    fun difficultyChangesDoNotResetAnActivePieceOrRevertOnRestart() {
+        val game = BiketrisGame(seed = 12L)
+        game.advance(0.2f)
+        val row = game.pieceY
+        val progress = game.fallProgress
+        game.difficultyLevel = 5
+        game.advance(0f)
+        assertEquals(row, game.pieceY)
+        assertEquals(progress, game.fallProgress, 1e-5f)
+        assertEquals(0.21f, game.effectiveGravitySeconds, 1e-4f)
+        game.restart(13L)
+        assertEquals(5, game.difficultyLevel)
+    }
+
+    @Test
+    fun difficultyPreferenceIsReadAndSavedIndependentlyFromPedalMode() {
+        val source = File("src/main/kotlin/com/fitbaus/arcade/BiketrisView.kt").readText()
+        assertTrue(source.contains("prefs.getInt(BiketrisDifficulty.KEY, BiketrisDifficulty.DEFAULT_LEVEL)"))
+        assertTrue(source.contains("prefs.edit().putInt(BiketrisDifficulty.KEY, difficultyLevel).apply()"))
+        assertTrue(source.contains("session.cadence.enabled = pedalToSlowEnabled"))
+        assertEquals("biketris_difficulty", BiketrisDifficulty.KEY)
+    }
+
 }

@@ -47,22 +47,24 @@ internal object BiketrisPalette {
     )
 }
 
-public enum class BiketrisInputSource { Webcam, Controller }
+public enum class BiketrisInputSource { Webcam, Controller, Both }
 
 internal object BiketrisInputSelection {
     const val PREF_KEY = "biketris_input_source"
-    fun effective(saved: String?, available: Boolean): BiketrisInputSource =
-        if (!available || saved == BiketrisInputSource.Webcam.name) BiketrisInputSource.Webcam
-        else BiketrisInputSource.Controller
+    fun effective(saved: String?, available: Boolean): BiketrisInputSource = when {
+        !available || saved == BiketrisInputSource.Webcam.name -> BiketrisInputSource.Webcam
+        saved == BiketrisInputSource.Both.name -> BiketrisInputSource.Both
+        else -> BiketrisInputSource.Controller
+    }
 }
 
 /**
  * BIKETRIS: a falling-block game for the console. Move the falling piece by moving the head left
  * or right (Face tracking, the same mirrored x as Bricks) and rotate it clockwise with one
  * deliberate sideways wave, detected from frame-to-frame luminance motion on the same camera
- * stream. Touch fallback: drag across the board to move. Read-only cadence sets the fall speed in
- * a single Pedal to Slow Mode toggle. Nothing is
- * ever sent to the bike.
+ * stream. Touch fallback: drag across the board to move. Read-only cadence slows falling
+ * pieces when Pedal to Slow Mode is on; the difficulty slider sets their baseline pace.
+ * Nothing is ever sent to the bike.
  */
 public class BiketrisView(context: Context) : View(context) {
     public var diagnosticsOverlay: Boolean = false
@@ -90,6 +92,9 @@ public class BiketrisView(context: Context) : View(context) {
         prefs.getBoolean(PedalToSlowPreference.KEY, true),
         prefs.getString(PedalToSlowPreference.LEGACY_KEY, null),
     )
+    private var difficultyLevel = BiketrisDifficulty.clamp(
+        prefs.getInt(BiketrisDifficulty.KEY, BiketrisDifficulty.DEFAULT_LEVEL),
+    )
     private val game = BiketrisGame(seed = System.nanoTime())
     private val session = BiketrisSession(game)
     private var selectedInput = prefs?.getString(BiketrisInputSelection.PREF_KEY, null)
@@ -107,7 +112,7 @@ public class BiketrisView(context: Context) : View(context) {
     public var onInputSourceChanged: ((BiketrisInputSource) -> Unit)? = null
 
     public fun selectInputSource(source: BiketrisInputSource) {
-        if (source == BiketrisInputSource.Controller && !controllerAvailable) return
+        if (source != BiketrisInputSource.Webcam && !controllerAvailable) return
         val prior = inputSource
         selectedInput = source.name
         prefs?.edit()?.putString(BiketrisInputSelection.PREF_KEY, source.name)?.apply()
@@ -124,6 +129,7 @@ public class BiketrisView(context: Context) : View(context) {
     private var dragging = false
     private var inputGesture = false
     private var cadenceTogglePressed = false
+    private var difficultyDragging = false
     private var restartPressed = false
     private var lastRenderNanos = Long.MIN_VALUE
     private var cameraState = CameraState.Off
@@ -148,8 +154,10 @@ public class BiketrisView(context: Context) : View(context) {
     private var boardWidth = 0f
     private var boardHeight = 0f
     private val selector = CadenceToggleLayout()
+    private val difficultyRect = RectF()
     private val webcamRect = RectF()
     private val controllerRect = RectF()
+    private val bothRect = RectF()
     private val sourcePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 1.8f * density
@@ -193,6 +201,7 @@ public class BiketrisView(context: Context) : View(context) {
         isClickable = true
         session.mapper.gain = SENSITIVITIES[sensitivityIndex]
         session.cadence.enabled = pedalToSlowEnabled
+        game.difficultyLevel = difficultyLevel
     }
 
     public fun render(
@@ -220,11 +229,13 @@ public class BiketrisView(context: Context) : View(context) {
         diagnosticsText = if (failure != null && camera != CameraState.Ready) failure else diagnostics
         val start = System.nanoTime()
         val wave = gestures
+        val source = inputSource
         session.update(
             position, camera, if (dragging) touchX else Float.NaN,
-            if (inputSource == BiketrisInputSource.Webcam) wave?.latest() else null,
+            if (source != BiketrisInputSource.Controller) wave?.latest() else null,
             now, connected, initialized, rpm, rpmCurrent, rpmObservedAt,
-            controller = if (inputSource == BiketrisInputSource.Controller) controller else null,
+            controller = if (source != BiketrisInputSource.Webcam) controller else null,
+            allowWebcamWithController = source == BiketrisInputSource.Both,
         )
         if (wave != null) waveRate.update(wave.observations, now)
         updateWindow.record((System.nanoTime() - start) / 1_000_000f)
@@ -238,6 +249,7 @@ public class BiketrisView(context: Context) : View(context) {
         inputGesture = false
         touchX = Float.NaN
         cadenceTogglePressed = false
+        difficultyDragging = false
         restartPressed = false
         lastRenderNanos = Long.MIN_VALUE
         waveRate.reset()
@@ -296,6 +308,17 @@ public class BiketrisView(context: Context) : View(context) {
         invalidate()
     }
 
+    private fun selectDifficultyAt(x: Float) {
+        val trackLeft = difficultyRect.left + 12f * density
+        val trackWidth = (difficultyRect.width() - 24f * density).coerceAtLeast(1f)
+        val next = BiketrisDifficulty.fromFraction((x - trackLeft) / trackWidth)
+        if (next == difficultyLevel) return
+        difficultyLevel = next
+        game.difficultyLevel = next
+        prefs.edit().putInt(BiketrisDifficulty.KEY, difficultyLevel).apply()
+        invalidate()
+    }
+
     private fun applyWaveSettings() {
         val target = gestures ?: return
         target.config = WaveConfig.forSensitivity(waveSensitivity, COOLDOWNS_MS[cooldownIndex] * 1_000_000L)
@@ -325,11 +348,17 @@ public class BiketrisView(context: Context) : View(context) {
         webcamRect.set(panelLeft, sourceTop, panelLeft + sourceSize, sourceTop + sourceHeight)
         controllerRect.set(panelLeft + sourceSize + sourceGap, sourceTop,
             panelLeft + 2f * sourceSize + sourceGap, sourceTop + sourceHeight)
-        val selectorWidth = minOf(panelWidth.coerceAtLeast(0f), segmentPaint.measureText(PedalToSlowPreference.LABEL) + 24f * density)
+        val bothLeft = panelLeft + 2f * (sourceSize + sourceGap)
+        bothRect.set(bothLeft, sourceTop, bothLeft + 56f * density, sourceTop + sourceHeight)
+        val sliderGap = 10f * density
+        val preferredSelectorWidth = segmentPaint.measureText(PedalToSlowPreference.LABEL) + 24f * density
+        val selectorWidth = minOf(preferredSelectorWidth, (panelWidth * 0.6f).coerceAtLeast(0f))
         val selectorHeight = 52f * density
         val feedbackHeight = 3f * (feedbackPaint.textSize + 6f * density)
         val selectorTop = boardTop + boardHeight - feedbackHeight - 10f * density - selectorHeight
         selector.set(panelLeft, selectorTop, selectorWidth, selectorHeight)
+        val sliderLeft = (panelLeft + selectorWidth + sliderGap).coerceAtMost(panelLeft + panelWidth)
+        difficultyRect.set(sliderLeft, selectorTop, panelLeft + panelWidth, selectorTop + selectorHeight)
         feedbackTop = selectorTop + selectorHeight + 10f * density
         val playW = boardWidth * 0.8f
         val playTop = boardTop + boardHeight * 0.56f
@@ -458,22 +487,35 @@ public class BiketrisView(context: Context) : View(context) {
         drawInputSourceSelector(canvas)
         var y = boardTop + 48f * density + infoPaint.textSize
         val controllerMode = inputSource == BiketrisInputSource.Controller
+        val combinedMode = inputSource == BiketrisInputSource.Both
         infoPaint.color = BiketrisPalette.PRIMARY
         canvas.drawText(
-            if (controllerMode) "CONTROLLER LEFT / RIGHT" else "HEAD LEFT / RIGHT TO MOVE",
+            when {
+                combinedMode -> "HEAD OR CONTROLLER TO MOVE"
+                controllerMode -> "CONTROLLER LEFT / RIGHT"
+                else -> "HEAD LEFT / RIGHT TO MOVE"
+            },
             left, y, infoPaint,
         )
         y += infoPaint.textSize + 8f * density
         infoPaint.color = BiketrisPalette.PRIMARY
         canvas.drawText(
-            if (controllerMode) "DOWN TO DROP FASTER"
-            else if (waveEnabled) "WAVE HAND TO ROTATE" else "WAVE ROTATION OFF",
+            when {
+                combinedMode -> "CONTROLLER DOWN = FAST DROP"
+                controllerMode -> "DOWN TO DROP FASTER"
+                waveEnabled -> "WAVE HAND TO ROTATE"
+                else -> "WAVE ROTATION OFF"
+            },
             left, y, infoPaint,
         )
         y += infoPaint.textSize + 8f * density
         infoPaint.color = BiketrisPalette.MUTE
         canvas.drawText(
-            if (controllerMode) "ROTATE: MAPPED BUTTON" else "OR DRAG THE BOARD TO MOVE",
+            when {
+                combinedMode -> if (waveEnabled) "WAVE OR BUTTON TO ROTATE" else "BUTTON TO ROTATE"
+                controllerMode -> "ROTATE: MAPPED BUTTON"
+                else -> "OR DRAG THE BOARD TO MOVE"
+            },
             left, y, infoPaint,
         )
         y += infoPaint.textSize + 20f * density
@@ -517,12 +559,17 @@ public class BiketrisView(context: Context) : View(context) {
             bannerPaint.color = BiketrisPalette.PRIMARY
         }
         drawSelector(canvas)
+        drawDifficultySlider(canvas)
         drawCadenceFeedback(canvas, left)
     }
 
     private fun drawInputSourceSelector(canvas: Canvas) {
         for (source in BiketrisInputSource.entries) {
-            val rect = if (source == BiketrisInputSource.Webcam) webcamRect else controllerRect
+            val rect = when (source) {
+                BiketrisInputSource.Webcam -> webcamRect
+                BiketrisInputSource.Controller -> controllerRect
+                BiketrisInputSource.Both -> bothRect
+            }
             val selected = inputSource == source
             val available = source == BiketrisInputSource.Webcam || controllerAvailable
             fill.color = if (selected) BiketrisPalette.SELECTED else BiketrisPalette.BUTTON
@@ -537,20 +584,32 @@ public class BiketrisView(context: Context) : View(context) {
             }
             val x = rect.centerX()
             val y = rect.centerY()
-            val d = density
-            if (source == BiketrisInputSource.Webcam) {
-                canvas.drawCircle(x, y - 3f * d, 6.5f * d, sourcePaint)
-                canvas.drawCircle(x, y - 3f * d, 2.5f * d, sourcePaint)
-                canvas.drawLine(x, y + 4f * d, x, y + 9f * d, sourcePaint)
-                canvas.drawLine(x - 8f * d, y + 9f * d, x + 8f * d, y + 9f * d, sourcePaint)
-            } else {
-                canvas.drawRoundRect(x - 12f * d, y - 6f * d, x + 12f * d, y + 7f * d, 5f * d, 5f * d, sourcePaint)
-                canvas.drawLine(x - 7f * d, y - 2f * d, x - 7f * d, y + 4f * d, sourcePaint)
-                canvas.drawLine(x - 10f * d, y + 1f * d, x - 4f * d, y + 1f * d, sourcePaint)
-                canvas.drawCircle(x + 6f * d, y - 1f * d, 1f * d, sourcePaint)
-                canvas.drawCircle(x + 9f * d, y + 3f * d, 1f * d, sourcePaint)
+            when (source) {
+                BiketrisInputSource.Webcam -> drawWebcamIcon(canvas, x, y, 1f)
+                BiketrisInputSource.Controller -> drawControllerIcon(canvas, x, y, 1f)
+                BiketrisInputSource.Both -> {
+                    drawWebcamIcon(canvas, x - 13f * density, y, 0.7f)
+                    drawControllerIcon(canvas, x + 13f * density, y, 0.7f)
+                }
             }
         }
+    }
+
+    private fun drawWebcamIcon(canvas: Canvas, x: Float, y: Float, scale: Float) {
+        val d = density * scale
+        canvas.drawCircle(x, y - 3f * d, 6.5f * d, sourcePaint)
+        canvas.drawCircle(x, y - 3f * d, 2.5f * d, sourcePaint)
+        canvas.drawLine(x, y + 4f * d, x, y + 9f * d, sourcePaint)
+        canvas.drawLine(x - 8f * d, y + 9f * d, x + 8f * d, y + 9f * d, sourcePaint)
+    }
+
+    private fun drawControllerIcon(canvas: Canvas, x: Float, y: Float, scale: Float) {
+        val d = density * scale
+        canvas.drawRoundRect(x - 12f * d, y - 6f * d, x + 12f * d, y + 7f * d, 5f * d, 5f * d, sourcePaint)
+        canvas.drawLine(x - 7f * d, y - 2f * d, x - 7f * d, y + 4f * d, sourcePaint)
+        canvas.drawLine(x - 10f * d, y + 1f * d, x - 4f * d, y + 1f * d, sourcePaint)
+        canvas.drawCircle(x + 6f * d, y - 1f * d, 1f * d, sourcePaint)
+        canvas.drawCircle(x + 9f * d, y + 3f * d, 1f * d, sourcePaint)
     }
 
     private fun drawSelector(canvas: Canvas) {
@@ -566,12 +625,39 @@ public class BiketrisView(context: Context) : View(context) {
         stroke.color = if (active) BiketrisPalette.GOOD else BiketrisPalette.BORDER
         canvas.drawRect(selector.left, selector.top, selector.left + selector.width, selector.top + selector.height, stroke)
         segmentPaint.color = if (active) BiketrisPalette.BACKGROUND else BiketrisPalette.MUTE
+        val originalSize = segmentPaint.textSize
+        val availableWidth = (selector.width - 8f * density).coerceAtLeast(0f)
+        val labelWidth = segmentPaint.measureText(PedalToSlowPreference.LABEL).coerceAtLeast(1f)
+        segmentPaint.textSize *= minOf(1f, availableWidth / labelWidth)
         canvas.drawText(
             PedalToSlowPreference.LABEL,
             selector.left + selector.width / 2f,
             selector.top + selector.height / 2f + segmentPaint.textSize / 3f,
             segmentPaint,
         )
+        segmentPaint.textSize = originalSize
+    }
+
+    private fun drawDifficultySlider(canvas: Canvas) {
+        if (difficultyRect.width() <= 24f * density) return
+        val trackLeft = difficultyRect.left + 12f * density
+        val trackRight = difficultyRect.right - 12f * density
+        val trackY = difficultyRect.top + 30f * density
+        segmentPaint.color = BiketrisPalette.MUTE
+        canvas.drawText("DIFFICULTY $difficultyLevel", difficultyRect.centerX(), difficultyRect.top + 13f * density, segmentPaint)
+        stroke.strokeWidth = 3f * density
+        stroke.color = BiketrisPalette.BORDER
+        canvas.drawLine(trackLeft, trackY, trackRight, trackY, stroke)
+        for (level in 1..5) {
+            val tickX = trackLeft + (level - 1) * (trackRight - trackLeft) / 4f
+            fill.color = if (level <= difficultyLevel) BiketrisPalette.GOOD else BiketrisPalette.MUTE
+            canvas.drawCircle(tickX, trackY, 2.5f * density, fill)
+            segmentPaint.color = if (level == difficultyLevel) BiketrisPalette.GOOD else BiketrisPalette.MUTE
+            canvas.drawText(level.toString(), tickX, difficultyRect.bottom - 2f * density, segmentPaint)
+        }
+        val selectedX = trackLeft + (difficultyLevel - 1) * (trackRight - trackLeft) / 4f
+        fill.color = BiketrisPalette.GOOD
+        canvas.drawCircle(selectedX, trackY, 6f * density, fill)
     }
 
     private fun drawCadenceFeedback(canvas: Canvas, left: Float) {
@@ -608,6 +694,7 @@ public class BiketrisView(context: Context) : View(context) {
     }
 
     private fun statusText(): String = when {
+        inputSource == BiketrisInputSource.Both -> "WEBCAM + CONTROLLER"
         inputSource == BiketrisInputSource.Controller -> "CONTROLLER CONTROL"
         session.reading.control == BiketrisControl.Touch -> "TOUCH CONTROL"
         session.touchSession -> "TOUCH PLAY"
@@ -637,9 +724,15 @@ public class BiketrisView(context: Context) : View(context) {
             banner(canvas, held, cx, boardTop + boardHeight * 0.45f, if (held.length > 28) 14f else 18f)
         } else if (game.elapsed < INTRO_SECONDS) {
             val controllerMode = inputSource == BiketrisInputSource.Controller
-            banner(canvas, if (controllerMode) "CONTROLLER TO MOVE" else "HEAD LEFT / RIGHT TO MOVE",
-                cx, boardTop + boardHeight * 0.18f, 15f)
-            if (controllerMode) banner(canvas, "DOWN = DROP   BUTTON = ROTATE",
+            val combinedMode = inputSource == BiketrisInputSource.Both
+            banner(canvas, when {
+                combinedMode -> "FACE OR CONTROLLER"
+                controllerMode -> "CONTROLLER TO MOVE"
+                else -> "HEAD LEFT / RIGHT TO MOVE"
+            }, cx, boardTop + boardHeight * 0.18f, 15f)
+            if (combinedMode) banner(canvas, "WAVE OR BUTTON = ROTATE",
+                cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
+            else if (controllerMode) banner(canvas, "DOWN = DROP   BUTTON = ROTATE",
                 cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
             else if (waveEnabled) banner(canvas, "WAVE HAND TO ROTATE",
                 cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
@@ -694,8 +787,8 @@ public class BiketrisView(context: Context) : View(context) {
             )
         }
         lines += String.format(
-            Locale.US, "game %s  level %d  lines %d  pieces %d  gravity %.0f ms  lock resets %d  rotations %d (blocked %d)  seed %d",
-            g.phase, g.level, g.lines, g.piecesSpawned, g.gravitySeconds * 1000f, g.lockResets, g.rotations, g.blockedRotations, g.seed,
+            Locale.US, "game %s  level %d  difficulty %d  input %s  lines %d  pieces %d  gravity %.0f ms  lock resets %d  rotations %d (blocked %d)  seed %d",
+            g.phase, g.level, g.difficultyLevel, inputSource, g.lines, g.piecesSpawned, g.gravitySeconds * 1000f, g.lockResets, g.rotations, g.blockedRotations, g.seed,
         )
         val c = session.cadence
         lines += String.format(
@@ -776,6 +869,7 @@ public class BiketrisView(context: Context) : View(context) {
             val selection = when {
                 webcamRect.contains(x, y) -> BiketrisInputSource.Webcam
                 controllerRect.contains(x, y) -> BiketrisInputSource.Controller
+                bothRect.contains(x, y) -> BiketrisInputSource.Both
                 else -> null
             }
             if (selection != null) {
@@ -789,6 +883,22 @@ public class BiketrisView(context: Context) : View(context) {
                 inputGesture = false
                 if (event.actionMasked == MotionEvent.ACTION_UP) performClick()
             }
+            return true
+        }
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && difficultyRect.contains(x, y)) {
+            difficultyDragging = true
+            selectDifficultyAt(x)
+            return true
+        }
+        if (difficultyDragging) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> selectDifficultyAt(x)
+            }
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                difficultyDragging = false
+                if (event.actionMasked == MotionEvent.ACTION_UP) performClick()
+            }
+            invalidate()
             return true
         }
         when (event.actionMasked) {
@@ -828,6 +938,7 @@ public class BiketrisView(context: Context) : View(context) {
         dragging = false
         touchX = Float.NaN
         cadenceTogglePressed = false
+        difficultyDragging = false
         restartPressed = false
     }
 
