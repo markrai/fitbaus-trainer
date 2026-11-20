@@ -416,7 +416,7 @@ class NativeBridgeActivity : Activity() {
             return
         }
         if (modeController.mode == ArcadeMode.Biketris) {
-            controllerOwnership.refreshNow()
+            if (exclusiveHid.isActive()) controllerOwnership.refreshNow()
             gameController.refresh()
             arcadeContent.biketris.controllerAvailable = gameController.hasController()
             val usingController = arcadeContent.biketris.inputSource == BiketrisInputSource.Controller
