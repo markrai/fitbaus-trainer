@@ -266,11 +266,6 @@ class NativeBridgeActivity : Activity() {
                 ArcadeMode.Biketris -> arcadeContent.biketris.restartGame()
                 else -> Unit
             }
-            "recenter" -> when (mode) {
-                ArcadeMode.Flak -> arcadeContent.flak.selectDeveloperOption(2)
-                ArcadeMode.TrailRide -> arcadeContent.trail.selectDeveloperOption(2)
-                else -> Unit
-            }
         }
     }
 
