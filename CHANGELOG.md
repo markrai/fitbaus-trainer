@@ -107,6 +107,14 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Opt-in exclusive USB HID experiment for bike gamepads.** The Controllers
+  settings tab can request USB Host permission, claim a single safe HID
+  interface with kernel-driver detachment if supported, display raw interrupt
+  reports, and learn Bricks left/right buttons. Approved sessions reopen only
+  during games and release on exit/pause; ambiguous/composite, bike and webcam
+  devices are excluded. Android Home capture remains unverified until physical
+  console testing, and released interfaces may require USB reconnection.
+
 - **Controller Back/menu keys leaving FitBaus during games.** In active games,
   recognized buttons delivered from the selected controller are consumed by
   FitBaus before Android's default Activity navigation handler. This includes
