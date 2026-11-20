@@ -93,6 +93,10 @@ internal class AutoControllerOwnership(
         hid.stop()
     }
 
+    fun refreshNow() {
+        if (running) reconcile()
+    }
+
     fun status(): String = if (hid.isActive()) hid.status() else statusText
 
     private fun reconcile() {
