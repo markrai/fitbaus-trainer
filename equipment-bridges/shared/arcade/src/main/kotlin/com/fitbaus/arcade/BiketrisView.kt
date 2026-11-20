@@ -61,7 +61,7 @@ internal object BiketrisInputSelection {
  * or right (Face tracking, the same mirrored x as Bricks) and rotate it clockwise with one
  * deliberate sideways wave, detected from frame-to-frame luminance motion on the same camera
  * stream. Touch fallback: drag across the board to move. Read-only cadence sets the fall speed in
- * one of two modes chosen on screen (PEDAL TO SLOW, the default, or PEDAL TO SPEED UP). Nothing is
+ * a single Pedal to Slow Mode toggle. Nothing is
  * ever sent to the bike.
  */
 public class BiketrisView(context: Context) : View(context) {
@@ -85,7 +85,11 @@ public class BiketrisView(context: Context) : View(context) {
     private var waveSensitivity = (prefs?.getInt(WAVE_SENSITIVITY_KEY, WaveConfig.DEFAULT_SENSITIVITY) ?: WaveConfig.DEFAULT_SENSITIVITY)
         .coerceIn(0, WaveConfig.SENSITIVITY_LABELS.size - 1)
     private var cooldownIndex = (prefs?.getInt(WAVE_COOLDOWN_KEY, DEFAULT_COOLDOWN) ?: DEFAULT_COOLDOWN).coerceIn(0, COOLDOWNS_MS.size - 1)
-    private var cadenceMode = CadenceMode.fromKey(prefs?.getString(CADENCE_MODE_KEY, null))
+    private var pedalToSlowEnabled = PedalToSlowPreference.enabled(
+        prefs.contains(PedalToSlowPreference.KEY),
+        prefs.getBoolean(PedalToSlowPreference.KEY, true),
+        prefs.getString(PedalToSlowPreference.LEGACY_KEY, null),
+    )
     private val game = BiketrisGame(seed = System.nanoTime())
     private val session = BiketrisSession(game)
     private var selectedInput = prefs?.getString(BiketrisInputSelection.PREF_KEY, null)
@@ -119,7 +123,7 @@ public class BiketrisView(context: Context) : View(context) {
     private var touchX = Float.NaN
     private var dragging = false
     private var inputGesture = false
-    private var pressedMode: CadenceMode? = null
+    private var cadenceTogglePressed = false
     private var restartPressed = false
     private var lastRenderNanos = Long.MIN_VALUE
     private var cameraState = CameraState.Off
@@ -143,7 +147,7 @@ public class BiketrisView(context: Context) : View(context) {
     private var boardTop = 0f
     private var boardWidth = 0f
     private var boardHeight = 0f
-    private val selector = CadenceSelectorLayout()
+    private val selector = CadenceToggleLayout()
     private val webcamRect = RectF()
     private val controllerRect = RectF()
     private val sourcePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -188,7 +192,7 @@ public class BiketrisView(context: Context) : View(context) {
         setBackgroundColor(BiketrisPalette.BACKGROUND)
         isClickable = true
         session.mapper.gain = SENSITIVITIES[sensitivityIndex]
-        session.cadence.mode = cadenceMode
+        session.cadence.enabled = pedalToSlowEnabled
     }
 
     public fun render(
@@ -233,7 +237,7 @@ public class BiketrisView(context: Context) : View(context) {
         dragging = false
         inputGesture = false
         touchX = Float.NaN
-        pressedMode = null
+        cadenceTogglePressed = false
         restartPressed = false
         lastRenderNanos = Long.MIN_VALUE
         waveRate.reset()
@@ -282,11 +286,13 @@ public class BiketrisView(context: Context) : View(context) {
         invalidate()
     }
 
-    private fun selectCadenceMode(mode: CadenceMode) {
-        if (mode == cadenceMode) return
-        cadenceMode = mode
-        session.cadence.mode = mode
-        prefs?.edit()?.putString(CADENCE_MODE_KEY, mode.key)?.apply()
+    private fun togglePedalToSlow() {
+        pedalToSlowEnabled = !pedalToSlowEnabled
+        session.cadence.enabled = pedalToSlowEnabled
+        prefs.edit()
+            .putBoolean(PedalToSlowPreference.KEY, pedalToSlowEnabled)
+            .remove(PedalToSlowPreference.LEGACY_KEY)
+            .apply()
         invalidate()
     }
 
@@ -319,13 +325,11 @@ public class BiketrisView(context: Context) : View(context) {
         webcamRect.set(panelLeft, sourceTop, panelLeft + sourceSize, sourceTop + sourceHeight)
         controllerRect.set(panelLeft + sourceSize + sourceGap, sourceTop,
             panelLeft + 2f * sourceSize + sourceGap, sourceTop + sourceHeight)
-        val segmentWidth = CadenceMode.values().maxOf { segmentPaint.measureText(it.label) } + 24f * density
-        val stacked = panelWidth < segmentWidth * 2f
-        val selectorWidth = if (stacked) minOf(panelWidth, segmentWidth) else minOf(panelWidth, maxOf(segmentWidth * 2f, 360f * density))
-        val selectorHeight = (if (stacked) 88f else 52f) * density
+        val selectorWidth = minOf(panelWidth.coerceAtLeast(0f), segmentPaint.measureText(PedalToSlowPreference.LABEL) + 24f * density)
+        val selectorHeight = 52f * density
         val feedbackHeight = 3f * (feedbackPaint.textSize + 6f * density)
         val selectorTop = boardTop + boardHeight - feedbackHeight - 10f * density - selectorHeight
-        selector.set(panelLeft, selectorTop, selectorWidth, selectorHeight, stacked)
+        selector.set(panelLeft, selectorTop, selectorWidth, selectorHeight)
         feedbackTop = selectorTop + selectorHeight + 10f * density
         val playW = boardWidth * 0.8f
         val playTop = boardTop + boardHeight * 0.56f
@@ -551,24 +555,23 @@ public class BiketrisView(context: Context) : View(context) {
 
     private fun drawSelector(canvas: Canvas) {
         if (!selector.visible) return
-        stroke.strokeWidth = 2f * density
-        for (mode in CadenceMode.values()) {
-            val l = selector.segmentLeft(mode)
-            val t = selector.segmentTop(mode)
-            val r = selector.segmentRight(mode)
-            val b = selector.segmentBottom(mode)
-            val active = mode == cadenceMode
-            fill.color = when {
-                active -> BiketrisPalette.SELECTED
-                pressedMode == mode -> BiketrisPalette.BUTTON_PRESSED
-                else -> BiketrisPalette.BUTTON
-            }
-            canvas.drawRect(l, t, r, b, fill)
-            stroke.color = if (active) BiketrisPalette.GOOD else BiketrisPalette.BORDER
-            canvas.drawRect(l, t, r, b, stroke)
-            segmentPaint.color = if (active) BiketrisPalette.BACKGROUND else BiketrisPalette.MUTE
-            canvas.drawText(mode.label, (l + r) / 2f, (t + b) / 2f + segmentPaint.textSize / 3f, segmentPaint)
+        val active = pedalToSlowEnabled
+        fill.color = when {
+            active -> BiketrisPalette.SELECTED
+            cadenceTogglePressed -> BiketrisPalette.BUTTON_PRESSED
+            else -> BiketrisPalette.BUTTON
         }
+        canvas.drawRect(selector.left, selector.top, selector.left + selector.width, selector.top + selector.height, fill)
+        stroke.strokeWidth = 2f * density
+        stroke.color = if (active) BiketrisPalette.GOOD else BiketrisPalette.BORDER
+        canvas.drawRect(selector.left, selector.top, selector.left + selector.width, selector.top + selector.height, stroke)
+        segmentPaint.color = if (active) BiketrisPalette.BACKGROUND else BiketrisPalette.MUTE
+        canvas.drawText(
+            PedalToSlowPreference.LABEL,
+            selector.left + selector.width / 2f,
+            selector.top + selector.height / 2f + segmentPaint.textSize / 3f,
+            segmentPaint,
+        )
     }
 
     private fun drawCadenceFeedback(canvas: Canvas, left: Float) {
@@ -597,7 +600,11 @@ public class BiketrisView(context: Context) : View(context) {
         canvas.drawText(fallText, left, y, feedbackPaint)
         y += line
         infoPaint.color = BiketrisPalette.MUTE
-        canvas.drawText(if (live) cadenceMode.hint else "NO RPM - NORMAL SPEED", left, y, infoPaint)
+        canvas.drawText(
+            if (!pedalToSlowEnabled) "NORMAL GRAVITY"
+            else if (live) PedalToSlowPreference.HINT else "NO RPM - NORMAL SPEED",
+            left, y, infoPaint,
+        )
     }
 
     private fun statusText(): String = when {
@@ -636,7 +643,8 @@ public class BiketrisView(context: Context) : View(context) {
                 cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
             else if (waveEnabled) banner(canvas, "WAVE HAND TO ROTATE",
                 cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
-            banner(canvas, cadenceMode.hint, cx, boardTop + boardHeight * 0.18f + 60f * density, 15f)
+            banner(canvas, if (pedalToSlowEnabled) PedalToSlowPreference.HINT else "NORMAL GRAVITY",
+                cx, boardTop + boardHeight * 0.18f + 60f * density, 15f)
         }
     }
 
@@ -692,7 +700,7 @@ public class BiketrisView(context: Context) : View(context) {
         val c = session.cadence
         lines += String.format(
             Locale.US, "cadence %s  %s  raw %s  filtered %.1f rpm  target x%.3f  applied x%.3f  level %.0f ms  fall %.0f ms  progress %.2f  sample age %s  samples %d",
-            c.mode, c.status, if (c.rawRpm < 0) "-" else c.rawRpm.toString(), c.filteredRpm, c.targetMultiplier, c.appliedMultiplier,
+            if (c.enabled) "pedal to slow" else "off", c.status, if (c.rawRpm < 0) "-" else c.rawRpm.toString(), c.filteredRpm, c.targetMultiplier, c.appliedMultiplier,
             g.gravitySeconds * 1000f, g.effectiveGravitySeconds * 1000f, g.fallProgress, if (c.sampleAgeMs < 0) "-" else "${c.sampleAgeMs} ms", c.samples,
         )
         lines += String.format(
@@ -785,9 +793,9 @@ public class BiketrisView(context: Context) : View(context) {
         }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                val segment = selector.hit(x, y)
+                val cadenceHit = selector.hit(x, y)
                 when {
-                    segment != null -> pressedMode = segment
+                    cadenceHit -> cadenceTogglePressed = true
                     game.phase == BiketrisPhase.GameOver -> restartPressed = restartRect.contains(x, y)
                     x >= boardLeft - cell * 2f && x <= boardLeft + boardWidth + cell * 2f -> {
                         dragging = true
@@ -798,12 +806,11 @@ public class BiketrisView(context: Context) : View(context) {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (dragging) touchX = boardFraction(x)
-                if (pressedMode != null && selector.hit(x, y) != pressedMode) pressedMode = null
+                if (cadenceTogglePressed && !selector.hit(x, y)) cadenceTogglePressed = false
                 if (restartPressed && !restartRect.contains(x, y)) restartPressed = false
             }
             MotionEvent.ACTION_UP -> {
-                val pressed = pressedMode
-                if (pressed != null && selector.hit(x, y) == pressed) selectCadenceMode(pressed)
+                if (cadenceTogglePressed && selector.hit(x, y)) togglePedalToSlow()
                 if (restartPressed && restartRect.contains(x, y) && game.phase == BiketrisPhase.GameOver) {
                     restartGame()
                     session.noteTouchIntent()
@@ -843,7 +850,6 @@ public class BiketrisView(context: Context) : View(context) {
         const val WAVE_ENABLED_KEY = "biketris_wave_enabled"
         const val WAVE_SENSITIVITY_KEY = "biketris_wave_sensitivity"
         const val WAVE_COOLDOWN_KEY = "biketris_wave_cooldown"
-        const val CADENCE_MODE_KEY = "biketris_cadence_mode"
         const val DEFAULT_SENSITIVITY = 1
         const val DEFAULT_COOLDOWN = 1
         const val STALL_NANOS = 500_000_000L
