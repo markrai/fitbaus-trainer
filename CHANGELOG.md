@@ -33,12 +33,13 @@ included in this upcoming release.
   binding has been removed.
 - **Automatic connected-gamepad USB HID ownership.** Removed the manual
   Claim input, Release, and Choose USB HID controls. Foreground FitBaus
-  attempts to claim every safe HID interface of a recognized gamepad,
+  attempts to claim safe HID interfaces when their raw input can be
+  decoded (or while explicitly learning raw buttons in Settings),
   requesting Android's USB Host permission only when needed and not
   aggressively retrying a denial. USB interfaces release on pause,
   disconnect, or exit. Mixed-class equipment including bike control and
-  external webcams is never claimed, and the normal Android event route
-  remains a fallback if exclusive claiming is unavailable.
+  external webcams is never claimed. Uncalibrated gamepads continue to
+  use Android's intercepted controller input rather than losing steering.
 
 
 - **Bricks input source selector.** Matching webcam/controller buttons now
