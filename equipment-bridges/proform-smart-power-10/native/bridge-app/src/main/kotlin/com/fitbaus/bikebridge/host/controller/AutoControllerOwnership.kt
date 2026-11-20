@@ -108,6 +108,7 @@ internal class AutoControllerOwnership(
         }
         if (!canClaim()) {
             if (hid.isActive()) hid.stop()
+            attemptedClaims.clear()
             statusText = "Using Android controller events until device-specific raw HID steering is calibrated"
             return
         }
