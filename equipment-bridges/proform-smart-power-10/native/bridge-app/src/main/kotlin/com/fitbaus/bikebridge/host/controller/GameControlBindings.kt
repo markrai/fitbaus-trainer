@@ -12,13 +12,12 @@ internal object GameControlCatalog {
     private val left = GameControl("left", "Move left", KeyEvent.KEYCODE_DPAD_LEFT)
     private val right = GameControl("right", "Move right", KeyEvent.KEYCODE_DPAD_RIGHT)
     private val restart = GameControl("restart", "Restart game")
-    private val recenter = GameControl("recenter", "Recenter head tracking")
 
     fun actions(mode: ArcadeMode?): List<GameControl> = when (mode) {
         ArcadeMode.Bricks -> listOf(left, right, restart)
         ArcadeMode.Math -> listOf(restart)
-        ArcadeMode.Flak -> listOf(restart, recenter)
-        ArcadeMode.TrailRide -> listOf(restart, recenter)
+        ArcadeMode.Flak -> listOf(restart)
+        ArcadeMode.TrailRide -> listOf(restart)
         ArcadeMode.Biketris -> listOf(left, right, restart)
         else -> emptyList()
     }
