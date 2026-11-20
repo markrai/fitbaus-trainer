@@ -88,6 +88,7 @@ class PassiveArcadeTest {
                 "BikeMotion",
                 "BikeMotionMonitor",
                 "BiketrisView",
+                "BricksInputSource",
                 "CameraRegion",
                 "CameraState",
                 "ExternalCameraProvider",
