@@ -59,6 +59,34 @@ This is **Bricks-only**. Biketris, Flak Run, Trail Ride and Finger Math retain
 their previously implemented input behaviors, and the speed buttons work
 independently of the new source choice.
 
+## Biketris steering source selector
+
+Biketris now displays the same webcam/controller icon pair as Bricks at
+the top of the right-hand panel, using green-selected and outlined-inactive
+states. The selection has its own persistent `biketris_input_source`
+preference, independent of Bricks. With one chosen and connected gamepad,
+Controller is selected by default until the player explicitly saves Webcam.
+When the chosen controller disconnects, Biketris temporarily shows Webcam
+but retains the saved Controller preference for reconnection.
+
+- **Webcam** retains mirrored head steering and wave-to-rotate gestures.
+- **Controller** steers through the configured gamepad mappings: holding
+  Left/Right moves the active piece sideways at Biketris' normal repeat
+  rate, Down increases the fall speed until released, and Rotate turns
+  one step clockwise per physical button press. A joystick's horizontal
+  and vertical axes work with the same directional behavior.
+- Touch dragging remains an override. Controller mode does not require a
+  visible face to start or continue playing, and does not act on head or
+  wave movements. The camera remains available for switching back.
+- Soft Drop multiplies the existing read-only gravity interval while
+  respecting its safety minimum. It never simulates RPM, pedaling, or
+  resistance changes; actual cadence still affects the game's speed.
+
+The on-screen Play Again action remains after game over. Controller
+button assignments are stored per game and controller descriptor.
+Controller capture via Android input events is independent of Bricks'
+optional experimental raw-HID calibration.
+
 ## Per-game controller mappings
 
 When Settings is opened from a game, the Controllers tab shows that game's
@@ -71,7 +99,7 @@ Entering Settings from Dashboard or YouTube provides no game-context extra,
 so the entire per-game mapping section is hidden.
 
 - Bricks: move left, move right
-- Biketris: move left, move right, restart
+- Biketris: move left, move right, soft drop, rotate clockwise
 - Finger Math: restart
 - Flak Run: restart
 - Trail Ride: restart
@@ -84,9 +112,10 @@ actions that the game engine does not support. Existing face tracking,
 physical pedaling and touch remain unchanged.
 
 Bricks routes left/right button mappings through its controller steering
-path, and Biketris uses its touch-steering fallback. The joystick X
-remains supported for Bricks; per-axis remapping is not part of the current
-keycode binding format. Mapping controls require Android to deliver the
+path; Biketris uses native column movement, bounded soft drop, and
+clockwise rotation without synthesizing touches. Analog axes are
+supported as conventional directions, but per-axis remapping is not part
+of the current keycode binding format. Mapping controls require Android to deliver the
 button as a keycode. Raw HID report learning is a separate experimental
 path described below.
 
