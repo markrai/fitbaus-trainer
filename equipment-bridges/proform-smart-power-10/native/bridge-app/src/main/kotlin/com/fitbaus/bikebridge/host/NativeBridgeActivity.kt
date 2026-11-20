@@ -34,6 +34,9 @@ import com.fitbaus.arcade.ArcadeCameraSession
 import com.fitbaus.arcade.ArcadeClock
 import com.fitbaus.arcade.ArcadeStatusResolver
 import com.fitbaus.arcade.BricksInputSource
+import com.fitbaus.arcade.BiketrisInputSource
+import com.fitbaus.arcade.HandPosition
+import com.fitbaus.arcade.HandSource
 import com.fitbaus.arcade.ArcadeStopReason
 import com.fitbaus.arcade.ArcadeTrackerMode
 import com.fitbaus.arcade.ArcadeTrackerSettings
@@ -252,9 +255,12 @@ class NativeBridgeActivity : Activity() {
             )
             val matches = selected != null && event.device != null &&
                 selected.vendorId == event.device.vendorId && selected.productId == event.device.productId
-            val bricksControllerEnabled = mode != ArcadeMode.Bricks ||
-                arcadeContent.playground.inputSource == BricksInputSource.Controller
-            val action = if (mode.isGame && modeController.isActive && matches && bricksControllerEnabled) {
+            val controllerEnabled = when (mode) {
+                ArcadeMode.Bricks -> arcadeContent.playground.inputSource == BricksInputSource.Controller
+                ArcadeMode.Biketris -> arcadeContent.biketris.inputSource == BiketrisInputSource.Controller
+                else -> true
+            }
+            val action = if (mode.isGame && modeController.isActive && matches && controllerEnabled) {
                 gameBindings.action(mode, selected!!.descriptor, event.keyCode)?.id
             } else null
             if (action != null && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
@@ -262,7 +268,7 @@ class NativeBridgeActivity : Activity() {
             }
             gameController.handleKey(
                 event,
-                steerBricks = modeController.isActive && bricksControllerEnabled &&
+                steerBricks = modeController.isActive && controllerEnabled &&
                     (mode == ArcadeMode.Bricks || mode == ArcadeMode.Biketris),
                 mappedAction = action,
             )
@@ -286,9 +292,12 @@ class NativeBridgeActivity : Activity() {
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (com.fitbaus.bikebridge.host.controller.ControllerDevices.belongsToController(event.device)) {
             gameController.refresh()
-            if (modeController.mode == ArcadeMode.Bricks && modeController.isActive &&
-                arcadeContent.playground.inputSource == BricksInputSource.Controller
-            ) gameController.handleMotion(event)
+            if (modeController.isActive && (
+                modeController.mode == ArcadeMode.Bricks &&
+                    arcadeContent.playground.inputSource == BricksInputSource.Controller ||
+                modeController.mode == ArcadeMode.Biketris &&
+                    arcadeContent.biketris.inputSource == BiketrisInputSource.Controller
+            )) gameController.handleMotion(event)
             return true
         }
         return super.dispatchGenericMotionEvent(event)
@@ -407,11 +416,14 @@ class NativeBridgeActivity : Activity() {
             return
         }
         if (modeController.mode == ArcadeMode.Biketris) {
+            controllerOwnership.refreshNow()
             gameController.refresh()
-            val steering = if (gameController.steeringHeld()) gameController.sample(now)?.x else null
-            arcadeContent.biketris.setControllerSteering(steering)
+            arcadeContent.biketris.controllerAvailable = gameController.hasController()
+            val usingController = arcadeContent.biketris.inputSource == BiketrisInputSource.Controller
+            val gamepadInput = if (usingController) gameController.takeBiketrisInput() else null
             arcadeContent.biketris.render(
-                handInput.latest(now),
+                if (usingController) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost)
+                else handInput.latest(now),
                 cameraSession.state(),
                 cameraSession.failureReason(),
                 connected = telemetry?.connected == true,
@@ -420,7 +432,8 @@ class NativeBridgeActivity : Activity() {
                 rpmCurrent = telemetry?.rpm?.current == true,
                 rpmObservedAt = telemetry?.rpm?.observedAt,
                 diagnostics = arcadeDiagnosticsText(now, info),
-                cameraInfo = info,
+                cameraInfo = if (usingController) null else info,
+                controller = gamepadInput,
             )
             return
         }
@@ -536,6 +549,7 @@ class NativeBridgeActivity : Activity() {
         )
         arcadeContent = ArcadeContent(this)
         arcadeContent.playground.onInputSourceChanged = { gameController.resetTransient() }
+        arcadeContent.biketris.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.playground.input = handInput
         arcadeContent.playground.preview = cameraSession.preview
         arcadeContent.playground.faceControl = savedTrackerSettings().mode == ArcadeTrackerMode.Face
