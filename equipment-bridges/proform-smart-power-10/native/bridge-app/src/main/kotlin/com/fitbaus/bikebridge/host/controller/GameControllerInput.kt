@@ -9,6 +9,7 @@ import android.view.MotionEvent
 import com.fitbaus.arcade.BiketrisControllerInput
 import com.fitbaus.arcade.HandPosition
 import com.fitbaus.arcade.HandSource
+import com.fitbaus.arcade.GhoulRunControllerInput
 import kotlin.math.abs
 
 internal object ControllerDevices {
@@ -93,6 +94,8 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var rightDown = false
     private var downDown = false
     private var rotationPending = false
+    private var leftPending = false
+    private var rightPending = false
     private var previousNanos = -1L
 
     fun refresh() {
@@ -113,6 +116,8 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         rightDown = false
         downDown = false
         rotationPending = false
+        leftPending = false
+        rightPending = false
         previousNanos = -1L
     }
 
@@ -125,8 +130,14 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         if (steerBricks && (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP)) {
             val down = event.action == KeyEvent.ACTION_DOWN
             when (mappedAction) {
-                "left" -> leftDown = down
-                "right" -> rightDown = down
+                "left" -> {
+                    leftDown = down
+                    if (down && event.repeatCount == 0) leftPending = true
+                }
+                "right" -> {
+                    rightDown = down
+                    if (down && event.repeatCount == 0) rightPending = true
+                }
                 "down" -> downDown = down
                 "rotate" -> if (down && event.repeatCount == 0) rotationPending = true
             }
@@ -146,6 +157,17 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
             softDrop = downDown || ControllerSteering.axis(axisY) > 0.45f,
             rotate = rotate,
         )
+    }
+
+    fun takeGhoulRunInput(): GhoulRunControllerInput {
+        val input = GhoulRunControllerInput(
+            leftPressed = leftPending,
+            rightPressed = rightPending,
+            stickX = ControllerSteering.axis(axisX),
+        )
+        leftPending = false
+        rightPending = false
+        return input
     }
 
     fun handleMotion(event: MotionEvent): Boolean {

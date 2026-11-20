@@ -12,6 +12,7 @@ import android.widget.TextView
 import com.fitbaus.arcade.BiketrisView
 import com.fitbaus.arcade.FingerMathView
 import com.fitbaus.arcade.FlakView
+import com.fitbaus.arcade.GhoulRunView
 import com.fitbaus.arcade.PlaygroundView
 import com.fitbaus.arcade.TrailRideView
 import com.fitbaus.bikebridge.host.BridgeUiStateMapper
@@ -102,6 +103,7 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
     val math: FingerMathView = FingerMathView(context)
     val flak: FlakView = FlakView(context)
     val trail: TrailRideView = TrailRideView(context)
+    val ghoul: GhoulRunView = GhoulRunView(context)
     val biketris: BiketrisView = BiketrisView(context)
 
     init {
@@ -114,6 +116,7 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
         addView(math, LayoutParams(playLp))
         addView(flak, LayoutParams(playLp))
         addView(trail, LayoutParams(playLp))
+        addView(ghoul, LayoutParams(playLp))
         addView(biketris, LayoutParams(playLp))
         show(ArcadeMode.Bricks)
     }
@@ -123,6 +126,7 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
         math.visibility = if (game == ArcadeMode.Math) VISIBLE else GONE
         flak.visibility = if (game == ArcadeMode.Flak) VISIBLE else GONE
         trail.visibility = if (game == ArcadeMode.TrailRide) VISIBLE else GONE
+        ghoul.visibility = if (game == ArcadeMode.GhoulRun) VISIBLE else GONE
         biketris.visibility = if (game == ArcadeMode.Biketris) VISIBLE else GONE
     }
 }

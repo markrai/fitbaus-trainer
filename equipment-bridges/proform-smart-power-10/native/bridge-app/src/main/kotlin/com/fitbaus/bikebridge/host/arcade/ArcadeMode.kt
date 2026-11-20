@@ -12,6 +12,7 @@ internal enum class ArcadeMode(val caption: String, val kind: ModeKind) {
     Math("MATH", ModeKind.Game),
     Flak("FLAK RUN", ModeKind.Game),
     TrailRide("TRAIL RIDE", ModeKind.Game),
+    GhoulRun("GHOUL RUN", ModeKind.Game),
     Biketris("BIKETRIS", ModeKind.Game),
     YouTube("YouTube", ModeKind.Media),
     ;

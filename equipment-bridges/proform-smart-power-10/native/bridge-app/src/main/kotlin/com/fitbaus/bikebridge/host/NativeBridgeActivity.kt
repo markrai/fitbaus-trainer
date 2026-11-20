@@ -35,6 +35,7 @@ import com.fitbaus.arcade.ArcadeClock
 import com.fitbaus.arcade.ArcadeStatusResolver
 import com.fitbaus.arcade.BricksInputSource
 import com.fitbaus.arcade.BiketrisInputSource
+import com.fitbaus.arcade.GhoulRunInputSource
 import com.fitbaus.arcade.HandPosition
 import com.fitbaus.arcade.HandSource
 import com.fitbaus.arcade.ArcadeStopReason
@@ -144,6 +145,7 @@ class NativeBridgeActivity : Activity() {
             arcadeClock.stop()
             cameraSession.stop(reason)
             arcadeContent.trail.pause()
+            arcadeContent.ghoul.pause()
             arcadeContent.biketris.pause()
         }
 
@@ -258,6 +260,7 @@ class NativeBridgeActivity : Activity() {
             val controllerEnabled = when (mode) {
                 ArcadeMode.Bricks -> arcadeContent.playground.inputSource == BricksInputSource.Controller
                 ArcadeMode.Biketris -> arcadeContent.biketris.inputSource != BiketrisInputSource.Webcam
+                ArcadeMode.GhoulRun -> arcadeContent.ghoul.inputSource != GhoulRunInputSource.Webcam
                 else -> true
             }
             val action = if (mode.isGame && modeController.isActive && matches && controllerEnabled) {
@@ -269,7 +272,7 @@ class NativeBridgeActivity : Activity() {
             gameController.handleKey(
                 event,
                 steerBricks = modeController.isActive && controllerEnabled &&
-                    (mode == ArcadeMode.Bricks || mode == ArcadeMode.Biketris),
+                    (mode == ArcadeMode.Bricks || mode == ArcadeMode.Biketris || mode == ArcadeMode.GhoulRun),
                 mappedAction = action,
             )
             return true
@@ -283,6 +286,7 @@ class NativeBridgeActivity : Activity() {
                 ArcadeMode.Math -> arcadeContent.math.restartGame()
                 ArcadeMode.Flak -> arcadeContent.flak.restartGame()
                 ArcadeMode.TrailRide -> arcadeContent.trail.restartGame()
+                ArcadeMode.GhoulRun -> arcadeContent.ghoul.restartGame()
                 ArcadeMode.Biketris -> arcadeContent.biketris.restartGame()
                 else -> Unit
             }
@@ -297,6 +301,8 @@ class NativeBridgeActivity : Activity() {
                     arcadeContent.playground.inputSource == BricksInputSource.Controller ||
                 modeController.mode == ArcadeMode.Biketris &&
                     arcadeContent.biketris.inputSource != BiketrisInputSource.Webcam
+                    || modeController.mode == ArcadeMode.GhoulRun &&
+                    arcadeContent.ghoul.inputSource != GhoulRunInputSource.Webcam
             )) gameController.handleMotion(event)
             return true
         }
@@ -412,6 +418,26 @@ class NativeBridgeActivity : Activity() {
                 rpmObservedAt = telemetry?.rpm?.observedAt,
                 diagnostics = arcadeDiagnosticsText(now, info),
                 cameraInfo = info,
+            )
+            return
+        }
+        if (modeController.mode == ArcadeMode.GhoulRun) {
+            gameController.refresh()
+            arcadeContent.ghoul.controllerAvailable = gameController.hasController()
+            val source = arcadeContent.ghoul.inputSource
+            val controllerOnly = source == GhoulRunInputSource.Controller
+            arcadeContent.ghoul.render(
+                if (controllerOnly) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost) else handInput.latest(now),
+                cameraSession.state(),
+                cameraSession.failureReason(),
+                connected = telemetry?.connected == true,
+                initialized = telemetry?.initialized == true,
+                rpm = telemetry?.rpm?.value,
+                rpmCurrent = telemetry?.rpm?.current == true,
+                rpmObservedAt = telemetry?.rpm?.observedAt,
+                diagnostics = arcadeDiagnosticsText(now, info),
+                cameraInfo = if (controllerOnly) null else info,
+                controller = if (source == GhoulRunInputSource.Webcam) null else gameController.takeGhoulRunInput(),
             )
             return
         }
@@ -552,6 +578,7 @@ class NativeBridgeActivity : Activity() {
         arcadeContent = ArcadeContent(this)
         arcadeContent.playground.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.biketris.onInputSourceChanged = { gameController.resetTransient() }
+        arcadeContent.ghoul.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.playground.input = handInput
         arcadeContent.playground.preview = cameraSession.preview
         arcadeContent.playground.faceControl = savedTrackerSettings().mode == ArcadeTrackerMode.Face
@@ -563,6 +590,7 @@ class NativeBridgeActivity : Activity() {
         arcadeContent.math.diagnosticsOverlay = overlay
         arcadeContent.flak.diagnosticsOverlay = overlay
         arcadeContent.trail.diagnosticsOverlay = overlay
+        arcadeContent.ghoul.diagnosticsOverlay = overlay
         arcadeContent.biketris.diagnosticsOverlay = overlay
         contentHost.addView(
             arcadeContent,
@@ -673,7 +701,7 @@ class NativeBridgeActivity : Activity() {
         tabs.addView(tabGroup(ArcadeMode.Dashboard))
         val gamesLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         gamesLp.leftMargin = dp(GAME_TAB_GAP_DP)
-        tabs.addView(tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris), gamesLp)
+        tabs.addView(tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris), gamesLp)
         val mediaLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         mediaLp.leftMargin = dp(GAME_TAB_GAP_DP)
         tabs.addView(tabGroup(ArcadeMode.YouTube), mediaLp)
@@ -767,6 +795,9 @@ class NativeBridgeActivity : Activity() {
     private fun savedTrailSettings(): ArcadeTrackerSettings =
         ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_TRAIL_TRACKER_KEY, null))
 
+    private fun savedGhoulSettings(): ArcadeTrackerSettings =
+        ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_GHOUL_TRACKER_KEY, null))
+
     private fun savedBiketrisSettings(): ArcadeTrackerSettings =
         ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_BIKETRIS_TRACKER_KEY, null))
 
@@ -774,12 +805,14 @@ class NativeBridgeActivity : Activity() {
         ArcadeMode.Math -> savedMathSettings()
         ArcadeMode.Flak -> savedFlakSettings()
         ArcadeMode.TrailRide -> savedTrailSettings()
+        ArcadeMode.GhoulRun -> savedGhoulSettings()
         ArcadeMode.Biketris -> savedBiketrisSettings()
         else -> savedTrackerSettings()
     }
 
     private fun faceGameOptions(game: ArcadeMode): List<String> = when (game) {
         ArcadeMode.TrailRide -> arcadeContent.trail.developerOptions()
+        ArcadeMode.GhoulRun -> arcadeContent.ghoul.developerOptions()
         ArcadeMode.Biketris -> arcadeContent.biketris.developerOptions()
         else -> arcadeContent.flak.developerOptions()
     }
@@ -787,6 +820,7 @@ class NativeBridgeActivity : Activity() {
     private fun selectFaceGameOption(game: ArcadeMode, option: Int) {
         when (game) {
             ArcadeMode.TrailRide -> arcadeContent.trail.selectDeveloperOption(option)
+            ArcadeMode.GhoulRun -> arcadeContent.ghoul.selectDeveloperOption(option)
             ArcadeMode.Biketris -> arcadeContent.biketris.selectDeveloperOption(option)
             else -> arcadeContent.flak.selectDeveloperOption(option)
         }
@@ -817,7 +851,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     private fun showTrackerPicker(game: ArcadeMode) {
-        if (game == ArcadeMode.Flak || game == ArcadeMode.TrailRide || game == ArcadeMode.Biketris) {
+        if (game == ArcadeMode.Flak || game == ArcadeMode.TrailRide || game == ArcadeMode.GhoulRun || game == ArcadeMode.Biketris) {
             showFaceGamePicker(game)
             return
         }
@@ -841,6 +875,7 @@ class NativeBridgeActivity : Activity() {
         arcadeContent.math.diagnosticsOverlay = enabled
         arcadeContent.flak.diagnosticsOverlay = enabled
         arcadeContent.trail.diagnosticsOverlay = enabled
+        arcadeContent.ghoul.diagnosticsOverlay = enabled
         arcadeContent.biketris.diagnosticsOverlay = enabled
     }
 
@@ -849,6 +884,7 @@ class NativeBridgeActivity : Activity() {
             ArcadeMode.Math -> ARCADE_MATH_TRACKER_KEY
             ArcadeMode.Flak -> ARCADE_FLAK_TRACKER_KEY
             ArcadeMode.TrailRide -> ARCADE_TRAIL_TRACKER_KEY
+            ArcadeMode.GhoulRun -> ARCADE_GHOUL_TRACKER_KEY
             ArcadeMode.Biketris -> ARCADE_BIKETRIS_TRACKER_KEY
             else -> ARCADE_TRACKER_KEY
         }
@@ -1042,6 +1078,7 @@ class NativeBridgeActivity : Activity() {
         const val ARCADE_MATH_TRACKER_KEY = "math_tracker"
         const val ARCADE_FLAK_TRACKER_KEY = "flak_tracker"
         const val ARCADE_TRAIL_TRACKER_KEY = "trail_tracker"
+        const val ARCADE_GHOUL_TRACKER_KEY = "ghoul_tracker"
         const val ARCADE_BIKETRIS_TRACKER_KEY = "biketris_tracker"
         const val GAME_TAB_GAP_DP = 12
         const val SETTINGS_TOUCH_DP = 48
