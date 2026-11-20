@@ -40,13 +40,12 @@ internal class AutoControllerOwnership(
                     val device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE) as UsbDevice? ?: return
                     if (device.deviceName != pendingDevice) return
                     pendingDevice = null
-                    if (!running) return
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false) &&
                         manager.hasPermission(device)
                     ) {
                         deniedDevices.remove(device.deviceName)
                         attemptedClaims.remove(device.deviceName)
-                        reconcile()
+                        if (running) reconcile()
                     } else {
                         deniedDevices.add(device.deviceName)
                         statusText = "USB permission denied; Android controller events remain intercepted"
@@ -56,6 +55,7 @@ internal class AutoControllerOwnership(
                     @Suppress("DEPRECATION")
                     val device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE) as UsbDevice? ?: return
                     deniedDevices.remove(device.deviceName)
+                    requestedDevices.remove(device.deviceName)
                     attemptedClaims.remove(device.deviceName)
                     if (pendingDevice == device.deviceName) pendingDevice = null
                     if (hid.activeCandidate()?.deviceName == device.deviceName) hid.stop()
@@ -98,6 +98,7 @@ internal class AutoControllerOwnership(
         if (!running) return
         val names = manager.deviceList.keys
         deniedDevices.retainAll(names)
+        requestedDevices.retainAll(names)
         attemptedClaims.retainAll(names)
         val active = hid.activeCandidate()
         if (active != null) {
@@ -120,7 +121,12 @@ internal class AutoControllerOwnership(
             statusText = "USB permission denied for connected gamepad; Android input still intercepted"
             return
         }
+        if (name in requestedDevices) {
+            statusText = "USB permission not granted; reconnect controller to retry"
+            return
+        }
         pendingDevice = name
+        requestedDevices.add(name)
         val permissionIntent = Intent(ACTION_USB_PERMISSION).setPackage(context.packageName)
         val flags = if (Build.VERSION.SDK_INT >= 31) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
@@ -140,5 +146,6 @@ internal class AutoControllerOwnership(
         private const val ACTION_USB_PERMISSION = "com.fitbaus.bikebridge.AUTO_HID_PERMISSION"
         private const val REQUEST_CODE = 7164
         private val deniedDevices = mutableSetOf<String>()
+        private val requestedDevices = mutableSetOf<String>()
     }
 }
