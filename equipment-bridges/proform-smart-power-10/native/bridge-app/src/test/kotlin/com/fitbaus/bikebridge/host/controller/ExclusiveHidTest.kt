@@ -83,6 +83,24 @@ class ExclusiveHidTest {
     }
 
     @Test
+    fun automaticRawClaimWaitsForBothCalibratedDirectionsOnTheSameDevice() {
+        val candidate = HidCandidate("/dev/bus/usb/001/004", 123, 456, 0, 0, 0, 16)
+        val otherDevice = candidate.copy(productId = 457)
+        val left = HidBinding(0, 15, 6, 0, 0)
+        val right = HidBinding(0, 15, 2, 0, 0)
+        val endpoints = setOf(0 to 0)
+        assertTrue(BricksRawHidReadiness.canDecode(candidate, candidate.key, left, right, endpoints))
+        assertFalse(BricksRawHidReadiness.canDecode(candidate, null, left, right, endpoints))
+        assertFalse(BricksRawHidReadiness.canDecode(candidate, otherDevice.key, left, right, endpoints))
+        assertFalse(BricksRawHidReadiness.canDecode(candidate, candidate.key, null, right, endpoints))
+        assertFalse(BricksRawHidReadiness.canDecode(candidate, candidate.key, left, null, endpoints))
+        assertFalse(BricksRawHidReadiness.canDecode(candidate, candidate.key, left, right, emptySet()))
+        assertFalse(BricksRawHidReadiness.canDecode(candidate, candidate.key, left.copy(endpointIndex = 1), right, endpoints))
+        assertFalse(BricksRawHidReadiness.canDecode(candidate, candidate.key, HidBinding(0, 15, 6), right, endpoints))
+        assertFalse(BricksRawHidReadiness.canDecode(null, candidate.key, left, right, endpoints))
+    }
+
+    @Test
     fun claimLifecycleIsScopedAndDoesNotModifyBikeUsbStack() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/controller/ExclusiveHid.kt").readText()
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
