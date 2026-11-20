@@ -53,7 +53,7 @@ class PairingSettingsUiTest {
         assertTrue(activity.contains("gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks)"))
         assertTrue(activity.contains("modeController.isActive && modeController.mode.isGame"))
         assertTrue(activity.contains("gameController.handleMotion(event)"))
-        assertTrue(activity.contains("if (handInput.isTouching()) null else gameController.sample(now)"))
+        assertTrue(activity.contains("if (handInput.isTouching()) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)"))
     }
 
     @Test
