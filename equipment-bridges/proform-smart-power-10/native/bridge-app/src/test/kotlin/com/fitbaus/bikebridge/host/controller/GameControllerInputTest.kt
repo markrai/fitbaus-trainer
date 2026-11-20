@@ -64,6 +64,29 @@ class GameControllerInputTest {
     }
 
     @Test
+    fun controllerDiagnosticsTrapsBackButKeepsDpadNavigation() {
+        val trapped = listOf(
+            android.view.KeyEvent.KEYCODE_BACK,
+            android.view.KeyEvent.KEYCODE_ESCAPE,
+            android.view.KeyEvent.KEYCODE_MENU,
+            android.view.KeyEvent.KEYCODE_APP_SWITCH,
+            android.view.KeyEvent.KEYCODE_BUTTON_MODE,
+        )
+        for (key in trapped) assertTrue(ControllerGameplayKeys.trapsSettingsNavigation(key))
+        val navigable = listOf(
+            android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+            android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+            android.view.KeyEvent.KEYCODE_DPAD_UP,
+            android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+            android.view.KeyEvent.KEYCODE_DPAD_CENTER,
+            android.view.KeyEvent.KEYCODE_ENTER,
+            android.view.KeyEvent.KEYCODE_HOME,
+            android.view.KeyEvent.KEYCODE_VOLUME_UP,
+        )
+        for (key in navigable) assertFalse(ControllerGameplayKeys.trapsSettingsNavigation(key))
+    }
+
+    @Test
     fun systemKeysAndUnrecognizedInputAreNotClaimed() {
         val excluded = listOf(
             android.view.KeyEvent.KEYCODE_HOME,
