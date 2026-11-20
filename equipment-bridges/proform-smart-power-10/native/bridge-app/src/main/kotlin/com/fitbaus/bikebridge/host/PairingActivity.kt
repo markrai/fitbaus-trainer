@@ -387,29 +387,41 @@ class PairingActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val device = InputDevice.getDevice(event.deviceId)
-        if (activeTab == SettingsTab.Controllers && device != null && ControllerDevices.supportsGames(device)) {
-            if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
-                val action = if (event.action == KeyEvent.ACTION_DOWN) "pressed" else "released"
-                controllerEvents.text = device.name + ": " + KeyEvent.keyCodeToString(event.keyCode) + " " + action
-                if (exclusiveHid.isActive() && exclusiveHid.belongsTo(device)) exclusiveHid.noteAndroidEvent()
-                if (ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)) return true
+        if (ControllerDevices.belongsToController(device)) {
+            if (activeTab == SettingsTab.Controllers) {
+                val action = when (event.action) {
+                    KeyEvent.ACTION_DOWN -> "pressed"
+                    KeyEvent.ACTION_UP -> "released"
+                    else -> "multiple"
+                }
+                controllerEvents.text = device!!.name + ": " + KeyEvent.keyCodeToString(event.keyCode) + " " + action
             }
+            if (exclusiveHid.isActive() && exclusiveHid.belongsTo(device)) exclusiveHid.noteAndroidEvent()
+            return true
         }
         return super.dispatchKeyEvent(event)
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         val device = InputDevice.getDevice(event.deviceId)
-        if (activeTab == SettingsTab.Controllers && device != null &&
-            ControllerDevices.supportsGames(device) && event.isFromSource(InputDevice.SOURCE_JOYSTICK)
-        ) {
-            val x = event.getAxisValue(MotionEvent.AXIS_X)
-            val y = event.getAxisValue(MotionEvent.AXIS_Y)
-            val hat = event.getAxisValue(MotionEvent.AXIS_HAT_X)
-            controllerEvents.text = device.name + ": stick X=" + "%.2f".format(x) +
-                " Y=" + "%.2f".format(y) + "  D-pad axis=" + "%.2f".format(hat)
+        if (ControllerDevices.belongsToController(device)) {
+            if (activeTab == SettingsTab.Controllers && event.isFromSource(InputDevice.SOURCE_JOYSTICK)) {
+                val x = event.getAxisValue(MotionEvent.AXIS_X)
+                val y = event.getAxisValue(MotionEvent.AXIS_Y)
+                val hat = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+                controllerEvents.text = device!!.name + ": stick X=" + "%.2f".format(x) +
+                    " Y=" + "%.2f".format(y) + "  D-pad axis=" + "%.2f".format(hat)
+            }
+            return true
         }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.isFromSource(InputDevice.SOURCE_MOUSE) &&
+            ControllerDevices.belongsToController(event.device)
+        ) return true
+        return super.dispatchTouchEvent(event)
     }
 
     private fun styleTab(tab: TextView, selected: Boolean) {
