@@ -110,6 +110,7 @@ internal class ExclusiveHid(
     private var active: HidCandidate? = null
     private var generation = 0L
     @Volatile private var stateText = "Released"
+    @Volatile private var androidLeak = false
     private var positionX = 0.5f
     private var lastTick = -1L
 
@@ -173,6 +174,7 @@ internal class ExclusiveHid(
         generation += 1L
         val token = generation
         report.set(null)
+        androidLeak = false
         stateText = "HID interface claimed; awaiting raw input (system ownership unverified)"
         Thread({ readLoop(handle, reader, candidate.maxPacket, token) }, "FitbausHid-" + candidate.interfaceNumber)
             .apply { isDaemon = true; start() }
@@ -192,21 +194,21 @@ internal class ExclusiveHid(
                     val bytes = ByteArray(count)
                     buffer.get(bytes)
                     report.set(HidReport(bytes, counter.incrementAndGet()))
-                    stateText = "Receiving raw USB HID reports (system exclusivity requires on-bike check)"
+                    if (!androidLeak) stateText = "Receiving raw USB HID reports (system exclusivity requires on-bike check)"
                 }
             }
         } catch (_: Exception) {
             if (synchronized(lock) { token == generation }) stateText = "USB HID read failed"
         } finally {
             synchronized(lock) {
-                if (token == generation && connection === handle) stopLocked()
+                if (token == generation && connection === handle) stopLocked("USB HID reader stopped; reconnect to retry")
             }
         }
     }
 
     fun stop() = synchronized(lock) { stopLocked() }
 
-    private fun stopLocked() {
+    private fun stopLocked(reason: String = "Released") {
         generation += 1L
         val oldRequest = request
         val oldConnection = connection
@@ -217,7 +219,8 @@ internal class ExclusiveHid(
         active = null
         report.set(null)
         lastTick = -1L
-        stateText = "Released"
+        stateText = reason
+        androidLeak = false
         try { oldRequest?.cancel() } catch (_: Exception) {}
         try { oldRequest?.close() } catch (_: Exception) {}
         if (oldConnection != null) {
@@ -232,7 +235,10 @@ internal class ExclusiveHid(
     }
 
     fun noteAndroidEvent() {
-        if (isActive()) stateText = "WARNING: Android still delivers keys; exclusive ownership is unverified"
+        if (isActive()) {
+            androidLeak = true
+            stateText = "WARNING: Android still delivers controller keys after USB claim"
+        }
     }
 
     fun sampleBricks(nowNanos: Long): HandPosition? {
