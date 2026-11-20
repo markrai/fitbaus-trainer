@@ -48,11 +48,12 @@ and a controller icon.
 - Tapping **Controller** when available also saves the choice. Disconnecting
   a controller temporarily selects Webcam while retaining the saved
   Controller preference; reconnecting restores Controller automatically.
-- The camera session continues running and existing webcam tracking settings
-  are unchanged regardless of the selected input. Touchscreen interaction
-  retains its temporary priority in either mode. An active but uncalibrated
-  exclusive-HID session falls back to webcam samples rather than inventing
-  steering data.
+- The camera session remains available for an immediate return to
+  Webcam mode, but **Controller mode never uses face-tracking samples to
+  move the paddle**, including when raw USB HID data is unavailable.
+  Touchscreen interaction retains its temporary priority. If controller
+  input is actually unavailable, Bricks displays a controller-unavailable
+  message instead of silently steering from the webcam.
 
 This is **Bricks-only**. Biketris, Flak Run, Trail Ride and Finger Math retain
 their previously implemented input behaviors, and the speed buttons work
@@ -122,6 +123,15 @@ attachment may show Android's mandatory USB permission dialog; FitBaus
 cannot grant USB Host permission without the user's approval. A denial
 is not re-requested repeatedly for the same attachment.
 
+Automatic raw USB claiming during Bricks gameplay is conditional on
+**both left and right raw-HID bindings having been learned for that specific
+controller and endpoint**. Without complete, trusted raw mappings, claiming
+the USB driver would suppress Android key events without providing usable
+steering. FitBaus therefore uses the Android gamepad key/axis path and
+continues to consume every controller event delivered to its activities.
+The raw diagnostic/learning route in Settings remains available to establish
+those bindings. Automatic claiming still occurs once mappings are valid.
+
 The controller is associated with a recognized Android gamepad and matched
 against USB vendor/product IDs. Ambiguous matches fail closed rather than
 claiming arbitrary equipment. The claim path checks every interface of a
@@ -136,7 +146,7 @@ The Controllers screen retains live HID report diagnostics and **Learn LEFT**
 / **Learn RIGHT** for Bricks, without a separate ownership toggle. When
 FitBaus leaves the foreground or the controller disconnects, the raw
 reader cancels pending requests, releases the claimed interfaces and
-closes the USB connection. A claim failure leaves the ordinary Android
+closes the USB connection. A claim failure or uncalibrated raw layout leaves the ordinary Android
 controller-event interception in place. Reconnecting a controller can be
 necessary if a kernel fails to reattach its original HID driver after release.
 
