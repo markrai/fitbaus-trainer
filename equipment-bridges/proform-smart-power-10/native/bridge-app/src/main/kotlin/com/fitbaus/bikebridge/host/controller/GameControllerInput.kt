@@ -109,6 +109,8 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         previousNanos = -1L
     }
 
+    fun hasController(): Boolean = activeDeviceId >= 0
+
     fun ownsDevice(deviceId: Int): Boolean = deviceId >= 0 && deviceId == activeDeviceId
 
     fun handleKey(event: KeyEvent, steerBricks: Boolean, mappedAction: String? = null): Boolean {

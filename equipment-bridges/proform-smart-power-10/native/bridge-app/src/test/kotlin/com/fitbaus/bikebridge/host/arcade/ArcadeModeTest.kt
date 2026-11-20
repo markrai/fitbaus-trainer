@@ -85,7 +85,7 @@ class ArcadeModeTest {
         assertTrue(source.contains("ArcadeMode.Flak -> savedFlakSettings()"))
         assertTrue(source.contains("ArcadeTrackerSettings.faceFromKey("))
         assertTrue(source.contains("const val ARCADE_FLAK_TRACKER_KEY = \"flak_tracker\""))
-        val flakBranch = source.substring(source.indexOf("if (modeController.mode == ArcadeMode.Flak) {"), source.indexOf("val controllerPosition = if (handInput.isTouching())"))
+        val flakBranch = source.substring(source.indexOf("if (modeController.mode == ArcadeMode.Flak) {"), source.indexOf("arcadeContent.playground.controllerAvailable ="))
         for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager")) assertFalse(flakBranch.contains(forbidden), forbidden)
     }
 
@@ -138,7 +138,7 @@ class ArcadeModeTest {
         assertTrue(source.contains("ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_TRAIL_TRACKER_KEY, null))"))
         val start = source.indexOf("if (modeController.mode == ArcadeMode.TrailRide) {")
         assertTrue(start > 0)
-        val trailBranch = source.substring(start, source.indexOf("val controllerPosition = if (handInput.isTouching())", start))
+        val trailBranch = source.substring(start, source.indexOf("arcadeContent.playground.controllerAvailable =", start))
         assertTrue(trailBranch.contains("arcadeContent.trail.render("))
         for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager", "session()", "startService")) {
             assertFalse(trailBranch.contains(forbidden), forbidden)
@@ -190,7 +190,7 @@ class ArcadeModeTest {
     fun biketrisBranchComesBeforeTheBricksFallbackAndStaysReadOnly() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val start = source.indexOf("if (modeController.mode == ArcadeMode.Biketris) {")
-        val fallback = source.indexOf("val controllerPosition = if (handInput.isTouching())")
+        val fallback = source.indexOf("arcadeContent.playground.controllerAvailable =")
         assertTrue(start > 0 && start < fallback)
         val branch = source.substring(start, fallback)
         assertTrue(branch.contains("arcadeContent.biketris.render("))

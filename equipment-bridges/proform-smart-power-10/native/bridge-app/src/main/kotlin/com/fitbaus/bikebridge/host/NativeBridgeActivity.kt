@@ -33,6 +33,7 @@ import com.fitbaus.arcade.ArcadeCameraInfo
 import com.fitbaus.arcade.ArcadeCameraSession
 import com.fitbaus.arcade.ArcadeClock
 import com.fitbaus.arcade.ArcadeStatusResolver
+import com.fitbaus.arcade.BricksInputSource
 import com.fitbaus.arcade.ArcadeStopReason
 import com.fitbaus.arcade.ArcadeTrackerMode
 import com.fitbaus.arcade.ArcadeTrackerSettings
@@ -240,7 +241,9 @@ class NativeBridgeActivity : Activity() {
             )
             val matches = selected != null && event.device != null &&
                 selected.vendorId == event.device.vendorId && selected.productId == event.device.productId
-            val action = if (mode.isGame && modeController.isActive && matches) {
+            val bricksControllerEnabled = mode != ArcadeMode.Bricks ||
+                arcadeContent.playground.inputSource == BricksInputSource.Controller
+            val action = if (mode.isGame && modeController.isActive && matches && bricksControllerEnabled) {
                 gameBindings.action(mode, selected!!.descriptor, event.keyCode)?.id
             } else null
             if (action != null && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
@@ -248,7 +251,8 @@ class NativeBridgeActivity : Activity() {
             }
             gameController.handleKey(
                 event,
-                steerBricks = modeController.isActive && (mode == ArcadeMode.Bricks || mode == ArcadeMode.Biketris),
+                steerBricks = modeController.isActive && bricksControllerEnabled &&
+                    (mode == ArcadeMode.Bricks || mode == ArcadeMode.Biketris),
                 mappedAction = action,
             )
             return true
@@ -272,7 +276,9 @@ class NativeBridgeActivity : Activity() {
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (com.fitbaus.bikebridge.host.controller.ControllerDevices.belongsToController(event.device)) {
             gameController.refresh()
-            if (modeController.mode == ArcadeMode.Bricks && modeController.isActive) gameController.handleMotion(event)
+            if (modeController.mode == ArcadeMode.Bricks && modeController.isActive &&
+                arcadeContent.playground.inputSource == BricksInputSource.Controller
+            ) gameController.handleMotion(event)
             return true
         }
         return super.dispatchGenericMotionEvent(event)
@@ -409,7 +415,10 @@ class NativeBridgeActivity : Activity() {
             return
         }
         gameController.refresh()
-        val controllerPosition = if (handInput.isTouching()) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)
+        arcadeContent.playground.controllerAvailable = gameController.hasController() || exclusiveHid.isActive()
+        val controllerPosition = if (handInput.isTouching() ||
+            arcadeContent.playground.inputSource != BricksInputSource.Controller
+        ) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)
         val position = controllerPosition ?: handInput.latest(now)
         val status = if (controllerPosition != null) com.fitbaus.arcade.ArcadeStatus.ControllerReady else ArcadeStatusResolver.resolve(
             cameraSession.state(),
@@ -504,6 +513,7 @@ class NativeBridgeActivity : Activity() {
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
         arcadeContent = ArcadeContent(this)
+        arcadeContent.playground.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.playground.input = handInput
         arcadeContent.playground.preview = cameraSession.preview
         arcadeContent.playground.faceControl = savedTrackerSettings().mode == ArcadeTrackerMode.Face

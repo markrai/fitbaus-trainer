@@ -16,6 +16,16 @@ included in this upcoming release.
 
 ### Added
 
+- **Bricks input source selector.** Matching webcam/controller buttons now
+  appear immediately to the left of the existing 1×/2×/3× speed buttons.
+  A connected and selected controller is the default unless the player has
+  explicitly saved Webcam. Switching is immediate and persists across
+  sessions; a disconnected controller falls back to webcam and restores the
+  saved controller choice on reconnect. The camera session stays active,
+  touchscreen input still overrides steering temporarily, and other games
+  keep their existing input behavior.
+
+
 - **USB controller settings and Bricks steering on the Bike Bridge.**
   A new Controllers tab beside Pairing and External Webcams lists Android
   input devices, distinguishes D-pad/gamepad/joystick from pointer-only
