@@ -827,7 +827,7 @@ public class BiketrisView(context: Context) : View(context) {
     private fun endTouch() {
         dragging = false
         touchX = Float.NaN
-        pressedMode = null
+        cadenceTogglePressed = false
         restartPressed = false
     }
 
