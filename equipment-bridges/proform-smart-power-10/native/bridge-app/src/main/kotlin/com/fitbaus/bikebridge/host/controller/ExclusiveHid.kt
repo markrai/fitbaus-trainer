@@ -194,8 +194,12 @@ internal class ExclusiveHid(
                     buffer.flip()
                     val bytes = ByteArray(count)
                     buffer.get(bytes)
-                    report.set(HidReport(bytes, counter.incrementAndGet()))
-                    if (!androidLeak) stateText = "Receiving raw USB HID reports (system exclusivity requires on-bike check)"
+                    synchronized(lock) {
+                        if (token == generation && connection === handle) {
+                            report.set(HidReport(bytes, counter.incrementAndGet()))
+                            if (!androidLeak) stateText = "Receiving raw USB HID reports (system exclusivity requires on-bike check)"
+                        }
+                    }
                 }
             }
         } catch (_: Exception) {
