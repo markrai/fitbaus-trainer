@@ -48,7 +48,8 @@ class PairingSettingsUiTest {
         assertTrue(source.contains("return super.dispatchGenericMotionEvent(event)"))
         assertTrue(source.contains("uiHandler.removeCallbacks(controllerPoll)"))
         assertTrue(activity.contains("modeController.mode == ArcadeMode.Bricks"))
-        assertTrue(activity.contains("gameController.handleKey(event)"))
+        assertTrue(activity.contains("gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks)"))
+        assertTrue(activity.contains("modeController.isActive && modeController.mode.isGame"))
         assertTrue(activity.contains("gameController.handleMotion(event)"))
         assertTrue(activity.contains("if (handInput.isTouching()) null else gameController.sample(now)"))
     }
