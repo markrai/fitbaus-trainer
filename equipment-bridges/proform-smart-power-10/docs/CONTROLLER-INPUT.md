@@ -29,6 +29,33 @@ Mouse-only devices are listed to aid diagnosis, but are not treated as gamepad
 controls. Android recognizing D-pad navigation is useful evidence of key events,
 but does not prove the availability of analog axes or gamepad face buttons.
 
+## Bricks steering source selector
+
+The **Bricks** HUD now has two input buttons immediately left of **1×, 2×,
+3×**, with the same green-selected/outlined-inactive styling: a webcam icon
+and a controller icon.
+
+- With no explicitly saved choice, a single selected/connected Android
+  gamepad (or an active raw-HID session) makes **Controller** the default.
+  Without an available controller, **Webcam** is selected and the controller
+  icon is shown as unavailable.
+- Tapping **Webcam** immediately switches Bricks steering to the normal
+  hand/face-tracking path. The selection is saved in Bricks' preferences
+  and overrides future automatic controller selection, including after an
+  app restart or USB reconnect.
+- Tapping **Controller** when available also saves the choice. Disconnecting
+  a controller temporarily selects Webcam while retaining the saved
+  Controller preference; reconnecting restores Controller automatically.
+- The camera session continues running and existing webcam tracking settings
+  are unchanged regardless of the selected input. Touchscreen interaction
+  retains its temporary priority in either mode. An active but uncalibrated
+  exclusive-HID session falls back to webcam samples rather than inventing
+  steering data.
+
+This is **Bricks-only**. Biketris, Flak Run, Trail Ride and Finger Math retain
+their previously implemented input behaviors, and the speed buttons work
+independently of the new source choice.
+
 ## Per-game controller mappings
 
 When Settings is opened from a game, the Controllers tab shows that game's
