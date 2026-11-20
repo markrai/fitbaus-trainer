@@ -110,11 +110,9 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
             !event.isFromSource(InputDevice.SOURCE_JOYSTICK)
         ) return false
         val device = event.device ?: return false
-        axisX = when {
-            device.getMotionRange(MotionEvent.AXIS_X) != null -> event.getAxisValue(MotionEvent.AXIS_X)
-            device.getMotionRange(MotionEvent.AXIS_HAT_X) != null -> event.getAxisValue(MotionEvent.AXIS_HAT_X)
-            else -> 0f
-        }
+        val stick = if (device.getMotionRange(MotionEvent.AXIS_X) != null) event.getAxisValue(MotionEvent.AXIS_X) else 0f
+        val hat = if (device.getMotionRange(MotionEvent.AXIS_HAT_X) != null) event.getAxisValue(MotionEvent.AXIS_HAT_X) else 0f
+        axisX = if (abs(hat) > 0.1f) hat else stick
         return true
     }
 
