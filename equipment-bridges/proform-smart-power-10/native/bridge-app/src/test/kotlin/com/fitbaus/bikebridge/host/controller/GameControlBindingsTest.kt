@@ -20,7 +20,7 @@ class GameControlBindingsTest {
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.Math).map { it.id })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.Flak).map { it.id })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.TrailRide).map { it.id })
-        assertEquals(listOf("left", "right", "restart"), GameControlCatalog.actions(ArcadeMode.Biketris).map { it.id })
+        assertEquals(listOf("left", "right", "down", "rotate"), GameControlCatalog.actions(ArcadeMode.Biketris).map { it.id })
         assertTrue(GameControlCatalog.actions(ArcadeMode.Dashboard).isEmpty())
         assertTrue(GameControlCatalog.actions(ArcadeMode.YouTube).isEmpty())
         assertTrue(ArcadeMode.entries.all { mode ->
