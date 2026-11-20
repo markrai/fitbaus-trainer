@@ -88,6 +88,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var activeDeviceId = -1
     private var positionX = 0.5f
     private var axisX = 0f
+    private var axisY = 0f
     private var leftDown = false
     private var rightDown = false
     private var downDown = false
@@ -107,6 +108,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
 
     fun resetTransient() {
         axisX = 0f
+        axisY = 0f
         leftDown = false
         rightDown = false
         downDown = false
@@ -141,7 +143,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         return BiketrisControllerInput(
             left = leftDown || axis < -0.45f,
             right = rightDown || axis > 0.45f,
-            softDrop = downDown,
+            softDrop = downDown || ControllerSteering.axis(axisY) > 0.45f,
             rotate = rotate,
         )
     }
@@ -153,6 +155,9 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         val stick = if (device.getMotionRange(MotionEvent.AXIS_X) != null) event.getAxisValue(MotionEvent.AXIS_X) else 0f
         val hat = if (device.getMotionRange(MotionEvent.AXIS_HAT_X) != null) event.getAxisValue(MotionEvent.AXIS_HAT_X) else 0f
         axisX = if (abs(hat) > 0.1f) hat else stick
+        val stickY = if (device.getMotionRange(MotionEvent.AXIS_Y) != null) event.getAxisValue(MotionEvent.AXIS_Y) else 0f
+        val hatY = if (device.getMotionRange(MotionEvent.AXIS_HAT_Y) != null) event.getAxisValue(MotionEvent.AXIS_HAT_Y) else 0f
+        axisY = if (abs(hatY) > 0.1f) hatY else stickY
         return true
     }
 
