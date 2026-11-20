@@ -156,6 +156,7 @@ public class PlaygroundView(context: Context) : View(context) {
 
     public val inputSource: BricksInputSource
         get() = BricksInputSelection.effective(preferredInputSource, controllerAvailable)
+    public var onInputSourceChanged: ((BricksInputSource) -> Unit)? = null
 
     private val game = BreakoutGame().also { g -> g.events = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, "game: $it") } }
     private val settings = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -227,8 +228,10 @@ public class PlaygroundView(context: Context) : View(context) {
 
     public fun selectInputSource(source: BricksInputSource) {
         if (source == BricksInputSource.Controller && !controllerAvailable) return
+        val previous = inputSource
         preferredInputSource = source.name
         settings.edit().putString(BricksInputSelection.PREF_KEY, source.name).apply()
+        if (previous != inputSource) onInputSourceChanged?.invoke(inputSource)
         invalidate()
     }
 
