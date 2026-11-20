@@ -14,7 +14,7 @@ internal object GameControlCatalog {
     private val restart = GameControl("restart", "Restart game")
 
     fun actions(mode: ArcadeMode?): List<GameControl> = when (mode) {
-        ArcadeMode.Bricks -> listOf(left, right, restart)
+        ArcadeMode.Bricks -> listOf(left, right)
         ArcadeMode.Math -> listOf(restart)
         ArcadeMode.Flak -> listOf(restart)
         ArcadeMode.TrailRide -> listOf(restart)
