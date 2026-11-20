@@ -270,8 +270,8 @@ class PairingActivity : Activity() {
                 }
             }
         }
-        val leftText = if (left == null) "not learned" else if (raw != null && left.matches(raw)) "PRESSED" else "released"
-        val rightText = if (right == null) "not learned" else if (raw != null && right.matches(raw)) "PRESSED" else "released"
+        val leftText = if (left == null) "not learned" else if (exclusiveHid.isBindingPressed(left)) "PRESSED" else "released"
+        val rightText = if (right == null) "not learned" else if (exclusiveHid.isBindingPressed(right)) "PRESSED" else "released"
         hidReports.text = "USB HID: " + (selected?.label ?: "none selected") +
             "\n" + (raw?.let { "IF " + it.interfaceIndex + " EP " + it.endpointIndex + " packet #" + it.sequence + ": " + it.hex() } ?: "No raw reports received") +
             "\nLeft: " + leftText + " | Right: " + rightText
