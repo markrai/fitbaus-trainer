@@ -32,6 +32,28 @@ class PairingSettingsUiTest {
     }
 
     @Test
+    fun controllerTabListsDevicesCapturesDiagnosticsAndPreservesNavigation() {
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val strings = File("src/main/res/values/strings.xml").readText()
+        assertTrue(source.contains("SettingsTab.Controllers"))
+        assertTrue(source.contains("settings_tab_controllers"))
+        assertTrue(strings.contains("settings_tab_controllers"))
+        assertTrue(source.contains("ControllerDevices.visible()"))
+        assertTrue(source.contains("ControllerDevices.chosen(devices, selected)"))
+        assertTrue(source.contains("private fun chooseController()"))
+        assertTrue(source.contains("override fun dispatchKeyEvent(event: KeyEvent)"))
+        assertTrue(source.contains("override fun dispatchGenericMotionEvent(event: MotionEvent)"))
+        assertTrue(source.contains("return super.dispatchKeyEvent(event)"))
+        assertTrue(source.contains("return super.dispatchGenericMotionEvent(event)"))
+        assertTrue(source.contains("uiHandler.removeCallbacks(controllerPoll)"))
+        assertTrue(activity.contains("modeController.mode == ArcadeMode.Bricks"))
+        assertTrue(activity.contains("gameController.handleKey(event)"))
+        assertTrue(activity.contains("gameController.handleMotion(event)"))
+        assertTrue(activity.contains("if (handInput.isTouching()) null else gameController.sample(now)"))
+    }
+
+    @Test
     fun stringsDocumentUnsupportedZoomWithoutFakeFov() {
         val strings = File("src/main/res/values/strings.xml").readText()
         assertTrue(strings.contains("does not expose adjustable zoom"))
