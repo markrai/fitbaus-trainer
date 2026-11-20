@@ -35,6 +35,16 @@ internal object ArcadePalette {
     )
 }
 
+public enum class BricksInputSource { Webcam, Controller }
+
+internal object BricksInputSelection {
+    const val PREF_KEY = "breakout_input_source"
+
+    fun effective(saved: String?, controllerAvailable: Boolean): BricksInputSource =
+        if (!controllerAvailable || saved == BricksInputSource.Webcam.name) BricksInputSource.Webcam
+        else BricksInputSource.Controller
+}
+
 internal object PlaygroundGeometry {
     fun handColor(source: HandSource): Int = when (source) {
         HandSource.Camera -> ArcadePalette.CAMERA_HAND
@@ -82,6 +92,34 @@ internal object PlaygroundGeometry {
     fun speedButtonLeft(level: Int, right: Float, buttonWidth: Float, gap: Float): Float =
         right - (BreakoutSpeed.MAX - level + 1) * buttonWidth - (BreakoutSpeed.MAX - level) * gap
 
+    fun inputSourceButtonLeft(
+        source: BricksInputSource,
+        speedRight: Float,
+        speedWidth: Float,
+        sourceWidth: Float,
+        gap: Float,
+    ): Float {
+        val firstSpeed = speedButtonLeft(BreakoutSpeed.MIN, speedRight, speedWidth, gap)
+        return firstSpeed - gap - if (source == BricksInputSource.Webcam) 2f * sourceWidth + gap else sourceWidth
+    }
+
+    fun inputSourceButtonAt(
+        x: Float,
+        y: Float,
+        speedRight: Float,
+        top: Float,
+        speedWidth: Float,
+        sourceWidth: Float,
+        height: Float,
+        gap: Float,
+    ): BricksInputSource? {
+        if (y < top || y > top + height) return null
+        return BricksInputSource.entries.firstOrNull {
+            val left = inputSourceButtonLeft(it, speedRight, speedWidth, sourceWidth, gap)
+            x >= left && x <= left + sourceWidth
+        }
+    }
+
     fun wrap(text: String, maxChars: Int): List<String> {
         if (text.length <= maxChars) return listOf(text)
         val lines = ArrayList<String>()
@@ -108,10 +146,21 @@ public class PlaygroundView(context: Context) : View(context) {
     public var preview: ArcadePreview? = null
     public var diagnosticsOverlay: Boolean = false
     public var faceControl: Boolean = false
+    public var controllerAvailable: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    public val inputSource: BricksInputSource
+        get() = BricksInputSelection.effective(preferredInputSource, controllerAvailable)
 
     private val game = BreakoutGame().also { g -> g.events = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, "game: $it") } }
     private val settings = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private var speedGesture = false
+    private var preferredInputSource = settings.getString(BricksInputSelection.PREF_KEY, null)
+    private var hudGesture = false
     private var speedRight = 0f
     private var speedTop = 0f
     private val trace = GameplayTrace()
@@ -153,6 +202,12 @@ public class PlaygroundView(context: Context) : View(context) {
     private val speedPaint = text(ArcadePalette.PRIMARY, 14f, Typeface.MONOSPACE, bold = true).apply { textAlign = Paint.Align.CENTER }
     private val speedSelectedPaint = fill(ArcadePalette.CAMERA_HAND)
     private val speedIdlePaint = stroke(ArcadePalette.MUTE, 1f)
+    private val sourceIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.8f * density
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
     private val speedLabels = Array(BreakoutSpeed.MAX + 1) { "${it}x" }
 
     init {
@@ -166,7 +221,14 @@ public class PlaygroundView(context: Context) : View(context) {
 
     public fun selectSpeed(level: Int) {
         game.setSpeedLevel(level)
-        settings?.edit()?.putInt(SPEED_KEY, game.speedLevel)?.apply()
+        settings.edit().putInt(SPEED_KEY, game.speedLevel).apply()
+        invalidate()
+    }
+
+    public fun selectInputSource(source: BricksInputSource) {
+        if (source == BricksInputSource.Controller && !controllerAvailable) return
+        preferredInputSource = source.name
+        settings.edit().putString(BricksInputSelection.PREF_KEY, source.name).apply()
         invalidate()
     }
 
@@ -293,6 +355,38 @@ public class PlaygroundView(context: Context) : View(context) {
             speedPaint.color = if (selected) ArcadePalette.PLAYFIELD else ArcadePalette.MUTE
             canvas.drawText(speedLabels[level], left + bw / 2f, speedTop + bh / 2f + speedPaint.textSize / 2.8f, speedPaint)
         }
+        for (source in BricksInputSource.entries) {
+            val left = PlaygroundGeometry.inputSourceButtonLeft(source, speedRight, bw, SOURCE_BUTTON_WIDTH_DP * density, gap)
+            val selected = source == inputSource
+            val available = source == BricksInputSource.Webcam || controllerAvailable
+            val foreground = when {
+                selected -> ArcadePalette.PLAYFIELD
+                available -> ArcadePalette.MUTE
+                else -> ArcadePalette.BORDER
+            }
+            canvas.drawRect(
+                left, speedTop, left + SOURCE_BUTTON_WIDTH_DP * density, speedTop + bh,
+                if (selected) speedSelectedPaint else speedIdlePaint,
+            )
+            drawSourceIcon(canvas, source, left + SOURCE_BUTTON_WIDTH_DP * density / 2f, speedTop + bh / 2f, foreground)
+        }
+    }
+
+    private fun drawSourceIcon(canvas: Canvas, source: BricksInputSource, x: Float, y: Float, color: Int) {
+        val d = density
+        sourceIconPaint.color = color
+        if (source == BricksInputSource.Webcam) {
+            canvas.drawCircle(x, y - 3f * d, 6.5f * d, sourceIconPaint)
+            canvas.drawCircle(x, y - 3f * d, 2.5f * d, sourceIconPaint)
+            canvas.drawLine(x, y + 4f * d, x, y + 9f * d, sourceIconPaint)
+            canvas.drawLine(x - 8f * d, y + 9f * d, x + 8f * d, y + 9f * d, sourceIconPaint)
+        } else {
+            canvas.drawRoundRect(x - 12f * d, y - 6f * d, x + 12f * d, y + 7f * d, 5f * d, 5f * d, sourceIconPaint)
+            canvas.drawLine(x - 7f * d, y - 2f * d, x - 7f * d, y + 4f * d, sourceIconPaint)
+            canvas.drawLine(x - 10f * d, y + 1f * d, x - 4f * d, y + 1f * d, sourceIconPaint)
+            canvas.drawCircle(x + 6f * d, y - 1f * d, 1f * d, sourceIconPaint)
+            canvas.drawCircle(x + 9f * d, y + 3f * d, 1f * d, sourceIconPaint)
+        }
     }
 
     private fun drawOverlay(canvas: Canvas, w: Float, hud: Float, traceBottom: Float) {
@@ -386,6 +480,21 @@ public class PlaygroundView(context: Context) : View(context) {
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            val source = PlaygroundGeometry.inputSourceButtonAt(
+                event.x,
+                event.y,
+                speedRight,
+                speedTop,
+                SPEED_BUTTON_WIDTH_DP * density,
+                SOURCE_BUTTON_WIDTH_DP * density,
+                SPEED_BUTTON_HEIGHT_DP * density,
+                SPEED_BUTTON_GAP_DP * density,
+            )
+            if (source != null) {
+                hudGesture = true
+                selectInputSource(source)
+                return true
+            }
             val level = PlaygroundGeometry.speedButtonAt(
                 event.x,
                 event.y,
@@ -396,17 +505,17 @@ public class PlaygroundView(context: Context) : View(context) {
                 SPEED_BUTTON_GAP_DP * density,
             )
             if (level != 0) {
-                speedGesture = true
+                hudGesture = true
                 selectSpeed(level)
                 return true
             }
         }
-        if (speedGesture) {
+        if (hudGesture) {
             if (event.actionMasked == MotionEvent.ACTION_UP) {
-                speedGesture = false
+                hudGesture = false
                 performClick()
             } else if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
-                speedGesture = false
+                hudGesture = false
             }
             return true
         }
@@ -455,6 +564,7 @@ public class PlaygroundView(context: Context) : View(context) {
         const val PREFS = "fitbaus_arcade"
         const val SPEED_KEY = "breakout_speed"
         const val SPEED_BUTTON_WIDTH_DP = 44f
+        const val SOURCE_BUTTON_WIDTH_DP = 36f
         const val SPEED_BUTTON_HEIGHT_DP = 26f
         const val SPEED_BUTTON_GAP_DP = 6f
     }
