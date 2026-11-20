@@ -7,7 +7,7 @@ import kotlin.math.exp
 internal object PedalToSlowPreference {
     const val KEY = "biketris_pedal_to_slow_enabled"
     const val LEGACY_KEY = "biketris_cadence_mode"
-    const val LABEL = "PEDAL TO SLOW MODE"
+    const val LABEL = "Pedal to Slow Mode"
     const val HINT = "PEDAL FASTER FOR MORE TIME"
 
     fun enabled(hasSaved: Boolean, saved: Boolean, legacy: String?): Boolean =
