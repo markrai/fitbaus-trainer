@@ -124,6 +124,9 @@ internal class ExclusiveHid(
 
     fun candidates(): List<HidCandidate> = ExclusiveHidPolicy.candidates(manager.deviceList.values)
 
+    fun disabledByUser(): Boolean =
+        prefs.getString(ControllerDevices.SELECTED, null) == ControllerDevices.DISABLED
+
     fun selected(): HidCandidate? {
         activeCandidate()?.let { return it }
         val chosen = ControllerDevices.chosen(
