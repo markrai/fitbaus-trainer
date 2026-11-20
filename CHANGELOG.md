@@ -26,6 +26,16 @@ included in this upcoming release.
 
 ### Added
 
+- **GHOUL RUN arcade mode (grey-box playable prototype).** Added a seeded
+  15×15 isometric maze ride with three-lane head or controller junction
+  choices, cadence-relative speed and dynamo light/noise, keys, locked exits,
+  timed shrine checkpoints, and Ghoul/Hound/Wraith pursuit behaviors. Catching
+  uses a cadence-based BREAK FREE recovery with hearts and checkpoint respawns;
+  completed mazes show results and restart hands-free. The mode keeps the
+  persistent exercise HUD, uses read-only bike telemetry, supports +10/+20/+30
+  RPM sprint difficulty, and includes a tuning/debug overlay plus pure logic
+  coverage for maze, junction, cadence, monster, catch, and hold behavior.
+
 - **Biketris difficulty and cadence toggle.** Initial falling speed is now
   420 ms per row rather than 720 ms, leaving less idle time between pieces.
   The old Pedal to Slow / Pedal to Speed Up selector is replaced by a single

@@ -20,6 +20,7 @@ internal object GameControlCatalog {
         ArcadeMode.Math -> listOf(restart)
         ArcadeMode.Flak -> listOf(restart)
         ArcadeMode.TrailRide -> listOf(restart)
+        ArcadeMode.GhoulRun -> listOf(left, right, restart)
         ArcadeMode.Biketris -> listOf(left, right, down, rotate)
         else -> emptyList()
     }

@@ -148,6 +148,25 @@ class ArcadeModeTest {
     }
 
     @Test
+    fun ghoulRunIsWiredAsAReadOnlyFaceOrControllerGame() {
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(source.contains("ArcadeMode.GhoulRun -> savedGhoulSettings()"))
+        assertTrue(source.contains("ArcadeMode.GhoulRun -> ARCADE_GHOUL_TRACKER_KEY"))
+        assertTrue(source.contains("arcadeContent.ghoul.pause()"))
+        val start = source.indexOf("if (modeController.mode == ArcadeMode.GhoulRun) {")
+        val end = source.indexOf("if (modeController.mode == ArcadeMode.Biketris) {", start)
+        assertTrue(start > 0 && end > start)
+        val branch = source.substring(start, end)
+        assertTrue(branch.contains("arcadeContent.ghoul.render("))
+        assertTrue(branch.contains("gameController.takeGhoulRunInput()"))
+        for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager", "startService")) {
+            assertFalse(branch.contains(forbidden), forbidden)
+        }
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ExerciseHud.kt").readText()
+        assertTrue(content.contains("ghoul.visibility = if (game == ArcadeMode.GhoulRun) VISIBLE else GONE"))
+    }
+
+    @Test
     fun switchingToBiketrisStopsThePreviousPipelineFirstAndBack() {
         val hooks = RecordingHooks()
         val controller = ArcadeModeController(hooks)
@@ -183,7 +202,7 @@ class ArcadeModeTest {
         assertTrue(hooksBody.contains("arcadeContent.biketris.pause()"))
         assertEquals(1, Regex("""ArcadeCameraSession\.forActivity\(""").findAll(source).count(), "one camera session for every game")
         assertTrue(source.contains("arcadeContent.biketris.gestures = cameraSession.gestures"))
-        assertTrue(source.contains("game == ArcadeMode.Flak || game == ArcadeMode.TrailRide || game == ArcadeMode.Biketris"), "long-press opens the face-game developer menu")
+        assertTrue(source.contains("game == ArcadeMode.Flak || game == ArcadeMode.TrailRide || game == ArcadeMode.GhoulRun || game == ArcadeMode.Biketris"), "long-press opens the face-game developer menu")
     }
 
     @Test
@@ -220,9 +239,10 @@ class ArcadeModeTest {
         assertTrue(ArcadeMode.Math.isGame)
         assertTrue(ArcadeMode.Flak.isGame)
         assertTrue(ArcadeMode.TrailRide.isGame)
+        assertTrue(ArcadeMode.GhoulRun.isGame)
         assertTrue(ArcadeMode.Biketris.isGame)
         assertFalse(ArcadeMode.YouTube.isGame)
-        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN", "TRAIL RIDE", "BIKETRIS", "YouTube"), ArcadeMode.values().map { it.caption })
+        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN", "TRAIL RIDE", "GHOUL RUN", "BIKETRIS", "YouTube"), ArcadeMode.values().map { it.caption })
     }
 
     @Test
@@ -232,7 +252,7 @@ class ArcadeModeTest {
         assertEquals(ModeKind.Dashboard, ArcadeMode.Dashboard.kind)
         assertFalse(ArcadeMode.Dashboard.isMedia)
         val games = ArcadeMode.values().filter { it.isGame }
-        assertEquals(listOf(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris), games)
+        assertEquals(listOf(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris), games)
         for (game in games) assertFalse(game.isMedia, game.name)
     }
 
@@ -346,7 +366,7 @@ class ArcadeModeTest {
         }
         assertTrue(source.contains("tabGroup(ArcadeMode.YouTube)"))
         assertTrue(
-            source.indexOf("tabGroup(ArcadeMode.YouTube)") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris)"),
+            source.indexOf("tabGroup(ArcadeMode.YouTube)") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"),
             "YouTube follows the game tabs",
         )
         assertTrue(source.contains("dashboardContent.visibility = if (mode == ArcadeMode.Dashboard) View.VISIBLE else View.GONE"))
@@ -408,7 +428,7 @@ class ArcadeModeTest {
             assertFalse(hooksBody.contains(forbidden), forbidden)
         }
         assertTrue(source.contains("tabGroup(ArcadeMode.Dashboard)"))
-        assertTrue(source.contains("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris)"))
+        assertTrue(source.contains("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"))
         assertFalse(source.contains("\"ARCADE\""))
         assertNotNull(Regex("""setOnLongClickListener""").find(source), "long-press FITBAUS still opens pairing")
         assertTrue(source.contains("PairingActivity::class.java"))
@@ -419,7 +439,7 @@ class ArcadeModeTest {
         assertTrue(source.contains("R.string.open_bike_bridge_settings"), "settings gear has accessible content description")
         assertTrue(source.contains("settingsButton()"), "header exposes a dedicated settings control")
         assertTrue(
-            source.indexOf("settingsButton()") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.Biketris)"),
+            source.indexOf("settingsButton()") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"),
             "settings gear stays after navigation tabs",
         )
     }
