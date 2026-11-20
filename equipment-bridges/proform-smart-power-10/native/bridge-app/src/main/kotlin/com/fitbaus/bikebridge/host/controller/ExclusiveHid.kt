@@ -45,16 +45,19 @@ internal object ExclusiveHidPolicy {
         val result = ArrayList<HidCandidate>()
         for (device in devices) {
             val classes = (0 until device.interfaceCount).map { device.getInterface(it).interfaceClass }
-            if (!permittedDevice(device.vendorId, device.productId, classes) || device.interfaceCount != 1) continue
+            if (!permittedDevice(device.vendorId, device.productId, classes)) continue
+            val before = result.size
             for (index in 0 until device.interfaceCount) {
                 val iface = device.getInterface(index)
-                if (iface.interfaceSubclass == 1 && (iface.interfaceProtocol == 1 || iface.interfaceProtocol == 2)) continue
                 for (endpointIndex in 0 until iface.endpointCount) {
                     val ep = iface.getEndpoint(endpointIndex)
                     if (ep.type != UsbConstants.USB_ENDPOINT_XFER_INT || ep.direction != UsbConstants.USB_DIR_IN) continue
                     if (ep.maxPacketSize !in 1..256) continue
                     result += HidCandidate(device.deviceName, device.vendorId, device.productId, index, iface.id, endpointIndex, ep.maxPacketSize)
                 }
+            }
+            if (result.drop(before).map { it.interfaceIndex }.distinct().size != device.interfaceCount) {
+                result.subList(before, result.size).clear()
             }
         }
         return result.sortedWith(compareBy({ it.vendorId }, { it.productId }, { it.deviceName }, { it.interfaceIndex }))
@@ -64,7 +67,12 @@ internal object ExclusiveHidPolicy {
         if (selected.isNullOrBlank()) null else candidates.filter { it.key == selected }.singleOrNull()
 }
 
-internal data class HidReport(val bytes: ByteArray, val sequence: Long) {
+internal data class HidReport(
+    val bytes: ByteArray,
+    val sequence: Long,
+    val interfaceIndex: Int = 0,
+    val endpointIndex: Int = 0,
+) {
     fun hex(): String = bytes.take(64).joinToString(" ") { "%02X".format(it.toInt() and 255) }
 }
 
@@ -105,8 +113,8 @@ internal class ExclusiveHid(
     private val report = AtomicReference<HidReport?>(null)
     private val counter = AtomicLong(0L)
     private var connection: UsbDeviceConnection? = null
-    private var iface: UsbInterface? = null
-    private var request: UsbRequest? = null
+    private var claimedInterfaces: List<UsbInterface> = emptyList()
+    private var readers: List<HidReader> = emptyList()
     private var active: HidCandidate? = null
     private var generation = 0L
     @Volatile private var stateText = "Released"
@@ -115,7 +123,17 @@ internal class ExclusiveHid(
     private var lastTick = -1L
 
     fun candidates(): List<HidCandidate> = ExclusiveHidPolicy.candidates(manager.deviceList.values)
-    fun selected(): HidCandidate? = ExclusiveHidPolicy.unique(candidates(), prefs.getString(ExclusiveHidPolicy.PREF_KEY, null))
+
+    fun selected(): HidCandidate? {
+        activeCandidate()?.let { return it }
+        val chosen = ControllerDevices.chosen(
+            ControllerDevices.visible(),
+            prefs.getString(ControllerDevices.SELECTED, null),
+        ) ?: return null
+        val matches = candidates().filter { it.vendorId == chosen.vendorId && it.productId == chosen.productId }
+        if (matches.map { it.deviceName }.distinct().size != 1) return null
+        return matches.firstOrNull()
+    }
 
     fun isPermitted(candidate: HidCandidate): Boolean {
         val device = manager.deviceList[candidate.deviceName] ?: return false
@@ -127,16 +145,19 @@ internal class ExclusiveHid(
     fun isActive(): Boolean = synchronized(lock) { connection != null && active != null }
     fun activeCandidate(): HidCandidate? = synchronized(lock) { active }
 
-    fun startFromPreference(): Boolean {
-        if (!prefs.getBoolean(ExclusiveHidPolicy.PREF_ENABLED, false)) return false
-        return start()
-    }
+    fun startFromPreference(): Boolean = start()
+
+    private data class HidReader(
+        val request: UsbRequest,
+        val buffer: ByteBuffer,
+        val candidate: HidCandidate,
+    )
 
     fun start(): Boolean = synchronized(lock) {
-        stopLocked()
+        if (connection != null && active != null) return true
         val candidate = selected()
         if (candidate == null) {
-            stateText = "No unique selected HID interface"
+            stateText = "No unambiguous USB HID gamepad detected"
             return false
         }
         val device = manager.deviceList[candidate.deviceName]
@@ -144,63 +165,89 @@ internal class ExclusiveHid(
             stateText = "USB permission needed or controller disconnected"
             return false
         }
-        if (ExclusiveHidPolicy.unique(candidates(), candidate.key) != candidate) {
-            stateText = "USB interface changed; refusing claim"
+        val sources = candidates().filter { it.deviceName == candidate.deviceName }
+        if (sources.isEmpty() || sources.map { it.interfaceIndex }.distinct().size != device.interfaceCount) {
+            stateText = "Unsafe or incomplete HID interface layout"
             return false
         }
-        val usbInterface = device.getInterface(candidate.interfaceIndex)
-        val endpoint = usbInterface.getEndpoint(candidate.endpointIndex)
         val handle = manager.openDevice(device)
         if (handle == null) {
-            stateText = "Could not open USB device"
+            stateText = "Could not open USB controller"
             return false
         }
-        if (!handle.claimInterface(usbInterface, true)) {
-            handle.close()
-            stateText = "Exclusive kernel HID claim failed"
-            return false
+        val interfaces = ArrayList<UsbInterface>()
+        val opened = ArrayList<HidReader>()
+        var failed = false
+        try {
+            for (i in 0 until device.interfaceCount) {
+                val usbInterface = device.getInterface(i)
+                if (!handle.claimInterface(usbInterface, true)) {
+                    failed = true
+                    break
+                }
+                interfaces.add(usbInterface)
+            }
+            if (!failed) {
+                for (source in sources) {
+                    val usbInterface = device.getInterface(source.interfaceIndex)
+                    val endpoint = usbInterface.getEndpoint(source.endpointIndex)
+                    val reader = UsbRequest()
+                    if (!reader.initialize(handle, endpoint)) {
+                        reader.close()
+                        failed = true
+                        break
+                    }
+                    opened.add(HidReader(reader, ByteBuffer.allocateDirect(source.maxPacket), source))
+                }
+            }
+        } catch (_: Exception) {
+            failed = true
         }
-        val reader = UsbRequest()
-        if (!reader.initialize(handle, endpoint)) {
-            handle.releaseInterface(usbInterface)
+        if (failed || opened.isEmpty()) {
+            opened.forEach { try { it.request.close() } catch (_: Exception) {} }
+            interfaces.asReversed().forEach { try { handle.releaseInterface(it) } catch (_: Exception) {} }
             handle.close()
-            stateText = "Cannot read HID interrupt endpoint"
+            stateText = "Failed to claim every USB HID interface"
             return false
         }
         connection = handle
-        iface = usbInterface
-        request = reader
+        claimedInterfaces = interfaces
+        readers = opened
         active = candidate
-        generation += 1L
+        generation++
         val token = generation
         report.set(null)
         androidLeak = false
-        stateText = "HID interface claimed; awaiting raw input (system ownership unverified)"
-        Thread({ readLoop(handle, reader, candidate.maxPacket, token) }, "FitbausHid-" + candidate.interfaceNumber)
-            .apply { isDaemon = true; start() }
+        stateText = "Claimed ${interfaces.size} HID interfaces; awaiting reports"
+        Thread({ readLoop(handle, opened, token) }, "FitbausHid").apply { isDaemon = true; start() }
         return true
     }
 
     @Suppress("DEPRECATION")
-    private fun readLoop(handle: UsbDeviceConnection, reader: UsbRequest, packetSize: Int, token: Long) {
-        val buffer = ByteBuffer.allocateDirect(packetSize)
+    private fun readLoop(handle: UsbDeviceConnection, opened: List<HidReader>, token: Long) {
         try {
+            for (reader in opened) {
+                reader.buffer.clear()
+                if (!reader.request.queue(reader.buffer, reader.candidate.maxPacket)) return
+            }
             while (synchronized(lock) { token == generation && connection === handle }) {
-                buffer.clear()
-                if (!reader.queue(buffer, packetSize)) break
-                if (handle.requestWait() !== reader) break
-                val count = buffer.position().coerceIn(0, packetSize)
+                val completed = handle.requestWait() ?: break
+                val reader = opened.firstOrNull { it.request === completed } ?: break
+                val count = reader.buffer.position().coerceIn(0, reader.candidate.maxPacket)
                 if (count > 0) {
-                    buffer.flip()
+                    reader.buffer.flip()
                     val bytes = ByteArray(count)
-                    buffer.get(bytes)
+                    reader.buffer.get(bytes)
                     synchronized(lock) {
                         if (token == generation && connection === handle) {
-                            report.set(HidReport(bytes, counter.incrementAndGet()))
-                            if (!androidLeak) stateText = "Receiving raw USB HID reports (system exclusivity requires on-bike check)"
+                            report.set(HidReport(bytes, counter.incrementAndGet(), reader.candidate.interfaceIndex, reader.candidate.endpointIndex))
+                            if (!androidLeak) stateText = "Reading USB HID reports from ${claimedInterfaces.size} claimed interfaces"
                         }
                     }
                 }
+                if (!synchronized(lock) { token == generation && connection === handle }) break
+                reader.buffer.clear()
+                if (!reader.request.queue(reader.buffer, reader.candidate.maxPacket)) break
             }
         } catch (_: Exception) {
             if (synchronized(lock) { token == generation }) stateText = "USB HID read failed"
@@ -214,22 +261,24 @@ internal class ExclusiveHid(
     fun stop() = synchronized(lock) { stopLocked() }
 
     private fun stopLocked(reason: String = "Released") {
-        generation += 1L
-        val oldRequest = request
+        generation++
+        val oldReaders = readers
         val oldConnection = connection
-        val oldInterface = iface
-        request = null
+        val oldInterfaces = claimedInterfaces
+        readers = emptyList()
         connection = null
-        iface = null
+        claimedInterfaces = emptyList()
         active = null
         report.set(null)
         lastTick = -1L
         stateText = reason
         androidLeak = false
-        try { oldRequest?.cancel() } catch (_: Exception) {}
-        try { oldRequest?.close() } catch (_: Exception) {}
+        oldReaders.forEach { try { it.request.cancel() } catch (_: Exception) {} }
+        oldReaders.forEach { try { it.request.close() } catch (_: Exception) {} }
         if (oldConnection != null) {
-            try { if (oldInterface != null) oldConnection.releaseInterface(oldInterface) } catch (_: Exception) {}
+            oldInterfaces.asReversed().forEach {
+                try { oldConnection.releaseInterface(it) } catch (_: Exception) {}
+            }
             try { oldConnection.close() } catch (_: Exception) {}
         }
     }
