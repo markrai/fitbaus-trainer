@@ -45,6 +45,8 @@ class PairingSettingsUiTest {
         assertTrue(source.contains("override fun dispatchKeyEvent(event: KeyEvent)"))
         assertTrue(source.contains("override fun dispatchGenericMotionEvent(event: MotionEvent)"))
         assertTrue(source.contains("return super.dispatchKeyEvent(event)"))
+        assertTrue(source.contains("ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)"))
+        assertTrue(source.contains("if (ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)) return true"))
         assertTrue(source.contains("return super.dispatchGenericMotionEvent(event)"))
         assertTrue(source.contains("uiHandler.removeCallbacks(controllerPoll)"))
         assertTrue(activity.contains("modeController.mode == ArcadeMode.Bricks"))
