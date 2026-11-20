@@ -26,6 +26,17 @@ included in this upcoming release.
 
 ### Added
 
+- **Biketris difficulty and cadence toggle.** Initial falling speed is now
+  420 ms per row rather than 720 ms, leaving less idle time between pieces.
+  The old Pedal to Slow / Pedal to Speed Up selector is replaced by a single
+  **Pedal to Slow Mode** toggle, green when enabled and neutral when disabled.
+  Enabled preserves the existing RPM-dependent slowdown reward; disabled
+  uses normal gravity independent of RPM. The choice persists, with existing
+  Slow users kept enabled and old Speed users migrated to disabled.
+  Level progression, webcam/controller inputs, soft drop, and read-only bike
+  telemetry remain unchanged.
+
+
 - **Biketris controller mode and remapping.** Matching Webcam/Controller
   selector in the game panel, with a saved Biketris-only preference and
   automatic Controller default when an eligible gamepad is connected.
