@@ -40,9 +40,11 @@ and a controller icon.
   Without an available controller, **Webcam** is selected and the controller
   icon is shown as unavailable.
 - Tapping **Webcam** immediately switches Bricks steering to the normal
-  hand/face-tracking path. The selection is saved in Bricks' preferences
-  and overrides future automatic controller selection, including after an
-  app restart or USB reconnect.
+  hand/face-tracking path. Controller-origin events are still consumed before
+  Android receives them, but Bricks no longer executes mapped controller game
+  actions. Held steering input is cleared on the switch. The selection is
+  saved in Bricks' preferences and overrides future automatic controller
+  selection, including after an app restart or USB reconnect.
 - Tapping **Controller** when available also saves the choice. Disconnecting
   a controller temporarily selects Webcam while retaining the saved
   Controller preference; reconnecting restores Controller automatically.
