@@ -73,7 +73,7 @@ class PairingActivity : Activity() {
     private val exclusiveHid by lazy { ExclusiveHid(this) }
     private val controllerOwnership by lazy { AutoControllerOwnership(this, exclusiveHid) }
     private var learnSide: String? = null
-    private var learnNeutral: HidReport? = null
+    private var learnBaselines: Map<Pair<Int, Int>, HidReport> = emptyMap()
     private var learnSignature: String? = null
     private var learnStable = 0
     private lateinit var cameraList: TextView
@@ -232,12 +232,12 @@ class PairingActivity : Activity() {
     private fun controllerPrefs() = getSharedPreferences(ControllerDevices.PREFS, MODE_PRIVATE)
 
     private fun beginHidLearn(side: String) {
-        val baseline = exclusiveHid.latest()
-        if (!exclusiveHid.isActive() || baseline == null) {
+        val baselines = exclusiveHid.snapshots()
+        if (!exclusiveHid.isActive() || baselines.isEmpty()) {
             hidStatus.text = "Waiting for an automatically claimed controller and neutral HID reports"
             return
         }
-        learnNeutral = baseline
+        learnBaselines = baselines
         learnSide = side
         learnSignature = null
         learnStable = 0
@@ -253,9 +253,9 @@ class PairingActivity : Activity() {
         val right = HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_RIGHT, null))
         if (learnSide == null) {
             hidStatus.text = controllerOwnership.status()
-        } else if (raw != null && raw.sequence != learnNeutral?.sequence) {
-            val baseline = learnNeutral
-            val binding = if (baseline == null) null else HidBinding.learn(baseline, raw)
+        } else if (raw != null) {
+            val baseline = learnBaselines[raw.interfaceIndex to raw.endpointIndex]
+            val binding = if (baseline == null || baseline.sequence == raw.sequence) null else HidBinding.learn(baseline, raw)
             if (binding != null) {
                 if (binding.encode() == learnSignature) learnStable++ else {
                     learnSignature = binding.encode()
