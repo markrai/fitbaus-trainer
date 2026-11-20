@@ -213,28 +213,34 @@ internal class BiketrisSession(
         rpmCurrent: Boolean = false,
         rpmObservedAt: String? = null,
         controller: BiketrisControllerInput? = null,
+        allowWebcamWithController: Boolean = false,
     ): BiketrisHold {
         game.gravityScale = cadence.update(connected, initialized, rpm, rpmCurrent, rpmObservedAt, nowNanos)
-        reading = if (controller != null && touchX.isNaN()) {
+        val combined = controller != null && allowWebcamWithController
+        reading = if (controller != null && !combined && touchX.isNaN()) {
             faceFresh = false
             freshSince = Long.MIN_VALUE
             BiketrisReading(BiketrisControl.Controller, 0.5f, 0L, 0L)
         } else read(position, touchX, nowNanos)
         val fingerDown = reading.control == BiketrisControl.Touch
         val gameOver = game.phase == BiketrisPhase.GameOver
-        if (controller != null) {
+        if (controller != null && !combined) {
             touchSession = false
         } else if ((fingerDown || touchIntent) && !faceFresh && !gameOver) touchSession = true
         touchIntent = false
         if (touchSession && !fingerDown && faceFresh && reading.stableMs * 1_000_000L >= config.resumeStableNanos) touchSession = false
         if (gameOver) touchSession = false
-        hold = supervisor.hold(camera, reading, touchSession, gameOver, nowNanos)
+        val readinessReading = if (combined && !fingerDown) {
+            BiketrisReading(BiketrisControl.Controller, 0.5f, 0L, 0L)
+        } else reading
+        hold = supervisor.hold(camera, readinessReading, touchSession, gameOver, nowNanos)
         trackSpawn(nowNanos)
-        if (controller?.rotate == true && live) game.rotate()
-        when (edge.update(if (controller != null) null else wave, nowNanos, live, pieceSpawnNanos)) {
+        val controllerRotating = controller?.rotate == true && live
+        if (controllerRotating) game.rotate()
+        when (edge.update(if (controller != null && !combined) null else wave, nowNanos, live, pieceSpawnNanos)) {
             WaveOutcome.Accepted -> {
-                consumedWaves += 1
-                if (game.rotate()) {
+                if (!controllerRotating) consumedWaves += 1
+                if (!controllerRotating && game.rotate()) {
                     waveRotations += 1
                     lastWaveRotationNanos = nowNanos
                     lastWaveSimulated = wave?.simulated == true
@@ -253,16 +259,14 @@ internal class BiketrisSession(
             lastSteps = 0
             return hold
         }
-        game.softDropActive = controller?.softDrop == true && reading.control == BiketrisControl.Controller
-        targetColumn = when (reading.control) {
-            BiketrisControl.Face -> if (touchSession) -1 else mapper.map(reading.x, game.maxLeft)
-            BiketrisControl.Touch -> mapper.map(reading.x, game.maxLeft, 1f)
-            BiketrisControl.Controller -> when {
-                controller?.left == true && controller.right != true -> (game.pieceLeft - 1).coerceAtLeast(0)
-                controller?.right == true && controller.left != true -> (game.pieceLeft + 1).coerceAtMost(game.maxLeft)
-                else -> -1
-            }
-            BiketrisControl.Lost -> -1
+        game.softDropActive = controller?.softDrop == true
+        val controllerMoving = controller != null && controller.left != controller.right
+        targetColumn = when {
+            reading.control == BiketrisControl.Touch -> mapper.map(reading.x, game.maxLeft, 1f)
+            controllerMoving && controller?.left == true -> (game.pieceLeft - 1).coerceAtLeast(0)
+            controllerMoving && controller?.right == true -> (game.pieceLeft + 1).coerceAtMost(game.maxLeft)
+            reading.control == BiketrisControl.Face -> if (touchSession) -1 else mapper.map(reading.x, game.maxLeft)
+            else -> -1
         }
         if (targetColumn >= 0) game.setTarget(targetColumn) else game.clearTarget()
         lastSteps = game.update(nowNanos)

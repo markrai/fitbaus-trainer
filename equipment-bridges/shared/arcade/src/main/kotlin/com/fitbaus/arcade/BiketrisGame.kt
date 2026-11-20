@@ -3,6 +3,7 @@
 package com.fitbaus.arcade
 
 import kotlin.random.Random
+import kotlin.math.roundToInt
 
 /**
  * The seven four-cell pieces. [spawn] lists the state-0 cells as (x, y) pairs inside a
@@ -89,6 +90,24 @@ internal object BlockKicks {
     }
 
     private fun negate(source: IntArray): IntArray = IntArray(source.size) { -source[it] }
+}
+
+internal object BiketrisDifficulty {
+    const val KEY = "biketris_difficulty"
+    const val DEFAULT_LEVEL = 3
+
+    fun clamp(level: Int): Int = level.coerceIn(1, 5)
+
+    fun fromFraction(fraction: Float): Int =
+        clamp(1 + (fraction.coerceIn(0f, 1f) * 4f).roundToInt())
+
+    fun gravityMultiplier(level: Int): Float = when (clamp(level)) {
+        1 -> 2f
+        2 -> 1.5f
+        3 -> 1f
+        4 -> 0.75f
+        else -> 0.5f
+    }
 }
 
 internal data class BiketrisConfig(
@@ -204,6 +223,9 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
     val gravitySeconds: Float
         get() = config.gravitySeconds(level)
 
+    var difficultyLevel: Int = BiketrisDifficulty.DEFAULT_LEVEL
+        set(value) { field = BiketrisDifficulty.clamp(value) }
+
     var gravityScale: Float = 1f
         set(value) {
             field = if (value.isNaN()) 1f else value.coerceIn(MIN_GRAVITY_SCALE, MAX_GRAVITY_SCALE)
@@ -213,8 +235,9 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
 
     val effectiveGravitySeconds: Float
         get() = maxOf(
-            config.minEffectiveGravitySeconds,
-            gravitySeconds * gravityScale * if (softDropActive) SOFT_DROP_SCALE else 1f,
+            config.minEffectiveGravitySeconds * BiketrisDifficulty.gravityMultiplier(difficultyLevel),
+            gravitySeconds * BiketrisDifficulty.gravityMultiplier(difficultyLevel) * gravityScale *
+                if (softDropActive) SOFT_DROP_SCALE else 1f,
         )
 
     var fallProgress: Float = 0f
