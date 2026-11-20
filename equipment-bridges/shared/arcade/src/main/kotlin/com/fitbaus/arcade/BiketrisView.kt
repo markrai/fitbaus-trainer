@@ -47,6 +47,15 @@ internal object BiketrisPalette {
     )
 }
 
+public enum class BiketrisInputSource { Webcam, Controller }
+
+internal object BiketrisInputSelection {
+    const val PREF_KEY = "biketris_input_source"
+    fun effective(saved: String?, available: Boolean): BiketrisInputSource =
+        if (!available || saved == BiketrisInputSource.Webcam.name) BiketrisInputSource.Webcam
+        else BiketrisInputSource.Controller
+}
+
 /**
  * BIKETRIS: a falling-block game for the console. Move the falling piece by moving the head left
  * or right (Face tracking, the same mirrored x as Bricks) and rotate it clockwise with one
@@ -79,14 +88,37 @@ public class BiketrisView(context: Context) : View(context) {
     private var cadenceMode = CadenceMode.fromKey(prefs?.getString(CADENCE_MODE_KEY, null))
     private val game = BiketrisGame(seed = System.nanoTime())
     private val session = BiketrisSession(game)
+    private var selectedInput = prefs?.getString(BiketrisInputSelection.PREF_KEY, null)
+    public var controllerAvailable: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
+
+    public val inputSource: BiketrisInputSource
+        get() = BiketrisInputSelection.effective(selectedInput, controllerAvailable)
+
+    public var onInputSourceChanged: ((BiketrisInputSource) -> Unit)? = null
+
+    public fun selectInputSource(source: BiketrisInputSource) {
+        if (source == BiketrisInputSource.Controller && !controllerAvailable) return
+        val prior = inputSource
+        selectedInput = source.name
+        prefs?.edit()?.putString(BiketrisInputSelection.PREF_KEY, source.name)?.apply()
+        if (prior != inputSource) {
+            session.pause()
+            dragging = false
+            touchX = Float.NaN
+            onInputSourceChanged?.invoke(inputSource)
+        }
+        invalidate()
+    }
 
     private var touchX = Float.NaN
     private var dragging = false
-    private var controllerTouchX: Float = Float.NaN
-    public fun setControllerSteering(x: Float?) {
-        controllerTouchX = x?.coerceIn(0f, 1f) ?: Float.NaN
-        if (!controllerTouchX.isNaN()) session.noteTouchIntent()
-    }
+    private var inputGesture = false
     private var pressedMode: CadenceMode? = null
     private var restartPressed = false
     private var lastRenderNanos = Long.MIN_VALUE
@@ -112,6 +144,14 @@ public class BiketrisView(context: Context) : View(context) {
     private var boardWidth = 0f
     private var boardHeight = 0f
     private val selector = CadenceSelectorLayout()
+    private val webcamRect = RectF()
+    private val controllerRect = RectF()
+    private val sourcePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.8f * density
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
     private var feedbackTop = 0f
     private var shownRpm = Int.MIN_VALUE
     private var shownFallMs = Int.MIN_VALUE
@@ -162,6 +202,7 @@ public class BiketrisView(context: Context) : View(context) {
         rpmObservedAt: String?,
         diagnostics: String,
         cameraInfo: ArcadeCameraInfo?,
+        controller: BiketrisControllerInput? = null,
     ) {
         val now = System.nanoTime()
         if (lastRenderNanos != Long.MIN_VALUE) {
@@ -175,7 +216,12 @@ public class BiketrisView(context: Context) : View(context) {
         diagnosticsText = if (failure != null && camera != CameraState.Ready) failure else diagnostics
         val start = System.nanoTime()
         val wave = gestures
-        session.update(position, camera, if (dragging) touchX else controllerTouchX, wave?.latest(), now, connected, initialized, rpm, rpmCurrent, rpmObservedAt)
+        session.update(
+            position, camera, if (dragging) touchX else Float.NaN,
+            if (inputSource == BiketrisInputSource.Webcam) wave?.latest() else null,
+            now, connected, initialized, rpm, rpmCurrent, rpmObservedAt,
+            controller = if (inputSource == BiketrisInputSource.Controller) controller else null,
+        )
         if (wave != null) waveRate.update(wave.observations, now)
         updateWindow.record((System.nanoTime() - start) / 1_000_000f)
         invalidate()
@@ -184,8 +230,8 @@ public class BiketrisView(context: Context) : View(context) {
     /** Host pause or game switch: stop the clock and forget transient input so nothing stale is replayed. */
     public fun pause() {
         session.pause()
-        controllerTouchX = Float.NaN
         dragging = false
+        inputGesture = false
         touchX = Float.NaN
         pressedMode = null
         restartPressed = false
@@ -266,6 +312,13 @@ public class BiketrisView(context: Context) : View(context) {
         boardTop = floor((h - boardHeight) / 2f)
         val panelLeft = boardLeft + boardWidth + 24f * density
         val panelWidth = w - pad - panelLeft
+        val sourceTop = boardTop + 4f * density
+        val sourceSize = 36f * density
+        val sourceGap = 6f * density
+        val sourceHeight = 28f * density
+        webcamRect.set(panelLeft, sourceTop, panelLeft + sourceSize, sourceTop + sourceHeight)
+        controllerRect.set(panelLeft + sourceSize + sourceGap, sourceTop,
+            panelLeft + 2f * sourceSize + sourceGap, sourceTop + sourceHeight)
         val segmentWidth = CadenceMode.values().maxOf { segmentPaint.measureText(it.label) } + 24f * density
         val stacked = panelWidth < segmentWidth * 2f
         val selectorWidth = if (stacked) minOf(panelWidth, segmentWidth) else minOf(panelWidth, maxOf(segmentWidth * 2f, 360f * density))
@@ -398,15 +451,27 @@ public class BiketrisView(context: Context) : View(context) {
 
     private fun drawRightPanel(canvas: Canvas) {
         val left = boardLeft + boardWidth + 24f * density
-        var y = boardTop + 16f * density + infoPaint.textSize
+        drawInputSourceSelector(canvas)
+        var y = boardTop + 48f * density + infoPaint.textSize
+        val controllerMode = inputSource == BiketrisInputSource.Controller
         infoPaint.color = BiketrisPalette.PRIMARY
-        canvas.drawText("HEAD LEFT / RIGHT TO MOVE", left, y, infoPaint)
+        canvas.drawText(
+            if (controllerMode) "CONTROLLER LEFT / RIGHT" else "HEAD LEFT / RIGHT TO MOVE",
+            left, y, infoPaint,
+        )
         y += infoPaint.textSize + 8f * density
-        infoPaint.color = if (waveEnabled) BiketrisPalette.PRIMARY else BiketrisPalette.MUTE
-        canvas.drawText(if (waveEnabled) "WAVE HAND TO ROTATE" else "WAVE ROTATION OFF", left, y, infoPaint)
+        infoPaint.color = BiketrisPalette.PRIMARY
+        canvas.drawText(
+            if (controllerMode) "DOWN TO DROP FASTER"
+            else if (waveEnabled) "WAVE HAND TO ROTATE" else "WAVE ROTATION OFF",
+            left, y, infoPaint,
+        )
         y += infoPaint.textSize + 8f * density
         infoPaint.color = BiketrisPalette.MUTE
-        canvas.drawText("OR DRAG THE BOARD TO MOVE", left, y, infoPaint)
+        canvas.drawText(
+            if (controllerMode) "ROTATE: MAPPED BUTTON" else "OR DRAG THE BOARD TO MOVE",
+            left, y, infoPaint,
+        )
         y += infoPaint.textSize + 20f * density
         infoPaint.color = when {
             session.reading.control == BiketrisControl.Touch || session.touchSession -> BiketrisPalette.WARN
@@ -449,6 +514,39 @@ public class BiketrisView(context: Context) : View(context) {
         }
         drawSelector(canvas)
         drawCadenceFeedback(canvas, left)
+    }
+
+    private fun drawInputSourceSelector(canvas: Canvas) {
+        for (source in BiketrisInputSource.entries) {
+            val rect = if (source == BiketrisInputSource.Webcam) webcamRect else controllerRect
+            val selected = inputSource == source
+            val available = source == BiketrisInputSource.Webcam || controllerAvailable
+            fill.color = if (selected) BiketrisPalette.SELECTED else BiketrisPalette.BUTTON
+            canvas.drawRect(rect, fill)
+            stroke.color = if (selected) BiketrisPalette.GOOD else BiketrisPalette.BORDER
+            stroke.strokeWidth = 1.5f * density
+            canvas.drawRect(rect, stroke)
+            sourcePaint.color = when {
+                selected -> BiketrisPalette.BACKGROUND
+                available -> BiketrisPalette.MUTE
+                else -> BiketrisPalette.BORDER
+            }
+            val x = rect.centerX()
+            val y = rect.centerY()
+            val d = density
+            if (source == BiketrisInputSource.Webcam) {
+                canvas.drawCircle(x, y - 3f * d, 6.5f * d, sourcePaint)
+                canvas.drawCircle(x, y - 3f * d, 2.5f * d, sourcePaint)
+                canvas.drawLine(x, y + 4f * d, x, y + 9f * d, sourcePaint)
+                canvas.drawLine(x - 8f * d, y + 9f * d, x + 8f * d, y + 9f * d, sourcePaint)
+            } else {
+                canvas.drawRoundRect(x - 12f * d, y - 6f * d, x + 12f * d, y + 7f * d, 5f * d, 5f * d, sourcePaint)
+                canvas.drawLine(x - 7f * d, y - 2f * d, x - 7f * d, y + 4f * d, sourcePaint)
+                canvas.drawLine(x - 10f * d, y + 1f * d, x - 4f * d, y + 1f * d, sourcePaint)
+                canvas.drawCircle(x + 6f * d, y - 1f * d, 1f * d, sourcePaint)
+                canvas.drawCircle(x + 9f * d, y + 3f * d, 1f * d, sourcePaint)
+            }
+        }
     }
 
     private fun drawSelector(canvas: Canvas) {
@@ -503,6 +601,7 @@ public class BiketrisView(context: Context) : View(context) {
     }
 
     private fun statusText(): String = when {
+        inputSource == BiketrisInputSource.Controller -> "CONTROLLER CONTROL"
         session.reading.control == BiketrisControl.Touch -> "TOUCH CONTROL"
         session.touchSession -> "TOUCH PLAY"
         session.reading.control == BiketrisControl.Face -> "TRACKING HEAD"
@@ -530,8 +629,13 @@ public class BiketrisView(context: Context) : View(context) {
         if (held != null) {
             banner(canvas, held, cx, boardTop + boardHeight * 0.45f, if (held.length > 28) 14f else 18f)
         } else if (game.elapsed < INTRO_SECONDS) {
-            banner(canvas, "HEAD LEFT / RIGHT TO MOVE", cx, boardTop + boardHeight * 0.18f, 15f)
-            if (waveEnabled) banner(canvas, "WAVE HAND TO ROTATE", cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
+            val controllerMode = inputSource == BiketrisInputSource.Controller
+            banner(canvas, if (controllerMode) "CONTROLLER TO MOVE" else "HEAD LEFT / RIGHT TO MOVE",
+                cx, boardTop + boardHeight * 0.18f, 15f)
+            if (controllerMode) banner(canvas, "DOWN = DROP   BUTTON = ROTATE",
+                cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
+            else if (waveEnabled) banner(canvas, "WAVE HAND TO ROTATE",
+                cx, boardTop + boardHeight * 0.18f + 30f * density, 15f)
             banner(canvas, cadenceMode.hint, cx, boardTop + boardHeight * 0.18f + 60f * density, 15f)
         }
     }
@@ -660,6 +764,25 @@ public class BiketrisView(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         val x = event.x
         val y = event.y
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            val selection = when {
+                webcamRect.contains(x, y) -> BiketrisInputSource.Webcam
+                controllerRect.contains(x, y) -> BiketrisInputSource.Controller
+                else -> null
+            }
+            if (selection != null) {
+                inputGesture = true
+                selectInputSource(selection)
+                return true
+            }
+        }
+        if (inputGesture) {
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                inputGesture = false
+                if (event.actionMasked == MotionEvent.ACTION_UP) performClick()
+            }
+            return true
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val segment = selector.hit(x, y)
