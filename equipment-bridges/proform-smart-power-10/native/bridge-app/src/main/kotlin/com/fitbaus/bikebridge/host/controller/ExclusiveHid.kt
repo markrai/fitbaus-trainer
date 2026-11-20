@@ -45,7 +45,7 @@ internal object ExclusiveHidPolicy {
         val result = ArrayList<HidCandidate>()
         for (device in devices) {
             val classes = (0 until device.interfaceCount).map { device.getInterface(it).interfaceClass }
-            if (!permittedDevice(device.vendorId, device.productId, classes)) continue
+            if (!permittedDevice(device.vendorId, device.productId, classes) || device.interfaceCount != 1) continue
             for (index in 0 until device.interfaceCount) {
                 val iface = device.getInterface(index)
                 if (iface.interfaceSubclass == 1 && (iface.interfaceProtocol == 1 || iface.interfaceProtocol == 2)) continue
@@ -221,6 +221,15 @@ internal class ExclusiveHid(
             try { if (oldInterface != null) oldConnection.releaseInterface(oldInterface) } catch (_: Exception) {}
             try { oldConnection.close() } catch (_: Exception) {}
         }
+    }
+
+    fun belongsTo(device: android.view.InputDevice?): Boolean {
+        val chosen = activeCandidate() ?: return false
+        return device != null && device.vendorId == chosen.vendorId && device.productId == chosen.productId
+    }
+
+    fun noteAndroidEvent() {
+        if (isActive()) stateText = "WARNING: Android still delivers keys; exclusive ownership is unverified"
     }
 
     fun sampleBricks(nowNanos: Long): HandPosition? {
