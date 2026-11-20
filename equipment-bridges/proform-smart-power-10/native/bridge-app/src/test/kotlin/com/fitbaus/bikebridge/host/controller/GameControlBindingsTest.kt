@@ -15,7 +15,8 @@ import org.junit.jupiter.api.Test
 class GameControlBindingsTest {
     @Test
     fun controllerActionsAreGameplayOnlyAndNeverCameraCalibration() {
-        assertEquals(listOf("left", "right", "restart"), GameControlCatalog.actions(ArcadeMode.Bricks).map { it.id })
+        assertEquals(listOf("left", "right"), GameControlCatalog.actions(ArcadeMode.Bricks).map { it.id })
+        assertFalse(GameControlCatalog.actions(ArcadeMode.Bricks).any { it.id == "restart" })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.Math).map { it.id })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.Flak).map { it.id })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.TrailRide).map { it.id })
@@ -51,6 +52,8 @@ class GameControlBindingsTest {
         assertNull(bindings.keyCode(ArcadeMode.Bricks, "pad-one", bricksLeft))
         assertEquals("right", bindings.action(ArcadeMode.Bricks, "pad-one", KeyEvent.KEYCODE_BUTTON_A)?.id)
         assertFalse(bindings.assign(ArcadeMode.Flak, "pad-one", "recenter", KeyEvent.KEYCODE_BUTTON_B))
+        assertFalse(bindings.assign(ArcadeMode.Bricks, "pad-one", "restart", KeyEvent.KEYCODE_BUTTON_START))
+        assertNull(bindings.action(ArcadeMode.Bricks, "pad-one", KeyEvent.KEYCODE_BUTTON_START))
         assertTrue(bindings.reset(ArcadeMode.Bricks, "pad-one"))
         assertEquals(KeyEvent.KEYCODE_DPAD_LEFT, bindings.keyCode(ArcadeMode.Bricks, "pad-one", bricksLeft))
     }
