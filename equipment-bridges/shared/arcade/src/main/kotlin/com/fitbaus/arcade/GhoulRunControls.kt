@@ -127,6 +127,31 @@ internal class GhoulPace(
     }
 }
 
+/**
+ * Rider-relative lean zones with hysteresis. Steer < 0 is the rider's left (mirrored face x and
+ * stick x are already player-relative). A side is entered at |steer| >= [enter] and left again
+ * only when |steer| drops below [exit], so tracker jitter at the boundary cannot flicker.
+ */
+internal class GhoulLeanZones(private val enter: Float, private val exit: Float) {
+    var lane: GhoulLane = GhoulLane.Center
+        private set
+
+    fun reset() {
+        lane = GhoulLane.Center
+    }
+
+    fun update(steer: Float): GhoulLane {
+        lane = when {
+            steer <= -enter -> GhoulLane.Left
+            steer >= enter -> GhoulLane.Right
+            lane == GhoulLane.Left && steer < -exit -> GhoulLane.Left
+            lane == GhoulLane.Right && steer > exit -> GhoulLane.Right
+            else -> GhoulLane.Center
+        }
+        return lane
+    }
+}
+
 internal enum class GhoulHold { None, CameraStarting, CameraUnavailable, FaceLost, Calibrating, NoTelemetry, Resuming }
 
 internal class GhoulRunSupervisor(private val resumeStableMs: Long = 600L) {
@@ -178,8 +203,14 @@ internal class GhoulRunSession(
     val pace: GhoulPace = GhoulPace(game.config),
     private val supervisor: GhoulRunSupervisor = GhoulRunSupervisor(),
 ) {
-    private val headLanes = HeadColumnMapper(gain = 1f, hysteresis = game.config.laneHysteresis)
-    private val stickLanes = HeadColumnMapper(gain = 1f, hysteresis = game.config.laneHysteresis)
+    private val headLanes = GhoulLeanZones(game.config.leanEnter, game.config.leanExit)
+    private val stickLanes = GhoulLeanZones(game.config.leanEnter, game.config.leanExit)
+    private var stickActive = false
+    private var seenChoiceTurns = game.choiceTurns
+
+    /** True after a turn used up the side selection, until lean/stick returns to center. */
+    var rearming: Boolean = false
+        private set
     var hold: GhoulHold = GhoulHold.CameraStarting
         private set
     var steer: SteerReading = SteerReading(FaceControlState.Lost, 0.5f, Float.NaN, 0f, -1L, 0L)
@@ -218,13 +249,33 @@ internal class GhoulRunSession(
         }
         cadenceReading = pace.advanceWarmup()
         val useController = controller != null && source != GhoulRunInputSource.Webcam
+        if (game.choiceTurns != seenChoiceTurns) {
+            // A turn taken at a real choice uses up the selection: no chained turns from a lean held
+            // through the last junction, and a button press arms only the next turn.
+            seenChoiceTurns = game.choiceTurns
+            if (lane != GhoulLane.Center) {
+                lane = GhoulLane.Center
+                rearming = true
+            }
+        }
         if (useController && controller.leftPressed != controller.rightPressed) {
-            lane = GhoulLane.entries[(lane.ordinal + if (controller.leftPressed) -1 else 1).coerceIn(0, 2)]
+            // Press a side to arm the next turn, press it again to cancel, the other side to switch.
+            val side = if (controller.leftPressed) GhoulLane.Left else GhoulLane.Right
+            lane = if (lane == side) GhoulLane.Center else side
+            rearming = false
             stickLanes.reset()
-        } else if (useController && abs(controller.stickX) > 0.08f) {
-            lane = GhoulLane.entries[stickLanes.map((controller.stickX.coerceIn(-1f, 1f) + 1f) / 2f, 2)]
+            stickActive = false
+        } else if (useController && abs(controller.stickX) > STICK_DEAD_ZONE) {
+            lane = rearmed(stickLanes.update(controller.stickX.coerceIn(-1f, 1f)))
+            stickActive = true
+        } else if (stickActive) {
+            // A released stick (or D-pad hat) recentres instead of leaving the last side selected.
+            stickActive = false
+            stickLanes.reset()
+            rearming = false
+            lane = GhoulLane.Center
         } else if (source != GhoulRunInputSource.Controller && steer.state == FaceControlState.Tracking) {
-            lane = GhoulLane.entries[headLanes.map((steer.steer + 1f) / 2f, 2)]
+            lane = rearmed(headLanes.update(steer.steer))
         }
         val appliedLean = when {
             useController && abs(controller.stickX) > abs(steer.steer) -> controller.stickX
@@ -239,6 +290,20 @@ internal class GhoulRunSession(
             cadenceReading.baseline,
         )
         return hold
+    }
+
+    /** While re-arming, a side reading counts as center until the input has passed back through center. */
+    private fun rearmed(zone: GhoulLane): GhoulLane {
+        if (!rearming) return zone
+        if (game.brakingForChoice || game.waitingForChoice) {
+            // A fork with no way straight: a lean still held from the last turn is clearly the
+            // rider's intent, so it counts at once (re-arming only guards against chained turns
+            // where going straight was possible).
+            rearming = false
+            return zone
+        }
+        if (zone == GhoulLane.Center) rearming = false
+        return GhoulLane.Center
     }
 
     fun message(): String? = supervisor.message(hold, cadenceReading)
@@ -258,6 +323,9 @@ internal class GhoulRunSession(
         supervisor.invalidate()
         headLanes.reset()
         stickLanes.reset()
+        stickActive = false
+        rearming = false
+        seenChoiceTurns = game.choiceTurns
         lane = GhoulLane.Center
     }
 
@@ -271,5 +339,9 @@ internal class GhoulRunSession(
         pace.recalibrate()
         game.resetClock()
         supervisor.invalidate()
+    }
+
+    private companion object {
+        const val STICK_DEAD_ZONE = 0.08f
     }
 }

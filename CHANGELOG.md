@@ -26,17 +26,41 @@ included in this upcoming release.
 
 ### Added
 
-- **GHOUL RUN arcade mode (grey-box playable prototype).** Added a seeded
-  11×11 isometric maze ride with screen-relative head or controller junction
-  choices, a compass-guided open exit, and a one-time 25-second pace warm-up.
-  Absolute filtered cadence now controls speed and dynamo light/noise without
-  re-baselining. A single smooth-moving Ghoul wanders, hunts by maze-path sound
-  or line of sight, searches last-known positions, and can be escaped by
-  sprinting. Physical-contact catches use knockback, stun and invulnerability;
-  ride-through shrines pulse-stun the Ghoul and set checkpoints. Expanded solid
-  wall tiles, threat warnings, a large RPM gauge, hands-free maze restarts,
-  controller support, read-only bike telemetry, and deterministic playability
-  simulations make the grey-box prototype suitable for core-loop tuning.
+- **GHOUL RUN arcade mode (playable prototype).** A seeded 11×11 maze ride,
+  shown as a split screen: a Wolfenstein-style first-person view on the left
+  (the steering view, a 320-pixel software raycaster scaled up unfiltered, 70°
+  field of view, walls fading to black at the dynamo lamp's radius so harder
+  pedaling visibly lights further; the Ghoul is a gaunt red figure with a
+  swaying halo of thorny branches and glowing eyes, grey while stunned) and the fixed isometric map on the right
+  with fog of war, a rider view cone and a faint noise-radius tint. Leaning
+  selects the rider's own left/center/right (enter a side at 35% steer, return
+  below 20%); turn slots and an always-visible lean bar show the choice, and a
+  white compass gives the exit bearing and distance. The game never picks a
+  turn for the rider: with no lean it goes straight, and where straight is
+  blocked it stops at the junction until the rider leans left or right (a
+  lean already held from the previous turn counts there straight away)
+  (corners and dead ends still follow the corridor). There are no guide arrows. A bike-computer gauge
+  shows live RPM, a filtered-RPM needle, and two markers derived from the
+  tuning config: "IT HEARS YOU" (the RPM whose noise radius reaches the Ghoul's
+  current path gap) and "YOU OUTRUN IT" (the RPM matching the Ghoul's hunt
+  speed). Catches flash red, show CAUGHT! with hearts left, pop the lost heart
+  and shake the camera; running out of hearts fades to black before returning
+  to the checkpoint. A red vignette warns when the Ghoul is within three tiles.
+  The 25-second pace warm-up keeps the rider still while teaching cards
+  rotate, then a lean check (left, right, center, GO) runs before the Ghoul
+  wakes; it runs once per session, and later mazes start straight after the
+  new-maze countdown. Absolute filtered cadence controls speed and light/noise without
+  re-baselining; the Ghoul wanders, hunts by maze-path sound or line of
+  sight, searches last-known positions, and can be escaped by sprinting.
+  Knockback, stun, invulnerability, ride-through shrines, controller support,
+  read-only bike telemetry and deterministic playability simulations are
+  unchanged from the grey-box pass. Playtest fixes: a firm lean no longer
+  U-turns the rider (the hard-lean reverse is removed; dead ends still turn
+  around automatically), steering is rider-relative instead of
+  screen-relative, a turn taken at a junction uses up the lean or button
+  press (re-center to arm the next one, so a held lean no longer chains
+  turns; buttons arm, cancel or switch the next turn), and riding pace is halved (creep/cruise/sprint 0.5/1.25/2
+  cells per second; Ghoul speeds follow as ratios of cruise).
 
 - **Biketris difficulty and cadence toggle.** Initial falling speed is now
   420 ms per row rather than 720 ms, leaving less idle time between pieces.

@@ -14,18 +14,20 @@ internal data class GhoulRunConfig(
     val shrineMin: Int = 2,
     val shrineMax: Int = 3,
     val monsterSpawnMinDistance: Int = 7,
-    val laneHysteresis: Float = 0.18f,
+    val leanEnter: Float = 0.35f,
+    val leanExit: Float = 0.20f,
     val junctionLockDistance: Float = 0.5f,
-    val hardLeanThreshold: Float = 0.82f,
-    val hardLeanSeconds: Float = 0.7f,
     val deadEndTurnSeconds: Float = 0.6f,
+    val leanCheckHoldSeconds: Float = 0.5f,
+    val leanCheckConfirmSeconds: Float = 0.4f,
+    val leanCheckGoSeconds: Float = 1f,
     val warmupSeconds: Float = 25f,
     val baselineWindowSeconds: Float = 15f,
     val stoppedBelowRpm: Float = 20f,
     val baselineCreepDelta: Float = 15f,
-    val creepSpeed: Float = 1f,
-    val cruiseSpeed: Float = 2.5f,
-    val sprintSpeed: Float = 4f,
+    val creepSpeed: Float = 0.5f,
+    val cruiseSpeed: Float = 1.25f,
+    val sprintSpeed: Float = 2f,
     val sprintDelta: Float = 20f,
     val speedResponse: Float = 4f,
     val creepLightRadius: Float = 3f,
@@ -41,6 +43,7 @@ internal data class GhoulRunConfig(
     val catchKnockbackTiles: Int = 4,
     val catchStunSeconds: Float = 3f,
     val invulnerabilitySeconds: Float = 3f,
+    val respawnSeconds: Float = 1.6f,
     val startingHearts: Int = 3,
     val shrinePulseRadius: Float = 5f,
     val shrineStunSeconds: Float = 6f,
@@ -55,8 +58,8 @@ internal data class GhoulRunConfig(
         require(extraWallRemoval in 0f..0.5f)
         require(keyCount >= 0 && shrineMin > 0 && shrineMax >= shrineMin)
         require(monsterSpawnMinDistance > 0)
-        require(laneHysteresis in 0f..0.49f && junctionLockDistance in 0f..1f)
-        require(hardLeanThreshold in 0f..1f && hardLeanSeconds > 0f && deadEndTurnSeconds > 0f)
+        require(leanExit > 0f && leanEnter > leanExit && leanEnter < 1f && junctionLockDistance in 0f..1f)
+        require(deadEndTurnSeconds > 0f && leanCheckHoldSeconds > 0f && leanCheckConfirmSeconds >= 0f && leanCheckGoSeconds > 0f)
         require(warmupSeconds > baselineWindowSeconds && baselineWindowSeconds > 0f && stoppedBelowRpm > 0f)
         require(baselineCreepDelta > 0f && creepSpeed > 0f && cruiseSpeed > creepSpeed && sprintSpeed > cruiseSpeed)
         require(sprintDelta > 0f && speedResponse > 0f)
@@ -66,6 +69,7 @@ internal data class GhoulRunConfig(
         require(cruiseSpeed * huntSpeedRatio < sprintSpeed) { "sprinting must outrun the Ghoul" }
         require(loseContactSeconds > 0f && searchWaitSeconds > 0f && catchDistance in 0f..1f)
         require(catchKnockbackTiles > 0 && catchStunSeconds > 0f && invulnerabilitySeconds >= catchStunSeconds)
+        require(respawnSeconds >= 0f && respawnSeconds < invulnerabilitySeconds)
         require(startingHearts > 0 && shrinePulseRadius > 0f && shrineStunSeconds > 0f && shrineRechargeSeconds > 0f)
         require(resultsSeconds > 0f && restartCountdownSeconds > 0f)
         require(step > 0f && maxFrame >= step)
@@ -85,10 +89,7 @@ internal enum class MazeDirection(val dr: Int, val dc: Int, val bit: Int) {
     val opposite: MazeDirection get() = entries[(ordinal + 2) % 4]
     val relativeLeft: MazeDirection get() = entries[(ordinal + 3) % 4]
     val relativeRight: MazeDirection get() = entries[(ordinal + 1) % 4]
-    val screenDx: Int get() = dc - dr
 }
-
-internal enum class ScreenSide { Left, Right }
 
 /** Seeded perfect maze with deterministic loop opening and objective placement. */
 internal class GhoulRunWorld(val config: GhoulRunConfig = GhoulRunConfig(), seed: Long = 1L) {
@@ -122,11 +123,6 @@ internal class GhoulRunWorld(val config: GhoulRunConfig = GhoulRunConfig(), seed
 
     fun neighbor(cell: MazeCell, direction: MazeDirection): MazeCell? = cell.moved(direction).takeIf(::contains)
 
-    fun screenTurn(heading: MazeDirection, side: ScreenSide): MazeDirection {
-        val turns = listOf(heading.relativeLeft, heading.relativeRight)
-        return if (side == ScreenSide.Left) turns.minBy { it.screenDx } else turns.maxBy { it.screenDx }
-    }
-
     fun distancesFrom(origin: MazeCell): Map<MazeCell, Int> {
         val distance = LinkedHashMap<MazeCell, Int>()
         val queue = ArrayDeque<MazeCell>()
@@ -147,6 +143,15 @@ internal class GhoulRunWorld(val config: GhoulRunConfig = GhoulRunConfig(), seed
         if (!contains(from) || !contains(to)) return null
         val cached = allDistances ?: return distancesFrom(from)[to]
         return cached[index(from)][index(to)].takeIf { it >= 0 }
+    }
+
+    /** Cached path distance between cell indices (row * width + col); -1 when unreachable. */
+    fun pathDistanceIndex(from: Int, to: Int): Int {
+        val cached = allDistances ?: return pathDistance(
+            MazeCell(from / config.width, from % config.width),
+            MazeCell(to / config.width, to % config.width),
+        ) ?: -1
+        return cached[from][to]
     }
 
     fun shortestPath(from: MazeCell, to: MazeCell): List<MazeCell> {
