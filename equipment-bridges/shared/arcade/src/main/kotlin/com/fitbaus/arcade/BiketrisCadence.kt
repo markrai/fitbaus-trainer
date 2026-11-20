@@ -4,16 +4,14 @@ package com.fitbaus.arcade
 
 import kotlin.math.exp
 
-internal enum class CadenceMode(val label: String, val key: String, val hint: String) {
-    PedalToSlow("PEDAL TO SLOW", "slow", "PEDAL FASTER FOR MORE TIME"),
-    PedalToSpeedUp("PEDAL TO SPEED UP", "speed", "PEDAL FASTER FOR MORE CHALLENGE"),
-    ;
+internal object PedalToSlowPreference {
+    const val KEY = "biketris_pedal_to_slow_enabled"
+    const val LEGACY_KEY = "biketris_cadence_mode"
+    const val LABEL = "PEDAL TO SLOW MODE"
+    const val HINT = "PEDAL FASTER FOR MORE TIME"
 
-    companion object {
-        val DEFAULT: CadenceMode = PedalToSlow
-
-        fun fromKey(key: String?): CadenceMode = values().firstOrNull { it.key == key } ?: DEFAULT
-    }
+    fun enabled(hasSaved: Boolean, saved: Boolean, legacy: String?): Boolean =
+        if (hasSaved) saved else legacy != "speed"
 }
 
 internal enum class CadenceStatus { Live, Stale, NoTelemetry }
@@ -44,14 +42,8 @@ internal data class CadenceGravityConfig(
 
     fun normalized(rpm: Float): Float = ((rpm - lowRpm) / (highRpm - lowRpm)).coerceIn(0f, 1f)
 
-    fun multiplier(mode: CadenceMode, rpm: Float): Float {
-        val t = normalized(rpm)
-        val span = longMultiplier - shortMultiplier
-        return when (mode) {
-            CadenceMode.PedalToSlow -> shortMultiplier + span * t
-            CadenceMode.PedalToSpeedUp -> longMultiplier - span * t
-        }
-    }
+    fun multiplier(rpm: Float): Float =
+        shortMultiplier + (longMultiplier - shortMultiplier) * normalized(rpm)
 
     fun interval(levelSeconds: Float, multiplier: Float): Float = maxOf(minIntervalSeconds, levelSeconds * multiplier)
 }
@@ -74,7 +66,7 @@ internal class CadenceGravity(val config: CadenceGravityConfig = CadenceGravityC
     private var lastSampleNanos = Long.MIN_VALUE
     private var lastUpdateNanos = Long.MIN_VALUE
 
-    var mode: CadenceMode = CadenceMode.DEFAULT
+    var enabled: Boolean = true
     var status: CadenceStatus = CadenceStatus.NoTelemetry
         private set
     var rawRpm: Int = -1
@@ -139,7 +131,7 @@ internal class CadenceGravity(val config: CadenceGravityConfig = CadenceGravityC
         } else {
             filteredRpm += (config.neutralRpm - filteredRpm) * blend(dt, config.neutralTauNanos)
         }
-        targetMultiplier = config.multiplier(mode, filteredRpm)
+        targetMultiplier = if (enabled) config.multiplier(filteredRpm) else 1f
         appliedMultiplier += (targetMultiplier - appliedMultiplier) * blend(dt, config.multiplierTauNanos)
         return appliedMultiplier
     }
@@ -149,8 +141,7 @@ internal class CadenceGravity(val config: CadenceGravityConfig = CadenceGravityC
     private fun blend(dt: Long, tau: Long): Float = if (dt <= 0L) 0f else (1.0 - exp(-dt.toDouble() / tau)).toFloat()
 }
 
-/** Two side-by-side (or stacked) touch segments for choosing the cadence mode. Pure geometry. */
-internal class CadenceSelectorLayout {
+internal class CadenceToggleLayout {
     var left: Float = 0f
         private set
     var top: Float = 0f
@@ -159,33 +150,17 @@ internal class CadenceSelectorLayout {
         private set
     var height: Float = 0f
         private set
-    var stacked: Boolean = false
-        private set
 
-    fun set(left: Float, top: Float, width: Float, height: Float, stacked: Boolean) {
+    fun set(left: Float, top: Float, width: Float, height: Float) {
         this.left = left
         this.top = top
         this.width = maxOf(0f, width)
         this.height = maxOf(0f, height)
-        this.stacked = stacked
     }
 
     val visible: Boolean
         get() = width > 0f && height > 0f
 
-    fun segmentLeft(mode: CadenceMode): Float = if (stacked || mode == CadenceMode.PedalToSlow) left else left + width / 2f
-
-    fun segmentRight(mode: CadenceMode): Float = if (stacked || mode == CadenceMode.PedalToSpeedUp) left + width else left + width / 2f
-
-    fun segmentTop(mode: CadenceMode): Float = if (!stacked || mode == CadenceMode.PedalToSlow) top else top + height / 2f
-
-    fun segmentBottom(mode: CadenceMode): Float = if (!stacked || mode == CadenceMode.PedalToSpeedUp) top + height else top + height / 2f
-
-    fun hit(x: Float, y: Float): CadenceMode? {
-        if (!visible) return null
-        for (mode in CadenceMode.values()) {
-            if (x >= segmentLeft(mode) && x < segmentRight(mode) && y >= segmentTop(mode) && y < segmentBottom(mode)) return mode
-        }
-        return null
-    }
+    fun hit(x: Float, y: Float): Boolean =
+        visible && x >= left && x < left + width && y >= top && y < top + height
 }
