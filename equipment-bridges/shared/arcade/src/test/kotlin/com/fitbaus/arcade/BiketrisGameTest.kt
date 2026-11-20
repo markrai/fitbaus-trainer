@@ -161,21 +161,21 @@ class BiketrisGameTest {
     fun gravityDropsOneRowPerIntervalAndSpeedsUpWithLevel() {
         val game = BiketrisGame(seed = 1L)
         val y0 = game.pieceY
-        repeat(14) { game.advance(0.05f) }
-        assertEquals(y0, game.pieceY, "0.70 s is below the 0.72 s level-1 interval")
+        repeat(8) { game.advance(0.05f) }
+        assertEquals(y0, game.pieceY, "0.40 s is below the new 0.42 s level-1 interval")
         repeat(2) { game.advance(0.05f) }
         assertEquals(y0 + 1, game.pieceY)
-        repeat(14) { game.advance(0.05f) }
+        repeat(8) { game.advance(0.05f) }
         assertEquals(y0 + 2, game.pieceY)
-        assertEquals(0.72f, game.config.gravitySeconds(1), 1e-4f)
-        assertEquals(0.72f, game.effectiveGravitySeconds, 1e-4f, "neutral cadence scale")
+        assertEquals(0.42f, game.config.gravitySeconds(1), 1e-4f)
+        assertEquals(0.42f, game.effectiveGravitySeconds, 1e-4f, "neutral cadence scale")
         var previous = game.config.gravitySeconds(1)
         for (level in 2..30) {
             val next = game.config.gravitySeconds(level)
             assertTrue(next <= previous, "level $level")
             previous = next
         }
-        assertTrue(game.config.gravitySeconds(2) > 0.6f, "acceleration is gradual")
+        assertTrue(game.config.gravitySeconds(2) in 0.36f..0.38f, "level 2 retains 12% acceleration")
         assertEquals(game.config.minGravitySeconds, game.config.gravitySeconds(60), 1e-4f)
     }
 
@@ -183,7 +183,7 @@ class BiketrisGameTest {
     fun changingTheGravityScaleKeepsFallProgressContinuous() {
         val game = BiketrisGame(seed = 1L)
         val y0 = game.pieceY
-        repeat(9) { game.advance(0.04f) }
+        repeat(5) { game.advance(0.04f) }
         val halfway = game.fallProgress
         assertEquals(0.5f, halfway, 0.03f)
         game.gravityScale = 0.75f
@@ -195,11 +195,11 @@ class BiketrisGameTest {
             game.advance(0.01f)
             t += 0.01f
         }
-        assertEquals(0.5f * 0.72f * 0.75f, t, 0.03f, "the remaining half row takes half of the new interval")
+        assertEquals((1f - halfway) * 0.42f * 0.75f, t, 0.03f, "gravity responds without resetting existing fall progress")
         assertTrue(game.fallProgress < 0.1f)
         game.gravityScale = 1.25f
         repeat(20) { game.advance(0.05f) }
-        assertEquals(y0 + 2, game.pieceY, "one row per 0.9 s, never a multi-row jump")
+        assertEquals(y0 + 2, game.pieceY, "one row per 0.525 s after returning to slower gravity")
     }
 
     @Test
