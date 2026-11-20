@@ -8,11 +8,40 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
 
-internal enum class GhoulLane { ScreenLeft, Center, ScreenRight }
-internal enum class GhoulPhase { WarmUp, Playing, Results, Countdown }
+/** Rider-relative selection: [Left] is the rider's own left, whatever the map orientation. */
+internal enum class GhoulLane { Left, Center, Right }
+internal enum class GhoulPhase { WarmUp, LeanCheck, Playing, Results, Countdown }
 internal enum class GhoulState { Inactive, Wandering, Hunting, Searching, Stunned }
+internal enum class GhoulHint { ChooseTurn, PedalPastGhoul, StayQuiet, LeanToChoose, RideThroughShrine }
 
 internal data class GhoulResults(val seconds: Float, val catches: Int, val keys: Int)
+
+/** Set exactly once per catch; [serial] equals [GhoulRunGame.catches] at the moment of the catch. */
+internal data class GhoulCatchEvent(val serial: Int, val atSeconds: Float, val heartsLeft: Int, val respawned: Boolean)
+
+/** Turn slots for the next junction, shown only when it is a real choice (2+ exits besides the way back). */
+internal data class GhoulTurnSlots(val left: Boolean, val straight: Boolean, val right: Boolean, val selected: GhoulLane?) {
+    fun open(lane: GhoulLane): Boolean = when (lane) {
+        GhoulLane.Left -> left
+        GhoulLane.Center -> straight
+        GhoulLane.Right -> right
+    }
+}
+
+/**
+ * Speed-gauge markers derived from [GhoulRunConfig] by inverting [GhoulRunGame.radiiFor] and
+ * [GhoulRunGame.speedFor]. [earRpm] is null when the ear is hidden (the gap is beyond the sprint
+ * noise radius); when pinned it equals [lowRpm] because even creeping is heard.
+ */
+internal data class GhoulGaugeMarks(
+    val lowRpm: Float,
+    val highRpm: Float,
+    val earRpm: Float?,
+    val earPinned: Boolean,
+    val outrunRpm: Float,
+) {
+    val earHidden: Boolean get() = earRpm == null
+}
 
 internal class GhoulMonster(val spawn: MazeCell) {
     var cell: MazeCell = spawn
@@ -49,6 +78,10 @@ internal class GhoulRunGame(
     val world = GhoulRunWorld(config, seed)
     val collectedKeys = LinkedHashSet<MazeCell>()
     val exploredTiles = LinkedHashSet<MazeTile>()
+    private val exploredGrid = BooleanArray(world.tileRows * world.tileCols)
+    private var revealRow = Float.NaN
+    private var revealCol = Float.NaN
+    private var revealRadius = 0f
     val shrineCooldowns = LinkedHashMap<MazeCell, Float>()
 
     var ghoul: GhoulMonster = GhoulMonster(world.monsterSpawn)
@@ -68,6 +101,10 @@ internal class GhoulRunGame(
     var lockedChoice: MazeDirection? = null
         private set
     var brakingForChoice: Boolean = false
+        private set
+
+    /** Stopped at a junction whose straight is blocked until the player leans; the game never picks a turn. */
+    var waitingForChoice: Boolean = false
         private set
     var turningLeft: Float = 0f
         private set
@@ -96,9 +133,31 @@ internal class GhoulRunGame(
     var seed: Long = seed
         private set
 
+    var catchEvent: GhoulCatchEvent? = null
+        private set
+    var respawnLeft: Float = 0f
+        private set
+    var respawns: Int = 0
+        private set
+    var warmupTime: Float = 0f
+        private set
+    var leanCheckStep: Int = 0
+        private set
+    var leanCheckHeld: Float = 0f
+        private set
+    var leanCheckConfirmLeft: Float = 0f
+        private set
+
+    /** The lean check runs once per session; later mazes skip it (it survives maze resets). */
+    var leanCheckPassed: Boolean = false
+        private set
+
+    /** Counts turns taken at real choices (2+ exits ahead); the session uses it to consume a side selection. */
+    var choiceTurns: Int = 0
+        private set
+
     private var accumulator = 0f
     private var lastFrameNanos = Long.MIN_VALUE
-    private var hardLeanFor = 0f
     private var rng = Random(seed xor GHOUL_RANDOM_SALT)
 
     init { resetMaze(seed, resetCatches = true) }
@@ -113,8 +172,102 @@ internal class GhoulRunGame(
         get() {
             val junction = riderCell.moved(heading)
             if (!world.contains(junction)) return null
-            return lockedChoice ?: choiceFor(junction, heading, lane) ?: compassChoice(junction, heading)
+            if (waitingForChoice) return choiceFor(riderCell, heading, lane)
+            return lockedChoice ?: choiceFor(junction, heading, lane)
         }
+    val ghoulHuntSpeed: Float get() = config.cruiseSpeed * config.huntSpeedRatio
+
+    /** Lane the lean check is waiting for; null once it shows GO (or outside the check). */
+    val leanCheckTarget: GhoulLane?
+        get() = if (phase == GhoulPhase.LeanCheck) LEAN_CHECK_ORDER.getOrNull(leanCheckStep) else null
+
+    /** The next junction's slots when it is a real choice; null on corridors, corners and dead ends. */
+    fun turnSlots(): GhoulTurnSlots? {
+        if (turningLeft > 0f) return null
+        if (!waitingForChoice && !world.isOpen(riderCell, heading)) return null
+        val junction = if (waitingForChoice) riderCell else riderCell.moved(heading)
+        val allowed = world.exits(junction).filter { it != heading.opposite }
+        if (allowed.size < 2) return null
+        val selected = when (activeChoice) {
+            heading.relativeLeft -> GhoulLane.Left
+            heading -> GhoulLane.Center
+            heading.relativeRight -> GhoulLane.Right
+            else -> null
+        }
+        return GhoulTurnSlots(heading.relativeLeft in allowed, heading in allowed, heading.relativeRight in allowed, selected)
+    }
+
+    /** Continuous maze-path distance (cells) from the rider to [cell]'s centre. */
+    fun riderPathDistanceTo(cell: MazeCell): Float {
+        var best = Float.POSITIVE_INFINITY
+        for ((end, cost) in edgeEndpoints(riderCell, heading, progress)) {
+            val cells = world.pathDistance(end, cell) ?: continue
+            best = min(best, cost + cells)
+        }
+        return best
+    }
+
+    /** Fills [out] (indexed row * width + col) with [riderPathDistanceTo] for every cell, without allocating. */
+    fun fillRiderPathDistances(out: FloatArray) {
+        val width = config.width
+        val here = riderCell.row * width + riderCell.col
+        val next = riderCell.moved(heading)
+        val moving = world.contains(next) && world.isOpen(riderCell, heading)
+        val there = next.row * width + next.col
+        for (index in out.indices) {
+            val a = world.pathDistanceIndex(here, index)
+            var best = if (a < 0) Float.POSITIVE_INFINITY else if (moving) progress + a else a.toFloat()
+            if (moving) {
+                val b = world.pathDistanceIndex(there, index)
+                if (b >= 0 && 1f - progress + b < best) best = 1f - progress + b
+            }
+            out[index] = best
+        }
+    }
+
+    /** One hint at a time, in priority order. */
+    fun hint(): GhoulHint? {
+        if (phase != GhoulPhase.Playing || respawnLeft > 0f) return null
+        return when {
+            waitingForChoice || brakingForChoice -> GhoulHint.ChooseTurn
+            ghoul.state == GhoulState.Hunting -> GhoulHint.PedalPastGhoul
+            ghoul.state == GhoulState.Searching -> GhoulHint.StayQuiet
+            turnSlots() != null -> GhoulHint.LeanToChoose
+            world.shrines.any { (shrineCooldowns[it] ?: 0f) <= 0f && riderPathDistanceTo(it) <= SHRINE_HINT_CELLS } ->
+                GhoulHint.RideThroughShrine
+            else -> null
+        }
+    }
+
+    /** RPM at which [speedFor] returns [target]; clamps to the creep/sprint ends. */
+    fun rpmForSpeed(target: Float, baseline: Float): Float {
+        val low = baseline - config.baselineCreepDelta
+        return when {
+            target <= config.creepSpeed -> low
+            target <= config.cruiseSpeed ->
+                low + config.baselineCreepDelta * (target - config.creepSpeed) / (config.cruiseSpeed - config.creepSpeed)
+            else -> baseline + config.sprintDelta *
+                ((target - config.cruiseSpeed) / (config.sprintSpeed - config.cruiseSpeed)).coerceAtMost(1f)
+        }
+    }
+
+    /** Ear and outrun markers for a [gap] (cells) to the Ghoul, or null before the pace baseline exists. */
+    fun gaugeMarks(baseline: Float, gap: Float): GhoulGaugeMarks? {
+        if (!baseline.isFinite()) return null
+        val low = baseline - config.baselineCreepDelta
+        val high = baseline + config.sprintDelta
+        val pinned = gap < config.creepNoiseRadius
+        val ear = when {
+            pinned -> low
+            !gap.isFinite() || gap > config.sprintNoiseRadius -> null
+            config.sprintNoiseRadius <= config.creepNoiseRadius -> low
+            else -> {
+                val t = (gap - config.creepNoiseRadius) / (config.sprintNoiseRadius - config.creepNoiseRadius)
+                max(low + t * (config.baselineCreepDelta + config.sprintDelta), config.stoppedBelowRpm)
+            }
+        }
+        return GhoulGaugeMarks(low, high, ear, pinned, rpmForSpeed(ghoulHuntSpeed, baseline))
+    }
 
     fun speedFor(filteredRpm: Float, baseline: Float): Float {
         if (filteredRpm < config.stoppedBelowRpm || baseline.isNaN()) return 0f
@@ -177,22 +330,28 @@ internal class GhoulRunGame(
         }
 
         if (baseline.isNaN()) {
+            if (phase != GhoulPhase.WarmUp) warmupTime = 0f
             phase = GhoulPhase.WarmUp
+            warmupTime += dt
             ghoul.state = GhoulState.Inactive
             ghoul.speed = 0f
-            val cruiseFactor = config.baselineCreepDelta / (config.baselineCreepDelta + config.sprintDelta)
-            lightRadius = lerp(config.creepLightRadius, config.sprintLightRadius, cruiseFactor)
-            noiseRadius = lerp(config.creepNoiseRadius, config.sprintNoiseRadius, cruiseFactor)
-            targetSpeed = config.cruiseSpeed
-            speed += (targetSpeed - speed) * min(1f, config.speedResponse * dt)
-            handleHardLean(dt)
-            moveRider(dt)
-            reveal()
+            holdStill()
             return
         }
 
         if (phase == GhoulPhase.WarmUp) {
-            beginCalibratedRun()
+            if (leanCheckPassed) beginCalibratedRun() else beginLeanCheck()
+        }
+        if (phase == GhoulPhase.LeanCheck) {
+            stepLeanCheck(dt)
+            return
+        }
+        if (respawnLeft > 0f) {
+            respawnLeft -= dt
+            speed = 0f
+            targetSpeed = 0f
+            if (respawnLeft <= 0f) completeRespawn()
+            return
         }
         elapsed += dt
         invulnerableLeft = (invulnerableLeft - dt).coerceAtLeast(0f)
@@ -203,7 +362,6 @@ internal class GhoulRunGame(
         lightRadius = radii.first
         noiseRadius = radii.second
         reveal()
-        handleHardLean(dt)
         if (turningLeft > 0f) {
             turningLeft -= dt
             speed = 0f
@@ -217,29 +375,19 @@ internal class GhoulRunGame(
         if (phase == GhoulPhase.Playing) updateGhoul(dt)
     }
 
-    /** Direction selected at [cell] for a screen-side selection while arriving along [arrivalHeading]. */
+    /** Direction selected at [cell] for a rider-relative lane while arriving along [arrivalHeading]. */
     fun choiceFor(cell: MazeCell, arrivalHeading: MazeDirection, lane: GhoulLane): MazeDirection? {
         val allowed = world.exits(cell).filter { it != arrivalHeading.opposite }
         if (allowed.isEmpty()) return arrivalHeading.opposite
         if (allowed.size == 1) return allowed[0]
         val straight = arrivalHeading.takeIf { it in allowed }
-        if (lane == GhoulLane.Center) return straight
-        val side = if (lane == GhoulLane.ScreenLeft) ScreenSide.Left else ScreenSide.Right
-        val turn = world.screenTurn(arrivalHeading, side)
+        val turn = when (lane) {
+            GhoulLane.Center -> return straight
+            GhoulLane.Left -> arrivalHeading.relativeLeft
+            GhoulLane.Right -> arrivalHeading.relativeRight
+        }
         if (turn in allowed) return turn
         return straight
-    }
-
-    fun compassChoice(cell: MazeCell, arrivalHeading: MazeDirection): MazeDirection {
-        val allowed = world.exits(cell).filter { it != arrivalHeading.opposite }.ifEmpty { listOf(arrivalHeading.opposite) }
-        return allowed.minWith(
-            compareBy<MazeDirection> { direction ->
-                val next = cell.moved(direction)
-                val dr = next.row - world.exit.row
-                val dc = next.col - world.exit.col
-                dr * dr + dc * dc
-            }.thenBy { if (it == arrivalHeading) 0 else 1 }.thenBy { it.ordinal },
-        )
     }
 
     fun selectionFor(direction: MazeDirection, cell: MazeCell, arrivalHeading: MazeDirection): GhoulLane {
@@ -271,14 +419,27 @@ internal class GhoulRunGame(
         progress = edgeProgress.coerceIn(0f, 0.999f)
         lockedChoice = null
         brakingForChoice = false
+        waitingForChoice = false
         turningLeft = 0f
     }
 
     internal fun visitForTest(cell: MazeCell) = visitCell(cell)
 
+    /** Test hook: completes the lean check immediately (the ghoul wakes as after GO). */
+    internal fun skipLeanCheck() {
+        if (phase == GhoulPhase.LeanCheck) beginCalibratedRun()
+    }
+
     fun restart(newSeed: Long = seed + 1L) = resetMaze(newSeed, resetCatches = true)
 
     private fun moveRider(dt: Float) {
+        if (waitingForChoice) {
+            speed = 0f
+            val selected = choiceFor(riderCell, heading, lane) ?: return
+            waitingForChoice = false
+            takeChoice(selected)
+            return
+        }
         if (!world.isOpen(riderCell, heading)) {
             beginDeadEndTurn()
             return
@@ -305,9 +466,24 @@ internal class GhoulRunGame(
         riderCell = junction
         visitCell(riderCell)
         if (phase != GhoulPhase.Playing && phase != GhoulPhase.WarmUp) return
-        val choice = lockedChoice ?: choiceFor(riderCell, heading, lane) ?: compassChoice(riderCell, heading)
+        val choice = lockedChoice ?: choiceFor(riderCell, heading, lane)
         lockedChoice = null
         brakingForChoice = false
+        if (choice == null) {
+            // Straight is blocked and no side is selected: stop here, facing the wall, until the player leans.
+            progress = 0f
+            speed = 0f
+            targetSpeed = 0f
+            waitingForChoice = true
+            return
+        }
+        takeChoice(choice)
+    }
+
+    private fun takeChoice(choice: MazeDirection) {
+        if (choice != heading && choice != heading.opposite &&
+            world.exits(riderCell).count { it != heading.opposite } >= 2
+        ) choiceTurns += 1
         if (choice == heading.opposite) {
             progress = 0f
             beginDeadEndTurn()
@@ -346,12 +522,48 @@ internal class GhoulRunGame(
         speed = 0f
     }
 
-    private fun handleHardLean(dt: Float) {
-        if (abs(lean) >= config.hardLeanThreshold) hardLeanFor += dt else hardLeanFor = 0f
-        if (hardLeanFor >= config.hardLeanSeconds) {
-            hardLeanFor = 0f
-            reverseOnSegment()
+    /** Warm-up and lean check: the rider stays exactly where it is, lit at cruise level. */
+    private fun holdStill() {
+        val cruiseFactor = config.baselineCreepDelta / (config.baselineCreepDelta + config.sprintDelta)
+        lightRadius = lerp(config.creepLightRadius, config.sprintLightRadius, cruiseFactor)
+        noiseRadius = lerp(config.creepNoiseRadius, config.sprintNoiseRadius, cruiseFactor)
+        targetSpeed = 0f
+        speed = 0f
+        reveal()
+    }
+
+    private fun beginLeanCheck() {
+        phase = GhoulPhase.LeanCheck
+        leanCheckStep = 0
+        leanCheckHeld = 0f
+        leanCheckConfirmLeft = 0f
+        phaseLeft = 0f
+    }
+
+    private fun stepLeanCheck(dt: Float) {
+        holdStill()
+        if (leanCheckStep >= LEAN_CHECK_ORDER.size) {
+            phaseLeft -= dt
+            if (phaseLeft <= 0f) beginCalibratedRun()
+            return
         }
+        if (leanCheckConfirmLeft > 0f) {
+            leanCheckConfirmLeft -= dt
+            if (leanCheckConfirmLeft <= 0f) nextLeanCheckStep()
+            return
+        }
+        leanCheckHeld = if (lane == LEAN_CHECK_ORDER[leanCheckStep]) leanCheckHeld + dt else 0f
+        if (leanCheckHeld >= config.leanCheckHoldSeconds) {
+            leanCheckConfirmLeft = config.leanCheckConfirmSeconds
+            if (leanCheckConfirmLeft <= 0f) nextLeanCheckStep()
+        }
+    }
+
+    private fun nextLeanCheckStep() {
+        leanCheckConfirmLeft = 0f
+        leanCheckHeld = 0f
+        leanCheckStep += 1
+        if (leanCheckStep >= LEAN_CHECK_ORDER.size) phaseLeft = config.leanCheckGoSeconds
     }
 
     private fun reverseOnSegment() {
@@ -363,6 +575,7 @@ internal class GhoulRunGame(
         heading = heading.opposite
         lockedChoice = null
         brakingForChoice = false
+        waitingForChoice = false
         turningLeft = 0f
     }
 
@@ -464,15 +677,15 @@ internal class GhoulRunGame(
         hearts -= 1
         invulnerableLeft = config.invulnerabilitySeconds
         if (hearts <= 0) {
-            hearts = config.startingHearts
-            riderCell = checkpoint
-            progress = 0f
-            heading = headingTowardExit(riderCell)
-            lockedChoice = null
-            brakingForChoice = false
-            resetGhoul(active = true)
+            hearts = 0
+            speed = 0f
+            targetSpeed = 0f
+            catchEvent = GhoulCatchEvent(catches, elapsed, 0, respawned = true)
+            respawnLeft = config.respawnSeconds
+            if (respawnLeft <= 0f) completeRespawn()
             return
         }
+        catchEvent = GhoulCatchEvent(catches, elapsed, hearts, respawned = false)
         val riderCentre = currentNearestCell()
         val distances = world.distancesFrom(riderCentre)
         val pushed = distances.entries
@@ -486,6 +699,23 @@ internal class GhoulRunGame(
         ghoul.progress = 0f
         ghoul.heading = world.exits(pushed).firstOrNull() ?: MazeDirection.East
         stunGhoul(config.catchStunSeconds)
+    }
+
+    /** Runs after the out-of-hearts delay so the view can fade to black before the move. */
+    private fun completeRespawn() {
+        respawnLeft = 0f
+        hearts = config.startingHearts
+        riderCell = checkpoint
+        progress = 0f
+        heading = headingTowardExit(riderCell)
+        lockedChoice = null
+        brakingForChoice = false
+        waitingForChoice = false
+        turningLeft = 0f
+        speed = 0f
+        invulnerableLeft = config.invulnerabilitySeconds
+        resetGhoul(active = true)
+        respawns += 1
     }
 
     private fun stunGhoul(seconds: Float) {
@@ -525,11 +755,39 @@ internal class GhoulRunGame(
         }
     }
 
+    fun isExplored(row: Int, col: Int): Boolean =
+        row in 0 until world.tileRows && col in 0 until world.tileCols && exploredGrid[row * world.tileCols + col]
+
+    /** Marks tiles within the lamp radius explored; allocation-free unless a tile is new (the console runs interpreted). */
     private fun reveal() {
-        if (lightRadius <= 0f) return
-        for (row in 0 until world.tileRows) for (col in 0 until world.tileCols) {
-            val tile = MazeTile(row, col)
-            if (tileDistance(tile) <= lightRadius) exploredTiles += tile
+        val radius = lightRadius
+        if (radius <= 0f) return
+        val rr = riderRow
+        val rc = riderCol
+        if (rr == revealRow && rc == revealCol && radius <= revealRadius) return
+        revealRow = rr
+        revealCol = rc
+        revealRadius = radius
+        val rows = world.tileRows
+        val cols = world.tileCols
+        val r2 = radius * radius
+        val minRow = max(0, (2f * (rr - radius) + 1f).toInt() - 1)
+        val maxRow = min(rows - 1, (2f * (rr + radius) + 1f).toInt() + 1)
+        val minCol = max(0, (2f * (rc - radius) + 1f).toInt() - 1)
+        val maxCol = min(cols - 1, (2f * (rc + radius) + 1f).toInt() + 1)
+        for (row in minRow..maxRow) {
+            val dr = (row - 1) / 2f - rr
+            val dr2 = dr * dr
+            if (dr2 > r2) continue
+            for (col in minCol..maxCol) {
+                val dc = (col - 1) / 2f - rc
+                if (dr2 + dc * dc > r2) continue
+                val index = row * cols + col
+                if (!exploredGrid[index]) {
+                    exploredGrid[index] = true
+                    exploredTiles += MazeTile(row, col)
+                }
+            }
         }
     }
 
@@ -548,6 +806,8 @@ internal class GhoulRunGame(
         rng = Random(seed xor GHOUL_RANDOM_SALT)
         collectedKeys.clear()
         exploredTiles.clear()
+        exploredGrid.fill(false)
+        revealRow = Float.NaN
         shrineCooldowns.clear()
         world.shrines.forEach { shrineCooldowns[it] = 0f }
         riderCell = world.start
@@ -557,6 +817,7 @@ internal class GhoulRunGame(
         lean = 0f
         lockedChoice = null
         brakingForChoice = false
+        waitingForChoice = false
         turningLeft = 0f
         speed = 0f
         targetSpeed = 0f
@@ -569,11 +830,17 @@ internal class GhoulRunGame(
         phase = GhoulPhase.WarmUp
         phaseLeft = 0f
         results = null
-        hardLeanFor = 0f
+        catchEvent = null
+        respawnLeft = 0f
+        warmupTime = 0f
+        leanCheckStep = 0
+        leanCheckHeld = 0f
+        leanCheckConfirmLeft = 0f
         if (resetCatches) catches = 0
         ghoul = GhoulMonster(world.monsterSpawn)
         resetGhoul(active = false)
         exploredTiles += MazeTile(1, 1)
+        exploredGrid[world.tileCols + 1] = true
         resetClock()
     }
 
@@ -582,15 +849,23 @@ internal class GhoulRunGame(
         ghoul.reset(first, active)
     }
 
+    /** Carries a passed lean check over to a replacement game (e.g. a difficulty change). */
+    fun markLeanCheckPassed() {
+        leanCheckPassed = true
+    }
+
     private fun beginCalibratedRun() {
+        leanCheckPassed = true
         phase = GhoulPhase.Playing
+        phaseLeft = 0f
         collectedKeys.clear()
-        exploredTiles.clear()
+        respawnLeft = 0f
         riderCell = world.start
         heading = headingTowardExit(riderCell)
         progress = 0f
         lockedChoice = null
         brakingForChoice = false
+        waitingForChoice = false
         turningLeft = 0f
         elapsed = 0f
         checkpoint = world.start
@@ -607,5 +882,7 @@ internal class GhoulRunGame(
 
     private companion object {
         const val GHOUL_RANDOM_SALT: Long = 0x47484F554CL
+        const val SHRINE_HINT_CELLS = 3f
+        val LEAN_CHECK_ORDER = listOf(GhoulLane.Left, GhoulLane.Right, GhoulLane.Center)
     }
 }

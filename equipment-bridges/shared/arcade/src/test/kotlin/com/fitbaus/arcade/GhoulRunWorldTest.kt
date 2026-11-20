@@ -41,15 +41,15 @@ class GhoulRunWorldTest {
     }
 
     @Test
-    fun fixedProjectionDefinesScreenLeftForEveryHeading() {
-        val world = GhoulRunWorld(seed = 7L)
-        for (heading in MazeDirection.entries) {
-            val left = world.screenTurn(heading, ScreenSide.Left)
-            val right = world.screenTurn(heading, ScreenSide.Right)
-            assertTrue(left.screenDx < 0, "$heading screen-left was $left")
-            assertTrue(right.screenDx > 0, "$heading screen-right was $right")
-            assertEquals(setOf(heading.relativeLeft, heading.relativeRight), setOf(left, right))
-        }
+    fun relativeTurnsAreTheRidersOwnLeftAndRight() {
+        assertEquals(MazeDirection.West, MazeDirection.North.relativeLeft)
+        assertEquals(MazeDirection.East, MazeDirection.North.relativeRight)
+        assertEquals(MazeDirection.North, MazeDirection.East.relativeLeft)
+        assertEquals(MazeDirection.South, MazeDirection.East.relativeRight)
+        assertEquals(MazeDirection.East, MazeDirection.South.relativeLeft)
+        assertEquals(MazeDirection.West, MazeDirection.South.relativeRight)
+        assertEquals(MazeDirection.South, MazeDirection.West.relativeLeft)
+        assertEquals(MazeDirection.North, MazeDirection.West.relativeRight)
     }
 
     @Test
