@@ -4,13 +4,6 @@ package com.fitbaus.bikebridge.host
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
-import android.content.Intent
-import android.content.IntentFilter
-import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbManager
-import android.os.Build
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
@@ -38,12 +31,10 @@ import com.fitbaus.bikebridge.host.controller.ControllerDevices
 import com.fitbaus.bikebridge.host.controller.GameControlCatalog
 import com.fitbaus.bikebridge.host.controller.GameControlBindings
 import com.fitbaus.bikebridge.host.arcade.ArcadeMode
-import com.fitbaus.bikebridge.host.controller.ControllerGameplayKeys
 import com.fitbaus.bikebridge.host.controller.ExclusiveHid
 import com.fitbaus.bikebridge.host.controller.AutoControllerOwnership
 import com.fitbaus.bikebridge.host.controller.ExclusiveHidPolicy
 import com.fitbaus.bikebridge.host.controller.HidBinding
-import com.fitbaus.bikebridge.host.controller.HidCandidate
 import com.fitbaus.bikebridge.host.controller.HidReport
 import com.fitbaus.bikebridge.host.uvc.UvcCameraHost
 import com.fitbaus.bikebridge.host.uvc.UvcDeviceInfo
