@@ -59,7 +59,7 @@ class BricksInputSourceIntegrationTest {
             .substringBefore("private fun performMappedGameAction")
         assertTrue(keys.contains("val controllerEnabled = when (mode) {"))
         assertTrue(keys.contains("ArcadeMode.Bricks -> arcadeContent.playground.inputSource == BricksInputSource.Controller"))
-        assertTrue(keys.contains("ArcadeMode.Biketris -> arcadeContent.biketris.inputSource == BiketrisInputSource.Controller"))
+        assertTrue(keys.contains("ArcadeMode.Biketris -> arcadeContent.biketris.inputSource != BiketrisInputSource.Webcam"))
         assertTrue(keys.contains("matches && controllerEnabled"))
         assertTrue(keys.contains("steerBricks = modeController.isActive && controllerEnabled"))
         assertTrue(keys.contains("return true"))
