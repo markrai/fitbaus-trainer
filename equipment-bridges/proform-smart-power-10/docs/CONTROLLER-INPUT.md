@@ -10,7 +10,10 @@ Open the gear icon, then **Controllers** beside **Pairing** and **External Webca
 The screen lists input devices recognized by Android, their input classes and
 vendor/product IDs, and the selected controller. D-pad keys and joystick axes
 appear in a live diagnostic field. Normal Android D-pad focus navigation remains
-available in Settings.
+available in Settings. In the Controllers diagnostic tab only, delivered
+Back, Escape, Menu, app-switch, search and Mode button events from recognized
+gamepads are shown **without** forwarding them to Android's Activity Back
+handler. The touchscreen Done button and non-controller Back still exit settings.
 
 The **Choose game controller** dialog supports:
 
@@ -74,7 +77,9 @@ USB endpoints are opened, and no controller-specific vendor protocol is used.
    camera-based games, USB resistance control, and external webcam functionality
    still work.
 7. Test multiple connected gamepads; auto-select should not guess between them.
-8. If a controller's Home/shortcut button still leaves FitBaus, test its
+8. In Controllers diagnostics, press the controller's formerly dangerous
+   Back button. Its keycode should appear without closing the settings tab.
+9. If a controller's Home/shortcut button still leaves FitBaus, test its
    input code in Controllers diagnostics. Document it as system-reserved if
    the Activity receives no event; do not claim in-app capture.
 
