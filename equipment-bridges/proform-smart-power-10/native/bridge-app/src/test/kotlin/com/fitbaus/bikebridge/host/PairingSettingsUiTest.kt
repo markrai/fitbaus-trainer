@@ -57,6 +57,24 @@ class PairingSettingsUiTest {
     }
 
     @Test
+    fun exclusiveHidRequiresExplicitPermissionAndHasAReleasePath() {
+        val settings = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(settings.contains("private fun chooseHidCandidate()"))
+        assertTrue(settings.contains("private fun requestExclusiveHid()"))
+        assertTrue(settings.contains("private fun releaseExclusiveHid()"))
+        assertTrue(settings.contains("manager.requestPermission(device, pi)"))
+        assertTrue(settings.contains("manager.hasPermission(device)"))
+        assertTrue(settings.contains("device.deviceName != pendingHidName"))
+        assertTrue(settings.contains("if (tab != SettingsTab.Controllers) exclusiveHid.stop()"))
+        assertTrue(settings.contains("exclusiveHid.stop()"))
+        assertTrue(settings.contains("beginHidLearn(\"LEFT\")"))
+        assertTrue(settings.contains("beginHidLearn(\"RIGHT\")"))
+        assertTrue(activity.contains("exclusiveHid.sampleBricks(now)"))
+        assertTrue(activity.contains("exclusiveHid.noteAndroidEvent()"))
+    }
+
+    @Test
     fun stringsDocumentUnsupportedZoomWithoutFakeFov() {
         val strings = File("src/main/res/values/strings.xml").readText()
         assertTrue(strings.contains("does not expose adjustable zoom"))
