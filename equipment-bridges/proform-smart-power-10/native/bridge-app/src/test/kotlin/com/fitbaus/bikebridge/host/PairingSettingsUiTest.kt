@@ -2,6 +2,7 @@
 
 package com.fitbaus.bikebridge.host
 
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -62,18 +63,25 @@ class PairingSettingsUiTest {
     }
 
     @Test
-    fun exclusiveHidRequiresExplicitPermissionAndHasAReleasePath() {
+    fun hidOwnershipIsAutomaticWithoutClaimOrReleaseButtons() {
         val settings = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        assertTrue(settings.contains("private fun chooseHidCandidate()"))
-        assertTrue(settings.contains("private fun requestExclusiveHid()"))
-        assertTrue(settings.contains("private fun releaseExclusiveHid()"))
-        assertTrue(settings.contains("manager.requestPermission(device, pi)"))
-        assertTrue(settings.contains("manager.hasPermission(device)"))
-        assertTrue(settings.contains("device.deviceName != pendingHidName"))
-        assertTrue(settings.contains("if (tab != SettingsTab.Controllers) {"))
-        assertTrue(settings.contains("exclusiveHid.stop()"))
-        assertTrue(settings.contains("exclusiveHid.stop()"))
+        val ownership = File("src/main/kotlin/com/fitbaus/bikebridge/host/controller/AutoControllerOwnership.kt").readText()
+        assertFalse(settings.contains("private fun chooseHidCandidate()"))
+        assertFalse(settings.contains("private fun requestExclusiveHid()"))
+        assertFalse(settings.contains("private fun releaseExclusiveHid()"))
+        assertFalse(settings.contains("choose.text = \"Claim input\""))
+        assertFalse(settings.contains("claim.text = \"Claim input\""))
+        assertFalse(settings.contains("release.text = \"Release\""))
+        assertTrue(settings.contains("USB HID CONTROLLER (AUTOMATIC)"))
+        assertTrue(settings.contains("controllerOwnership.onHostResume()"))
+        assertTrue(settings.contains("controllerOwnership.onHostPause()"))
+        assertTrue(activity.contains("controllerOwnership.onHostResume()"))
+        assertTrue(activity.contains("controllerOwnership.onHostPause()"))
+        assertTrue(ownership.contains("manager.requestPermission(device, pending)"))
+        assertTrue(ownership.contains("manager.hasPermission(device)"))
+        assertTrue(ownership.contains("if (name in deniedDevices)"))
+        assertTrue(ownership.contains("UsbManager.ACTION_USB_DEVICE_DETACHED"))
         assertTrue(settings.contains("beginHidLearn(\"LEFT\")"))
         assertTrue(settings.contains("beginHidLearn(\"RIGHT\")"))
         assertTrue(activity.contains("exclusiveHid.sampleBricks(now)"))
