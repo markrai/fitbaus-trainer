@@ -454,7 +454,7 @@ class BiketrisControlsTest {
 
     @Test
     fun singlePedalModePreferenceMigratesAndOverridesLegacyChoice() {
-        assertEquals(PedalToSlowPreference.LABEL, "PEDAL TO SLOW MODE")
+        assertEquals("Pedal to Slow Mode", PedalToSlowPreference.LABEL)
         assertTrue(PedalToSlowPreference.enabled(false, false, null))
         assertTrue(PedalToSlowPreference.enabled(false, false, "slow"))
         assertFalse(PedalToSlowPreference.enabled(false, true, "speed"))
