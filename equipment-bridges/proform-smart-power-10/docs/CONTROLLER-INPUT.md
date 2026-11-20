@@ -82,6 +82,19 @@ but retains the saved Controller preference for reconnection.
   respecting its safety minimum. It never simulates RPM, pedaling, or
   resistance changes; actual cadence still affects the game's speed.
 
+The on-screen **Pedal to Slow Mode** button is independent of the
+Webcam/Controller input selector. It replaces the former two-option
+Pedal to Slow / Pedal to Speed Up mode choice. The toggle is **green when
+on**, grey/neutral when off, and remembers its value. When on, sustained
+pedaling at 40–100 RPM adjusts the gravity interval from ×0.75 to ×1.25
+at the current level, slowing pieces as cadence increases. When off,
+the interval uses the normal level-dependent gravity without any RPM
+multiplier. The Level 1 baseline has been tightened from 720 ms to
+420 ms per row, while later level progression is unchanged.
+Previous Pedal to Slow users retain enabled; users who selected Pedal
+to Speed Up migrate to disabled. No additional mode or pedaling mechanic
+is introduced.
+
 The on-screen Play Again action remains after game over. Controller
 button assignments are stored per game and controller descriptor.
 Controller capture via Android input events is independent of Bricks'
