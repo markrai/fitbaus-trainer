@@ -13,7 +13,14 @@ internal data class BiketrisControlConfig(
     val eventMaxAgeNanos: Long = 350_000_000L,
 )
 
-internal enum class BiketrisControl { Lost, Face, Touch }
+public data class BiketrisControllerInput(
+    val left: Boolean = false,
+    val right: Boolean = false,
+    val softDrop: Boolean = false,
+    val rotate: Boolean = false,
+)
+
+internal enum class BiketrisControl { Lost, Face, Touch, Controller }
 
 internal class BiketrisReading(
     val control: BiketrisControl,
@@ -85,7 +92,7 @@ internal class BiketrisSupervisor(private val config: BiketrisControlConfig = Bi
     fun hold(camera: CameraState, reading: BiketrisReading, touchSession: Boolean, gameOver: Boolean, nowNanos: Long): BiketrisHold {
         val hold = when {
             gameOver -> BiketrisHold.GameOver
-            reading.control == BiketrisControl.Touch || touchSession -> BiketrisHold.None
+            reading.control == BiketrisControl.Controller || reading.control == BiketrisControl.Touch || touchSession -> BiketrisHold.None
             camera == CameraState.Unavailable || camera == CameraState.PermissionDenied -> BiketrisHold.CameraUnavailable
             camera != CameraState.Ready -> BiketrisHold.CameraStarting
             reading.control == BiketrisControl.Lost -> lostHold(nowNanos)
@@ -205,18 +212,26 @@ internal class BiketrisSession(
         rpm: Int? = null,
         rpmCurrent: Boolean = false,
         rpmObservedAt: String? = null,
+        controller: BiketrisControllerInput? = null,
     ): BiketrisHold {
         game.gravityScale = cadence.update(connected, initialized, rpm, rpmCurrent, rpmObservedAt, nowNanos)
-        reading = read(position, touchX, nowNanos)
+        reading = if (controller != null && touchX.isNaN()) {
+            faceFresh = false
+            freshSince = Long.MIN_VALUE
+            BiketrisReading(BiketrisControl.Controller, 0.5f, 0L, 0L)
+        } else read(position, touchX, nowNanos)
         val fingerDown = reading.control == BiketrisControl.Touch
         val gameOver = game.phase == BiketrisPhase.GameOver
-        if ((fingerDown || touchIntent) && !faceFresh && !gameOver) touchSession = true
+        if (controller != null) {
+            touchSession = false
+        } else if ((fingerDown || touchIntent) && !faceFresh && !gameOver) touchSession = true
         touchIntent = false
         if (touchSession && !fingerDown && faceFresh && reading.stableMs * 1_000_000L >= config.resumeStableNanos) touchSession = false
         if (gameOver) touchSession = false
         hold = supervisor.hold(camera, reading, touchSession, gameOver, nowNanos)
         trackSpawn(nowNanos)
-        when (edge.update(wave, nowNanos, live, pieceSpawnNanos)) {
+        if (controller?.rotate == true && live) game.rotate()
+        when (edge.update(if (controller != null) null else wave, nowNanos, live, pieceSpawnNanos)) {
             WaveOutcome.Accepted -> {
                 consumedWaves += 1
                 if (game.rotate()) {
@@ -231,15 +246,22 @@ internal class BiketrisSession(
             WaveOutcome.None -> Unit
         }
         if (!live) {
+            game.softDropActive = false
             game.clearTarget()
             game.resetClock()
             targetColumn = -1
             lastSteps = 0
             return hold
         }
+        game.softDropActive = controller?.softDrop == true && reading.control == BiketrisControl.Controller
         targetColumn = when (reading.control) {
             BiketrisControl.Face -> if (touchSession) -1 else mapper.map(reading.x, game.maxLeft)
             BiketrisControl.Touch -> mapper.map(reading.x, game.maxLeft, 1f)
+            BiketrisControl.Controller -> when {
+                controller?.left == true && controller.right != true -> (game.pieceLeft - 1).coerceAtLeast(0)
+                controller?.right == true && controller.left != true -> (game.pieceLeft + 1).coerceAtMost(game.maxLeft)
+                else -> -1
+            }
             BiketrisControl.Lost -> -1
         }
         if (targetColumn >= 0) game.setTarget(targetColumn) else game.clearTarget()
@@ -259,6 +281,7 @@ internal class BiketrisSession(
      * a render stall passes [endTouchSession] = false so touch play survives it.
      */
     fun pause(endTouchSession: Boolean = true) {
+        game.softDropActive = false
         game.resetClock()
         game.clearTarget()
         supervisor.invalidate()
@@ -273,6 +296,7 @@ internal class BiketrisSession(
 
     fun restart(seed: Long) {
         game.restart(seed)
+        game.softDropActive = false
         supervisor.restart()
         edge.invalidate()
         mapper.reset()
