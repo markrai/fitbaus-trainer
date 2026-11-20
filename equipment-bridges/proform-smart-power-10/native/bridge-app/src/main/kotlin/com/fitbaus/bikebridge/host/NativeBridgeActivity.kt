@@ -263,7 +263,6 @@ class NativeBridgeActivity : Activity() {
     private fun performMappedGameAction(mode: ArcadeMode, action: String) {
         when (action) {
             "restart" -> when (mode) {
-                ArcadeMode.Bricks -> arcadeContent.playground.restartGame()
                 ArcadeMode.Math -> arcadeContent.math.restartGame()
                 ArcadeMode.Flak -> arcadeContent.flak.restartGame()
                 ArcadeMode.TrailRide -> arcadeContent.trail.restartGame()
