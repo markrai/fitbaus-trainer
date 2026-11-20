@@ -189,7 +189,9 @@ class BreakoutGameTest {
         val events = mutableListOf<String>()
         g.events = events::add
         g.placeBallForTest(0.05f, g.config.height - 0.01f, 0f, 0.5f, paddle = 0.9f)
-        g.run(0.2f, present)
+        repeat(40) {
+            if (g.phase != GamePhase.GameOver) g.advance(g.config.stepSeconds, present)
+        }
         assertEquals(GamePhase.GameOver, g.phase)
         assertEquals(3f, g.restartIn, 0.01f)
         assertEquals(0, g.lives)
@@ -215,7 +217,9 @@ class BreakoutGameTest {
         val g = BreakoutGame(BreakoutConfig(rows = 1, columns = 1))
         val x = g.brickLeft(0) + g.config.brickWidth / 2f
         g.placeBallForTest(x, g.brickTop(0) + g.config.brickHeight + 0.03f, 0f, -0.5f)
-        g.run(0.3f, present)
+        repeat(60) {
+            if (g.phase != GamePhase.Cleared) g.advance(g.config.stepSeconds, present)
+        }
         assertEquals(GamePhase.Cleared, g.phase)
         assertEquals(3f, g.restartIn, 0.01f)
         assertEquals("CLEARED!  SCORE ${g.score}", PlaygroundGeometry.banner(g, InputAvailability.Present))
@@ -230,7 +234,9 @@ class BreakoutGameTest {
     fun countdownTimeIsClampedAfterLongClockGaps() {
         val g = BreakoutGame(BreakoutConfig(lives = 1))
         g.placeBallForTest(0.05f, g.config.height - 0.01f, 0f, 0.5f, paddle = 0.9f)
-        g.run(0.2f, present)
+        repeat(40) {
+            if (g.phase != GamePhase.GameOver) g.advance(g.config.stepSeconds, present)
+        }
         assertEquals(GamePhase.GameOver, g.phase)
         g.update(1_000_000_000L, lost)
         g.update(60_000_000_000L, lost)
