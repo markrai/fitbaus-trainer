@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package com.fitbaus.bikebridge.host.controller
+
+import android.hardware.usb.UsbConstants
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import java.io.File
+
+class ExclusiveHidTest {
+    @Test
+    fun usbClaimPolicyExcludesBikeCameraAndCompositeDevices() {
+        val hid = UsbConstants.USB_CLASS_HID
+        assertFalse(ExclusiveHidPolicy.permittedDevice(0x213C, 0x0002, listOf(hid)))
+        assertFalse(ExclusiveHidPolicy.permittedDevice(0x10C4, 0xEA60, listOf(hid)))
+        assertFalse(ExclusiveHidPolicy.permittedDevice(0x1234, 0x5678, emptyList()))
+        assertFalse(ExclusiveHidPolicy.permittedDevice(0x1234, 0x5678, listOf(hid, UsbConstants.USB_CLASS_VIDEO)))
+        assertTrue(ExclusiveHidPolicy.permittedDevice(0x1234, 0x5678, listOf(hid)))
+    }
+
+    @Test
+    fun selectionFailsClosedOnDuplicateUsbDevices() {
+        val a = HidCandidate("/dev/bus/usb/001/003", 123, 456, 0, 0, 0, 16)
+        val b = a.copy(deviceName = "/dev/bus/usb/001/004")
+        assertNull(ExclusiveHidPolicy.unique(listOf(a, b), a.key))
+        assertNull(ExclusiveHidPolicy.unique(listOf(a), "wrong"))
+        assertNull(ExclusiveHidPolicy.unique(listOf(a), null))
+        assertEquals(a, ExclusiveHidPolicy.unique(listOf(a), a.key))
+    }
+
+    @Test
+    fun learnsDigitalButtonMaskAndIgnoresUnrelatedBits() {
+        val binding = HidBinding.learn(byteArrayOf(1, 0, 8), byteArrayOf(1, 4, 8))!!
+        assertEquals(HidBinding(1, 4, 4), binding)
+        assertTrue(binding.matches(byteArrayOf(1, 5, 8)))
+        assertFalse(binding.matches(byteArrayOf(1, 1, 8)))
+        assertEquals(binding, HidBinding.decode(binding.encode()))
+        assertNull(HidBinding.decode("1:0:0"))
+        assertNull(HidBinding.decode("999:1:1"))
+        assertNull(HidBinding.decode("1:1:4"))
+    }
+
+    @Test
+    fun learnsHatDirectionsWithoutBothDirectionsMatching() {
+        val neutral = byteArrayOf(0x01, 0x08)
+        val left = HidBinding.learn(neutral, byteArrayOf(0x01, 0x06))!!
+        val right = HidBinding.learn(neutral, byteArrayOf(0x01, 0x02))!!
+        assertEquals(15, left.mask)
+        assertEquals(15, right.mask)
+        assertTrue(left.matches(byteArrayOf(0x01, 0x06)))
+        assertFalse(right.matches(byteArrayOf(0x01, 0x06)))
+        assertTrue(right.matches(byteArrayOf(0x01, 0x02)))
+        assertFalse(left.matches(byteArrayOf(0x01, 0x02)))
+        assertFalse(left.matches(neutral))
+        assertFalse(right.matches(neutral))
+        assertNull(HidBinding.learn(byteArrayOf(1, 2, 3), byteArrayOf(4, 5, 3)))
+        assertNull(HidBinding.learn(byteArrayOf(1, 2), byteArrayOf(1)))
+    }
+
+    @Test
+    fun claimLifecycleIsScopedAndDoesNotModifyBikeUsbStack() {
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/controller/ExclusiveHid.kt").readText()
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(source.contains("claimInterface(usbInterface, true)"))
+        assertTrue(source.contains("reader.initialize(handle, endpoint)"))
+        assertTrue(source.contains("handle.requestWait()"))
+        assertTrue(source.contains("oldRequest?.cancel()"))
+        assertTrue(source.contains("oldConnection.releaseInterface(oldInterface)"))
+        assertTrue(source.contains("oldConnection.close()"))
+        assertTrue(source.contains("device.interfaceCount != 1"))
+        assertTrue(activity.contains("exclusiveHid.startFromPreference()"))
+        assertTrue(activity.contains("override fun deactivateArcade(reason: ArcadeStopReason)"))
+        assertTrue(activity.contains("exclusiveHid.stop()"))
+        assertFalse(source.contains("NativeBridgeService"))
+        assertFalse(source.contains("requestResistance"))
+    }
+}
