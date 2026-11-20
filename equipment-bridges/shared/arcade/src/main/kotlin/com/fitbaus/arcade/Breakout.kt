@@ -31,12 +31,14 @@ internal data class BreakoutConfig(
     val lives: Int = 3,
     val serveDelaySeconds: Float = 1.0f,
     val resumeDelaySeconds: Float = 0.6f,
+    val restartCountdownSeconds: Float = 3f,
 ) {
     init {
         require(width > 0f && height > 0f) { "playfield must have a size" }
         require(stepSeconds > 0f && maxFrameSeconds >= stepSeconds) { "invalid timing" }
         require(rows in 1..12 && columns in 1..20) { "invalid brick grid" }
         require(lives >= 1) { "lives must be >= 1" }
+        require(restartCountdownSeconds > 0f) { "restart countdown must be positive" }
     }
 
     val paddleTop: Float
@@ -111,6 +113,8 @@ internal class BreakoutGame(val config: BreakoutConfig = BreakoutConfig()) {
         private set
     var lives: Int = config.lives
         private set
+    var restartIn: Float = 0f
+        private set
     var speedLevel: Int = BreakoutSpeed.DEFAULT
         private set
     private var speedScale = BreakoutSpeed.scale(BreakoutSpeed.DEFAULT)
@@ -144,6 +148,7 @@ internal class BreakoutGame(val config: BreakoutConfig = BreakoutConfig()) {
         paddleHits = 0
         misses.clear()
         speed = config.ballSpeed
+        restartIn = 0f
         paddleX = config.width / 2f
         targetX = paddleX
         serve()
@@ -196,7 +201,14 @@ internal class BreakoutGame(val config: BreakoutConfig = BreakoutConfig()) {
         presentFor = if (present) presentFor + dt else 0f
         if (present) targetX = input.x * config.width
         when (phase) {
-            GamePhase.GameOver, GamePhase.Cleared -> return
+            GamePhase.GameOver, GamePhase.Cleared -> {
+                restartIn -= dt
+                if (restartIn <= 0f) {
+                    restart()
+                    events?.invoke("auto restart after countdown")
+                }
+                return
+            }
             GamePhase.Paused -> {
                 pauseReason = input.availability
                 if (presentFor >= config.resumeDelaySeconds) {
@@ -319,6 +331,7 @@ internal class BreakoutGame(val config: BreakoutConfig = BreakoutConfig()) {
                 normalizeSpeed()
                 if (bricksLeft == 0) {
                     phase = GamePhase.Cleared
+                    restartIn = config.restartCountdownSeconds
                     events?.invoke("cleared with score $score")
                 }
                 return
@@ -342,6 +355,7 @@ internal class BreakoutGame(val config: BreakoutConfig = BreakoutConfig()) {
         )
         if (lives <= 0) {
             phase = GamePhase.GameOver
+            restartIn = config.restartCountdownSeconds
             events?.invoke("game over with score $score")
         } else {
             serve()
