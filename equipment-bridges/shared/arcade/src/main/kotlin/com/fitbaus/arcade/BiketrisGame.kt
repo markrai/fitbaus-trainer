@@ -209,8 +209,13 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
             field = if (value.isNaN()) 1f else value.coerceIn(MIN_GRAVITY_SCALE, MAX_GRAVITY_SCALE)
         }
 
+    var softDropActive: Boolean = false
+
     val effectiveGravitySeconds: Float
-        get() = maxOf(config.minEffectiveGravitySeconds, gravitySeconds * gravityScale)
+        get() = maxOf(
+            config.minEffectiveGravitySeconds,
+            gravitySeconds * gravityScale * if (softDropActive) SOFT_DROP_SCALE else 1f,
+        )
 
     var fallProgress: Float = 0f
         private set
@@ -248,6 +253,7 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
         clearsBySize.fill(0)
         targetLeft = -1
         phase = BiketrisPhase.Playing
+        softDropActive = false
         resetClock()
         next = draw()
         spawn()
@@ -468,6 +474,7 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
 
     internal companion object {
         val PIECES: Array<BlockPiece> = BlockPiece.values()
+        const val SOFT_DROP_SCALE: Float = 0.15f
         const val MIN_GRAVITY_SCALE: Float = 0.5f
         const val MAX_GRAVITY_SCALE: Float = 2f
     }

@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import com.fitbaus.arcade.BiketrisControllerInput
 import com.fitbaus.arcade.HandPosition
 import com.fitbaus.arcade.HandSource
 import kotlin.math.abs
@@ -87,8 +88,11 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var activeDeviceId = -1
     private var positionX = 0.5f
     private var axisX = 0f
+    private var axisY = 0f
     private var leftDown = false
     private var rightDown = false
+    private var downDown = false
+    private var rotationPending = false
     private var previousNanos = -1L
 
     fun refresh() {
@@ -104,8 +108,11 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
 
     fun resetTransient() {
         axisX = 0f
+        axisY = 0f
         leftDown = false
         rightDown = false
+        downDown = false
+        rotationPending = false
         previousNanos = -1L
     }
 
@@ -120,12 +127,26 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
             when (mappedAction) {
                 "left" -> leftDown = down
                 "right" -> rightDown = down
+                "down" -> downDown = down
+                "rotate" -> if (down && event.repeatCount == 0) rotationPending = true
             }
         }
         return true
     }
 
     fun steeringHeld(): Boolean = leftDown || rightDown
+
+    fun takeBiketrisInput(): BiketrisControllerInput {
+        val rotate = rotationPending
+        rotationPending = false
+        val axis = ControllerSteering.axis(axisX)
+        return BiketrisControllerInput(
+            left = leftDown || axis < -0.45f,
+            right = rightDown || axis > 0.45f,
+            softDrop = downDown || ControllerSteering.axis(axisY) > 0.45f,
+            rotate = rotate,
+        )
+    }
 
     fun handleMotion(event: MotionEvent): Boolean {
         if (!ownsDevice(event.deviceId)) return false
@@ -134,6 +155,9 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         val stick = if (device.getMotionRange(MotionEvent.AXIS_X) != null) event.getAxisValue(MotionEvent.AXIS_X) else 0f
         val hat = if (device.getMotionRange(MotionEvent.AXIS_HAT_X) != null) event.getAxisValue(MotionEvent.AXIS_HAT_X) else 0f
         axisX = if (abs(hat) > 0.1f) hat else stick
+        val stickY = if (device.getMotionRange(MotionEvent.AXIS_Y) != null) event.getAxisValue(MotionEvent.AXIS_Y) else 0f
+        val hatY = if (device.getMotionRange(MotionEvent.AXIS_HAT_Y) != null) event.getAxisValue(MotionEvent.AXIS_HAT_Y) else 0f
+        axisY = if (abs(hatY) > 0.1f) hatY else stickY
         return true
     }
 

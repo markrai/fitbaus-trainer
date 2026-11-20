@@ -26,6 +26,16 @@ included in this upcoming release.
 
 ### Added
 
+- **Biketris controller mode and remapping.** Matching Webcam/Controller
+  selector in the game panel, with a saved Biketris-only preference and
+  automatic Controller default when an eligible gamepad is connected.
+  Webcam retains head steering and wave rotation; Controller can move
+  left/right, soft-drop pieces by holding Down, and rotate clockwise
+  once per button press. All four gamepad buttons are remappable under
+  Settings → Controllers and saved independently for each controller.
+  Real bike cadence and its gravity effect remain read-only and untouched.
+
+
 - **Hands-free Bricks restart.** After the last life or a cleared board,
   Bricks displays the final score with a 3-2-1 countdown and automatically
   starts a new round without touchscreen interaction. The Bricks controller
