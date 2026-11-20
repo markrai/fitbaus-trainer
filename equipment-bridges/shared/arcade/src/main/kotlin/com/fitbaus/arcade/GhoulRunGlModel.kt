@@ -2,6 +2,105 @@
 
 package com.fitbaus.arcade
 
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.tan
+
+/** Bounded shader phases; shaders never receive large uptime-derived values. */
+internal class GhoulShaderPhases {
+    var lamp = 0f
+        private set
+    var glow = 0f
+        private set
+
+    fun advance(dt: Float, cadenceHz: Float) {
+        if (!dt.isFinite() || dt <= 0f) return
+        val cadence = if (cadenceHz.isFinite()) cadenceHz.coerceAtLeast(0f) else 0f
+        lamp = wrap(lamp + dt * (LAMP_BASE_RADIANS_PER_SECOND + cadence * LAMP_CADENCE_RADIANS_PER_SECOND))
+        glow = wrap(glow + dt * GLOW_RADIANS_PER_SECOND)
+    }
+
+    private fun wrap(value: Float): Float {
+        val phase = value % TWO_PI
+        return if (phase < 0f) phase + TWO_PI else phase
+    }
+
+    companion object {
+        const val LAMP_BASE_RADIANS_PER_SECOND = 7f
+        const val LAMP_CADENCE_RADIANS_PER_SECOND = 6f
+        const val GLOW_RADIANS_PER_SECOND = 4f
+        const val TWO_PI = (2.0 * PI).toFloat()
+    }
+}
+
+/** Pure column-major OpenGL camera maths for the maze's left-handed x=east, y=south, z=up space. */
+internal object GhoulGlMatrices {
+    fun buildViewProjection(
+        out: FloatArray,
+        projection: FloatArray,
+        view: FloatArray,
+        cameraX: Float,
+        cameraY: Float,
+        cameraZ: Float,
+        yaw: Float,
+        horizontalFovRadians: Float,
+        aspect: Float,
+        near: Float,
+        far: Float,
+    ) {
+        require(out.size >= 16 && projection.size >= 16 && view.size >= 16)
+        require(aspect > 0f && near > 0f && far > near)
+        projection.fill(0f)
+        val horizontalScale = 1f / tan(horizontalFovRadians / 2f)
+        // Standard look-at makes north screen-right while facing east. Negating projection X
+        // converts the maze's left-handed map coordinates so rider-right stays screen-right.
+        projection[0] = -horizontalScale
+        projection[5] = horizontalScale * aspect
+        projection[10] = (far + near) / (near - far)
+        projection[11] = -1f
+        projection[14] = 2f * far * near / (near - far)
+
+        val forwardX = cos(yaw)
+        val forwardY = sin(yaw)
+        val sideX = forwardY
+        val sideY = -forwardX
+        view.fill(0f)
+        view[0] = sideX
+        view[4] = sideY
+        view[9] = 1f
+        view[2] = -forwardX
+        view[6] = -forwardY
+        view[12] = -(sideX * cameraX + sideY * cameraY)
+        view[13] = -cameraZ
+        view[14] = forwardX * cameraX + forwardY * cameraY
+        view[15] = 1f
+        multiply(out, projection, view)
+    }
+
+    fun clipX(matrix: FloatArray, x: Float, y: Float, z: Float): Float =
+        matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]
+
+    fun billboardRightX(yaw: Float): Float = -sin(yaw)
+    fun billboardRightY(yaw: Float): Float = cos(yaw)
+
+    private fun multiply(out: FloatArray, left: FloatArray, right: FloatArray) {
+        var column = 0
+        while (column < 4) {
+            var row = 0
+            while (row < 4) {
+                out[column * 4 + row] =
+                    left[row] * right[column * 4] +
+                    left[4 + row] * right[column * 4 + 1] +
+                    left[8 + row] * right[column * 4 + 2] +
+                    left[12 + row] * right[column * 4 + 3]
+                row += 1
+            }
+            column += 1
+        }
+    }
+}
+
 /** Immutable rendering copy of the expanded maze grid, safe to hand to the GL thread. */
 internal class GhoulGlMaze(
     val seed: Long,
@@ -177,8 +276,10 @@ internal class GhoulGlSnapshot {
     var yaw = 0f
     var eye = 0.5f
     var lampRadius = 0f
-    var cadenceHz = 0f
+    var lampPhase = 0f
+    var glowPhase = 0f
     var timeSeconds = 0f
+    var diagnostics = false
     var lightCount = 0
     val lightXyr = FloatArray(MAX_LIGHTS * 3)
     val lightRgb = FloatArray(MAX_LIGHTS * 3)
@@ -187,7 +288,8 @@ internal class GhoulGlSnapshot {
 
     fun copyFrom(other: GhoulGlSnapshot) {
         maze = other.maze; cameraX = other.cameraX; cameraY = other.cameraY; yaw = other.yaw
-        eye = other.eye; lampRadius = other.lampRadius; cadenceHz = other.cadenceHz; timeSeconds = other.timeSeconds
+        eye = other.eye; lampRadius = other.lampRadius; lampPhase = other.lampPhase; glowPhase = other.glowPhase
+        timeSeconds = other.timeSeconds; diagnostics = other.diagnostics
         lightCount = other.lightCount; other.lightXyr.copyInto(lightXyr); other.lightRgb.copyInto(lightRgb)
         spriteCount = other.spriteCount; other.spriteXyk.copyInto(spriteXyk)
     }

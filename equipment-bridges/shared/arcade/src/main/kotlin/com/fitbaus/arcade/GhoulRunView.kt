@@ -114,6 +114,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val sprites = ArrayList<GhoulSprite>()
     private val spritePool = ArrayList<GhoulSprite>()
     private var bobPhase = 0f
+    private val shaderPhases = GhoulShaderPhases()
     private val shakeRandom = Random(7)
 
     // Feedback tracking.
@@ -265,6 +266,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         trackFeedback(now)
         rig.update(game, dt)
         val cadenceHz = session.cadenceReading.filteredRpm.coerceAtLeast(0f) / 60f
+        shaderPhases.advance(dt, cadenceHz)
         if (game.speed > 0.05f) bobPhase = (bobPhase + dt * cadenceHz * 2f * TWO_PI) % TWO_PI
         val hunt = game.ghoul.state == GhoulState.Hunting
         val shift = if (hunt) 0.28f else 0f
@@ -378,14 +380,17 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         }
     }
 
-    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        super.onSizeChanged(w, h, oldw, oldh)
-        val surface = glSurface ?: return
-        val params = surface.layoutParams as LayoutParams
-        params.width = (w * SPLIT_RATIO * GL_RENDER_SCALE).roundToInt().coerceAtLeast(1)
-        params.height = (h - TOP_UI * density).roundToInt().coerceAtLeast(1)
-        params.topMargin = (TOP_UI * density).roundToInt()
-        surface.layoutParams = params
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val measuredWidth = View.MeasureSpec.getSize(widthMeasureSpec)
+        val measuredHeight = View.MeasureSpec.getSize(heightMeasureSpec)
+        val surface = glSurface
+        if (surface != null) {
+            val params = surface.layoutParams as LayoutParams
+            params.width = (measuredWidth * SPLIT_RATIO * GL_RENDER_SCALE).roundToInt().coerceAtLeast(1)
+            params.height = (measuredHeight - TOP_UI * density).roundToInt().coerceAtLeast(1)
+            params.topMargin = (TOP_UI * density).roundToInt()
+        }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
 
     override fun onAttachedToWindow() {
@@ -451,8 +456,10 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         frame.eye = 0.5f + sin(bobPhase) * BOB_AMPLITUDE * speedShare +
             if (shake > 0f) (shakeRandom.nextFloat() - 0.5f) * 0.06f * shake else 0f
         frame.lampRadius = game.lightRadius * 2f
-        frame.cadenceHz = session.cadenceReading.filteredRpm.coerceAtLeast(0f) / 60f
+        frame.lampPhase = shaderPhases.lamp
+        frame.glowPhase = shaderPhases.glow
         frame.timeSeconds = (now / 1_000_000L % 10_000_000L) / 1000f
+        frame.diagnostics = diagnosticsOverlay
 
         var candidates = 0
         for (shrine in world.shrines) if ((game.shrineCooldowns[shrine] ?: 0f) <= 0f) {
@@ -1493,7 +1500,11 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val gpu = glRenderer
         if (glSelection.type == GhoulRendererType.Gl) return String.format(
             Locale.US,
-            "renderer GL gl %.1f ms gl-frame %.1f ms | canvas %.1f ms | update %.1f ms | host-frame %.1f ms (%.0f fps)",
+            "renderer GL %dx%d frames %d error 0x%04x | gl %.1f ms gl-frame %.1f ms | canvas %.1f ms | update %.1f ms | host-frame %.1f ms (%.0f fps)",
+            gpu?.surfaceWidth ?: 0,
+            gpu?.surfaceHeight ?: 0,
+            gpu?.framesDrawn ?: 0L,
+            gpu?.lastGlError ?: 0,
             (gpu?.frameNanos ?: 0L) / 1_000_000f,
             (gpu?.frameIntervalNanos ?: 0L) / 1_000_000f,
             drawMs,
@@ -1504,7 +1515,11 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val fp = renderer
         return String.format(
             Locale.US,
-            "renderer fallback fp %dx%d render %.1f ms (cast %.1f cols %.1f sprites %.1f) upload+blit %.1f ms | canvas %.1f ms | update %.1f ms | host-frame %.1f ms (%.0f fps)",
+            "renderer fallback gl %dx%d frames %d error 0x%04x | fp %dx%d render %.1f ms (cast %.1f cols %.1f sprites %.1f) upload+blit %.1f ms | canvas %.1f ms | update %.1f ms | host-frame %.1f ms (%.0f fps)",
+            gpu?.surfaceWidth ?: 0,
+            gpu?.surfaceHeight ?: 0,
+            gpu?.framesDrawn ?: 0L,
+            gpu?.lastGlError ?: 0,
             fp?.width ?: 0,
             fp?.height ?: 0,
             fpRenderMs,

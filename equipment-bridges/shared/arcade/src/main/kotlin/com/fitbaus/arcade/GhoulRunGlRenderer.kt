@@ -4,7 +4,7 @@ package com.fitbaus.arcade
 
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
-import android.opengl.Matrix
+import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -14,11 +14,9 @@ import javax.microedition.khronos.egl.EGLContext
 import javax.microedition.khronos.egl.EGLDisplay
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.PI
-import kotlin.math.atan
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.sin
-import kotlin.math.tan
 
 /** Reports EGL context creation failure before GLSurfaceView's render loop gives up. */
 internal class GhoulEglContextFactory(private val failed: (String) -> Unit) : GLSurfaceView.EGLContextFactory {
@@ -51,6 +49,14 @@ internal class GhoulRunGlRenderer(
         private set
     @Volatile var frameIntervalNanos: Long = 0L
         private set
+    @Volatile var surfaceWidth: Int = 1
+        private set
+    @Volatile var surfaceHeight: Int = 1
+        private set
+    @Volatile var framesDrawn: Long = 0L
+        private set
+    @Volatile var lastGlError: Int = GLES20.GL_NO_ERROR
+        private set
 
     private var mazeProgram = 0
     private var spriteProgram = 0
@@ -66,8 +72,6 @@ internal class GhoulRunGlRenderer(
     private val projection = FloatArray(16)
     private val view = FloatArray(16)
     private val viewProjection = FloatArray(16)
-    private var width = 1
-    private var height = 1
     private var ready = false
     private var lastFrameStarted = 0L
     private val frame = GhoulGlSnapshot()
@@ -78,6 +82,11 @@ internal class GhoulRunGlRenderer(
         try {
             releaseHandles()
             GLES20.glClearColor(0f, 0f, 0f, 1f)
+            Log.i(
+                TAG,
+                "GL vendor=${GLES20.glGetString(GLES20.GL_VENDOR)} renderer=${GLES20.glGetString(GLES20.GL_RENDERER)} " +
+                    "version=${GLES20.glGetString(GLES20.GL_VERSION)}",
+            )
             GLES20.glEnable(GLES20.GL_DEPTH_TEST)
             GLES20.glDepthFunc(GLES20.GL_LEQUAL)
             mazeProgram = link(MAZE_VERTEX, MAZE_FRAGMENT)
@@ -96,13 +105,9 @@ internal class GhoulRunGlRenderer(
     }
 
     override fun onSurfaceChanged(unused: GL10?, newWidth: Int, newHeight: Int) {
-        width = max(1, newWidth)
-        height = max(1, newHeight)
-        GLES20.glViewport(0, 0, width, height)
-        val aspect = width.toFloat() / height
-        val horizontal = FOV_DEGREES * PI.toFloat() / 180f
-        val vertical = (2f * atan(tan(horizontal / 2f) / aspect)) * 180f / PI.toFloat()
-        Matrix.perspectiveM(projection, 0, vertical, aspect, NEAR, FAR)
+        surfaceWidth = max(1, newWidth)
+        surfaceHeight = max(1, newHeight)
+        GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
     }
 
     override fun onDrawFrame(unused: GL10?) {
@@ -112,25 +117,23 @@ internal class GhoulRunGlRenderer(
         if (!ready) return
         try {
             snapshots.readInto(frame)
+            if (frame.diagnostics) GLES20.glClearColor(0.25f, 0f, 0.25f, 1f) else GLES20.glClearColor(0f, 0f, 0f, 1f)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+            framesDrawn += 1L
             val maze = frame.maze
-            if (maze == null) {
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-                return
-            }
+            if (maze == null) return
             if (maze.seed != mazeSeed) uploadMaze(maze)
             val dirX = cos(frame.yaw)
             val dirY = sin(frame.yaw)
-            Matrix.setLookAtM(
-                view, 0,
-                frame.cameraX, frame.cameraY, frame.eye,
-                frame.cameraX + dirX, frame.cameraY + dirY, frame.eye,
-                0f, 0f, 1f,
+            GhoulGlMatrices.buildViewProjection(
+                viewProjection, projection, view,
+                frame.cameraX, frame.cameraY, frame.eye, frame.yaw,
+                FOV_RADIANS, surfaceWidth.toFloat() / surfaceHeight, NEAR, FAR,
             )
-            Matrix.multiplyMM(viewProjection, 0, projection, 0, view, 0)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
             drawMaze(frame, dirX, dirY)
             drawSprites(frame)
             val error = GLES20.glGetError()
+            lastGlError = error
             if (error != GLES20.GL_NO_ERROR) throw IllegalStateException("GL error 0x${error.toString(16)}")
         } catch (error: RuntimeException) {
             ready = false
@@ -164,8 +167,7 @@ internal class GhoulRunGlRenderer(
         GLES20.glUniform3f(mazeLocations.camera, frame.cameraX, frame.cameraY, frame.eye)
         GLES20.glUniform2f(mazeLocations.direction, dirX, dirY)
         GLES20.glUniform1f(mazeLocations.lampRadius, frame.lampRadius)
-        GLES20.glUniform1f(mazeLocations.cadenceHz, frame.cadenceHz)
-        GLES20.glUniform1f(mazeLocations.time, frame.timeSeconds)
+        GLES20.glUniform1f(mazeLocations.lampPhase, frame.lampPhase)
         GLES20.glUniform1i(mazeLocations.lightCount, frame.lightCount)
         GLES20.glUniform3fv(mazeLocations.lightXyr, GhoulGlSnapshot.MAX_LIGHTS, frame.lightXyr, 0)
         GLES20.glUniform3fv(mazeLocations.lightRgb, GhoulGlSnapshot.MAX_LIGHTS, frame.lightRgb, 0)
@@ -186,7 +188,7 @@ internal class GhoulRunGlRenderer(
         uniformMatrix(spriteLocations.viewProjection, viewProjection)
         GLES20.glUniform1f(spriteLocations.yaw, frame.yaw)
         GLES20.glUniform1f(spriteLocations.lampRadius, frame.lampRadius)
-        GLES20.glUniform1f(spriteLocations.time, frame.timeSeconds)
+        GLES20.glUniform1f(spriteLocations.glowPhase, frame.glowPhase)
         GLES20.glUniform3f(spriteLocations.camera, frame.cameraX, frame.cameraY, frame.eye)
         GLES20.glUniform1i(spriteLocations.texture, 0)
         GLES20.glEnable(GLES20.GL_BLEND)
@@ -200,7 +202,10 @@ internal class GhoulRunGlRenderer(
             val height = GhoulFirstPersonRenderer.spriteHeight(kind)
             GLES20.glUniform3f(spriteLocations.centre, frame.spriteXyk[base], frame.spriteXyk[base + 1], GhoulFirstPersonRenderer.spriteBase(kind))
             GLES20.glUniform2f(spriteLocations.size, width, height)
-            GLES20.glUniform1f(spriteLocations.glow, GhoulFirstPersonRenderer.spriteGlow(kind, frame.timeSeconds))
+            GLES20.glUniform1f(
+                spriteLocations.glow,
+                GhoulFirstPersonRenderer.spriteGlow(kind, frame.glowPhase / GhoulShaderPhases.GLOW_RADIANS_PER_SECOND),
+            )
             val textureFrame = if (kind == GhoulSpriteKind.Ghoul) frameIndex else 0
             bindTexture(spriteTextures[kind.ordinal][textureFrame])
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -230,7 +235,7 @@ internal class GhoulRunGlRenderer(
             GLES20.glGenTextures(frames, spriteTextures[kind.ordinal], 0)
             var frame = 0
             while (frame < frames) {
-                uploadArgb(spriteTextures[kind.ordinal][frame], w, h, GhoulSpriteArt.texture(kind, w, h, frame), mipmaps = false)
+                uploadArgb(spriteTextures[kind.ordinal][frame], w, h, GhoulSpriteArt.texture(kind, w, h, frame), mipmaps = false, repeat = false)
                 frame += 1
             }
         }
@@ -239,7 +244,11 @@ internal class GhoulRunGlRenderer(
         val w = (h * GhoulFirstPersonRenderer.spriteWidth(GhoulSpriteKind.Ghoul) / GhoulFirstPersonRenderer.spriteHeight(GhoulSpriteKind.Ghoul)).toInt()
         var frame = 0
         while (frame < eyeTextures.size) {
-            uploadArgb(eyeTextures[frame], w, h, GhoulSpriteArt.texture(GhoulSpriteKind.Ghoul, w, h, frame, eyesOnly = true), mipmaps = false)
+            uploadArgb(
+                eyeTextures[frame], w, h,
+                GhoulSpriteArt.texture(GhoulSpriteKind.Ghoul, w, h, frame, eyesOnly = true),
+                mipmaps = false, repeat = false,
+            )
             frame += 1
         }
     }
@@ -281,10 +290,10 @@ internal class GhoulRunGlRenderer(
             }
             y += 1
         }
-        uploadArgb(texture, size, size, pixels, mipmaps = true)
+        uploadArgb(texture, size, size, pixels, mipmaps = true, repeat = true)
     }
 
-    private fun uploadArgb(texture: Int, width: Int, height: Int, pixels: IntArray, mipmaps: Boolean) {
+    private fun uploadArgb(texture: Int, width: Int, height: Int, pixels: IntArray, mipmaps: Boolean, repeat: Boolean) {
         val bytes = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.nativeOrder())
         var index = 0
         while (index < pixels.size) {
@@ -297,8 +306,9 @@ internal class GhoulRunGlRenderer(
         }
         bytes.position(0)
         bindTexture(texture)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        val wrap = if (repeat) GLES20.GL_REPEAT else GLES20.GL_CLAMP_TO_EDGE
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, wrap)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, wrap)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(
             GLES20.GL_TEXTURE_2D,
@@ -384,8 +394,7 @@ internal class GhoulRunGlRenderer(
         val camera = uniform(program, "uCamera")
         val direction = uniform(program, "uDirection")
         val lampRadius = uniform(program, "uLampRadius")
-        val cadenceHz = uniform(program, "uCadenceHz")
-        val time = uniform(program, "uTime")
+        val lampPhase = uniform(program, "uLampPhase")
         val lightCount = uniform(program, "uLightCount")
         val lightXyr = uniform(program, "uLightXyr[0]")
         val lightRgb = uniform(program, "uLightRgb[0]")
@@ -399,7 +408,7 @@ internal class GhoulRunGlRenderer(
         val size = uniform(program, "uSize")
         val yaw = uniform(program, "uYaw")
         val lampRadius = uniform(program, "uLampRadius")
-        val time = uniform(program, "uTime")
+        val glowPhase = uniform(program, "uGlowPhase")
         val camera = uniform(program, "uCamera")
         val texture = uniform(program, "uTexture")
         val glow = uniform(program, "uGlow")
@@ -414,7 +423,8 @@ internal class GhoulRunGlRenderer(
             if (it < 0) throw IllegalStateException("missing uniform $name")
         }
 
-        const val FOV_DEGREES = 70f
+        const val TAG = "GhoulRun"
+        const val FOV_RADIANS = (70.0 * PI / 180.0).toFloat()
         const val NEAR = 0.08f
         const val FAR = 60f
         const val TEXTURE_SIZE = 64
@@ -435,13 +445,16 @@ internal class GhoulRunGlRenderer(
             }
         """
         const val MAZE_FRAGMENT = """
+            #ifdef GL_FRAGMENT_PRECISION_HIGH
+            precision highp float;
+            #else
             precision mediump float;
+            #endif
             uniform sampler2D uTexture;
             uniform vec3 uCamera;
             uniform vec2 uDirection;
             uniform float uLampRadius;
-            uniform float uCadenceHz;
-            uniform float uTime;
+            uniform float uLampPhase;
             uniform int uLightCount;
             uniform vec3 uLightXyr[8];
             uniform vec3 uLightRgb[8];
@@ -454,7 +467,7 @@ internal class GhoulRunGlRenderer(
                 float radius = max(uLampRadius, 0.001);
                 float cone = 0.64 + 0.36 * max(0.0, dot(normalize(delta.xy), uDirection));
                 float lamp = (1.0 - smoothstep(radius * 0.30, radius, distanceToCamera)) * cone;
-                lamp *= 0.975 + 0.025 * sin(uTime * (7.0 + uCadenceHz * 6.0));
+                lamp *= 0.975 + 0.025 * sin(uLampPhase);
                 float pilot = 0.28 * (1.0 - smoothstep(0.35, 1.6, distanceToCamera));
                 vec3 lighting = vec3(max(lamp, pilot)) * vec3(1.0, 0.86, 0.68);
                 for (int i = 0; i < 8; ++i) {
@@ -488,12 +501,16 @@ internal class GhoulRunGlRenderer(
             }
         """
         const val SPRITE_FRAGMENT = """
+            #ifdef GL_FRAGMENT_PRECISION_HIGH
+            precision highp float;
+            #else
             precision mediump float;
+            #endif
             uniform sampler2D uTexture;
             uniform vec3 uCamera;
             uniform float uLampRadius;
             uniform float uGlow;
-            uniform float uTime;
+            uniform float uGlowPhase;
             varying vec2 vUv;
             varying vec3 vWorld;
             void main() {
@@ -502,7 +519,7 @@ internal class GhoulRunGlRenderer(
                 float d = distance(vWorld, uCamera);
                 float lamp = 1.0 - smoothstep(max(0.5, uLampRadius * 0.3), max(0.6, uLampRadius), d);
                 float pilot = 0.28 * (1.0 - smoothstep(0.35, 1.6, d));
-                float light = max(max(lamp, pilot), uGlow * (0.9 + 0.1 * sin(uTime * 4.0)));
+                float light = max(max(lamp, pilot), uGlow * (0.9 + 0.1 * sin(uGlowPhase)));
                 gl_FragColor = vec4(texel.rgb * light, texel.a);
             }
         """

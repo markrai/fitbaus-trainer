@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.PI
 
 internal class GhoulRunGlModelTest {
     @Test
@@ -67,7 +68,8 @@ internal class GhoulRunGlModelTest {
         val buffer = GhoulGlSnapshotBuffer()
         val first = buffer.writable()
         first.cameraX = 3f
-        first.cadenceHz = 1.25f
+        first.lampPhase = 1.25f
+        first.glowPhase = 2.5f
         buffer.publish(first)
         assertSame(first, buffer.readable())
         val second = buffer.writable()
@@ -76,8 +78,37 @@ internal class GhoulRunGlModelTest {
         second.cameraX = 7f
         buffer.publish(second)
         assertEquals(7f, buffer.readable().cameraX)
-        assertEquals(1.25f, buffer.readable().cadenceHz)
+        assertEquals(1.25f, buffer.readable().lampPhase)
+        assertEquals(2.5f, buffer.readable().glowPhase)
         assertEquals(3f, first.cameraX)
+    }
+
+    @Test
+    fun shaderPhasesRemainBoundedAcrossTwentyFourHours() {
+        val phases = GhoulShaderPhases()
+        repeat(24 * 60 * 60) {
+            phases.advance(1f, 2.5f)
+            assertTrue(phases.lamp in 0f..GhoulShaderPhases.TWO_PI, "lamp phase ${phases.lamp}")
+            assertTrue(phases.glow in 0f..GhoulShaderPhases.TWO_PI, "glow phase ${phases.glow}")
+        }
+    }
+
+    @Test
+    fun leftHandedMazeProjectsRiderRightToScreenRight() {
+        val matrix = FloatArray(16)
+        val projection = FloatArray(16)
+        val view = FloatArray(16)
+        val fov = (70.0 * PI / 180.0).toFloat()
+        GhoulGlMatrices.buildViewProjection(matrix, projection, view, 0f, 0f, 0.5f, 0f, fov, 1f, 0.08f, 60f)
+        assertTrue(GhoulGlMatrices.clipX(matrix, 2f, 1f, 0.5f) > 0f, "south must be right while facing east")
+        assertEquals(0f, GhoulGlMatrices.billboardRightX(0f), 1e-5f)
+        assertEquals(1f, GhoulGlMatrices.billboardRightY(0f), 1e-5f)
+
+        val south = (PI / 2.0).toFloat()
+        GhoulGlMatrices.buildViewProjection(matrix, projection, view, 0f, 0f, 0.5f, south, fov, 1f, 0.08f, 60f)
+        assertTrue(GhoulGlMatrices.clipX(matrix, -1f, 2f, 0.5f) > 0f, "west must be right while facing south")
+        assertEquals(-1f, GhoulGlMatrices.billboardRightX(south), 1e-5f)
+        assertEquals(0f, GhoulGlMatrices.billboardRightY(south), 1e-5f)
     }
 
     @Test
