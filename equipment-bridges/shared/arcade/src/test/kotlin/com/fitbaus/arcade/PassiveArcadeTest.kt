@@ -53,11 +53,13 @@ class PassiveArcadeTest {
             "import android.",
             "import java.io.IOException",
             "import java.io.File",
+            "import java.nio.",
             "import java.util.Locale",
             "import java.util.concurrent.Semaphore",
             "import java.util.concurrent.TimeUnit",
             "import java.util.concurrent.atomic.",
             "import java.util.concurrent.locks.",
+            "import javax.microedition.khronos.",
             "import kotlin.",
             "import com.fitbaus.arcade.",
         )

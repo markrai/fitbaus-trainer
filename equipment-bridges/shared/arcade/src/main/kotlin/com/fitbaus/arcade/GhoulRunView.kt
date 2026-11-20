@@ -15,9 +15,11 @@ import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.opengl.GLSurfaceView
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.widget.FrameLayout
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -33,12 +35,16 @@ import kotlin.random.Random
  * GHOUL RUN split screen: a first-person raycast view (the steering view) on the left and the
  * fixed-orientation isometric map on the right. Input selectors stay across the top.
  */
-public class GhoulRunView(context: Context) : View(context) {
+public class GhoulRunView(context: Context) : FrameLayout(context) {
     public var diagnosticsOverlay: Boolean = false
+        set(value) {
+            field = value
+            overlay.invalidate()
+        }
     public var controllerAvailable: Boolean = false
         set(value) {
             field = value
-            invalidate()
+            overlay.invalidate()
         }
 
     private val density = resources.displayMetrics.density
@@ -52,6 +58,21 @@ public class GhoulRunView(context: Context) : View(context) {
     private var cameraRow = 0f
     private var cameraCol = 0f
     private var diagnosticsText = ""
+
+    // GPU first-person surface and its allocation-free UI -> GL handoff.
+    private val glSelection = GhoulRendererSelection()
+    private val glSnapshots = GhoulGlSnapshotBuffer()
+    private var glSurface: GLSurfaceView? = null
+    private var glRenderer: GhoulRunGlRenderer? = null
+    private var glMaze: GhoulGlMaze? = null
+    private var glMazeGame: GhoulRunGame? = null
+    private var glMazeSeed = Long.MIN_VALUE
+    private val lightCandidateX = FloatArray(GhoulGlSnapshot.MAX_LIGHTS)
+    private val lightCandidateY = FloatArray(GhoulGlSnapshot.MAX_LIGHTS)
+    private val lightCandidateKind = IntArray(GhoulGlSnapshot.MAX_LIGHTS)
+    private var glAttached = false
+    private var glHostPaused = true
+    private var glPaused = false
 
     // First person.
     private val rig = GhoulCameraRig()
@@ -140,10 +161,43 @@ public class GhoulRunView(context: Context) : View(context) {
     private val slotRect = RectF()
     private var shaderKey = 0L
 
+    private val overlay = object : View(context) {
+        init {
+            setBackgroundColor(Color.TRANSPARENT)
+            isClickable = true
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            drawOverlay(canvas)
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean = handleTouch(event)
+
+        override fun performClick(): Boolean {
+            super.performClick()
+            return true
+        }
+    }
+
     init {
         setBackgroundColor(BACKGROUND)
-        isClickable = true
         dashed.pathEffect = DashPathEffect(floatArrayOf(5f * density, 4f * density), 0f)
+        try {
+            val surface = GLSurfaceView(context)
+            val gpu = GhoulRunGlRenderer(glSnapshots, ::onGlFailure)
+            surface.setEGLContextClientVersion(2)
+            surface.setEGLContextFactory(GhoulEglContextFactory(::onGlFailure))
+            surface.preserveEGLContextOnPause = true
+            surface.setRenderer(gpu)
+            surface.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+            glSurface = surface
+            glRenderer = gpu
+            addView(surface, LayoutParams(1, 1))
+        } catch (error: RuntimeException) {
+            glSelection.fail("GLES2 surface failed: ${error.message ?: error.javaClass.simpleName}")
+            Log.e(TAG, glSelection.reason ?: "GLES2 surface failed")
+        }
+        addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     public fun selectInputSource(source: GhoulRunInputSource) {
@@ -153,7 +207,7 @@ public class GhoulRunView(context: Context) : View(context) {
         prefs?.edit()?.putString(GhoulRunInputSelection.PREF_KEY, source.name)?.apply()
         session.pause()
         if (prior != inputSource) onInputSourceChanged?.invoke(inputSource)
-        invalidate()
+        overlay.invalidate()
     }
 
     public fun render(
@@ -169,6 +223,8 @@ public class GhoulRunView(context: Context) : View(context) {
         @Suppress("UNUSED_PARAMETER") cameraInfo: ArcadeCameraInfo?,
         controller: GhoulRunControllerInput? = null,
     ) {
+        glHostPaused = false
+        updateGlLifecycle()
         val now = System.nanoTime()
         val interval = if (lastRenderNanos == Long.MIN_VALUE) 0L else now - lastRenderNanos
         try {
@@ -176,7 +232,8 @@ public class GhoulRunView(context: Context) : View(context) {
         } finally {
             updateMs = ema(updateMs, (System.nanoTime() - now) / 1_000_000f)
         }
-        invalidate()
+        publishGlFrame(now)
+        overlay.invalidate()
     }
 
     private fun update(
@@ -248,6 +305,8 @@ public class GhoulRunView(context: Context) : View(context) {
     public fun pause() {
         session.pause()
         lastRenderNanos = Long.MIN_VALUE
+        glHostPaused = true
+        updateGlLifecycle()
     }
 
     public fun restartGame() {
@@ -255,7 +314,7 @@ public class GhoulRunView(context: Context) : View(context) {
         session.restart(seed)
         session.pause()
         rig.reset()
-        invalidate()
+        overlay.invalidate()
     }
 
     public fun developerOptions(): List<String> = listOf(
@@ -282,11 +341,10 @@ public class GhoulRunView(context: Context) : View(context) {
             3 -> session.recalibratePace()
             4 -> restartGame()
         }
-        invalidate()
+        overlay.invalidate()
     }
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
+    private fun drawOverlay(canvas: Canvas) {
         if (width <= 0 || height <= 0) return
         val started = System.nanoTime()
         drawSelectors(canvas)
@@ -303,7 +361,7 @@ public class GhoulRunView(context: Context) : View(context) {
 
         canvas.save()
         canvas.clipRect(fpRect)
-        drawFirstPerson(canvas, now)
+        if (glSelection.type == GhoulRendererType.Fallback) drawFirstPerson(canvas, now) else drawFirstPersonHud(canvas, now)
         canvas.restore()
 
         stroke.color = DIVIDER
@@ -318,6 +376,136 @@ public class GhoulRunView(context: Context) : View(context) {
             lastTimingLogNanos = now
             Log.i(TAG, timingLine())
         }
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        val surface = glSurface ?: return
+        val params = surface.layoutParams as LayoutParams
+        params.width = (w * SPLIT_RATIO * GL_RENDER_SCALE).roundToInt().coerceAtLeast(1)
+        params.height = (h - TOP_UI * density).roundToInt().coerceAtLeast(1)
+        params.topMargin = (TOP_UI * density).roundToInt()
+        surface.layoutParams = params
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        glAttached = true
+        updateGlLifecycle()
+    }
+
+    override fun onDetachedFromWindow() {
+        glAttached = false
+        updateGlLifecycle()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        updateGlLifecycle()
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        if (changedView === this) updateGlLifecycle()
+    }
+
+    private fun updateGlLifecycle() {
+        val surface = glSurface ?: return
+        val shouldRun = glAttached && !glHostPaused && windowVisibility == View.VISIBLE && visibility == View.VISIBLE &&
+            glSelection.type == GhoulRendererType.Gl
+        if (shouldRun && glPaused) {
+            glPaused = false
+            surface.onResume()
+        } else if (!shouldRun && !glPaused) {
+            glPaused = true
+            surface.onPause()
+        }
+    }
+
+    private fun onGlFailure(reason: String) {
+        post {
+            glSelection.fail(reason)
+            Log.e(TAG, reason)
+            glSurface?.visibility = View.GONE
+            updateGlLifecycle()
+            overlay.invalidate()
+        }
+    }
+
+    private fun publishGlFrame(now: Long) {
+        if (glSelection.type != GhoulRendererType.Gl) return
+        val world = game.world
+        if (glMaze == null || glMazeGame !== game || glMazeSeed != world.seed) {
+            glMaze = GhoulGlMaze.from(world)
+            glMazeGame = game
+            glMazeSeed = world.seed
+        }
+        val frame = glSnapshots.writable()
+        frame.maze = glMaze
+        frame.cameraX = rig.x
+        frame.cameraY = rig.y
+        val shake = shakeAmount(now)
+        frame.yaw = rig.yaw + if (shake > 0f) (shakeRandom.nextFloat() - 0.5f) * 0.09f * shake else 0f
+        val speedShare = (game.speed / game.config.sprintSpeed).coerceIn(0f, 1f)
+        frame.eye = 0.5f + sin(bobPhase) * BOB_AMPLITUDE * speedShare +
+            if (shake > 0f) (shakeRandom.nextFloat() - 0.5f) * 0.06f * shake else 0f
+        frame.lampRadius = game.lightRadius * 2f
+        frame.cadenceHz = session.cadenceReading.filteredRpm.coerceAtLeast(0f) / 60f
+        frame.timeSeconds = (now / 1_000_000L % 10_000_000L) / 1000f
+
+        var candidates = 0
+        for (shrine in world.shrines) if ((game.shrineCooldowns[shrine] ?: 0f) <= 0f) {
+            if (candidates < lightCandidateX.size) {
+                lightCandidateX[candidates] = GhoulRaycaster.cellX(shrine.col.toFloat())
+                lightCandidateY[candidates] = GhoulRaycaster.cellY(shrine.row.toFloat())
+                lightCandidateKind[candidates] = GhoulGlLightColor.SHRINE_CYAN
+                candidates += 1
+            }
+        }
+        if (game.exitOpen && candidates < lightCandidateX.size) {
+            lightCandidateX[candidates] = GhoulRaycaster.cellX(world.exit.col.toFloat())
+            lightCandidateY[candidates] = GhoulRaycaster.cellY(world.exit.row.toFloat())
+            lightCandidateKind[candidates] = GhoulGlLightColor.EXIT_GREEN
+            candidates += 1
+        }
+        if (game.ghoul.state != GhoulState.Inactive && game.ghoul.state != GhoulState.Stunned && candidates < lightCandidateX.size) {
+            lightCandidateX[candidates] = GhoulRaycaster.cellX(game.ghoul.col)
+            lightCandidateY[candidates] = GhoulRaycaster.cellY(game.ghoul.row)
+            lightCandidateKind[candidates] = GhoulGlLightColor.GHOUL_RED
+            candidates += 1
+        }
+        frame.lightCount = GhoulLightSelector.select(
+            frame.cameraX, frame.cameraY, lightCandidateX, lightCandidateY, lightCandidateKind, candidates,
+            frame.lightXyr, frame.lightRgb, GhoulGlSnapshot.MAX_LIGHTS,
+        )
+        var spriteCount = 0
+        var at = spriteCount * 3
+        frame.spriteXyk[at] = GhoulRaycaster.cellX(world.exit.col.toFloat())
+        frame.spriteXyk[at + 1] = GhoulRaycaster.cellY(world.exit.row.toFloat())
+        frame.spriteXyk[at + 2] = (if (game.exitOpen) GhoulSpriteKind.Exit else GhoulSpriteKind.ExitLocked).ordinal.toFloat()
+        spriteCount += 1
+        for (shrine in world.shrines) if (spriteCount < GhoulGlSnapshot.MAX_SPRITES) {
+            at = spriteCount * 3
+            frame.spriteXyk[at] = GhoulRaycaster.cellX(shrine.col.toFloat())
+            frame.spriteXyk[at + 1] = GhoulRaycaster.cellY(shrine.row.toFloat())
+            frame.spriteXyk[at + 2] = (
+                if ((game.shrineCooldowns[shrine] ?: 0f) <= 0f) GhoulSpriteKind.ShrineReady else GhoulSpriteKind.ShrineSpent
+            ).ordinal.toFloat()
+            spriteCount += 1
+        }
+        if (game.ghoul.state != GhoulState.Inactive && spriteCount < GhoulGlSnapshot.MAX_SPRITES) {
+            at = spriteCount * 3
+            frame.spriteXyk[at] = GhoulRaycaster.cellX(game.ghoul.col)
+            frame.spriteXyk[at + 1] = GhoulRaycaster.cellY(game.ghoul.row)
+            frame.spriteXyk[at + 2] = (
+                if (game.ghoul.state == GhoulState.Stunned) GhoulSpriteKind.GhoulStunned else GhoulSpriteKind.Ghoul
+            ).ordinal.toFloat()
+            spriteCount += 1
+        }
+        frame.spriteCount = spriteCount
+        glSnapshots.publish(frame)
+        glSurface?.requestRender()
     }
 
     // ---------------------------------------------------------------- first person
@@ -371,6 +559,17 @@ public class GhoulRunView(context: Context) : View(context) {
         fpRenderMs = ema(fpRenderMs, (uploadStart - renderStart) / 1_000_000f)
         fpUploadMs = ema(fpUploadMs, (uploadEnd - uploadStart) / 1_000_000f)
 
+        drawFpOverlays(canvas, now)
+        val gaugeTop = fpRect.bottom - GAUGE_HEIGHT * density
+        drawCompass(canvas)
+        drawHearts(canvas, now)
+        drawSteering(canvas, now)
+        drawHint(canvas, gaugeTop)
+        drawSpeedGauge(canvas, gaugeTop, now)
+        drawPhase(canvas, gaugeTop)
+    }
+
+    private fun drawFirstPersonHud(canvas: Canvas, now: Long) {
         drawFpOverlays(canvas, now)
         val gaugeTop = fpRect.bottom - GAUGE_HEIGHT * density
         drawCompass(canvas)
@@ -1291,10 +1490,21 @@ public class GhoulRunView(context: Context) : View(context) {
     }
 
     private fun timingLine(): String {
+        val gpu = glRenderer
+        if (glSelection.type == GhoulRendererType.Gl) return String.format(
+            Locale.US,
+            "renderer GL gl %.1f ms gl-frame %.1f ms | canvas %.1f ms | update %.1f ms | host-frame %.1f ms (%.0f fps)",
+            (gpu?.frameNanos ?: 0L) / 1_000_000f,
+            (gpu?.frameIntervalNanos ?: 0L) / 1_000_000f,
+            drawMs,
+            updateMs,
+            frameIntervalMs,
+            if (frameIntervalMs > 0f) 1000f / frameIntervalMs else 0f,
+        )
         val fp = renderer
         return String.format(
             Locale.US,
-            "fp %dx%d render %.1f ms (cast %.1f cols %.1f sprites %.1f) upload+blit %.1f ms | onDraw %.1f ms | update %.1f ms | frame %.1f ms (%.0f fps)",
+            "renderer fallback fp %dx%d render %.1f ms (cast %.1f cols %.1f sprites %.1f) upload+blit %.1f ms | canvas %.1f ms | update %.1f ms | host-frame %.1f ms (%.0f fps)",
             fp?.width ?: 0,
             fp?.height ?: 0,
             fpRenderMs,
@@ -1391,7 +1601,7 @@ public class GhoulRunView(context: Context) : View(context) {
 
     private fun ema(previous: Float, sample: Float): Float = if (previous <= 0f) sample else previous + (sample - previous) * 0.1f
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
+    private fun handleTouch(event: MotionEvent): Boolean {
         if (event.actionMasked != MotionEvent.ACTION_UP) return true
         when {
             webcamRect.contains(event.x, event.y) -> selectInputSource(GhoulRunInputSource.Webcam)
@@ -1399,12 +1609,7 @@ public class GhoulRunView(context: Context) : View(context) {
             bothRect.contains(event.x, event.y) -> selectInputSource(GhoulRunInputSource.Both)
             difficultyRect.contains(event.x, event.y) -> selectDeveloperOption(0)
         }
-        performClick()
-        return true
-    }
-
-    override fun performClick(): Boolean {
-        super.performClick()
+        overlay.performClick()
         return true
     }
 
@@ -1423,6 +1628,7 @@ public class GhoulRunView(context: Context) : View(context) {
         /** Share of the width given to the first-person (left) half. */
         const val SPLIT_RATIO = 0.5f
         const val FP_PIXELS_WIDE = 320
+        const val GL_RENDER_SCALE = 1f
         const val LIGHT_STEPS = 32
         val SQRT2 = kotlin.math.sqrt(2f)
         const val FOV_DEGREES = 70f
