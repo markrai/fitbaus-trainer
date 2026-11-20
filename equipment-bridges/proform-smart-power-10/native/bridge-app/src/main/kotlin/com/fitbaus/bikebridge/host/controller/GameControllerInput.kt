@@ -35,6 +35,17 @@ internal object ControllerDevices {
         else candidates.firstOrNull { it.descriptor == descriptor }
     }
 
+    fun belongsToController(device: InputDevice?): Boolean {
+        if (device == null || device.isVirtual) return false
+        if (supportsGames(device)) return true
+        if (device.vendorId <= 0 || device.productId <= 0) return false
+        return visible().any { candidate ->
+            supportsGames(candidate) &&
+                candidate.vendorId == device.vendorId &&
+                candidate.productId == device.productId
+        }
+    }
+
     fun category(device: InputDevice): String = when {
         hasSource(device.sources, InputDevice.SOURCE_JOYSTICK) -> "Joystick"
         hasSource(device.sources, InputDevice.SOURCE_GAMEPAD) -> "Gamepad"
