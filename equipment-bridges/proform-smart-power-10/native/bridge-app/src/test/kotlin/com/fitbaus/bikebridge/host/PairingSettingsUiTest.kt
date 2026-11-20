@@ -32,7 +32,7 @@ class PairingSettingsUiTest {
     }
 
     @Test
-    fun controllerTabListsDevicesCapturesDiagnosticsAndPreservesNavigation() {
+    fun controllerTabCapturesAllDeviceEventsAndScopesMappingsToGames() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val strings = File("src/main/res/values/strings.xml").readText()
@@ -45,13 +45,16 @@ class PairingSettingsUiTest {
         assertTrue(source.contains("override fun dispatchKeyEvent(event: KeyEvent)"))
         assertTrue(source.contains("override fun dispatchGenericMotionEvent(event: MotionEvent)"))
         assertTrue(source.contains("return super.dispatchKeyEvent(event)"))
-        assertTrue(source.contains("ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)"))
-        assertTrue(source.contains("if (ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)) return true"))
+        assertTrue(source.contains("ControllerDevices.belongsToController(device)"))
+        assertTrue(source.contains("private fun refreshGameMappings()"))
+        assertTrue(source.contains("controllerMappingPanel.visibility = if (mode == null) View.GONE else View.VISIBLE"))
+        assertTrue(source.contains("gameContext = GameControlCatalog.fromContext(intent.getStringExtra(CONTROLLER_GAME_CONTEXT))"))
+        assertTrue(source.contains("gameBindings.assign(mode, selected.descriptor, pending, event.keyCode)"))
         assertTrue(source.contains("return super.dispatchGenericMotionEvent(event)"))
         assertTrue(source.contains("uiHandler.removeCallbacks(controllerPoll)"))
         assertTrue(activity.contains("modeController.mode == ArcadeMode.Bricks"))
-        assertTrue(activity.contains("gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks)"))
-        assertTrue(activity.contains("modeController.isActive && modeController.mode.isGame"))
+        assertTrue(activity.contains("mappedAction = action"))
+        assertTrue(activity.contains("if (modeController.mode.isGame) intent.putExtra(CONTROLLER_GAME_CONTEXT, modeController.mode.name)"))
         assertTrue(activity.contains("gameController.handleMotion(event)"))
         assertTrue(activity.contains("if (handInput.isTouching()) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)"))
     }
