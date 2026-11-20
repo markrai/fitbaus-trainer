@@ -39,6 +39,21 @@ class BricksInputSourceIntegrationTest {
     }
 
     @Test
+    fun uncalibratedHidDoesNotDetachAndroidControllerAndSettingsStayUsable() {
+        val main = host.substringAfter("private val controllerOwnership by lazy")
+            .substringBefore("private val gameBindings")
+        assertTrue(main.contains("canClaim = {"))
+        assertTrue(main.contains("exclusiveHid.hasCalibratedBricksInput()"))
+        assertTrue(main.contains("modeController.mode == ArcadeMode.Bricks"))
+        val settings = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
+        assertTrue(settings.contains("canClaim = { rawLearningRequested }"))
+        assertTrue(settings.contains("rawLearningRequested = true"))
+        assertTrue(settings.contains("controllerOwnership.refreshNow()"))
+        assertTrue(settings.contains("private fun prepareRawNeutral()"))
+        assertTrue(settings.contains(".putString(ExclusiveHidPolicy.PREF_KEY, candidate.key)"))
+    }
+
+    @Test
     fun webcamSelectionBlocksBricksControllerActionsButStillConsumesDeviceEvents() {
         val keys = host.substringAfter("override fun dispatchKeyEvent(event: KeyEvent)")
             .substringBefore("private fun performMappedGameAction")
