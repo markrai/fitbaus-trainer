@@ -87,8 +87,11 @@ internal data class HidBinding(val index: Int, val mask: Int, val pressed: Int) 
             val changed = neutral.indices.filter { neutral[it] != pressed[it] }
             if (changed.size != 1) return null
             val index = changed[0]
-            val mask = (neutral[index].toInt() xor pressed[index].toInt()) and 255
-            return if (mask == 0) null else HidBinding(index, mask, pressed[index].toInt() and mask)
+            val old = neutral[index].toInt() and 255
+            val next = pressed[index].toInt() and 255
+            val hat = (old and 15) in 8..15 && (next and 15) in 0..7
+            val mask = if (hat) 15 else old xor next
+            return if (mask == 0) null else HidBinding(index, mask, next and mask)
         }
     }
 }
