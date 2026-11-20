@@ -35,6 +35,21 @@ class BricksInputSourceIntegrationTest {
     }
 
     @Test
+    fun webcamSelectionBlocksBricksControllerActionsButStillConsumesDeviceEvents() {
+        val keys = host.substringAfter("override fun dispatchKeyEvent(event: KeyEvent)")
+            .substringBefore("private fun performMappedGameAction")
+        assertTrue(keys.contains("val bricksControllerEnabled = mode != ArcadeMode.Bricks ||"))
+        assertTrue(keys.contains("arcadeContent.playground.inputSource == BricksInputSource.Controller"))
+        assertTrue(keys.contains("matches && bricksControllerEnabled"))
+        assertTrue(keys.contains("steerBricks = modeController.isActive && bricksControllerEnabled"))
+        assertTrue(keys.contains("return true"))
+        val motion = host.substringAfter("override fun dispatchGenericMotionEvent(event: MotionEvent)")
+            .substringBefore("override fun dispatchTouchEvent")
+        assertTrue(motion.contains("arcadeContent.playground.inputSource == BricksInputSource.Controller"))
+        assertTrue(host.contains("arcadeContent.playground.onInputSourceChanged = { gameController.resetTransient() }"))
+    }
+
+    @Test
     fun otherGameRenderersStillUseTheirExistingCameraInput() {
         val tick = host.substringAfter("private fun arcadeTick()")
             .substringBefore("private fun arcadeDiagnosticsText")
