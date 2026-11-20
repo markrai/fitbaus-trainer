@@ -357,10 +357,11 @@ class PairingActivity : Activity() {
                 }
             }
         }
+        val leftText = if (left == null) "not learned" else if (raw != null && left.matches(raw.bytes)) "PRESSED" else "released"
+        val rightText = if (right == null) "not learned" else if (raw != null && right.matches(raw.bytes)) "PRESSED" else "released"
         hidReports.text = "USB HID: " + (selected?.label ?: "none selected") +
             "\n" + (raw?.let { "Packet #" + it.sequence + ": " + it.hex() } ?: "No raw reports received") +
-            "\nLeft: " + if (left != null) (if (raw != null && left.matches(raw.bytes)) "PRESSED" else "released") else "not learned" +
-            " | Right: " + if (right != null) (if (raw != null && right.matches(raw.bytes)) "PRESSED" else "released") else "not learned"
+            "\nLeft: " + leftText + " | Right: " + rightText
     }
 
     private fun chooseController() {
