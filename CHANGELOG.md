@@ -16,6 +16,16 @@ included in this upcoming release.
 
 ### Added
 
+- **USB controller settings and Bricks steering on the Bike Bridge.**
+  A new Controllers tab beside Pairing and External Webcams lists Android
+  input devices, distinguishes D-pad/gamepad/joystick from pointer-only
+  devices, and shows live key/stick diagnostics. Single-controller auto-select
+  and an explicit persistent selection/disable option let D-pad left/right or
+  joystick X steer the Bricks paddle. Existing touch takes priority during a
+  gesture; controller input stops on game exit, host pause and disconnect.
+  Other games' camera and pedaling requirements are unchanged; no raw USB
+  access, bike-command changes or Android system pairing is required.
+
 - **Related-video discovery on the Bike Bridge YouTube screen.** Signed-in
   users can open DISCOVER alongside FROM YOUR CHANNELS to see suggestions
   obtained from a bounded sample of their subscription uploads. The existing
