@@ -170,6 +170,7 @@ internal class ExclusiveHid(
 
     fun status(): String = stateText
     fun latest(): HidReport? = report.get()
+    fun snapshots(): Map<Pair<Int, Int>, HidReport> = synchronized(lock) { reportByEndpoint.toMap() }
     fun isActive(): Boolean = synchronized(lock) { connection != null && active != null }
     fun activeCandidate(): HidCandidate? = synchronized(lock) { active }
 
