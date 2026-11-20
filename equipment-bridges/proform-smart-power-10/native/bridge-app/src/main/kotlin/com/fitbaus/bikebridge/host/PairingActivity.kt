@@ -391,6 +391,7 @@ class PairingActivity : Activity() {
             if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
                 val action = if (event.action == KeyEvent.ACTION_DOWN) "pressed" else "released"
                 controllerEvents.text = device.name + ": " + KeyEvent.keyCodeToString(event.keyCode) + " " + action
+                if (exclusiveHid.isActive() && exclusiveHid.belongsTo(device)) exclusiveHid.noteAndroidEvent()
                 if (ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)) return true
             }
         }
