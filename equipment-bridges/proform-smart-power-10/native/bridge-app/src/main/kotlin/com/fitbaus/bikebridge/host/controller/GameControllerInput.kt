@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import com.fitbaus.arcade.BiketrisControllerInput
 import com.fitbaus.arcade.HandPosition
 import com.fitbaus.arcade.HandSource
 import kotlin.math.abs
@@ -89,6 +90,8 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var axisX = 0f
     private var leftDown = false
     private var rightDown = false
+    private var downDown = false
+    private var rotationPending = false
     private var previousNanos = -1L
 
     fun refresh() {
@@ -106,6 +109,8 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         axisX = 0f
         leftDown = false
         rightDown = false
+        downDown = false
+        rotationPending = false
         previousNanos = -1L
     }
 
@@ -120,12 +125,26 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
             when (mappedAction) {
                 "left" -> leftDown = down
                 "right" -> rightDown = down
+                "down" -> downDown = down
+                "rotate" -> if (down && event.repeatCount == 0) rotationPending = true
             }
         }
         return true
     }
 
     fun steeringHeld(): Boolean = leftDown || rightDown
+
+    fun takeBiketrisInput(): BiketrisControllerInput {
+        val rotate = rotationPending
+        rotationPending = false
+        val axis = ControllerSteering.axis(axisX)
+        return BiketrisControllerInput(
+            left = leftDown || axis < -0.45f,
+            right = rightDown || axis > 0.45f,
+            softDrop = downDown,
+            rotate = rotate,
+        )
+    }
 
     fun handleMotion(event: MotionEvent): Boolean {
         if (!ownsDevice(event.deviceId)) return false
