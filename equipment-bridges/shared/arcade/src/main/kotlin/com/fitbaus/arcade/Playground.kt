@@ -12,6 +12,7 @@ import android.graphics.Typeface
 import android.view.MotionEvent
 import android.view.View
 import java.util.Locale
+import kotlin.math.ceil
 
 internal object ArcadePalette {
     val PLAYFIELD: Int = Color.rgb(10, 10, 24)
@@ -58,8 +59,8 @@ internal object PlaygroundGeometry {
             InputAvailability.TrackerUnavailable -> "CAMERA UNAVAILABLE - TOUCH THE SCREEN TO PLAY"
             else -> if (face) "FACE LOST - LOOK AT THE SCREEN TO RESUME" else "HAND LOST - RAISE YOUR HAND TO RESUME"
         }
-        GamePhase.GameOver -> "GAME OVER  -  SCORE ${game.score}  -  TAP TO PLAY AGAIN"
-        GamePhase.Cleared -> "CLEARED!  SCORE ${game.score}  -  TAP TO PLAY AGAIN"
+        GamePhase.GameOver -> "GAME OVER  -  SCORE ${game.score}"
+        GamePhase.Cleared -> "CLEARED!  SCORE ${game.score}"
         GamePhase.Playing -> null
     }
 
@@ -199,6 +200,7 @@ public class PlaygroundView(context: Context) : View(context) {
     private val hudPaint = text(ArcadePalette.PRIMARY, 18f, Typeface.MONOSPACE, bold = true)
     private val statusPaint = text(ArcadePalette.MUTE, 14f, Typeface.DEFAULT_BOLD, bold = false)
     private val bannerPaint = text(ArcadePalette.PRIMARY, 22f, Typeface.DEFAULT_BOLD, bold = true).apply { textAlign = Paint.Align.CENTER }
+    private val restartPaint = text(ArcadePalette.PRIMARY, 52f, Typeface.DEFAULT_BOLD, bold = true).apply { textAlign = Paint.Align.CENTER }
     private val diagnosticsPaint = text(ArcadePalette.PRIMARY, 11f, Typeface.MONOSPACE, bold = false)
     private val speedPaint = text(ArcadePalette.PRIMARY, 14f, Typeface.MONOSPACE, bold = true).apply { textAlign = Paint.Align.CENTER }
     private val speedSelectedPaint = fill(ArcadePalette.CAMERA_HAND)
@@ -328,6 +330,16 @@ public class PlaygroundView(context: Context) : View(context) {
             val half = bannerPaint.measureText(it) / 2f + 16f * density
             canvas.drawRect(w / 2f - half, baseline - bannerPaint.textSize - 8f * density, w / 2f + half, baseline + 12f * density, overlayPaint)
             canvas.drawText(it, w / 2f, baseline, bannerPaint)
+        }
+        if (game.phase == GamePhase.GameOver || game.phase == GamePhase.Cleared) {
+            val number = ceil(game.restartIn.toDouble()).toInt().coerceIn(1, 3).toString()
+            val baseline = oy + cfg.height * scale * 0.82f
+            val half = restartPaint.measureText(number) / 2f + 24f * density
+            canvas.drawRect(
+                w / 2f - half, baseline - restartPaint.textSize - 8f * density,
+                w / 2f + half, baseline + 10f * density, overlayPaint,
+            )
+            canvas.drawText(number, w / 2f, baseline, restartPaint)
         }
         failureText?.let { text ->
             val top = hud
@@ -528,7 +540,6 @@ public class PlaygroundView(context: Context) : View(context) {
                 target.onTouch(HandMapping.normalize(event.x, width.toFloat()), HandMapping.normalize(event.y, height.toFloat()))
             MotionEvent.ACTION_UP -> {
                 target.onTouchUp()
-                if (game.phase == GamePhase.GameOver || game.phase == GamePhase.Cleared) game.restart()
                 performClick()
             }
             MotionEvent.ACTION_CANCEL -> target.onTouchUp()
