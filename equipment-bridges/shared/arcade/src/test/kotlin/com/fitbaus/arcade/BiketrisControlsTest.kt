@@ -430,29 +430,45 @@ class BiketrisControlsTest {
     }
 
     @Test
-    fun cadenceSetsTheFallSpeedInBothModesWithoutTouchingTheBoard() {
+    fun pedalToSlowIsTheOnlyCadenceRewardAndCanBeDisabled() {
         val r = Rig()
         r.goLive()
         r.bike = true
         r.rpm = 100
         r.run(4000)
-        assertEquals(CadenceMode.PedalToSlow, r.session.cadence.mode, "default mode")
-        assertEquals(0.9f, r.game.effectiveGravitySeconds, 0.02f, "fast pedaling gives more time")
-        val pieces = r.game.piecesSpawned
-        val score = r.game.score
-        val piece = r.game.piece
-        val rotation = r.game.rotation
-        r.session.cadence.mode = CadenceMode.PedalToSpeedUp
+        assertTrue(r.session.cadence.enabled, "Pedal to Slow Mode defaults to on")
+        assertEquals(0.525f, r.game.effectiveGravitySeconds, 0.02f)
+        val previousProgress = r.game.fallProgress
+        val previousPieces = r.game.piecesSpawned
+        r.session.cadence.enabled = false
         r.tick()
-        assertTrue(r.game.effectiveGravitySeconds > 0.8f, "the mode switch eases in, not a jump")
+        assertTrue(r.game.effectiveGravitySeconds > 0.42f, "switching off eases back to normal speed")
         r.run(3000)
-        assertEquals(0.54f, r.game.effectiveGravitySeconds, 0.02f, "the same cadence now speeds the fall up")
-        assertTrue(r.game.piecesSpawned - pieces <= 1)
-        assertEquals(score, r.game.score)
-        if (r.game.piecesSpawned == pieces) {
-            assertEquals(piece, r.game.piece, "switching modes keeps the current piece")
-            assertEquals(rotation, r.game.rotation)
-        }
+        assertEquals(0.42f, r.game.effectiveGravitySeconds, 0.02f, "off ignores RPM")
+        assertTrue(r.game.piecesSpawned >= previousPieces, "mode change never restarts a board")
+        r.session.cadence.enabled = true
+        r.run(3000)
+        assertEquals(0.525f, r.game.effectiveGravitySeconds, 0.02f, "on restores pedal-based slowdown")
+        assertTrue(previousProgress >= 0f)
+    }
+
+    @Test
+    fun singlePedalModePreferenceMigratesAndOverridesLegacyChoice() {
+        assertEquals("Pedal to Slow Mode", PedalToSlowPreference.LABEL)
+        assertTrue(PedalToSlowPreference.enabled(false, false, null))
+        assertTrue(PedalToSlowPreference.enabled(false, false, "slow"))
+        assertFalse(PedalToSlowPreference.enabled(false, true, "speed"))
+        assertTrue(PedalToSlowPreference.enabled(true, true, "speed"))
+        assertFalse(PedalToSlowPreference.enabled(true, false, "slow"))
+        val toggle = CadenceToggleLayout()
+        toggle.set(12f, 20f, 140f, 52f)
+        assertTrue(toggle.visible)
+        assertTrue(toggle.hit(12f, 20f))
+        assertTrue(toggle.hit(151f, 71f))
+        assertFalse(toggle.hit(152f, 50f))
+        assertFalse(toggle.hit(100f, 72f))
+        toggle.set(0f, 0f, 0f, 52f)
+        assertFalse(toggle.visible)
     }
 
     @Test
@@ -464,12 +480,12 @@ class BiketrisControlsTest {
         val y0 = r.game.pieceY
         r.run(4000)
         assertTrue(r.session.cadence.live, "zero rpm is a valid sample")
-        assertEquals(0.54f, r.game.effectiveGravitySeconds, 0.02f, "not pedaling falls faster in PEDAL TO SLOW")
+        assertEquals(0.315f, r.game.effectiveGravitySeconds, 0.02f, "without pedaling the pieces fall faster")
         assertTrue(r.game.pieceY > y0 || r.game.piecesSpawned > 1)
         r.bike = false
         r.run(6000)
         assertEquals(CadenceStatus.NoTelemetry, r.session.cadence.status)
-        assertEquals(0.72f, r.game.effectiveGravitySeconds, 0.02f, "missing telemetry returns to neutral")
+        assertEquals(0.42f, r.game.effectiveGravitySeconds, 0.02f, "missing telemetry returns to normal baseline")
         assertTrue(r.session.live, "telemetry never holds the game")
     }
 

@@ -97,7 +97,7 @@ internal data class BiketrisConfig(
     val hiddenRows: Int = 2,
     val stepSeconds: Float = 1f / 60f,
     val maxFrameSeconds: Float = 0.1f,
-    val baseGravitySeconds: Float = 0.72f,
+    val baseGravitySeconds: Float = 0.42f,
     val gravityFactor: Float = 0.88f,
     val minGravitySeconds: Float = 0.15f,
     val minEffectiveGravitySeconds: Float = 0.1f,
