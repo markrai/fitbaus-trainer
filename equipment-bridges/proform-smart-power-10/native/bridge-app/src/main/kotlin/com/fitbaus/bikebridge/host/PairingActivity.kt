@@ -28,6 +28,7 @@ import com.fitbaus.arcade.ExternalWebcamPreview
 import com.fitbaus.arcade.UvcZoomCapability
 import com.fitbaus.arcade.UvcZoomPreference
 import com.fitbaus.bikebridge.host.controller.ControllerDevices
+import com.fitbaus.bikebridge.host.controller.ControllerGameplayKeys
 import com.fitbaus.bikebridge.host.uvc.UvcCameraHost
 import com.fitbaus.bikebridge.host.uvc.UvcDeviceInfo
 import com.fitbaus.bikebridge.host.uvc.UvcDeviceSelector
@@ -226,6 +227,7 @@ class PairingActivity : Activity() {
             if (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP) {
                 val action = if (event.action == KeyEvent.ACTION_DOWN) "pressed" else "released"
                 controllerEvents.text = device.name + ": " + KeyEvent.keyCodeToString(event.keyCode) + " " + action
+                if (ControllerGameplayKeys.trapsSettingsNavigation(event.keyCode)) return true
             }
         }
         return super.dispatchKeyEvent(event)
