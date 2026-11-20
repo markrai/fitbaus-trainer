@@ -392,7 +392,7 @@ class NativeBridgeActivity : Activity() {
         }
         if (modeController.mode == ArcadeMode.Biketris) {
             gameController.refresh()
-            val steering = if (gameController.steeringHeld()) gameController.sample(now).x else null
+            val steering = if (gameController.steeringHeld()) gameController.sample(now)?.x else null
             arcadeContent.biketris.setControllerSteering(steering)
             arcadeContent.biketris.render(
                 handInput.latest(now),
