@@ -53,12 +53,21 @@ internal object PlaygroundGeometry {
         HandSource.Lost -> ArcadePalette.LOST_HAND
     }
 
-    fun banner(game: BreakoutGame, availability: InputAvailability, face: Boolean = false): String? = when (game.phase) {
-        GamePhase.Serving -> if (availability == InputAvailability.Present) "GET READY" else idleBanner(availability, face)
-        GamePhase.Paused -> when (game.pauseReason) {
-            InputAvailability.TrackerUnavailable -> "CAMERA UNAVAILABLE - TOUCH THE SCREEN TO PLAY"
+    fun banner(
+        game: BreakoutGame,
+        availability: InputAvailability,
+        face: Boolean = false,
+        controllerUnavailable: Boolean = false,
+    ): String? = when (game.phase) {
+        GamePhase.Serving -> if (availability == InputAvailability.Present) "GET READY"
+            else if (controllerUnavailable) "CONTROLLER INPUT UNAVAILABLE"
+            else idleBanner(availability, face)
+        GamePhase.Paused -> when {
+            controllerUnavailable -> "CONTROLLER INPUT UNAVAILABLE"
+            game.pauseReason == InputAvailability.TrackerUnavailable -> "CAMERA UNAVAILABLE - TOUCH THE SCREEN TO PLAY"
             else -> if (face) "FACE LOST - LOOK AT THE SCREEN TO RESUME" else "HAND LOST - RAISE YOUR HAND TO RESUME"
         }
+
         GamePhase.GameOver -> "GAME OVER  -  SCORE ${game.score}"
         GamePhase.Cleared -> "CLEARED!  SCORE ${game.score}"
         GamePhase.Playing -> null
@@ -325,7 +334,13 @@ public class PlaygroundView(context: Context) : View(context) {
             canvas.drawRect(bx - r, by - r, bx + r, by + r, ballPaint)
         }
         drawHud(canvas, w, hud)
-        PlaygroundGeometry.banner(game, gameInput.availability, faceControl)?.let {
+        PlaygroundGeometry.banner(
+            game,
+            gameInput.availability,
+            faceControl,
+            controllerUnavailable = inputSource == BricksInputSource.Controller &&
+                statusText == ArcadeStatus.ControllerUnavailable.label,
+        )?.let {
             val baseline = oy + cfg.height * scale * 0.62f
             val half = bannerPaint.measureText(it) / 2f + 16f * density
             canvas.drawRect(w / 2f - half, baseline - bannerPaint.textSize - 8f * density, w / 2f + half, baseline + 12f * density, overlayPaint)

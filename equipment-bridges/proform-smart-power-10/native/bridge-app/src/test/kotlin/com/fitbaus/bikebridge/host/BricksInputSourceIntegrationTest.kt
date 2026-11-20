@@ -25,13 +25,32 @@ class BricksInputSourceIntegrationTest {
         val bricks = host.substringAfter("private fun arcadeTick()")
             .substringBefore("private fun arcadeDiagnosticsText")
         assertTrue(bricks.contains("arcadeContent.playground.controllerAvailable = gameController.hasController() || exclusiveHid.isActive()"))
-        assertTrue(bricks.contains("arcadeContent.playground.inputSource != BricksInputSource.Controller"))
-        assertTrue(bricks.contains("if (handInput.isTouching()"))
+        assertTrue(bricks.contains("val source = arcadeContent.playground.inputSource"))
+        assertTrue(bricks.contains("val touch = if (handInput.isTouching()) handInput.latest(now) else null"))
+        assertTrue(bricks.contains("if (source == BricksInputSource.Controller && touch == null)"))
         assertTrue(bricks.contains("exclusiveHid.sampleBricks(now)"))
         assertTrue(bricks.contains("gameController.sample(now)"))
-        assertTrue(bricks.contains("val position = controllerPosition ?: handInput.latest(now)"))
-        assertTrue(bricks.contains("ArcadeStatusResolver.resolve("))
+        assertTrue(bricks.contains("val frame = BricksInputRouting.resolve("))
+        assertTrue(bricks.contains("camera = { handInput.latest(now) }"))
+        assertTrue(bricks.contains("cameraStatus = {"))
+        assertTrue(bricks.contains("arcadeContent.playground.render(frame.position, frame.status"))
+        assertFalse(bricks.contains("controllerPosition ?: handInput.latest(now)"))
         assertTrue(gamepad.contains("fun hasController(): Boolean = activeDeviceId >= 0"))
+    }
+
+    @Test
+    fun uncalibratedHidDoesNotDetachAndroidControllerAndSettingsStayUsable() {
+        val main = host.substringAfter("private val controllerOwnership by lazy")
+            .substringBefore("private val gameBindings")
+        assertTrue(main.contains("canClaim = {"))
+        assertTrue(main.contains("exclusiveHid.hasCalibratedBricksInput()"))
+        assertTrue(main.contains("modeController.mode == ArcadeMode.Bricks"))
+        val settings = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
+        assertTrue(settings.contains("canClaim = { rawLearningRequested }"))
+        assertTrue(settings.contains("rawLearningRequested = true"))
+        assertTrue(settings.contains("controllerOwnership.refreshNow()"))
+        assertTrue(settings.contains("private fun prepareRawNeutral()"))
+        assertTrue(settings.contains(".putString(ExclusiveHidPolicy.PREF_KEY, candidate.key)"))
     }
 
     @Test

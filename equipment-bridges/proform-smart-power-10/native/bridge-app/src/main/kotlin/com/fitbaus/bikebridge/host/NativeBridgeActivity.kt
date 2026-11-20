@@ -85,7 +85,17 @@ class NativeBridgeActivity : Activity() {
     private val modeTabs = HashMap<ArcadeMode, TextView>()
     private val handInput = HandPositionInput()
     private val exclusiveHid by lazy { ExclusiveHid(this) }
-    private val controllerOwnership by lazy { AutoControllerOwnership(this, exclusiveHid) }
+    private val controllerOwnership by lazy {
+        AutoControllerOwnership(
+            this,
+            exclusiveHid,
+            canClaim = {
+                modeController.mode == ArcadeMode.Bricks &&
+                    arcadeContent.playground.inputSource == BricksInputSource.Controller &&
+                    exclusiveHid.hasCalibratedBricksInput()
+            },
+        )
+    }
     private val gameBindings by lazy {
         GameControlBindings(getSharedPreferences(ControllerDevices.PREFS, Context.MODE_PRIVATE))
     }
@@ -416,16 +426,28 @@ class NativeBridgeActivity : Activity() {
         }
         gameController.refresh()
         arcadeContent.playground.controllerAvailable = gameController.hasController() || exclusiveHid.isActive()
-        val controllerPosition = if (handInput.isTouching() ||
-            arcadeContent.playground.inputSource != BricksInputSource.Controller
-        ) null else if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)
-        val position = controllerPosition ?: handInput.latest(now)
-        val status = if (controllerPosition != null) com.fitbaus.arcade.ArcadeStatus.ControllerReady else ArcadeStatusResolver.resolve(
-            cameraSession.state(),
-            handInput.cameraTracking(now),
-            handInput.hasEverTracked(),
+        val source = arcadeContent.playground.inputSource
+        val touch = if (handInput.isTouching()) handInput.latest(now) else null
+        val controllerPosition = if (source == BricksInputSource.Controller && touch == null) {
+            if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)
+        } else null
+        val frame = BricksInputRouting.resolve(
+            source = source,
+            nowNanos = now,
+            touch = touch,
+            controller = controllerPosition,
+            camera = { handInput.latest(now) },
+            cameraStatus = {
+                ArcadeStatusResolver.resolve(
+                    cameraSession.state(),
+                    handInput.cameraTracking(now),
+                    handInput.hasEverTracked(),
+                )
+            },
         )
-        arcadeContent.playground.render(position, status, arcadeDiagnosticsText(now, info), info)
+        arcadeContent.playground.render(frame.position, frame.status, arcadeDiagnosticsText(now, info),
+            if (source == BricksInputSource.Webcam) info else null,
+        )
     }
 
     private fun arcadeDiagnosticsText(now: Long, info: ArcadeCameraInfo?): String {

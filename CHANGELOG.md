@@ -14,6 +14,16 @@ FitBaus Full 2.1.3 (`versionCode 20103`) is in development on `main`.
 Full 2.1.1 was prepared but not published; its YouTube improvements remain
 included in this upcoming release.
 
+### Fixed
+
+- **Bricks controller steering regression.** Controller mode now strictly
+  excludes face-tracking input from paddle steering; it reports unavailable
+  controller input instead of silently falling back to the webcam.
+  Automatic exclusive USB HID claiming waits until left/right raw mappings
+  are calibrated to the active controller and report endpoints. Uncalibrated
+  controllers continue to steer through Android's intercepted gamepad
+  events instead of losing all input when their kernel driver is detached.
+
 ### Added
 
 - **Hands-free Bricks restart.** After the last life or a cleared board,
