@@ -219,7 +219,9 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (modeController.mode == ArcadeMode.Bricks && modeController.isActive && gameController.handleKey(event)) return true
+        if (modeController.isActive && modeController.mode.isGame &&
+            gameController.handleKey(event, steerBricks = modeController.mode == ArcadeMode.Bricks)
+        ) return true
         return super.dispatchKeyEvent(event)
     }
 
