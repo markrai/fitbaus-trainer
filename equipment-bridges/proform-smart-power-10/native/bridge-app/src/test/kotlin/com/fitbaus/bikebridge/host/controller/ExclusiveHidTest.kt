@@ -61,6 +61,28 @@ class ExclusiveHidTest {
     }
 
     @Test
+    fun rawHidBindingsStayWithTheSourceInterfaceAndEndpoint() {
+        val neutral = HidReport(byteArrayOf(0x08, 0x00), 1L, 0, 1)
+        val pressed = HidReport(byteArrayOf(0x06, 0x00), 2L, 0, 1)
+        val anotherInterface = HidReport(byteArrayOf(0x06, 0x00), 3L, 1, 1)
+        val anotherEndpoint = HidReport(byteArrayOf(0x06, 0x00), 4L, 0, 2)
+        val binding = HidBinding.learn(neutral, pressed)!!
+        assertEquals(0, binding.interfaceIndex)
+        assertEquals(1, binding.endpointIndex)
+        assertTrue(binding.matches(pressed))
+        assertFalse(binding.matches(neutral))
+        assertFalse(binding.matches(anotherInterface))
+        assertFalse(binding.matches(anotherEndpoint))
+        assertNull(HidBinding.learn(neutral, anotherInterface))
+        assertNull(HidBinding.learn(neutral, anotherEndpoint))
+        assertEquals(binding, HidBinding.decode(binding.encode()))
+        assertNull(HidBinding.decode("0:15:6:256:1"))
+        assertNull(HidBinding.decode("0:15:6:0:256"))
+        assertNull(HidBinding.decode("0:15:6:0"))
+        assertEquals(HidBinding(0, 15, 6), HidBinding.decode("0:15:6"))
+    }
+
+    @Test
     fun claimLifecycleIsScopedAndDoesNotModifyBikeUsbStack() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/controller/ExclusiveHid.kt").readText()
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
