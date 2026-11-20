@@ -102,6 +102,7 @@ class BiketrisControllerTest {
         val sample = HandPosition(0.5f, 0.5f, 0f, initialNanos, HandSource.Lost)
         val originalGravity = game.effectiveGravitySeconds
         val originalScale = game.gravityScale
+        val startingY = game.pieceY
         var now = initialNanos
         repeat(12) {
             now += 33_000_000L
@@ -110,7 +111,7 @@ class BiketrisControllerTest {
         }
         assertTrue(game.softDropActive)
         assertTrue(game.effectiveGravitySeconds < originalGravity)
-        assertTrue(game.pieceY > game.config.hiddenRows - 2)
+        assertTrue(game.pieceY > startingY, "holding down moves the piece toward the floor")
         assertEquals(originalScale, game.gravityScale)
         now += 33_000_000L
         session.update(sample, CameraState.Off, Float.NaN, null, now,
