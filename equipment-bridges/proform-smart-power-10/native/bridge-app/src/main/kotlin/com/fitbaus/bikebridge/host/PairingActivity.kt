@@ -40,6 +40,7 @@ import com.fitbaus.bikebridge.host.controller.GameControlBindings
 import com.fitbaus.bikebridge.host.arcade.ArcadeMode
 import com.fitbaus.bikebridge.host.controller.ControllerGameplayKeys
 import com.fitbaus.bikebridge.host.controller.ExclusiveHid
+import com.fitbaus.bikebridge.host.controller.AutoControllerOwnership
 import com.fitbaus.bikebridge.host.controller.ExclusiveHidPolicy
 import com.fitbaus.bikebridge.host.controller.HidBinding
 import com.fitbaus.bikebridge.host.controller.HidCandidate
@@ -79,7 +80,7 @@ class PairingActivity : Activity() {
     private lateinit var hidStatus: TextView
     private lateinit var hidReports: TextView
     private val exclusiveHid by lazy { ExclusiveHid(this) }
-    private var pendingHidName: String? = null
+    private val controllerOwnership by lazy { AutoControllerOwnership(this, exclusiveHid) }
     private var learnSide: String? = null
     private var learnNeutral: HidReport? = null
     private var learnSignature: String? = null
@@ -110,22 +111,6 @@ class PairingActivity : Activity() {
             uiHandler.postDelayed(this, 250L)
         }
     }
-    private val hidPermissionReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: android.content.Context, intent: Intent) {
-            if (intent.action != ACTION_HID_PERMISSION) return
-            @Suppress("DEPRECATION")
-            val device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE) as UsbDevice? ?: return
-            if (device.deviceName != pendingHidName) return
-            pendingHidName = null
-            if (!uiAlive(SettingsTab.Controllers)) return
-            val manager = getSystemService(USB_SERVICE) as UsbManager
-            if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false) && manager.hasPermission(device)) {
-                connectExclusiveHid()
-            } else {
-                hidStatus.text = "USB permission denied; Android input remains active"
-            }
-        }
-    }
     private var pendingZoomRequestId: Int = -1
     private var uiBitmap: Bitmap? = null
     private var uiPixels: IntArray? = null
@@ -149,8 +134,6 @@ class PairingActivity : Activity() {
         super.onCreate(savedInstanceState)
         gameContext = GameControlCatalog.fromContext(intent.getStringExtra(CONTROLLER_GAME_CONTEXT))
         UvcProcess.acquire(this, this).addDetachListener(detachListener)
-        if (Build.VERSION.SDK_INT >= 33) registerReceiver(hidPermissionReceiver, IntentFilter(ACTION_HID_PERMISSION), android.content.Context.RECEIVER_NOT_EXPORTED)
-        else registerReceiver(hidPermissionReceiver, IntentFilter(ACTION_HID_PERMISSION))
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(buildUi())
         showTab(if (gameContext != null) SettingsTab.Controllers else SettingsTab.Pairing)
@@ -158,21 +141,21 @@ class PairingActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        controllerOwnership.onHostResume()
         bindPairing()
         if (activeTab == SettingsTab.Webcams) refreshWebcams(startPreview = true)
         if (activeTab == SettingsTab.Controllers) startControllerPolling()
     }
 
     override fun onPause() {
-        exclusiveHid.stop()
+        controllerOwnership.onHostPause()
         uiHandler.removeCallbacks(controllerPoll)
         stopPreview()
         super.onPause()
     }
 
     override fun onDestroy() {
-        exclusiveHid.stop()
-        unregisterReceiver(hidPermissionReceiver)
+        controllerOwnership.onHostPause()
         destroyed = true
         uiHandler.removeCallbacks(controllerPoll)
         stopPreview()
@@ -213,10 +196,7 @@ class PairingActivity : Activity() {
         styleTab(webcamTab, tab == SettingsTab.Webcams)
         styleTab(controllerTab, tab == SettingsTab.Controllers)
         uiHandler.removeCallbacks(controllerPoll)
-        if (tab != SettingsTab.Controllers) {
-            exclusiveHid.stop()
-            awaitingGameButton = null
-        }
+        if (tab != SettingsTab.Controllers) awaitingGameButton = null
         if (tab == SettingsTab.Webcams) {
             refreshWebcams(startPreview = true)
         } else {
@@ -260,83 +240,10 @@ class PairingActivity : Activity() {
 
     private fun controllerPrefs() = getSharedPreferences(ControllerDevices.PREFS, MODE_PRIVATE)
 
-    private fun chooseHidCandidate() {
-        val candidates = exclusiveHid.candidates()
-        if (candidates.isEmpty()) {
-            hidStatus.text = "No eligible single-interface USB HID controller found"
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Choose raw USB HID interface")
-            .setItems(candidates.map { it.label }.toTypedArray()) { _, which ->
-                exclusiveHid.stop()
-                learnSide = null
-                val selected = candidates[which]
-                controllerPrefs().edit()
-                    .putString(ExclusiveHidPolicy.PREF_KEY, selected.key)
-                    .putBoolean(ExclusiveHidPolicy.PREF_ENABLED, false)
-                    .remove(ExclusiveHidPolicy.PREF_LEFT)
-                    .remove(ExclusiveHidPolicy.PREF_RIGHT)
-                    .apply()
-                hidStatus.text = "Selected " + selected.label + ". Grant USB access to test."
-                refreshExclusiveHid()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun requestExclusiveHid() {
-        val selected = exclusiveHid.selected()
-        if (selected == null) {
-            hidStatus.text = "Choose a uniquely identifiable USB HID interface first"
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Temporarily take controller input?")
-            .setMessage("Experimental: FitBaus will request exclusive USB HID access and may detach Android's controller driver. Keep the touchscreen available to tap Release or Done. This does not guarantee Home/system keys are blocked. Bike USB, webcams, and composite devices are excluded.")
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton("Claim HID") { _, _ ->
-                if (exclusiveHid.isPermitted(selected)) {
-                    connectExclusiveHid()
-                } else {
-                    val manager = getSystemService(USB_SERVICE) as UsbManager
-                    val device = manager.deviceList[selected.deviceName]
-                    if (device == null) {
-                        hidStatus.text = "Controller disconnected"
-                    } else {
-                        pendingHidName = device.deviceName
-                        val intent = Intent(ACTION_HID_PERMISSION).setPackage(packageName)
-                        val flags = if (Build.VERSION.SDK_INT >= 31) {
-                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-                        } else PendingIntent.FLAG_UPDATE_CURRENT
-                        val pi = PendingIntent.getBroadcast(this, 7163, intent, flags)
-                        manager.requestPermission(device, pi)
-                        hidStatus.text = "Awaiting USB permission"
-                    }
-                }
-            }
-            .show()
-    }
-
-    private fun connectExclusiveHid() {
-        val started = exclusiveHid.start()
-        controllerPrefs().edit().putBoolean(ExclusiveHidPolicy.PREF_ENABLED, started).apply()
-        hidStatus.text = exclusiveHid.status()
-        refreshExclusiveHid()
-    }
-
-    private fun releaseExclusiveHid() {
-        exclusiveHid.stop()
-        pendingHidName = null
-        learnSide = null
-        controllerPrefs().edit().putBoolean(ExclusiveHidPolicy.PREF_ENABLED, false).apply()
-        refreshExclusiveHid()
-    }
-
     private fun beginHidLearn(side: String) {
         val baseline = exclusiveHid.latest()
         if (!exclusiveHid.isActive() || baseline == null) {
-            hidStatus.text = "Claim the controller and wait for neutral raw reports first"
+            hidStatus.text = "Waiting for an automatically claimed controller and neutral HID reports"
             return
         }
         learnNeutral = baseline
@@ -351,11 +258,10 @@ class PairingActivity : Activity() {
         val selected = exclusiveHid.selected()
         val raw = exclusiveHid.latest()
         val prefs = controllerPrefs()
-        val enabled = prefs.getBoolean(ExclusiveHidPolicy.PREF_ENABLED, false)
         val left = HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_LEFT, null))
         val right = HidBinding.decode(prefs.getString(ExclusiveHidPolicy.PREF_RIGHT, null))
         if (learnSide == null) {
-            hidStatus.text = exclusiveHid.status() + if (enabled) " | Armed for games" else " | Not armed"
+            hidStatus.text = controllerOwnership.status()
         } else if (raw != null && raw.sequence != learnNeutral?.sequence) {
             val binding = HidBinding.learn(learnNeutral?.bytes ?: byteArrayOf(), raw.bytes)
             if (binding != null) {
@@ -368,7 +274,7 @@ class PairingActivity : Activity() {
                     val key = if (side == "LEFT") ExclusiveHidPolicy.PREF_LEFT else ExclusiveHidPolicy.PREF_RIGHT
                     prefs.edit().putString(key, binding.encode()).apply()
                     learnSide = null
-                    hidStatus.text = side + " learned from raw HID. Release and test it."
+                    hidStatus.text = side + " learned from raw HID. Release the button and test it."
                 }
             }
         }
@@ -888,30 +794,15 @@ class PairingActivity : Activity() {
         controllerMappingPanel.visibility = View.GONE
         root.addView(controllerMappingPanel, marginBottom(dp(16)))
 
-        val rawLabel = label("EXCLUSIVE USB HID (EXPERIMENTAL)", 11f, MUTE)
+        val rawLabel = label("USB HID CONTROLLER (AUTOMATIC)", 11f, MUTE)
         rawLabel.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
         root.addView(rawLabel, marginBottom(dp(6)))
         val warning = label(
-            "Opt-in only. Claims a single non-composite HID interface; never touches the bike controller or webcams. System Home buttons may remain Android-owned. Touchscreen Done/Release restores ordinary input.",
+            "Connected gamepads are claimed automatically when Android USB permission is granted. The Android permission dialog may appear once for a new attachment. Keyboard, bike control and webcams are not claimed. System-level keys may remain Android-owned. The interface is released when FitBaus leaves the foreground.",
             12f,
             MUTE,
         )
         root.addView(warning, marginBottom(dp(8)))
-        val actions = LinearLayout(this)
-        actions.orientation = LinearLayout.HORIZONTAL
-        val chooseUsb = Button(this)
-        chooseUsb.text = "Choose USB HID"
-        chooseUsb.setOnClickListener { chooseHidCandidate() }
-        actions.addView(chooseUsb)
-        val claim = Button(this)
-        claim.text = "Claim input"
-        claim.setOnClickListener { requestExclusiveHid() }
-        actions.addView(claim)
-        val release = Button(this)
-        release.text = "Release"
-        release.setOnClickListener { releaseExclusiveHid() }
-        actions.addView(release)
-        root.addView(actions, marginBottom(dp(8)))
 
         hidStatus = label("Released", 12f, Color.WHITE)
         root.addView(hidStatus, marginBottom(dp(6)))
@@ -1039,7 +930,6 @@ class PairingActivity : Activity() {
     private fun dp(value: Int): Int = BridgeUiStateMapper.dp(value, resources.displayMetrics.density)
 
     private companion object {
-        const val ACTION_HID_PERMISSION = "com.fitbaus.bikebridge.HID_USB_PERMISSION"
         val MUTE: Int = Color.rgb(140, 140, 140)
         val DIVIDER: Int = Color.rgb(48, 48, 48)
     }
