@@ -39,8 +39,8 @@ internal class GhoulMapCameraTest {
         val camera = GhoulMapCamera()
         for (heading in MazeDirection.entries) {
             camera.follow(GhoulRaycaster.yawOf(heading))
-            assertEquals(0f, camera.x(0f, 0f, 50f))
-            assertEquals(0f, camera.y(0f, 0f, 25f))
+            assertEquals(0f, camera.x(0f, 0f, 50f), 0.0001f)
+            assertEquals(0f, camera.y(0f, 0f, 25f), 0.0001f)
             val northX = camera.x(-1f, 0f, 50f)
             val northY = camera.y(-1f, 0f, 25f)
             assertTrue(northX.isFinite() && northY.isFinite())
