@@ -16,6 +16,13 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Arcade game lifecycle on tab switches.** Leaving a game for Dashboard, YouTube,
+  or another game now ends the outgoing session and hides every inactive game
+  view. Ghoul Run's GPU surface respects ancestor visibility and releases its
+  EGL context while paused, avoiding ghost frames over YouTube and conserving
+  GPU memory. Temporary Android activity pauses still suspend rather than
+  restart games; YouTube's floating player and the Bike Bridge remain unchanged.
+
 - **Bike console Settings brightness.** The gear-icon Settings activity now applies
   the dashboard's persisted window brightness before its first frame and again on
   resume, so switching screens no longer falls back to a dimmer system level.

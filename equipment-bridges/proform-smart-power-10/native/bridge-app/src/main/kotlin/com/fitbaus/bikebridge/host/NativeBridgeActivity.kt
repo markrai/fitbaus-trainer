@@ -516,7 +516,7 @@ class NativeBridgeActivity : Activity() {
         dashboardContent.visibility = if (mode == ArcadeMode.Dashboard) View.VISIBLE else View.GONE
         arcadeContent.visibility = if (mode.isGame) View.VISIBLE else View.GONE
         youtubeContent.visibility = if (mode == ArcadeMode.YouTube) View.VISIBLE else View.GONE
-        if (mode.isGame) arcadeContent.show(mode)
+        arcadeContent.show(mode)
         for ((tabMode, tab) in modeTabs) styleTab(tab, tabMode == mode)
     }
 

@@ -424,6 +424,63 @@ class ArcadeModeTest {
     }
 
     @Test
+    fun leavingAnyGameResetsOnlyThatGameAndHidesEveryArcadeSurface() {
+        val host = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val arcade = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ExerciseHud.kt").readText()
+        val showContent = host.substringAfter("private fun showContent(mode: ArcadeMode) {")
+            .substringBefore("private fun styleTab(")
+        assertTrue(showContent.contains("arcadeContent.show(mode)"))
+        assertFalse(showContent.contains("if (mode.isGame) arcadeContent.show(mode)"))
+        assertTrue(arcade.contains("show(ArcadeMode.Dashboard)"))
+        val show = arcade.substringAfter("fun show(game: ArcadeMode) {")
+        assertTrue(show.contains("if (previousMode.isGame && previousMode != game)"))
+        assertTrue(show.contains("previousMode = game"))
+        for ((mode, view) in listOf(
+            ArcadeMode.Bricks to "playground",
+            ArcadeMode.Math to "math",
+            ArcadeMode.Flak to "flak",
+            ArcadeMode.TrailRide to "trail",
+            ArcadeMode.GhoulRun to "ghoul",
+            ArcadeMode.Biketris to "biketris",
+        )) {
+            assertTrue(show.contains("ArcadeMode.${mode.name} -> ${view}.restartGame()"), mode.name)
+            assertTrue(show.contains("${view}.visibility = if (game == ArcadeMode.${mode.name}) VISIBLE else GONE"), mode.name)
+        }
+        assertFalse(show.contains("stopService"))
+    }
+
+    @Test
+    fun ghoulRunGpuSuspendsWithHiddenAncestorsAndReleasesContextOnPause() {
+        val ghoul = File("../../../shared/arcade/src/main/kotlin/com/fitbaus/arcade/GhoulRunView.kt").readText()
+        assertTrue(ghoul.contains("surface.preserveEGLContextOnPause = false"))
+        val lifecycle = ghoul.substringAfter("private fun updateGlLifecycle() {")
+            .substringBefore("private fun onGlFailure(")
+        assertTrue(lifecycle.contains("glAttached && !glHostPaused && isShown"))
+        assertTrue(lifecycle.contains("surface.onPause()"))
+        assertTrue(lifecycle.contains("surface.onResume()"))
+        val host = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(host.contains("arcadeContent.ghoul.pause()"))
+    }
+
+    @Test
+    fun leavingGhoulRunForYouTubeStopsItsPipelineBeforeMediaStarts() {
+        val hooks = RecordingHooks()
+        val controller = ArcadeModeController(hooks)
+        controller.onHostResume()
+        controller.select(ArcadeMode.GhoulRun)
+        controller.select(ArcadeMode.YouTube)
+        assertEquals(
+            listOf(
+                "show:GhoulRun", "activate:GhoulRun", "deactivate:ExitArcade",
+                "show:YouTube", "media:YouTube",
+            ),
+            hooks.events(),
+        )
+        assertFalse(controller.isActive)
+        assertTrue(controller.isMediaActive)
+    }
+
+    @Test
     fun activityModeSwitchDoesNotTouchBridgeService() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         assertEquals(3, Regex("""startBridgeService\(\)""").findAll(source).count(), "definition + onCreate + onNewIntent only")
