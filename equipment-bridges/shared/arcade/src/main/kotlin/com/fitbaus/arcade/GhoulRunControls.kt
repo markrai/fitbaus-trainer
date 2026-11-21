@@ -11,6 +11,8 @@ public data class GhoulRunControllerInput(
     val rightPressed: Boolean = false,
     val stickX: Float = 0f,
     val reversePressed: Boolean = false,
+    val leftPressCount: Int = if (leftPressed) 1 else 0,
+    val rightPressCount: Int = if (rightPressed) 1 else 0,
 )
 
 internal object GhoulRunInputSelection {
@@ -286,16 +288,19 @@ internal class GhoulRunSession(
             previousStickLane = stickLanes.update(controller?.stickX ?: 0f)
         } else if (useController) {
             val stickLane = stickLanes.update(controller.stickX.coerceIn(-1f, 1f))
+            val leftPulses = controller.leftPressCount.coerceIn(0, 2)
+            val rightPulses = controller.rightPressCount.coerceIn(0, 2)
             val buttonLane = when {
-                controller.leftPressed && !controller.rightPressed -> GhoulLane.Left
-                controller.rightPressed && !controller.leftPressed -> GhoulLane.Right
+                leftPulses > 0 && rightPulses == 0 -> GhoulLane.Left
+                rightPulses > 0 && leftPulses == 0 -> GhoulLane.Right
                 else -> GhoulLane.Center
             }
             if (stickLane != previousStickLane && stickLane != GhoulLane.Center && buttonLane == GhoulLane.Center) {
                 controllerTurns.offer(stickLane)
             }
             previousStickLane = stickLane
-            controllerTurns.offer(buttonLane)
+            val count = if (buttonLane == GhoulLane.Left) leftPulses else rightPulses
+            repeat(if (buttonLane == GhoulLane.Center) 0 else count) { controllerTurns.offer(buttonLane) }
         }
         val webcamLane = if (source != GhoulRunInputSource.Controller && steer.state == FaceControlState.Tracking) {
             headLanes.update(steer.steer)

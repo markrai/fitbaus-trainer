@@ -125,6 +125,38 @@ internal class ControllerReverseInput {
     }
 }
 
+internal class ControllerTurnPressInput {
+    private var keyDown = false
+    private var hatDown = false
+    private var held = false
+    private var pending = 0
+
+    fun onKey(down: Boolean, repeatCount: Int) {
+        keyDown = down
+        update(keyDown || hatDown, repeatCount)
+    }
+
+    fun sample(hatDown: Boolean): Int {
+        this.hatDown = hatDown
+        update(keyDown || hatDown, 0)
+        val count = pending
+        pending = 0
+        return count
+    }
+
+    private fun update(down: Boolean, repeatCount: Int) {
+        if (down && !held && repeatCount == 0) pending = (pending + 1).coerceAtMost(2)
+        held = down
+    }
+
+    fun reset() {
+        keyDown = false
+        hatDown = false
+        held = false
+        pending = 0
+    }
+}
+
 internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var activeDeviceId = -1
     private var activeDeviceDescriptor: String? = null
@@ -138,8 +170,8 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var rightDown = false
     private var downDown = false
     private var rotationPending = false
-    private val leftInput = ControllerReverseInput()
-    private val rightInput = ControllerReverseInput()
+    private val leftInput = ControllerTurnPressInput()
+    private val rightInput = ControllerTurnPressInput()
     private val reverseInput = ControllerReverseInput()
     private var previousNanos = -1L
 
@@ -216,12 +248,18 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         allowHatDown: Boolean = false,
         allowHatLeft: Boolean = false,
         allowHatRight: Boolean = false,
-    ): GhoulRunControllerInput = GhoulRunControllerInput(
-        leftPressed = leftInput.sample(allowHatLeft && hatX < -0.45f),
-        rightPressed = rightInput.sample(allowHatRight && hatX > 0.45f),
-        stickX = ControllerSteering.axis(stickAxisX),
-        reversePressed = reverseInput.sample(allowHatDown && hatY > 0.45f),
-    )
+    ): GhoulRunControllerInput {
+        val leftCount = leftInput.sample(allowHatLeft && hatX < -0.45f)
+        val rightCount = rightInput.sample(allowHatRight && hatX > 0.45f)
+        return GhoulRunControllerInput(
+            leftPressed = leftCount > 0,
+            rightPressed = rightCount > 0,
+            stickX = ControllerSteering.axis(stickAxisX),
+            reversePressed = reverseInput.sample(allowHatDown && hatY > 0.45f),
+            leftPressCount = leftCount,
+            rightPressCount = rightCount,
+        )
+    }
 
     fun handleMotion(event: MotionEvent): Boolean {
         if (!ownsDevice(event.deviceId)) return false

@@ -115,6 +115,19 @@ internal class GhoulRunTurnIntentTest {
     }
 
     @Test
+    fun twoControllerTapsDeliveredInOneFrameStillTakeTwoTurns() {
+        val (seed, fixture) = doubleLeftFixture()
+        val (first, incoming) = fixture
+        val rig = rigFor(seed, first, incoming, controller = true)
+        val initial = rig.game.choiceTurns
+        rig.tick(input = GhoulRunControllerInput(leftPressed = true, leftPressCount = 2))
+        var count = 0
+        while (rig.game.choiceTurns - initial < 2 && count++ < 150) rig.tick(input = GhoulRunControllerInput())
+        assertEquals(2, rig.game.choiceTurns - initial)
+        assertEquals(incoming.opposite, rig.game.heading)
+    }
+
+    @Test
     fun distinctAnalogGesturesAreBufferedWithoutAutoRepeatingTheHold() {
         val (seed, fixture) = doubleLeftFixture()
         val (first, incoming) = fixture
