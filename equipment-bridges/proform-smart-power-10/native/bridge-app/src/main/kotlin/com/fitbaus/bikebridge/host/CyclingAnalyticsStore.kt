@@ -38,7 +38,7 @@ internal class CyclingAnalyticsDatabase(context: Context) :
                 )
                 db.execSQL(
                     "UPDATE cycling_daily SET spinning_ms = spinning_ms + ?, rpm_ms = rpm_ms + ? WHERE day = ?",
-                    arrayOf(total.spinningMs, total.rpmMs, total.date.toString()),
+                    arrayOf<Any>(total.spinningMs, total.rpmMs, total.date.toString()),
                 )
             }
             db.setTransactionSuccessful()

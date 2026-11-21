@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -184,7 +185,7 @@ internal class CyclingWeekChart(context: Context) : View(context) {
         val maxMinutes = max(30.0, ceil(days.maxOf { it.spinningMs / 60_000.0 } / 15.0) * 15.0)
         val maxRpm = max(100.0, ceil(days.maxOf { it.averageRpm } / 20.0) * 20.0)
         val span = bottom - top
-        paint.textSize = 10f * resources.displayMetrics.scaledDensity
+        paint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, resources.displayMetrics)
         paint.typeface = Typeface.DEFAULT
         for (step in 0..2) {
             val ratio = step / 2f
@@ -198,7 +199,7 @@ internal class CyclingWeekChart(context: Context) : View(context) {
             paint.textAlign = Paint.Align.LEFT
             canvas.drawText(String.format(Locale.US, "%.0f", maxRpm * ratio), right + 7f * density, y + 3f * density, paint)
         }
-        paint.textSize = 10f * resources.displayMetrics.scaledDensity
+        paint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, resources.displayMetrics)
         paint.color = Color.rgb(170, 170, 170)
         paint.textAlign = Paint.Align.LEFT
         canvas.drawText("MIN", left - 30f * density, top - 10f * density, paint)
