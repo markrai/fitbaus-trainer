@@ -51,6 +51,19 @@ internal class GhoulMapCameraTest {
     }
 
     @Test
+    fun projectedTileFootprintsKeepTheirAreaDuringContinuousOrbit() {
+        val camera = GhoulMapCamera()
+        for (index in -16..16) {
+            camera.follow(index * (PI / 16).toFloat())
+            val rx = camera.x(1f, 0f, 40f)
+            val ry = camera.y(1f, 0f, 20f)
+            val cx = camera.x(0f, 1f, 40f)
+            val cy = camera.y(0f, 1f, 20f)
+            assertEquals(-400f, rx * cy - ry * cx, 0.001f)
+        }
+    }
+
+    @Test
     fun headingWrapAroundIsEquivalentToTheSameCardinalView() {
         val camera = GhoulMapCamera()
         camera.follow(0f)
