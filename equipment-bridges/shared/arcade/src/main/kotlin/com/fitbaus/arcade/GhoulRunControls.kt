@@ -10,6 +10,7 @@ public data class GhoulRunControllerInput(
     val leftPressed: Boolean = false,
     val rightPressed: Boolean = false,
     val stickX: Float = 0f,
+    val reversePressed: Boolean = false,
 )
 
 internal object GhoulRunInputSelection {
@@ -249,6 +250,14 @@ internal class GhoulRunSession(
         }
         cadenceReading = pace.advanceWarmup()
         val useController = controller != null && source != GhoulRunInputSource.Webcam
+        val reversed = useController && controller.reversePressed && game.reverseDirection()
+        if (reversed) {
+            lane = GhoulLane.Center
+            rearming = false
+            headLanes.reset()
+            stickLanes.reset()
+            stickActive = false
+        }
         if (game.choiceTurns != seenChoiceTurns) {
             // A turn taken at a real choice uses up the selection: no chained turns from a lean held
             // through the last junction, and a button press arms only the next turn.
@@ -258,7 +267,9 @@ internal class GhoulRunSession(
                 rearming = true
             }
         }
-        if (useController && controller.leftPressed != controller.rightPressed) {
+        if (reversed) {
+            lane = GhoulLane.Center
+        } else if (useController && controller.leftPressed != controller.rightPressed) {
             // Press a side to arm the next turn, press it again to cancel, the other side to switch.
             val side = if (controller.leftPressed) GhoulLane.Left else GhoulLane.Right
             lane = if (lane == side) GhoulLane.Center else side
@@ -278,6 +289,7 @@ internal class GhoulRunSession(
             lane = rearmed(headLanes.update(steer.steer))
         }
         val appliedLean = when {
+            reversed -> 0f
             useController && abs(controller.stickX) > abs(steer.steer) -> controller.stickX
             source == GhoulRunInputSource.Controller -> controller?.stickX ?: 0f
             else -> steer.steer

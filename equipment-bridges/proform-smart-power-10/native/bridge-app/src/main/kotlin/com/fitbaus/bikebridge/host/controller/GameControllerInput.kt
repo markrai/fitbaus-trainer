@@ -85,6 +85,23 @@ internal object ControllerGameplayKeys {
     fun consumes(keyCode: Int): Boolean = keyCode >= KeyEvent.KEYCODE_UNKNOWN
 }
 
+internal class ControllerPressEdge {
+    private var held = false
+    private var pending = false
+
+    fun update(down: Boolean, repeatCount: Int) {
+        if (down && !held && repeatCount == 0) pending = true
+        held = down
+    }
+
+    fun take(): Boolean = pending.also { pending = false }
+
+    fun reset() {
+        held = false
+        pending = false
+    }
+}
+
 internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var activeDeviceId = -1
     private var positionX = 0.5f
@@ -96,6 +113,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var rotationPending = false
     private var leftPending = false
     private var rightPending = false
+    private val reversePress = ControllerPressEdge()
     private var previousNanos = -1L
 
     fun refresh() {
@@ -118,6 +136,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         rotationPending = false
         leftPending = false
         rightPending = false
+        reversePress.reset()
         previousNanos = -1L
     }
 
@@ -139,6 +158,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
                     if (down && event.repeatCount == 0) rightPending = true
                 }
                 "down" -> downDown = down
+                "reverse" -> reversePress.update(down, event.repeatCount)
                 "rotate" -> if (down && event.repeatCount == 0) rotationPending = true
             }
         }
@@ -164,6 +184,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
             leftPressed = leftPending,
             rightPressed = rightPending,
             stickX = ControllerSteering.axis(axisX),
+            reversePressed = reversePress.take(),
         )
         leftPending = false
         rightPending = false

@@ -9,6 +9,24 @@ import org.junit.jupiter.api.Test
 
 class GameControllerInputTest {
     @Test
+    fun reversePressIsOneShotUntilReleaseEvenWithKeyRepeats() {
+        val press = ControllerPressEdge()
+        press.update(true, 0)
+        assertTrue(press.take())
+        assertFalse(press.take())
+        press.update(true, 1)
+        press.update(true, 0)
+        assertFalse(press.take())
+        press.update(false, 0)
+        press.update(true, 0)
+        assertTrue(press.take())
+        press.reset()
+        assertFalse(press.take())
+        press.update(true, 0)
+        assertTrue(press.take())
+    }
+
+    @Test
     fun deadzoneRejectsDriftAndPreservesFullStickTravel() {
         assertEquals(0f, ControllerSteering.axis(0f))
         assertEquals(0f, ControllerSteering.axis(0.12f))

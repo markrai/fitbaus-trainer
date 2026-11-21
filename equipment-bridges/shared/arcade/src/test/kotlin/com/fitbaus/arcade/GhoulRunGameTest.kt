@@ -45,6 +45,28 @@ class GhoulRunGameTest {
     }
 
     @Test
+    fun controllerReversePreservesRiderCoordinatesAndIsDisabledOutsidePlay() {
+        val game = GhoulRunGame(seed = 23L)
+        assertFalse(game.reverseDirection())
+        activate(game)
+        val cell = game.world.start
+        val direction = game.world.exits(cell).first()
+        game.placeRider(cell, direction, 0.35f)
+        val row = game.riderRow
+        val col = game.riderCol
+        assertTrue(game.reverseDirection())
+        assertEquals(direction.opposite, game.heading)
+        assertEquals(row, game.riderRow, 0.0001f)
+        assertEquals(col, game.riderCol, 0.0001f)
+        assertTrue(game.reverseDirection())
+        assertEquals(direction, game.heading)
+        assertEquals(row, game.riderRow, 0.0001f)
+        assertEquals(col, game.riderCol, 0.0001f)
+        game.visitForTest(game.world.exit)
+        assertFalse(game.reverseDirection())
+    }
+
+    @Test
     fun cadenceMapsSpeedAndRadiiAndStopsBelowTwenty() {
         val game = GhoulRunGame(seed = 3L)
         assertEquals(0f, game.speedFor(19.9f, 70f))

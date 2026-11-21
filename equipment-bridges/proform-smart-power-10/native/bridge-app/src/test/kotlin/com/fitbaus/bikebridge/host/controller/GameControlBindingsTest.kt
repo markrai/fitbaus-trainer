@@ -20,7 +20,7 @@ class GameControlBindingsTest {
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.Math).map { it.id })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.Flak).map { it.id })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.TrailRide).map { it.id })
-        assertEquals(listOf("left", "right", "restart"), GameControlCatalog.actions(ArcadeMode.GhoulRun).map { it.id })
+        assertEquals(listOf("left", "right", "reverse", "restart"), GameControlCatalog.actions(ArcadeMode.GhoulRun).map { it.id })
         assertEquals(listOf("left", "right", "down", "rotate"), GameControlCatalog.actions(ArcadeMode.Biketris).map { it.id })
         assertTrue(GameControlCatalog.actions(ArcadeMode.Dashboard).isEmpty())
         assertTrue(GameControlCatalog.actions(ArcadeMode.YouTube).isEmpty())
@@ -81,6 +81,21 @@ class GameControlBindingsTest {
         assertFalse(bindings.assign(mode, "pad-01", "restart", KeyEvent.KEYCODE_BUTTON_START))
         assertTrue(bindings.reset(mode, "pad-01"))
         assertEquals(KeyEvent.KEYCODE_BUTTON_A, bindings.keyCode(mode, "pad-01", actions[3]))
+    }
+
+    @Test
+    fun ghoulRunDownReversesAndCanBeRemappedWithoutChangingBiketris() {
+        val bindings = GameControlBindings(memoryPreferences())
+        val reverse = GameControlCatalog.actions(ArcadeMode.GhoulRun).first { it.id == "reverse" }
+        assertEquals("Reverse direction", reverse.label)
+        assertEquals(KeyEvent.KEYCODE_DPAD_DOWN, bindings.keyCode(ArcadeMode.GhoulRun, "pad-01", reverse))
+        assertEquals("reverse", bindings.action(ArcadeMode.GhoulRun, "pad-01", KeyEvent.KEYCODE_DPAD_DOWN)?.id)
+        assertTrue(bindings.assign(ArcadeMode.GhoulRun, "pad-01", "reverse", KeyEvent.KEYCODE_BUTTON_B))
+        assertNull(bindings.action(ArcadeMode.GhoulRun, "pad-01", KeyEvent.KEYCODE_DPAD_DOWN))
+        assertEquals("reverse", bindings.action(ArcadeMode.GhoulRun, "pad-01", KeyEvent.KEYCODE_BUTTON_B)?.id)
+        assertEquals("down", bindings.action(ArcadeMode.Biketris, "pad-01", KeyEvent.KEYCODE_DPAD_DOWN)?.id)
+        assertTrue(bindings.reset(ArcadeMode.GhoulRun, "pad-01"))
+        assertEquals(KeyEvent.KEYCODE_DPAD_DOWN, bindings.keyCode(ArcadeMode.GhoulRun, "pad-01", reverse))
     }
 
     private fun memoryPreferences(): SharedPreferences {
