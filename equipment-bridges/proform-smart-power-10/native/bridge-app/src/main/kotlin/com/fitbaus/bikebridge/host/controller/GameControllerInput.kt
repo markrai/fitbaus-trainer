@@ -130,14 +130,16 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var activeDeviceDescriptor: String? = null
     private var positionX = 0.5f
     private var axisX = 0f
+    private var stickAxisX = 0f
     private var axisY = 0f
+    private var hatX = 0f
     private var hatY = 0f
     private var leftDown = false
     private var rightDown = false
     private var downDown = false
     private var rotationPending = false
-    private var leftPending = false
-    private var rightPending = false
+    private val leftInput = ControllerReverseInput()
+    private val rightInput = ControllerReverseInput()
     private val reverseInput = ControllerReverseInput()
     private var previousNanos = -1L
 
@@ -155,14 +157,16 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
 
     fun resetTransient() {
         axisX = 0f
+        stickAxisX = 0f
         axisY = 0f
+        hatX = 0f
         hatY = 0f
         leftDown = false
         rightDown = false
         downDown = false
         rotationPending = false
-        leftPending = false
-        rightPending = false
+        leftInput.reset()
+        rightInput.reset()
         reverseInput.reset()
         previousNanos = -1L
     }
@@ -180,11 +184,11 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
             when (mappedAction) {
                 "left" -> {
                     leftDown = down
-                    if (down && event.repeatCount == 0) leftPending = true
+                    leftInput.onKey(down, event.repeatCount)
                 }
                 "right" -> {
                     rightDown = down
-                    if (down && event.repeatCount == 0) rightPending = true
+                    rightInput.onKey(down, event.repeatCount)
                 }
                 "down" -> downDown = down
                 "reverse" -> reverseInput.onKey(down, event.repeatCount)
@@ -208,18 +212,16 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         )
     }
 
-    fun takeGhoulRunInput(allowHatDown: Boolean = false): GhoulRunControllerInput {
-        val reverse = reverseInput.sample(allowHatDown && hatY > 0.45f)
-        val input = GhoulRunControllerInput(
-            leftPressed = leftPending,
-            rightPressed = rightPending,
-            stickX = ControllerSteering.axis(axisX),
-            reversePressed = reverse,
-        )
-        leftPending = false
-        rightPending = false
-        return input
-    }
+    fun takeGhoulRunInput(
+        allowHatDown: Boolean = false,
+        allowHatLeft: Boolean = false,
+        allowHatRight: Boolean = false,
+    ): GhoulRunControllerInput = GhoulRunControllerInput(
+        leftPressed = leftInput.sample(allowHatLeft && hatX < -0.45f),
+        rightPressed = rightInput.sample(allowHatRight && hatX > 0.45f),
+        stickX = ControllerSteering.axis(stickAxisX),
+        reversePressed = reverseInput.sample(allowHatDown && hatY > 0.45f),
+    )
 
     fun handleMotion(event: MotionEvent): Boolean {
         if (!ownsDevice(event.deviceId)) return false
@@ -227,6 +229,8 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         val device = event.device ?: return true
         val stick = if (device.getMotionRange(MotionEvent.AXIS_X) != null) event.getAxisValue(MotionEvent.AXIS_X) else 0f
         val hat = if (device.getMotionRange(MotionEvent.AXIS_HAT_X) != null) event.getAxisValue(MotionEvent.AXIS_HAT_X) else 0f
+        stickAxisX = stick
+        hatX = hat
         axisX = if (abs(hat) > 0.1f) hat else stick
         val stickY = if (device.getMotionRange(MotionEvent.AXIS_Y) != null) event.getAxisValue(MotionEvent.AXIS_Y) else 0f
         hatY = if (device.getMotionRange(MotionEvent.AXIS_HAT_Y) != null) event.getAxisValue(MotionEvent.AXIS_HAT_Y) else 0f

@@ -197,6 +197,27 @@ internal class GhoulRunSupervisor(private val resumeStableMs: Long = 600L) {
     }
 }
 
+internal class GhoulTurnIntentBuffer(private val capacity: Int = 2) {
+    private val commands = ArrayList<GhoulLane>(capacity)
+
+    val size: Int get() = commands.size
+    val current: GhoulLane? get() = commands.firstOrNull()
+
+    fun offer(direction: GhoulLane) {
+        if (direction == GhoulLane.Center) return
+        if (commands.size < capacity) commands.add(direction)
+        else commands[commands.lastIndex] = direction
+    }
+
+    fun consume() {
+        if (commands.isNotEmpty()) commands.removeAt(0)
+    }
+
+    fun clear() {
+        commands.clear()
+    }
+}
+
 /** Pure input/session bridge: fresh absolute cadence and selected steering gate the game clock. */
 internal class GhoulRunSession(
     val game: GhoulRunGame,
@@ -206,12 +227,9 @@ internal class GhoulRunSession(
 ) {
     private val headLanes = GhoulLeanZones(game.config.leanEnter, game.config.leanExit)
     private val stickLanes = GhoulLeanZones(game.config.leanEnter, game.config.leanExit)
-    private var stickActive = false
-    private var seenChoiceTurns = game.choiceTurns
-
-    /** True after a turn used up the side selection, until lean/stick returns to center. */
-    var rearming: Boolean = false
-        private set
+    private val controllerTurns = GhoulTurnIntentBuffer()
+    private var previousStickLane = GhoulLane.Center
+    private var seenChoiceDecisions = game.choiceDecisions
     var hold: GhoulHold = GhoulHold.CameraStarting
         private set
     var steer: SteerReading = SteerReading(FaceControlState.Lost, 0.5f, Float.NaN, 0f, -1L, 0L)
@@ -251,43 +269,38 @@ internal class GhoulRunSession(
         cadenceReading = pace.advanceWarmup()
         val useController = controller != null && source != GhoulRunInputSource.Webcam
         val reversed = useController && controller.reversePressed && game.reverseDirection()
+        if (game.choiceDecisions != seenChoiceDecisions) {
+            if (game.choiceDecisions < seenChoiceDecisions) controllerTurns.clear()
+            else repeat((game.choiceDecisions - seenChoiceDecisions).coerceAtMost(2)) { controllerTurns.consume() }
+            seenChoiceDecisions = game.choiceDecisions
+        }
+        if (!useController) {
+            controllerTurns.clear()
+            stickLanes.reset()
+            previousStickLane = GhoulLane.Center
+        }
         if (reversed) {
-            lane = GhoulLane.Center
-            rearming = false
+            controllerTurns.clear()
             headLanes.reset()
             stickLanes.reset()
-            stickActive = false
-        }
-        if (game.choiceTurns != seenChoiceTurns) {
-            // A turn taken at a real choice uses up the selection: no chained turns from a lean held
-            // through the last junction, and a button press arms only the next turn.
-            seenChoiceTurns = game.choiceTurns
-            if (lane != GhoulLane.Center) {
-                lane = GhoulLane.Center
-                rearming = true
+            previousStickLane = stickLanes.update(controller?.stickX ?: 0f)
+        } else if (useController) {
+            val stickLane = stickLanes.update(controller.stickX.coerceIn(-1f, 1f))
+            val buttonLane = when {
+                controller.leftPressed && !controller.rightPressed -> GhoulLane.Left
+                controller.rightPressed && !controller.leftPressed -> GhoulLane.Right
+                else -> GhoulLane.Center
             }
+            if (stickLane != previousStickLane && stickLane != GhoulLane.Center && buttonLane == GhoulLane.Center) {
+                controllerTurns.offer(stickLane)
+            }
+            previousStickLane = stickLane
+            controllerTurns.offer(buttonLane)
         }
-        if (reversed) {
-            lane = GhoulLane.Center
-        } else if (useController && controller.leftPressed != controller.rightPressed) {
-            // Press a side to arm the next turn, press it again to cancel, the other side to switch.
-            val side = if (controller.leftPressed) GhoulLane.Left else GhoulLane.Right
-            lane = if (lane == side) GhoulLane.Center else side
-            rearming = false
-            stickLanes.reset()
-            stickActive = false
-        } else if (useController && abs(controller.stickX) > STICK_DEAD_ZONE) {
-            lane = rearmed(stickLanes.update(controller.stickX.coerceIn(-1f, 1f)))
-            stickActive = true
-        } else if (stickActive) {
-            // A released stick (or D-pad hat) recentres instead of leaving the last side selected.
-            stickActive = false
-            stickLanes.reset()
-            rearming = false
-            lane = GhoulLane.Center
-        } else if (source != GhoulRunInputSource.Controller && steer.state == FaceControlState.Tracking) {
-            lane = rearmed(headLanes.update(steer.steer))
-        }
+        val webcamLane = if (source != GhoulRunInputSource.Controller && steer.state == FaceControlState.Tracking) {
+            headLanes.update(steer.steer)
+        } else GhoulLane.Center
+        lane = if (reversed) GhoulLane.Center else controllerTurns.current ?: webcamLane
         val appliedLean = when {
             reversed -> 0f
             useController && abs(controller.stickX) > abs(steer.steer) -> controller.stickX
@@ -301,21 +314,12 @@ internal class GhoulRunSession(
             cadenceReading.filteredRpm,
             cadenceReading.baseline,
         )
-        return hold
-    }
-
-    /** While re-arming, a side reading counts as center until the input has passed back through center. */
-    private fun rearmed(zone: GhoulLane): GhoulLane {
-        if (!rearming) return zone
-        if (game.brakingForChoice || game.waitingForChoice) {
-            // A fork with no way straight: a lean still held from the last turn is clearly the
-            // rider's intent, so it counts at once (re-arming only guards against chained turns
-            // where going straight was possible).
-            rearming = false
-            return zone
+        if (game.choiceDecisions != seenChoiceDecisions) {
+            repeat((game.choiceDecisions - seenChoiceDecisions).coerceAtMost(2)) { controllerTurns.consume() }
+            seenChoiceDecisions = game.choiceDecisions
+            lane = controllerTurns.current ?: webcamLane
         }
-        if (zone == GhoulLane.Center) rearming = false
-        return GhoulLane.Center
+        return hold
     }
 
     fun message(): String? = supervisor.message(hold, cadenceReading)
@@ -327,6 +331,9 @@ internal class GhoulRunSession(
         supervisor.invalidate()
         headLanes.reset()
         stickLanes.reset()
+        controllerTurns.clear()
+        previousStickLane = GhoulLane.Center
+        lane = GhoulLane.Center
     }
 
     fun restart(seed: Long) {
@@ -335,9 +342,9 @@ internal class GhoulRunSession(
         supervisor.invalidate()
         headLanes.reset()
         stickLanes.reset()
-        stickActive = false
-        rearming = false
-        seenChoiceTurns = game.choiceTurns
+        controllerTurns.clear()
+        previousStickLane = GhoulLane.Center
+        seenChoiceDecisions = game.choiceDecisions
         lane = GhoulLane.Center
     }
 
@@ -353,7 +360,4 @@ internal class GhoulRunSession(
         supervisor.invalidate()
     }
 
-    private companion object {
-        const val STICK_DEAD_ZONE = 0.08f
-    }
 }

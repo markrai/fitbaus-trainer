@@ -152,8 +152,10 @@ internal class GhoulRunGame(
     var leanCheckPassed: Boolean = false
         private set
 
-    /** Counts turns taken at real choices (2+ exits ahead); the session uses it to consume a side selection. */
+    /** Counts actual direction changes at optional junctions. */
     var choiceTurns: Int = 0
+
+    var choiceDecisions: Int = 0
         private set
 
     private var accumulator = 0f
@@ -451,11 +453,11 @@ internal class GhoulRunGame(
             return
         }
         val junction = riderCell.moved(heading)
-        if (progress >= 1f - config.junctionLockDistance && lockedChoice == null && !brakingForChoice) {
+        if (progress >= 1f - config.junctionLockDistance && !brakingForChoice) {
             val next = choiceFor(junction, heading, lane)
-            if (next == null) {
+            if (next == null && lockedChoice == null) {
                 brakingForChoice = true
-            } else {
+            } else if (next != null) {
                 lockedChoice = next
             }
         }
@@ -487,9 +489,10 @@ internal class GhoulRunGame(
     }
 
     private fun takeChoice(choice: MazeDirection) {
-        if (choice != heading && choice != heading.opposite &&
-            world.exits(riderCell).count { it != heading.opposite } >= 2
-        ) choiceTurns += 1
+        if (world.exits(riderCell).count { it != heading.opposite } >= 2) {
+            choiceDecisions += 1
+            if (choice != heading && choice != heading.opposite) choiceTurns += 1
+        }
         if (choice == heading.opposite) {
             progress = 0f
             beginDeadEndTurn()

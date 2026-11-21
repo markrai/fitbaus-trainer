@@ -48,6 +48,26 @@ class GameControllerInputTest {
     }
 
     @Test
+    fun digitalDirectionAndDpadHatEmitOneEdgePerPhysicalPress() {
+        val input = ControllerReverseInput()
+        input.onKey(true, 0)
+        assertTrue(input.sample(true))
+        assertFalse(input.sample(true))
+        input.onKey(true, 1)
+        assertFalse(input.sample(true))
+        input.onKey(false, 0)
+        assertFalse(input.sample(true))
+        assertFalse(input.sample(false))
+        input.onKey(true, 0)
+        assertTrue(input.sample(true))
+        assertFalse(input.sample(true))
+        input.onKey(false, 0)
+        assertFalse(input.sample(false))
+        assertTrue(input.sample(true))
+        assertFalse(input.sample(true))
+    }
+
+    @Test
     fun deadzoneRejectsDriftAndPreservesFullStickTravel() {
         assertEquals(0f, ControllerSteering.axis(0f))
         assertEquals(0f, ControllerSteering.axis(0.12f))
