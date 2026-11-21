@@ -200,8 +200,8 @@ class GhoulRunControlsTest {
                     controller = if (useStick) GhoulRunControllerInput(stickX = if (leaning) -1f else 0f) else null,
                 )
                 if (leaning && session.live) {
-                    // Left until a taken turn uses the selection up; then centre until the lean is released.
-                    assertTrue(session.lane == GhoulLane.Left || (session.rearming && session.lane == GhoulLane.Center))
+                    if (!useStick) assertEquals(GhoulLane.Left, session.lane)
+                    else assertTrue(session.lane == GhoulLane.Left || session.lane == GhoulLane.Center)
                     if (session.lane == GhoulLane.Left) sawLeft = true
                 }
                 if (game.heading == previous.opposite) {
@@ -263,7 +263,7 @@ class GhoulRunControlsTest {
     }
 
     @Test
-    fun aHeldLeanTakesOneTurnThenMustRecentre() {
+    fun continuousWebcamLeanRemainsActiveThroughTurns() {
         val rig = liveRig(seed = 9L)
         repeat(60) { rig.tick() }
         rig.approachLeftChoice()
@@ -274,11 +274,10 @@ class GhoulRunControlsTest {
         assertEquals(arrival.relativeLeft, rig.game.heading, "the lean takes the left")
         repeat(90) {
             rig.tick(faceX = 0.15f)
-            assertEquals(GhoulLane.Center, rig.session.lane, "a lean held through the turn does not chain another")
+            assertEquals(GhoulLane.Left, rig.session.lane, "a lean held through the turn stays available for the next junction")
         }
-        assertTrue(rig.session.rearming)
         rig.tick(faceX = 0.5f)
-        assertFalse(rig.session.rearming)
+        assertEquals(GhoulLane.Center, rig.session.lane)
         rig.tick(faceX = 0.15f)
         assertEquals(GhoulLane.Left, rig.session.lane, "leaning again after centering selects left")
     }
@@ -308,7 +307,7 @@ class GhoulRunControlsTest {
         var guard = 0
         while (rig.game.choiceTurns == turns && guard++ < 200) rig.tick(faceX = 0.15f)
         rig.tick(faceX = 0.15f)
-        assertTrue(rig.session.rearming, "the last turn used up the lean")
+        assertEquals(GhoulLane.Left, rig.session.lane, "continuous webcam lean stays selected")
 
         val (fork, arrival) = rig.approachBlockedForkWithLeft()
         guard = 0
@@ -316,22 +315,20 @@ class GhoulRunControlsTest {
         assertEquals(fork, rig.game.riderCell)
         assertEquals(arrival.relativeLeft, rig.game.heading, "the held lean turns at the fork without re-centering")
         rig.tick(faceX = 0.15f)
-        assertTrue(rig.session.rearming, "the fork turn uses the lean up again, so it cannot chain on")
+        assertEquals(GhoulLane.Left, rig.session.lane, "the blocked fork does not consume webcam lean")
     }
 
     @Test
-    fun controllerPressArmsOnlyTheNextTurn() {
+    fun repeatedControllerPressesQueueTheFollowingTurn() {
         val rig = liveRig(seed = 9L)
         val idle = GhoulRunControllerInput()
         repeat(10) { rig.tick(controller = idle) }
         rig.tick(controller = GhoulRunControllerInput(leftPressed = true))
         assertEquals(GhoulLane.Left, rig.session.lane)
         rig.tick(controller = GhoulRunControllerInput(leftPressed = true))
-        assertEquals(GhoulLane.Center, rig.session.lane, "pressing the same side again cancels")
+        assertEquals(GhoulLane.Left, rig.session.lane, "two left presses must not cancel each other")
         rig.tick(controller = GhoulRunControllerInput(rightPressed = true))
-        assertEquals(GhoulLane.Right, rig.session.lane)
-        rig.tick(controller = GhoulRunControllerInput(leftPressed = true))
-        assertEquals(GhoulLane.Left, rig.session.lane, "the other side switches directly")
+        assertEquals(GhoulLane.Left, rig.session.lane, "new input changes the next buffered turn")
 
         rig.approachLeftChoice()
         val arrival = rig.game.heading
@@ -340,7 +337,7 @@ class GhoulRunControlsTest {
         while (rig.game.choiceTurns == turns && guard++ < 200) rig.tick(controller = idle)
         assertEquals(arrival.relativeLeft, rig.game.heading)
         rig.tick(controller = idle)
-        assertEquals(GhoulLane.Center, rig.session.lane, "the press was used up by the turn")
+        assertEquals(GhoulLane.Right, rig.session.lane, "the next buffered press becomes active after the first turn")
     }
 
     @Test
@@ -361,7 +358,7 @@ class GhoulRunControlsTest {
     }
 
     @Test
-    fun releasedStickRecentres() {
+    fun releasedStickStopsNewGesturesButPreservesTheQueuedTurn() {
         val game = GhoulRunGame(seed = 6L)
         val session = GhoulRunSession(game)
         var now = 1_000_000_000L
@@ -384,6 +381,6 @@ class GhoulRunControlsTest {
         tick(1f, 0)
         assertEquals(GhoulLane.Right, session.lane)
         tick(0f, 1)
-        assertEquals(GhoulLane.Center, session.lane)
+        assertEquals(GhoulLane.Right, session.lane, "release must not erase a turn queued before the next junction")
     }
 }

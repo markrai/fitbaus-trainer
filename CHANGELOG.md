@@ -16,6 +16,8 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run successive steering inputs.** Webcam lean remains active across consecutive optional turns without forcing a full recenter; rapid controller button presses queue separate turns, while analog stick re-entries register distinct gestures. Precommitted junction directions can be corrected until arrival, and D-pad key/hat events share one press edge so a physical press cannot be double-counted.
+
 - **Bricks controller steering regression.** Controller mode now strictly
   excludes face-tracking input from paddle steering; it reports unavailable
   controller input instead of silently falling back to the webcam.

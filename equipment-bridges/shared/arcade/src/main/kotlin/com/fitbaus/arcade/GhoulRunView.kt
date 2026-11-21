@@ -841,11 +841,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         stroke.color = Color.rgb(130, 132, 140)
         for (mark in floatArrayOf(-exit, exit)) canvas.drawLine(cx + half * mark, barTop, cx + half * mark, barTop + barH, stroke)
         val lean = game.lean.coerceIn(-1f, 1f)
-        paint.color = when {
-            session.rearming -> Color.rgb(120, 122, 130)
-            session.lane == GhoulLane.Center -> Color.WHITE
-            else -> HIGHLIGHT
-        }
+        paint.color = if (session.lane == GhoulLane.Center) Color.WHITE else HIGHLIGHT
         canvas.drawCircle(cx + half * lean, barTop + barH / 2f, 7f * density, paint)
     }
 

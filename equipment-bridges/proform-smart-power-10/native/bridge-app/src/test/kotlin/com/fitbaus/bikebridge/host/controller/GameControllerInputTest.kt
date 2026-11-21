@@ -48,6 +48,62 @@ class GameControllerInputTest {
     }
 
     @Test
+    fun digitalDirectionAndDpadHatEmitOneEdgePerPhysicalPress() {
+        val input = ControllerReverseInput()
+        input.onKey(true, 0)
+        assertTrue(input.sample(true))
+        assertFalse(input.sample(true))
+        input.onKey(true, 1)
+        assertFalse(input.sample(true))
+        input.onKey(false, 0)
+        assertFalse(input.sample(true))
+        assertFalse(input.sample(false))
+        input.onKey(true, 0)
+        assertTrue(input.sample(true))
+        assertFalse(input.sample(true))
+        input.onKey(false, 0)
+        assertFalse(input.sample(false))
+        assertTrue(input.sample(true))
+        assertFalse(input.sample(true))
+    }
+
+    @Test
+    fun twoFastDirectionalTapsBeforeTheNextFrameSurviveAsSeparateCommands() {
+        val input = ControllerTurnPressInput()
+        input.onKey(true, 0)
+        input.onKey(false, 0)
+        input.onKey(true, 0)
+        assertEquals(2, input.sample(false))
+        assertEquals(0, input.sample(false))
+        input.onKey(true, 1)
+        assertEquals(0, input.sample(false))
+        input.onKey(false, 0)
+        input.onKey(true, 0)
+        assertEquals(1, input.sample(false))
+    }
+
+    @Test
+    fun directionalKeysTakePriorityOverHatAfterTheFirstKeyEvent() {
+        val input = ControllerTurnPressInput()
+        input.onKey(true, 0)
+        assertEquals(1, input.sample(true))
+        input.onKey(false, 0)
+        assertEquals(0, input.sample(true))
+        input.onKey(true, 0)
+        assertEquals(1, input.sample(true))
+        input.onKey(false, 0)
+        input.onKey(true, 0)
+        assertEquals(1, input.sample(true))
+        input.onKey(false, 0)
+        assertEquals(0, input.sample(false))
+        input.reset()
+        assertEquals(1, input.sample(true))
+        assertEquals(0, input.sample(true))
+        assertEquals(0, input.sample(false))
+        assertEquals(1, input.sample(true))
+    }
+
+    @Test
     fun deadzoneRejectsDriftAndPreservesFullStickTravel() {
         assertEquals(0f, ControllerSteering.axis(0f))
         assertEquals(0f, ControllerSteering.axis(0.12f))
