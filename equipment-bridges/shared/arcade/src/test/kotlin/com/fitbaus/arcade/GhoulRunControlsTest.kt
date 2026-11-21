@@ -358,7 +358,7 @@ class GhoulRunControlsTest {
     }
 
     @Test
-    fun releasedStickRecentres() {
+    fun releasedStickStopsNewGesturesButPreservesTheQueuedTurn() {
         val game = GhoulRunGame(seed = 6L)
         val session = GhoulRunSession(game)
         var now = 1_000_000_000L
@@ -381,6 +381,6 @@ class GhoulRunControlsTest {
         tick(1f, 0)
         assertEquals(GhoulLane.Right, session.lane)
         tick(0f, 1)
-        assertEquals(GhoulLane.Center, session.lane)
+        assertEquals(GhoulLane.Right, session.lane, "release must not erase a turn queued before the next junction")
     }
 }
