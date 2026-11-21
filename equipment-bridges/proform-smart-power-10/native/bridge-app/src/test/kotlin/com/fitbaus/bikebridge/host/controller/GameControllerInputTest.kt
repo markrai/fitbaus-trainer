@@ -83,17 +83,24 @@ class GameControllerInputTest {
     }
 
     @Test
-    fun directionalKeyAndHatShareOnePressEvenWhenBothSourcesReportIt() {
+    fun directionalKeysTakePriorityOverHatAfterTheFirstKeyEvent() {
         val input = ControllerTurnPressInput()
         input.onKey(true, 0)
         assertEquals(1, input.sample(true))
         input.onKey(false, 0)
         assertEquals(0, input.sample(true))
+        input.onKey(true, 0)
+        assertEquals(1, input.sample(true))
+        input.onKey(false, 0)
+        input.onKey(true, 0)
+        assertEquals(1, input.sample(true))
+        input.onKey(false, 0)
         assertEquals(0, input.sample(false))
+        input.reset()
         assertEquals(1, input.sample(true))
         assertEquals(0, input.sample(true))
-        input.reset()
         assertEquals(0, input.sample(false))
+        assertEquals(1, input.sample(true))
     }
 
     @Test

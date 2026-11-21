@@ -128,31 +128,29 @@ internal class ControllerReverseInput {
 internal class ControllerTurnPressInput {
     private var keyDown = false
     private var hatDown = false
-    private var held = false
+    private var keySeen = false
     private var pending = 0
 
     fun onKey(down: Boolean, repeatCount: Int) {
+        if (down && !keyDown && repeatCount == 0 && (keySeen || !hatDown)) {
+            pending = (pending + 1).coerceAtMost(2)
+        }
         keyDown = down
-        update(keyDown || hatDown, repeatCount)
+        keySeen = true
     }
 
     fun sample(hatDown: Boolean): Int {
+        if (!keySeen && hatDown && !this.hatDown) pending = (pending + 1).coerceAtMost(2)
         this.hatDown = hatDown
-        update(keyDown || hatDown, 0)
         val count = pending
         pending = 0
         return count
     }
 
-    private fun update(down: Boolean, repeatCount: Int) {
-        if (down && !held && repeatCount == 0) pending = (pending + 1).coerceAtMost(2)
-        held = down
-    }
-
     fun reset() {
         keyDown = false
         hatDown = false
-        held = false
+        keySeen = false
         pending = 0
     }
 }
