@@ -16,6 +16,10 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Bike console Settings brightness.** The gear-icon Settings activity now applies
+  the dashboard's persisted window brightness before its first frame and again on
+  resume, so switching screens no longer falls back to a dimmer system level.
+
 - **Ghoul Run successive steering inputs.** Webcam lean remains active across consecutive optional turns without forcing a full recenter; rapid controller button presses queue separate turns, while analog stick re-entries register distinct gestures. Precommitted junction directions can be corrected until arrival, and D-pad key/hat events share one press edge so a physical press cannot be double-counted.
 
 - **Bricks controller steering regression.** Controller mode now strictly

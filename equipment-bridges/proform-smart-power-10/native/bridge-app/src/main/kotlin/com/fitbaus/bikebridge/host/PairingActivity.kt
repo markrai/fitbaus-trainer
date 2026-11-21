@@ -130,12 +130,14 @@ class PairingActivity : Activity() {
         gameContext = GameControlCatalog.fromContext(intent.getStringExtra(CONTROLLER_GAME_CONTEXT))
         UvcProcess.acquire(this, this).addDetachListener(detachListener)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        applyStoredBrightness()
         setContentView(buildUi())
         showTab(if (gameContext != null) SettingsTab.Controllers else SettingsTab.Pairing)
     }
 
     override fun onResume() {
         super.onResume()
+        applyStoredBrightness()
         controllerOwnership.onHostResume()
         bindPairing()
         if (activeTab == SettingsTab.Webcams) refreshWebcams(startPreview = true)
@@ -163,6 +165,13 @@ class PairingActivity : Activity() {
         if (destroyed || isFinishing) return false
         if (requiredTab != null && activeTab != requiredTab) return false
         return true
+    }
+
+    private fun applyStoredBrightness() {
+        val percent = BridgeProcess.brightness(this).percent() ?: return
+        val attrs = window.attributes
+        attrs.screenBrightness = BrightnessLimits.toWindowBrightness(percent)
+        window.attributes = attrs
     }
 
     private fun bindPairing() {

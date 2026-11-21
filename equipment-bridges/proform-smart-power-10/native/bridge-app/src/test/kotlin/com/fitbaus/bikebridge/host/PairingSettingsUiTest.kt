@@ -33,6 +33,22 @@ class PairingSettingsUiTest {
     }
 
     @Test
+    fun settingsUsesTheDashboardBrightnessOverrideBeforeShowingItsUiAndOnResume() {
+        val settings = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
+        val dashboard = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(settings.contains("BridgeProcess.brightness(this).percent() ?: return"))
+        assertTrue(settings.contains("attrs.screenBrightness = BrightnessLimits.toWindowBrightness(percent)"))
+        assertTrue(dashboard.contains("attrs.screenBrightness = BrightnessLimits.toWindowBrightness(percent)"))
+        assertTrue(settings.contains("window.attributes = attrs"))
+        val create = settings.substringAfter("override fun onCreate(savedInstanceState: Bundle?)")
+            .substringBefore("override fun onResume()")
+        assertTrue(create.indexOf("applyStoredBrightness()") in 0 until create.indexOf("setContentView(buildUi())"))
+        val resume = settings.substringAfter("override fun onResume()")
+            .substringBefore("override fun onPause()")
+        assertTrue(resume.contains("applyStoredBrightness()"))
+    }
+
+    @Test
     fun controllerTabCapturesAllDeviceEventsAndScopesMappingsToGames() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
