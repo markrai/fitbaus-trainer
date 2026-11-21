@@ -1175,6 +1175,96 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         for (cell in game.world.keys) if (cell !in game.collectedKeys) drawObjectiveAt(canvas, cell, ox, oy, tw, th, camR, camC, light)
     }
 
+    private fun drawOrbitMaze(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float, camR: Float, camC: Float) {
+        orbitTiles.clear()
+        orbitTiles.addAll(game.exploredTiles)
+        orbitTiles.sortWith(compareBy<MazeTile> { mapCamera.y(it.row.toFloat(), it.col.toFloat(), th) }.thenBy { it.row }.thenBy { it.col })
+        for (tile in orbitTiles) {
+            val x = ox + mapCamera.x(tile.row - camR, tile.col - camC, tw)
+            val y = oy + mapCamera.y(tile.row - camR, tile.col - camC, th)
+            if (x < mapRect.left - tw * 2f || x > mapRect.right + tw * 2f ||
+                y < mapRect.top - th * 3f || y > mapRect.bottom + th * 3f
+            ) continue
+            if (game.world.isFloorTile(tile)) {
+                drawOrbitTop(canvas, x, y, tw, th, 0f, FLOOR_LIT)
+            } else {
+                drawOrbitWall(canvas, x, y, tw, th)
+            }
+        }
+    }
+
+    private fun drawOrbitWall(canvas: Canvas, x: Float, y: Float, tw: Float, th: Float) {
+        val rx = mapCamera.x(0.5f, 0f, tw)
+        val ry = mapCamera.y(0.5f, 0f, th)
+        val cx = mapCamera.x(0f, 0.5f, tw)
+        val cy = mapCamera.y(0f, 0.5f, th)
+        val x0 = x - rx - cx
+        val y0 = y - ry - cy
+        val x1 = x - rx + cx
+        val y1 = y - ry + cy
+        val x2 = x + rx + cx
+        val y2 = y + ry + cy
+        val x3 = x + rx - cx
+        val y3 = y + ry - cy
+        val rise = th * 0.55f
+        drawOrbitFace(canvas, x, y, x0, y0, x1, y1, rise)
+        drawOrbitFace(canvas, x, y, x1, y1, x2, y2, rise)
+        drawOrbitFace(canvas, x, y, x2, y2, x3, y3, rise)
+        drawOrbitFace(canvas, x, y, x3, y3, x0, y0, rise)
+        drawOrbitTop(canvas, x, y, tw, th, rise, WALL_TOP)
+    }
+
+    private fun drawOrbitFace(
+        canvas: Canvas,
+        centreX: Float,
+        centreY: Float,
+        ax: Float,
+        ay: Float,
+        bx: Float,
+        by: Float,
+        rise: Float,
+    ) {
+        if ((ay + by) * 0.5f <= centreY + 0.001f) return
+        paint.color = if ((ax + bx) * 0.5f < centreX) WALL_LEFT else WALL_RIGHT
+        path.reset()
+        path.moveTo(ax, ay)
+        path.lineTo(bx, by)
+        path.lineTo(bx, by - rise)
+        path.lineTo(ax, ay - rise)
+        path.close()
+        canvas.drawPath(path, paint)
+    }
+
+    private fun drawOrbitTop(canvas: Canvas, x: Float, y: Float, tw: Float, th: Float, rise: Float, color: Int) {
+        val rx = mapCamera.x(0.5f, 0f, tw)
+        val ry = mapCamera.y(0.5f, 0f, th)
+        val cx = mapCamera.x(0f, 0.5f, tw)
+        val cy = mapCamera.y(0f, 0.5f, th)
+        paint.color = color
+        path.reset()
+        path.moveTo(x - rx - cx, y - ry - cy - rise)
+        path.lineTo(x - rx + cx, y - ry + cy - rise)
+        path.lineTo(x + rx + cx, y + ry + cy - rise)
+        path.lineTo(x + rx - cx, y + ry - cy - rise)
+        path.close()
+        canvas.drawPath(path, paint)
+    }
+
+    private fun drawMapNorthIndicator(canvas: Canvas) {
+        val x = mapRect.right - 28f * density
+        val y = mapRect.top + 80f * density
+        paint.color = PANEL
+        canvas.drawCircle(x, y, 20f * density, paint)
+        val dx = mapCamera.x(-1f, 0f, 40f)
+        val dy = mapCamera.y(-1f, 0f, 20f)
+        drawArrow(canvas, x, y, dx, dy, COMPASS, 22f * density)
+        text.textSize = 11f * density
+        text.textAlign = Paint.Align.CENTER
+        text.color = COMPASS
+        canvas.drawText("N", x, y + 34f * density, text)
+        text.textAlign = Paint.Align.LEFT
+    }
+
     private fun drawObjectiveAt(
         canvas: Canvas,
         cell: MazeCell,
