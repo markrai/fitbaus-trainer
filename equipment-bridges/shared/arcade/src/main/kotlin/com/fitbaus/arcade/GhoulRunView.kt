@@ -90,6 +90,17 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val v = 255 * step / LIGHT_STEPS
         LightingColorFilter(Color.rgb(v, v, v), 0)
     }
+    private val ghoulLightFilters = Array(LIGHT_STEPS + 1) { step ->
+        val v = 255 * step / LIGHT_STEPS
+        LightingColorFilter(
+            Color.rgb(
+                (v * GhoulConceptArt.TINT_RED).roundToInt(),
+                (v * GhoulConceptArt.TINT_GREEN).roundToInt(),
+                (v * GhoulConceptArt.TINT_BLUE).roundToInt(),
+            ),
+            0,
+        )
+    }
     private val spritePaint = Paint().apply { isFilterBitmap = true }
     private val spriteDst = RectF()
     private var tileArtWidth = -1
@@ -604,7 +615,10 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 fpRect.left + (draw.left + draw.width) * sx,
                 fpRect.top + (draw.top + draw.height) * sy,
             )
-            spritePaint.colorFilter = lightFilters[(draw.light.coerceIn(0f, 1f) * LIGHT_STEPS + 0.5f).toInt()]
+            val lightStep = (draw.light.coerceIn(0f, 1f) * LIGHT_STEPS + 0.5f).toInt()
+            spritePaint.colorFilter = if (
+                draw.kind == GhoulSpriteKind.Ghoul || draw.kind == GhoulSpriteKind.GhoulStunned
+            ) ghoulLightFilters[lightStep] else lightFilters[lightStep]
             for (run in 0 until draw.runCount) {
                 canvas.save()
                 canvas.clipRect(

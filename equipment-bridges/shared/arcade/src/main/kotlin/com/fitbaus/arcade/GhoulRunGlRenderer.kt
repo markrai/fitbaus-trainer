@@ -288,6 +288,10 @@ internal class GhoulRunGlRenderer(
         GLES20.glUniform1f(ghoulLocations.phaseB, frame.ghoulPhaseB)
         GLES20.glUniform1f(ghoulLocations.flare, frame.ghoulFlare)
         GLES20.glUniform1f(ghoulLocations.sway, frame.ghoulSway)
+        GLES20.glUniform3f(
+            ghoulLocations.tint,
+            GhoulConceptArt.TINT_RED, GhoulConceptArt.TINT_GREEN, GhoulConceptArt.TINT_BLUE,
+        )
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         bindTexture(ghoulTextures[0])
         GLES20.glUniform1i(ghoulLocations.body, 0)
@@ -530,6 +534,7 @@ internal class GhoulRunGlRenderer(
         val phaseB = uniform(program, "uPhaseB")
         val flare = uniform(program, "uFlare")
         val sway = uniform(program, "uSway")
+        val tint = uniform(program, "uTint")
         val desaturation = uniform(program, "uDesat")
     }
 
@@ -661,6 +666,7 @@ internal class GhoulRunGlRenderer(
             uniform float uPhaseB;
             uniform float uFlare;
             uniform float uSway;
+            uniform vec3 uTint;
             uniform float uDesat;
             varying vec2 vUv;
             varying vec3 vWorld;
@@ -684,6 +690,7 @@ internal class GhoulRunGlRenderer(
                 vec4 halo = texture2D(uHalo, uChest + dh / vec2(ASPECT, 1.0));
                 vec4 body = texture2D(uBody, vUv - vec2((uFeetV - vUv.y) * tan(uSway) / ASPECT, 0.0));
                 vec4 c = body + halo * (1.0 - body.a);
+                c.rgb *= uTint;
                 c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.3, 0.59, 0.11))), uDesat);
                 if (c.a < 0.02) discard;
                 gl_FragColor = vec4(c.rgb * light, c.a);

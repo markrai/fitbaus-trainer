@@ -85,6 +85,9 @@ internal object GhoulConceptArt {
     const val BOB_AMPLITUDE = 0.006f
     const val FLARE_TIME_CONSTANT = 0.35f
     const val CATCH_FLARE = 1.2f
+    const val TINT_RED = 1f
+    const val TINT_GREEN = 0.28f
+    const val TINT_BLUE = 0.22f
     val CHEST = GhoulUv(0.5094f, 0.3173f)
     val BILLBOARD_BASE = -(1f - FEET_V) * BILLBOARD_HEIGHT
 }
