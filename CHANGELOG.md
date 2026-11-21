@@ -26,6 +26,13 @@ included in this upcoming release.
 
 ### Added
 
+- **Ghoul Run heading-following 3D isometric map.** The map's viewpoint now
+  follows the eased first-person heading through corners and U-turns, keeping
+  travel in the upper-right isometric direction while preserving upright wall
+  geometry. It retains an incrementally cached, fog-of-war map at each settled
+  cardinal heading, and uses depth-sorted projected walls while rotating.
+  The rider indicator faces forward and a north arrow preserves world bearings.
+
 - **Ghoul Run controller U-turn.** D-pad Down reverses direction with one press in
   Controller or Both mode. The new Reverse direction action can be remapped
   per controller without changing Biketris's Down/Soft drop behavior. Android

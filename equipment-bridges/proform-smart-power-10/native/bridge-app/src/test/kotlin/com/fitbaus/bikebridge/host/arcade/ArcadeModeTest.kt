@@ -158,7 +158,8 @@ class ArcadeModeTest {
         assertTrue(start > 0 && end > start)
         val branch = source.substring(start, end)
         assertTrue(branch.contains("arcadeContent.ghoul.render("))
-        assertTrue(branch.contains("gameController.takeGhoulRunInput()"))
+        assertTrue(branch.contains("gameController.takeGhoulRunInput(reverseFromHat)"))
+        assertTrue(branch.contains("gameBindings.action(ArcadeMode.GhoulRun, descriptor, KeyEvent.KEYCODE_DPAD_DOWN)?.id == \"reverse\""))
         for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager", "startService")) {
             assertFalse(branch.contains(forbidden), forbidden)
         }

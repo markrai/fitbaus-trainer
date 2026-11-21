@@ -115,9 +115,12 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private var mapLayerGame: GhoulRunGame? = null
     private var mapLayerSeed = Long.MIN_VALUE
     private var mapLayerCount = 0
+    private var mapLayerQuarter = -1
     private var mapOriginX = 0f
     private var mapOriginY = 0f
+    private val mapCamera = GhoulMapCamera()
     private val newTiles = ArrayList<MazeTile>()
+    private val orbitTiles = ArrayList<MazeTile>()
     private val layerPaint = Paint().apply { isFilterBitmap = true }
     private val darkPaint = Paint()
     private val darkMatrix = Matrix()
@@ -1107,6 +1110,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private fun drawMapHalf(canvas: Canvas, now: Long) {
         val hunted = game.ghoul.state == GhoulState.Hunting
         val zoom = if (hunted) 0.80f else 1f
+        mapCamera.follow(rig.yaw)
         val baseW = min(mapRect.width() / 10f, mapRect.height() / 7f).roundToInt().toFloat()
         val tileW = baseW * zoom
         val tileH = tileW / 2f
@@ -1120,6 +1124,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         drawLampShade(canvas, ox, oy, tileW, tileH)
         drawEntities(canvas, ox, oy, tileW, tileH, now)
         drawThreat(canvas, ox, oy, tileW, tileH, now)
+        drawMapNorthIndicator(canvas)
         if (game.config.keyCount > 0) {
             text.textSize = 14f * density
             text.color = Color.WHITE
@@ -1149,21 +1154,115 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
      */
     private fun drawMaze(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float) {
         ensureTileArt(tw, th)
-        updateMapLayer(tw, th)
-        val layer = mapLayer ?: return
         val camR = cameraRow * 2f + 1f
         val camC = cameraCol * 2f + 1f
-        canvas.drawBitmap(
-            layer,
-            ox - mapOriginX - (camC - camR) * tw / 2f,
-            oy - mapOriginY - (camC + camR) * th / 2f,
-            layerPaint,
-        )
+        if (mapCamera.quarter == null) {
+            drawOrbitMaze(canvas, ox, oy, tw, th, camR, camC)
+        } else {
+            updateMapLayer(tw, th)
+            val layer = mapLayer
+            if (layer != null) canvas.drawBitmap(
+                layer,
+                ox - mapOriginX - mapCamera.x(camR, camC, tw),
+                oy - mapOriginY - mapCamera.y(camR, camC, th),
+                layerPaint,
+            )
+        }
         drawNoiseTint(canvas, ox, oy, tw, th, camR, camC)
         val light = game.lightRadius
         for (cell in game.world.shrines) drawObjectiveAt(canvas, cell, ox, oy, tw, th, camR, camC, light)
         drawObjectiveAt(canvas, game.world.exit, ox, oy, tw, th, camR, camC, light)
         for (cell in game.world.keys) if (cell !in game.collectedKeys) drawObjectiveAt(canvas, cell, ox, oy, tw, th, camR, camC, light)
+    }
+
+    private fun drawOrbitMaze(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float, camR: Float, camC: Float) {
+        orbitTiles.clear()
+        orbitTiles.addAll(game.exploredTiles)
+        orbitTiles.sortWith(compareBy<MazeTile> { mapCamera.y(it.row.toFloat(), it.col.toFloat(), th) }.thenBy { it.row }.thenBy { it.col })
+        for (tile in orbitTiles) {
+            val x = ox + mapCamera.x(tile.row - camR, tile.col - camC, tw)
+            val y = oy + mapCamera.y(tile.row - camR, tile.col - camC, th)
+            if (x < mapRect.left - tw * 2f || x > mapRect.right + tw * 2f ||
+                y < mapRect.top - th * 3f || y > mapRect.bottom + th * 3f
+            ) continue
+            if (game.world.isFloorTile(tile)) {
+                drawOrbitTop(canvas, x, y, tw, th, 0f, FLOOR_LIT)
+            } else {
+                drawOrbitWall(canvas, x, y, tw, th)
+            }
+        }
+    }
+
+    private fun drawOrbitWall(canvas: Canvas, x: Float, y: Float, tw: Float, th: Float) {
+        val rx = mapCamera.x(0.5f, 0f, tw)
+        val ry = mapCamera.y(0.5f, 0f, th)
+        val cx = mapCamera.x(0f, 0.5f, tw)
+        val cy = mapCamera.y(0f, 0.5f, th)
+        val x0 = x - rx - cx
+        val y0 = y - ry - cy
+        val x1 = x - rx + cx
+        val y1 = y - ry + cy
+        val x2 = x + rx + cx
+        val y2 = y + ry + cy
+        val x3 = x + rx - cx
+        val y3 = y + ry - cy
+        val rise = th * 0.55f
+        drawOrbitFace(canvas, x, y, x0, y0, x1, y1, rise)
+        drawOrbitFace(canvas, x, y, x1, y1, x2, y2, rise)
+        drawOrbitFace(canvas, x, y, x2, y2, x3, y3, rise)
+        drawOrbitFace(canvas, x, y, x3, y3, x0, y0, rise)
+        drawOrbitTop(canvas, x, y, tw, th, rise, WALL_TOP)
+    }
+
+    private fun drawOrbitFace(
+        canvas: Canvas,
+        centreX: Float,
+        centreY: Float,
+        ax: Float,
+        ay: Float,
+        bx: Float,
+        by: Float,
+        rise: Float,
+    ) {
+        if ((ay + by) * 0.5f <= centreY + 0.001f) return
+        paint.color = if ((ax + bx) * 0.5f < centreX) WALL_LEFT else WALL_RIGHT
+        path.reset()
+        path.moveTo(ax, ay)
+        path.lineTo(bx, by)
+        path.lineTo(bx, by - rise)
+        path.lineTo(ax, ay - rise)
+        path.close()
+        canvas.drawPath(path, paint)
+    }
+
+    private fun drawOrbitTop(canvas: Canvas, x: Float, y: Float, tw: Float, th: Float, rise: Float, color: Int) {
+        val rx = mapCamera.x(0.5f, 0f, tw)
+        val ry = mapCamera.y(0.5f, 0f, th)
+        val cx = mapCamera.x(0f, 0.5f, tw)
+        val cy = mapCamera.y(0f, 0.5f, th)
+        paint.color = color
+        path.reset()
+        path.moveTo(x - rx - cx, y - ry - cy - rise)
+        path.lineTo(x - rx + cx, y - ry + cy - rise)
+        path.lineTo(x + rx + cx, y + ry + cy - rise)
+        path.lineTo(x + rx - cx, y + ry - cy - rise)
+        path.close()
+        canvas.drawPath(path, paint)
+    }
+
+    private fun drawMapNorthIndicator(canvas: Canvas) {
+        val x = mapRect.right - 28f * density
+        val y = mapRect.top + 80f * density
+        paint.color = PANEL
+        canvas.drawCircle(x, y, 20f * density, paint)
+        val dx = mapCamera.x(-1f, 0f, 40f)
+        val dy = mapCamera.y(-1f, 0f, 20f)
+        drawArrow(canvas, x, y, dx, dy, COMPASS, 22f * density)
+        text.textSize = 11f * density
+        text.textAlign = Paint.Align.CENTER
+        text.color = COMPASS
+        canvas.drawText("N", x, y + 34f * density, text)
+        text.textAlign = Paint.Align.LEFT
     }
 
     private fun drawObjectiveAt(
@@ -1182,8 +1281,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         if (!game.isExplored(row, col)) return
         val dr = row - camR
         val dc = col - camC
-        val x = ox + (dc - dr) * tw / 2f
-        val y = oy + (dc + dr) * th / 2f
+        val x = ox + mapCamera.x(dr.toFloat(), dc.toFloat(), tw)
+        val y = oy + mapCamera.y(dr.toFloat(), dc.toFloat(), th)
         if (x < mapRect.left - tw * 2 || x > mapRect.right + tw * 2 || y < mapRect.top - tw * 2 || y > mapRect.bottom + tw * 2) return
         val lr = cell.row - game.riderRow
         val lc = cell.col - game.riderCol
@@ -1229,9 +1328,13 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         halfH: Float,
     ) {
         if (!game.isExplored(row, col)) return
-        val dr = row - camR
-        val dc = col - camC
-        canvas.drawBitmap(art, ox + (dc - dr) * tw / 2f - halfW, oy + (dc + dr) * th / 2f - halfH, null)
+        val x = ox + mapCamera.x((row - camR), (col - camC), tw)
+        val y = oy + mapCamera.y((row - camR), (col - camC), th)
+        if (mapCamera.quarter != null) {
+            canvas.drawBitmap(art, x - halfW, y - halfH, null)
+        } else {
+            drawOrbitTop(canvas, x, y, tw, th, 0f, NOISE_TINT)
+        }
     }
 
     /** Dims everything outside the lamp: an elliptical (isometric circle) gradient centred on the rider. */
@@ -1248,8 +1351,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val camC = cameraCol * 2f + 1f
         val dr = game.riderRow * 2f + 1f - camR
         val dc = game.riderCol * 2f + 1f - camC
-        val x = ox + (dc - dr) * tw / 2f
-        val y = oy + (dc + dr) * th / 2f
+        val x = ox + mapCamera.x(dr, dc, tw)
+        val y = oy + mapCamera.y(dr, dc, th)
         val radius = max(game.lightRadius, 0.05f) * SQRT2
         darkMatrix.reset()
         darkMatrix.setScale(radius * tw, radius * th)
@@ -1259,21 +1362,33 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     }
 
     private fun updateMapLayer(tw: Float, th: Float) {
+        val quarter = mapCamera.quarter ?: return
         val rows = game.world.tileRows
         val cols = game.world.tileCols
         val explored = game.exploredTiles
+        val rowX = mapCamera.x((rows - 1).toFloat(), 0f, tw)
+        val colX = mapCamera.x(0f, (cols - 1).toFloat(), tw)
+        val rowY = mapCamera.y((rows - 1).toFloat(), 0f, th)
+        val colY = mapCamera.y(0f, (cols - 1).toFloat(), th)
+        val minX = minOf(0f, rowX, colX, rowX + colX)
+        val maxX = maxOf(0f, rowX, colX, rowX + colX)
+        val minY = minOf(0f, rowY, colY, rowY + colY)
+        val maxY = maxOf(0f, rowY, colY, rowY + colY)
+        val targetWidth = ceil(maxX - minX + tw + 6f).toInt()
+        val targetHeight = ceil(maxY - minY + th * 1.55f + 6f).toInt()
         val stale = mapLayer == null || mapLayerGame !== game || mapLayerSeed != game.world.seed ||
-            explored.size < mapLayerCount || mapLayer?.width != layerWidth(tw, rows, cols)
+            mapLayerQuarter != quarter || explored.size < mapLayerCount ||
+            mapLayer?.width != targetWidth || mapLayer?.height != targetHeight
         if (stale) {
             mapLayer?.recycle()
-            val pad = 2f
-            mapOriginX = rows * tw / 2f + pad
-            mapOriginY = th * 0.55f + th / 2f + pad
-            val bitmap = Bitmap.createBitmap(layerWidth(tw, rows, cols), ceil((rows + cols) * th / 2f + th * 0.55f + 2 * pad + th).toInt(), Bitmap.Config.ARGB_8888)
+            mapOriginX = tw / 2f + 3f - minX
+            mapOriginY = th * 1.05f + 3f - minY
+            val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
             mapLayer = bitmap
             mapLayerCanvas = Canvas(bitmap)
             mapLayerGame = game
             mapLayerSeed = game.world.seed
+            mapLayerQuarter = quarter
             mapLayerCount = 0
         }
         if (explored.size == mapLayerCount) return
@@ -1288,11 +1403,14 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val fresh = newTiles.size
         for (i in 0 until fresh) {
             val tile = newTiles[i]
-            for ((r, c) in arrayOf(tile.row + 1 to tile.col, tile.row to tile.col + 1, tile.row + 1 to tile.col + 1)) {
-                if (game.isExplored(r, c)) newTiles += MazeTile(r, c)
+            for (r in tile.row - 1..tile.row + 1) for (c in tile.col - 1..tile.col + 1) {
+                if (r == tile.row && c == tile.col) continue
+                if (game.isExplored(r, c) && mapCamera.y((r - tile.row).toFloat(), (c - tile.col).toFloat(), th) >= 0f) {
+                    newTiles += MazeTile(r, c)
+                }
             }
         }
-        newTiles.sortWith(compareBy<MazeTile> { it.row + it.col }.thenBy { it.row })
+        newTiles.sortWith(compareBy<MazeTile> { mapCamera.y(it.row.toFloat(), it.col.toFloat(), th) }.thenBy { it.row }.thenBy { it.col })
         var previous: MazeTile? = null
         for (tile in newTiles) {
             if (tile == previous) continue
@@ -1301,13 +1419,11 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun layerWidth(tw: Float, rows: Int, cols: Int): Int = ceil((rows + cols) * tw / 2f + 4f + tw).toInt()
-
     private fun drawLayerTile(layerCanvas: Canvas, tile: MazeTile, tw: Float, th: Float) {
         val floor = floorLitTile ?: return
         val wall = wallLitTile ?: return
-        val x = mapOriginX + (tile.col - tile.row) * tw / 2f
-        val y = mapOriginY + (tile.col + tile.row) * th / 2f
+        val x = mapOriginX + mapCamera.x(tile.row.toFloat(), tile.col.toFloat(), tw)
+        val y = mapOriginY + mapCamera.y(tile.row.toFloat(), tile.col.toFloat(), th)
         if (game.world.isFloorTile(tile)) {
             layerCanvas.drawBitmap(floor, x - floor.width / 2f, y - floor.height / 2f, null)
         } else {
@@ -1428,10 +1544,17 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val blinkOff = game.invulnerableLeft > 0f && (now / BLINK_NANOS) % 2L == 1L
         if (!blinkOff) {
             paint.color = RIDER
+            val dx = mapCamera.x(sin(rig.yaw), cos(rig.yaw), tw)
+            val dy = mapCamera.y(sin(rig.yaw), cos(rig.yaw), th)
+            val norm = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001f)
+            val fx = dx / norm
+            val fy = dy / norm
+            val length = th * 0.95f
+            val half = tw * 0.14f
             path.reset()
-            path.moveTo(rider.first, rider.second - th * 0.72f)
-            path.lineTo(rider.first - tw * 0.14f, rider.second)
-            path.lineTo(rider.first + tw * 0.14f, rider.second)
+            path.moveTo(rider.first + fx * length, rider.second + fy * length)
+            path.lineTo(rider.first - fx * length * 0.45f - fy * half, rider.second - fy * length * 0.45f + fx * half)
+            path.lineTo(rider.first - fx * length * 0.45f + fy * half, rider.second - fy * length * 0.45f - fx * half)
             path.close()
             canvas.drawPath(path, paint)
         }
@@ -1620,7 +1743,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private fun projectTile(row: Float, col: Float, ox: Float, oy: Float, tw: Float, th: Float): Pair<Float, Float> {
         val dr = row - (cameraRow * 2f + 1f)
         val dc = col - (cameraCol * 2f + 1f)
-        return ox + (dc - dr) * tw / 2f to oy + (dc + dr) * th / 2f
+        return ox + mapCamera.x(dr, dc, tw) to oy + mapCamera.y(dr, dc, th)
     }
 
     private fun diamond(canvas: Canvas, cx: Float, cy: Float, hw: Float, hh: Float, source: Paint) {
