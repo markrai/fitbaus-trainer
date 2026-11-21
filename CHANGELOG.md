@@ -32,9 +32,11 @@ included in this upcoming release.
   controllers that report the D-pad as a hat axis also trigger the action.
 
 - **GHOUL RUN arcade mode (playable prototype).** A seeded 11×11 maze ride,
-  shown as a split screen: a Wolfenstein-style first-person view on the left
-  (the steering view, a 320-pixel software raycaster scaled up unfiltered, 70°
-  field of view, walls fading to black at the dynamo lamp's radius so harder
+  shown as a split screen: a GPU-rendered first-person view on the left
+  (the steering view, native-resolution OpenGL ES 2.0 geometry with procedural
+  floor, ceiling and brick textures, per-pixel dynamo and objective lighting,
+  depth-tested billboards, a 70° field of view, and an automatic software-raycaster
+  fallback if GL setup fails; walls fade to black at the dynamo lamp's radius so harder
   pedaling visibly lights further; the Ghoul is a gaunt red figure with a
   swaying halo of thorny branches and glowing eyes, grey while stunned) and the fixed isometric map on the right
   with fog of war, a rider view cone and a faint noise-radius tint. Leaning
