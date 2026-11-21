@@ -404,19 +404,19 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
         }
 
         fun spriteWidth(kind: GhoulSpriteKind): Float = when (kind) {
-            GhoulSpriteKind.Ghoul, GhoulSpriteKind.GhoulStunned -> 1.25f
+            GhoulSpriteKind.Ghoul, GhoulSpriteKind.GhoulStunned -> GhoulConceptArt.BILLBOARD_WIDTH
             GhoulSpriteKind.Exit, GhoulSpriteKind.ExitLocked -> 0.7f
             GhoulSpriteKind.ShrineReady, GhoulSpriteKind.ShrineSpent -> 0.3f
         }
 
         fun spriteHeight(kind: GhoulSpriteKind): Float = when (kind) {
-            GhoulSpriteKind.Ghoul, GhoulSpriteKind.GhoulStunned -> 1f
+            GhoulSpriteKind.Ghoul, GhoulSpriteKind.GhoulStunned -> GhoulConceptArt.BILLBOARD_HEIGHT
             GhoulSpriteKind.Exit, GhoulSpriteKind.ExitLocked -> 0.92f
             GhoulSpriteKind.ShrineReady, GhoulSpriteKind.ShrineSpent -> 0.85f
         }
 
         fun spriteBase(kind: GhoulSpriteKind): Float = when (kind) {
-            GhoulSpriteKind.Ghoul, GhoulSpriteKind.GhoulStunned -> 0f
+            GhoulSpriteKind.Ghoul, GhoulSpriteKind.GhoulStunned -> GhoulConceptArt.BILLBOARD_BASE
             else -> 0f
         }
 
@@ -430,50 +430,16 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
     }
 }
 
-/**
- * Billboard artwork, rasterised once into small row-major ARGB textures (0 = transparent) so the
- * view can scale them with Canvas instead of shading per pixel. The ghoul has [GHOUL_FRAMES]
- * animation frames and a separate always-lit eyes layer.
- */
+/** Procedural fallback artwork retained only for exit and shrine props. */
 internal object GhoulSpriteArt {
-    const val GHOUL_FRAMES = 4
-    const val FRAME_SECONDS = 0.18f
-
-    private const val BRANCHES = 44
-
-    // The ghoul stays red (one colour, one meaning); the eyes glow hot so they read in the dark.
-    private val HEAD = GhoulFirstPersonRenderer.rgb(232, 120, 108)
-    private val FACE = GhoulFirstPersonRenderer.rgb(196, 84, 76)
-    private val SOCKET = GhoulFirstPersonRenderer.rgb(40, 6, 8)
-    private val NECK = GhoulFirstPersonRenderer.rgb(186, 70, 64)
-    private val STRANDS = GhoulFirstPersonRenderer.rgb(240, 150, 140)
-    private val CHEST = GhoulFirstPersonRenderer.rgb(176, 58, 54)
-    private val SHOULDER = GhoulFirstPersonRenderer.rgb(196, 76, 70)
-    private val RAGS = GhoulFirstPersonRenderer.rgb(118, 20, 24)
-    private val RAGS_DARK = GhoulFirstPersonRenderer.rgb(86, 12, 16)
-    private val ARM = GhoulFirstPersonRenderer.rgb(170, 52, 50)
-    private val FOREARM = GhoulFirstPersonRenderer.rgb(150, 36, 38)
-    private val CLAW = GhoulFirstPersonRenderer.rgb(222, 70, 60)
-    private val LEG = GhoulFirstPersonRenderer.rgb(100, 16, 20)
-    private val LEG_DARK = GhoulFirstPersonRenderer.rgb(78, 10, 14)
-    private val FOOT = GhoulFirstPersonRenderer.rgb(60, 8, 10)
-    private val BRANCH_DARK = GhoulFirstPersonRenderer.rgb(128, 22, 26)
-    private val BRANCH_LIGHT = GhoulFirstPersonRenderer.rgb(172, 40, 40)
-    private val WEB = GhoulFirstPersonRenderer.rgb(180, 92, 88)
-    private val EYE_GLOW = GhoulFirstPersonRenderer.rgb(255, 150, 60)
-    private val EYE_CORE = GhoulFirstPersonRenderer.rgb(255, 238, 200)
     private val EXIT_GREEN = GhoulFirstPersonRenderer.rgb(80, 232, 118)
     private val EXIT_FRAME = GhoulFirstPersonRenderer.rgb(36, 140, 62)
     private val EXIT_LOCKED = GhoulFirstPersonRenderer.rgb(115, 45, 48)
     private val SHRINE_READY = GhoulFirstPersonRenderer.rgb(70, 225, 230)
     private val SHRINE_SPENT = GhoulFirstPersonRenderer.rgb(35, 67, 72)
 
-    fun texture(kind: GhoulSpriteKind, w: Int, h: Int, frame: Int = 0, eyesOnly: Boolean = false): IntArray {
-        when (kind) {
-            GhoulSpriteKind.Ghoul -> return ghoul(w, h, frame, stunned = false, eyesOnly = eyesOnly)
-            GhoulSpriteKind.GhoulStunned -> return ghoul(w, h, frame, stunned = true, eyesOnly = eyesOnly)
-            else -> Unit
-        }
+    fun texture(kind: GhoulSpriteKind, w: Int, h: Int): IntArray {
+        require(kind != GhoulSpriteKind.Ghoul && kind != GhoulSpriteKind.GhoulStunned)
         val out = IntArray(w * h)
         for (y in 0 until h) for (x in 0 until w) {
             val u = (x + 0.5f) / w
@@ -489,163 +455,7 @@ internal object GhoulSpriteArt {
         return out
     }
 
-    /** Texture height in pixels; the ghoul gets more detail than the props. */
-    fun textureHeight(kind: GhoulSpriteKind): Int = when (kind) {
-        GhoulSpriteKind.Ghoul, GhoulSpriteKind.GhoulStunned -> 128
-        else -> 56
-    }
-
-    /**
-     * A gaunt, bald, long-armed figure in rags with a halo of thorny branches radiating from its
-     * back, all in reds, with glowing eyes on a separate always-lit layer. Rasterised by stamping
-     * discs along strokes (cost scales with drawn pixels, which matters on the interpreted console).
-     * Coordinates are in units of the texture height, x centred. The layout is seeded, so every
-     * frame is the same creature; frames only sway the branches.
-     */
-    private fun ghoul(w: Int, h: Int, frame: Int, stunned: Boolean, eyesOnly: Boolean): IntArray {
-        val r = Raster(w, h)
-        if (eyesOnly) {
-            if (!stunned) {
-                for (side in intArrayOf(-1, 1)) {
-                    r.disc(side * 0.021f, 0.118f, 0.0105f, EYE_GLOW)
-                    r.disc(side * 0.021f, 0.117f, 0.005f, EYE_CORE)
-                }
-            }
-            return r.px
-        }
-        val rng = kotlin.random.Random(0x6807)
-        val sway = frame * (PI.toFloat() / 2f)
-        // Thorn halo, behind the body.
-        for (i in 0 until BRANCHES) {
-            var angle = rng.nextFloat() * 2f * PI.toFloat() - PI.toFloat()
-            if (sin(angle) > 0.82f) angle += if (cos(angle) >= 0f) -0.9f else 0.9f
-            val sideways = abs(cos(angle))
-            val length = (0.22f + rng.nextFloat() * 0.3f) * (1f + 0.45f * sideways)
-            var x = (rng.nextFloat() - 0.5f) * 0.08f
-            var y = 0.22f + rng.nextFloat() * 0.22f
-            var a = angle + 0.05f * sin(sway + i)
-            var radius = 0.0125f
-            val color = if (i % 3 == 0) BRANCH_LIGHT else BRANCH_DARK
-            for (segment in 0 until 3) {
-                a += (rng.nextFloat() - 0.5f) * 0.5f
-                val step = length / 3f
-                val nx = x + cos(a) * step
-                val ny = y + sin(a) * step
-                val nr = radius * 0.6f
-                r.line(x, y, nx, ny, radius, nr, color)
-                if (rng.nextFloat() < 0.55f) {
-                    val ta = a + (if (rng.nextBoolean()) 0.65f else -0.65f) + 0.08f * sin(sway + i * 2)
-                    val tl = 0.05f + rng.nextFloat() * 0.07f
-                    r.line(nx, ny, nx + cos(ta) * tl, ny + sin(ta) * tl, nr * 0.8f, 0.0015f, color)
-                }
-                x = nx
-                y = ny
-                radius = nr
-            }
-        }
-        // Cobweb strands between the inner branches.
-        repeat(5) {
-            val a0 = rng.nextFloat() * 2f * PI.toFloat()
-            val a1 = a0 + 0.5f + rng.nextFloat() * 0.5f
-            val d0 = 0.12f + rng.nextFloat() * 0.12f
-            val d1 = d0 + (rng.nextFloat() - 0.5f) * 0.06f
-            r.line(cos(a0) * d0, 0.32f + sin(a0) * d0, cos(a1) * d1, 0.32f + sin(a1) * d1, 0.0018f, 0.0018f, WEB)
-        }
-        // Legs and feet.
-        for (side in intArrayOf(-1, 1)) {
-            r.line(side * 0.026f, 0.47f, side * 0.03f, 0.72f, 0.025f, 0.019f, LEG)
-            r.line(side * 0.03f, 0.72f, side * 0.031f, 0.94f, 0.019f, 0.014f, LEG_DARK)
-            r.ellipse(side * 0.038f, 0.955f, 0.032f, 0.016f, FOOT, 0f)
-        }
-        // Torso in rags, shoulders, hanging strips, long arms ending in claws.
-        r.line(0f, 0.22f, 0f, 0.47f, 0.058f, 0.036f, RAGS)
-        r.line(0f, 0.22f, 0f, 0.31f, 0.034f, 0.026f, CHEST)
-        for (side in intArrayOf(-1, 1)) {
-            r.disc(side * 0.06f, 0.232f, 0.024f, SHOULDER)
-            r.line(side * 0.028f, 0.46f, side * 0.042f, 0.57f, 0.012f, 0.006f, RAGS_DARK)
-            r.line(side * 0.066f, 0.24f, side * 0.082f, 0.40f, 0.015f, 0.011f, ARM)
-            r.line(side * 0.082f, 0.40f, side * 0.088f, 0.555f, 0.011f, 0.008f, FOREARM)
-            for (claw in 0 until 4) {
-                val cx = side * (0.072f + claw * 0.011f)
-                r.line(side * 0.088f, 0.555f, cx, 0.625f + (claw % 2) * 0.012f, 0.005f, 0.0015f, CLAW)
-            }
-        }
-        // Neck, bald elongated head, hollow eye sockets, stringy jaw.
-        r.line(0f, 0.165f, 0f, 0.215f, 0.016f, 0.018f, NECK)
-        r.ellipse(0f, 0.088f, 0.056f, 0.06f, HEAD, 0.4f)
-        r.ellipse(0f, 0.125f, 0.044f, 0.055f, HEAD, 0.4f)
-        r.ellipse(0f, 0.152f, 0.03f, 0.03f, FACE, 0.25f)
-        for (side in intArrayOf(-1, 1)) r.ellipse(side * 0.021f, 0.118f, 0.015f, 0.011f, SOCKET, 0f)
-        for (strand in -2..2) {
-            r.line(strand * 0.009f, 0.165f, strand * 0.02f, 0.255f + abs(strand) * 0.01f, 0.0028f, 0.0015f, STRANDS)
-        }
-        if (stunned) {
-            for (i in r.px.indices) {
-                val c = r.px[i]
-                if (c == 0) continue
-                val grey = (((c shr 16) and 0xFF) * 3 + ((c shr 8) and 0xFF) * 6 + (c and 0xFF)) / 10
-                val g = 70 + grey * 6 / 10
-                r.px[i] = GhoulFirstPersonRenderer.OPAQUE or (g shl 16) or (g shl 8) or min(255, g + 6)
-            }
-        }
-        return r.px
-    }
-
-    /** Minimal pure rasteriser: discs, tapered strokes and shaded ellipses in height units, x centred. */
-    private class Raster(val w: Int, val h: Int) {
-        val px = IntArray(w * h)
-        private val scale = h.toFloat()
-        private val centre = w / 2f
-
-        fun disc(fx: Float, fy: Float, fr: Float, color: Int) {
-            val cx = centre + fx * scale
-            val cy = fy * scale
-            val radius = max(0.5f, fr * scale)
-            val r2 = radius * radius
-            val x0 = max(0, (cx - radius).toInt())
-            val x1 = min(w - 1, (cx + radius).toInt())
-            val y0 = max(0, (cy - radius).toInt())
-            val y1 = min(h - 1, (cy + radius).toInt())
-            for (y in y0..y1) {
-                val dy = y + 0.5f - cy
-                for (x in x0..x1) {
-                    val dx = x + 0.5f - cx
-                    if (dx * dx + dy * dy <= r2) px[y * w + x] = color
-                }
-            }
-        }
-
-        fun line(fx0: Float, fy0: Float, fx1: Float, fy1: Float, r0: Float, r1: Float, color: Int) {
-            val length = kotlin.math.hypot(fx1 - fx0, fy1 - fy0) * scale
-            val steps = max(1, (length / 0.6f).toInt())
-            for (i in 0..steps) {
-                val t = i.toFloat() / steps
-                disc(fx0 + (fx1 - fx0) * t, fy0 + (fy1 - fy0) * t, r0 + (r1 - r0) * t, color)
-            }
-        }
-
-        /** Filled ellipse, lit from the upper left by [relief] (0 = flat). */
-        fun ellipse(fx: Float, fy: Float, frx: Float, fry: Float, color: Int, relief: Float) {
-            val cx = centre + fx * scale
-            val cy = fy * scale
-            val rx = max(0.5f, frx * scale)
-            val ry = max(0.5f, fry * scale)
-            val x0 = max(0, (cx - rx).toInt())
-            val x1 = min(w - 1, (cx + rx).toInt())
-            val y0 = max(0, (cy - ry).toInt())
-            val y1 = min(h - 1, (cy + ry).toInt())
-            for (y in y0..y1) {
-                val ny = (y + 0.5f - cy) / ry
-                for (x in x0..x1) {
-                    val nx = (x + 0.5f - cx) / rx
-                    val d = nx * nx + ny * ny
-                    if (d > 1f) continue
-                    px[y * w + x] = if (relief == 0f) color else shadeRaw(color, 1f - relief * (0.35f * (nx + ny) + 0.45f * d))
-                }
-            }
-        }
-    }
-
+    fun textureHeight(@Suppress("UNUSED_PARAMETER") kind: GhoulSpriteKind): Int = 56
     private fun door(u: Float, v: Float, locked: Boolean): Int {
         val frame = u < 0.12f || u > 0.88f || v < 0.1f
         return when {

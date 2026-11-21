@@ -4,6 +4,7 @@ package com.fitbaus.arcade
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -84,14 +85,12 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val frameMatrix = Matrix()
     private val frameValues = FloatArray(9)
     private val spriteBitmaps = HashMap<GhoulSpriteKind, Bitmap>()
-    private val ghoulFrames = ArrayList<Bitmap>()
-    private val ghoulEyes = ArrayList<Bitmap>()
+    private var conceptGhoulBitmap: Bitmap? = null
     private val lightFilters = Array(LIGHT_STEPS + 1) { step ->
         val v = 255 * step / LIGHT_STEPS
         LightingColorFilter(Color.rgb(v, v, v), 0)
     }
-    private val spritePaint = Paint().apply { isFilterBitmap = false }
-    private val eyePaint = Paint().apply { isFilterBitmap = false }
+    private val spritePaint = Paint().apply { isFilterBitmap = true }
     private val spriteDst = RectF()
     private var tileArtWidth = -1
     private var floorLitTile: Bitmap? = null
@@ -115,6 +114,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val spritePool = ArrayList<GhoulSprite>()
     private var bobPhase = 0f
     private val shaderPhases = GhoulShaderPhases()
+    private val ghoulMotion = GhoulConceptMotion()
     private val shakeRandom = Random(7)
 
     // Feedback tracking.
@@ -185,7 +185,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         dashed.pathEffect = DashPathEffect(floatArrayOf(5f * density, 4f * density), 0f)
         try {
             val surface = GLSurfaceView(context)
-            val gpu = GhoulRunGlRenderer(glSnapshots, ::onGlFailure)
+            val gpu = GhoulRunGlRenderer(context.assets, glSnapshots, ::onGlFailure)
             surface.setEGLContextClientVersion(2)
             surface.setEGLContextFactory(GhoulEglContextFactory(::onGlFailure))
             surface.preserveEGLContextOnPause = true
@@ -267,6 +267,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         rig.update(game, dt)
         val cadenceHz = session.cadenceReading.filteredRpm.coerceAtLeast(0f) / 60f
         shaderPhases.advance(dt, cadenceHz)
+        ghoulMotion.advance(dt, game.ghoul.state)
         if (game.speed > 0.05f) bobPhase = (bobPhase + dt * cadenceHz * 2f * TWO_PI) % TWO_PI
         val hunt = game.ghoul.state == GhoulState.Hunting
         val shift = if (hunt) 0.28f else 0f
@@ -295,6 +296,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         if (event != null && event !== shownCatch) {
             shownCatch = event
             catchAtNanos = now
+            ghoulMotion.spikeCatch()
         }
         if (event == null) shownCatch = null
         if (game.respawns != seenRespawns) {
@@ -458,8 +460,13 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         frame.lampRadius = game.lightRadius * 2f
         frame.lampPhase = shaderPhases.lamp
         frame.glowPhase = shaderPhases.glow
-        frame.timeSeconds = (now / 1_000_000L % 10_000_000L) / 1000f
         frame.diagnostics = diagnosticsOverlay
+        frame.ghoulPhaseA = ghoulMotion.phaseA
+        frame.ghoulPhaseB = ghoulMotion.phaseB
+        frame.ghoulFlare = ghoulMotion.flare
+        frame.ghoulBob = ghoulMotion.bob
+        frame.ghoulSway = ghoulMotion.sway
+        frame.ghoulDesaturation = ghoulMotion.desaturation(game.ghoul.state)
 
         var candidates = 0
         for (shrine in world.shrines) if ((game.shrineCooldowns[shrine] ?: 0f) <= 0f) {
@@ -530,9 +537,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             frameBitmap?.recycle()
             // Transposed: the renderer fills columns contiguously, so bitmap rows are frame columns.
             frameBitmap = Bitmap.createBitmap(pixelsHigh, pixelsWide, Bitmap.Config.ARGB_8888)
-            // Build the ghoul textures now (warm-up), not mid-ride when it first comes into view.
-            spriteBitmap(GhoulSpriteKind.Ghoul, 0)
-            spriteBitmap(GhoulSpriteKind.GhoulStunned, 0)
+            // Decode the fallback artwork now (warm-up), not mid-ride when it first comes into view.
+            spriteBitmap(GhoulSpriteKind.Ghoul)
         }
         val bitmap = frameBitmap ?: return
         val rayGrid = currentGrid()
@@ -561,7 +567,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         frameValues[Matrix.MPERSP_2] = 1f
         frameMatrix.setValues(frameValues)
         canvas.drawBitmap(bitmap, frameMatrix, bitmapPaint)
-        drawSprites(canvas, fp, sx, sy, time)
+        drawSprites(canvas, fp, sx, sy)
         val uploadEnd = System.nanoTime()
         fpRenderMs = ema(fpRenderMs, (uploadStart - renderStart) / 1_000_000f)
         fpUploadMs = ema(fpUploadMs, (uploadEnd - uploadStart) / 1_000_000f)
@@ -588,11 +594,10 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     }
 
     /** Billboards: prebuilt textures scaled by Canvas, clipped to the columns where they beat the walls. */
-    private fun drawSprites(canvas: Canvas, fp: GhoulFirstPersonRenderer, sx: Float, sy: Float, time: Float) {
-        val frame = (time / GhoulSpriteArt.FRAME_SECONDS).toInt() % GhoulSpriteArt.GHOUL_FRAMES
+    private fun drawSprites(canvas: Canvas, fp: GhoulFirstPersonRenderer, sx: Float, sy: Float) {
         for (index in 0 until fp.drawCount) {
             val draw = fp.draws[index]
-            val art = spriteBitmap(draw.kind, frame)
+            val art = spriteBitmap(draw.kind)
             spriteDst.set(
                 fpRect.left + draw.left * sx,
                 fpRect.top + draw.top * sy,
@@ -600,7 +605,6 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 fpRect.top + (draw.top + draw.height) * sy,
             )
             spritePaint.colorFilter = lightFilters[(draw.light.coerceIn(0f, 1f) * LIGHT_STEPS + 0.5f).toInt()]
-            val eyes = if (draw.kind == GhoulSpriteKind.Ghoul) ghoulEyes[frame] else null
             for (run in 0 until draw.runCount) {
                 canvas.save()
                 canvas.clipRect(
@@ -610,21 +614,24 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                     fpRect.bottom,
                 )
                 canvas.drawBitmap(art, null, spriteDst, spritePaint)
-                if (eyes != null) canvas.drawBitmap(eyes, null, spriteDst, eyePaint)
                 canvas.restore()
             }
         }
     }
 
-    private fun spriteBitmap(kind: GhoulSpriteKind, frame: Int): Bitmap {
-        if (ghoulFrames.isEmpty()) {
-            val (w, h) = textureSize(GhoulSpriteKind.Ghoul)
-            for (f in 0 until GhoulSpriteArt.GHOUL_FRAMES) {
-                ghoulFrames += textureBitmap(GhoulSpriteArt.texture(GhoulSpriteKind.Ghoul, w, h, f), w, h)
-                ghoulEyes += textureBitmap(GhoulSpriteArt.texture(GhoulSpriteKind.Ghoul, w, h, f, eyesOnly = true), w, h)
-            }
+    private fun spriteBitmap(kind: GhoulSpriteKind): Bitmap {
+        if (kind == GhoulSpriteKind.Ghoul || kind == GhoulSpriteKind.GhoulStunned) {
+            val cached = conceptGhoulBitmap
+            if (cached != null) return cached
+            return requireNotNull(
+                context.assets.open(GHOUL_FULL_ASSET).use { input ->
+                    BitmapFactory.decodeStream(input, null, BitmapFactory.Options().apply {
+                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                        inScaled = false
+                    })
+                },
+            ) { "missing $GHOUL_FULL_ASSET" }.also { conceptGhoulBitmap = it }
         }
-        if (kind == GhoulSpriteKind.Ghoul) return ghoulFrames[frame]
         return spriteBitmaps.getOrPut(kind) {
             val (w, h) = textureSize(kind)
             textureBitmap(GhoulSpriteArt.texture(kind, w, h), w, h)
@@ -1662,6 +1669,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         const val FADE_NANOS = 400_000_000L
         const val BACK_AT_NANOS = 1_800_000_000L
         const val BLINK_NANOS = 150_000_000L
+        const val GHOUL_FULL_ASSET = "arcade/ghoul/ghoul_full.png"
 
         val WARMUP_CARDS = listOf(
             "REACH THE EXIT - FOLLOW THE COMPASS",

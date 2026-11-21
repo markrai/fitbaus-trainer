@@ -196,18 +196,11 @@ class GhoulRunRaycasterTest {
         ghoul.x = GhoulRaycaster.cellX(start.col.toFloat()) + heading.dc * 1.2f
         ghoul.y = GhoulRaycaster.cellY(start.row.toFloat()) + heading.dr * 1.2f
 
-        val h = GhoulSpriteArt.textureHeight(GhoulSpriteKind.Ghoul)
-        val w = h * 5 / 4
-        val art = GhoulSpriteArt.texture(GhoulSpriteKind.Ghoul, w, h)
-        val opaque = art.filter { it != 0 }
-        assertTrue(opaque.size in (w * h / 10)..(w * h * 7 / 10), "a figure with transparent surroundings: ${opaque.size}")
-        assertTrue(opaque.all { (it shr 16 and 0xFF) > (it shr 8 and 0xFF) }, "the ghoul stays red")
-        val eyes = GhoulSpriteArt.texture(GhoulSpriteKind.Ghoul, w, h, eyesOnly = true)
-        assertTrue(eyes.count { it != 0 } in 4..200, "two small glowing eyes")
-        assertEquals(0, GhoulSpriteArt.texture(GhoulSpriteKind.GhoulStunned, w, h, eyesOnly = true).count { it != 0 })
-        val stunned = GhoulSpriteArt.texture(GhoulSpriteKind.GhoulStunned, w, h).filter { it != 0 }
-        assertTrue(stunned.all { (it shr 16 and 0xFF) == (it shr 8 and 0xFF) }, "the stunned ghoul is grey")
-        assertTrue(!GhoulSpriteArt.texture(GhoulSpriteKind.Ghoul, w, h, frame = 1).contentEquals(art), "branches sway between frames")
+        val propHeight = GhoulSpriteArt.textureHeight(GhoulSpriteKind.Exit)
+        val exit = GhoulSpriteArt.texture(GhoulSpriteKind.Exit, propHeight, propHeight)
+        val shrine = GhoulSpriteArt.texture(GhoulSpriteKind.ShrineReady, propHeight, propHeight)
+        assertTrue(exit.any { it != 0 }, "exit procedural art remains")
+        assertTrue(shrine.any { it != 0 }, "shrine procedural art remains")
 
         val frames = 120
         val begin = System.nanoTime()

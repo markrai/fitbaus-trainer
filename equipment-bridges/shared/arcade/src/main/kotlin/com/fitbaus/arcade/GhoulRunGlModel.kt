@@ -3,9 +3,146 @@
 package com.fitbaus.arcade
 
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.math.tan
+
+internal data class GhoulUv(val u: Float, val v: Float)
+
+internal data class GhoulAnchor(
+    val canvasWidth: Int,
+    val canvasHeight: Int,
+    val chest: GhoulUv,
+    val feet: GhoulUv,
+)
+
+/** Small strict parser for the committed anchor file; avoids an Android JSON dependency in pure tests. */
+internal object GhoulAnchorParser {
+    fun parse(json: String): GhoulAnchor {
+        val canvas = intPair(json, "canvas")
+        val chest = floatPair(json, "chest")
+        val feet = floatPair(json, "feet")
+        require(canvas.first > 0 && canvas.second > 0)
+        require(chest.first in 0f..1f && chest.second in 0f..1f)
+        require(feet.first in 0f..1f && feet.second in 0f..1f)
+        return GhoulAnchor(canvas.first, canvas.second, GhoulUv(chest.first, chest.second), GhoulUv(feet.first, feet.second))
+    }
+
+    private fun intPair(json: String, name: String): Pair<Int, Int> {
+        val values = pair(json, name)
+        return values.first.toInt() to values.second.toInt()
+    }
+
+    private fun floatPair(json: String, name: String): Pair<Float, Float> = pair(json, name)
+
+    private fun pair(json: String, name: String): Pair<Float, Float> {
+        val number = "[-+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)"
+        val match = Regex("\\\"${Regex.escape(name)}\\\"\\s*:\\s*\\[\\s*($number)\\s*,\\s*($number)\\s*]").find(json)
+            ?: throw IllegalArgumentException("missing $name anchor")
+        return match.groupValues[1].toFloat() to match.groupValues[2].toFloat()
+    }
+}
+
+/** CPU mirror of the approved halo shader warp. */
+internal fun haloWarp(
+    uv: GhoulUv,
+    phaseA: Float,
+    phaseB: Float,
+    flare: Float,
+    chest: GhoulUv = GhoulConceptArt.CHEST,
+): GhoulUv {
+    val dx = (uv.u - chest.u) * GhoulConceptArt.ASPECT
+    val dy = uv.v - chest.v
+    val r = hypot(dx, dy) / GhoulConceptArt.HALO_RADIUS
+    val theta = atan2(dy, dx + 1e-5f)
+    val w = smoothstep(0.08f, 0.9f, r) * r
+    val tang = 0.0176f * w * sin(phaseA + theta * 3f + r * 4f)
+    val radial = 0.0088f * w * sin(phaseB + theta * 5f - r * 6f)
+    val scale = 1f + 0.14f * flare * smoothstep(0.3f, 1f, r)
+    val tangentX = -sin(theta)
+    val tangentY = cos(theta)
+    val radialX = cos(theta)
+    val radialY = sin(theta)
+    val warpedX = dx / scale - (tangentX * tang + radialX * radial)
+    val warpedY = dy / scale - (tangentY * tang + radialY * radial)
+    return GhoulUv(chest.u + warpedX / GhoulConceptArt.ASPECT, chest.v + warpedY)
+}
+
+private fun smoothstep(edge0: Float, edge1: Float, value: Float): Float {
+    val t = ((value - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+internal object GhoulConceptArt {
+    const val ASPECT = 2f
+    const val BILLBOARD_HEIGHT = 0.98f
+    const val BILLBOARD_WIDTH = ASPECT * BILLBOARD_HEIGHT
+    const val FEET_V = 0.9901f
+    const val HALO_RADIUS = 0.586f
+    const val BOB_AMPLITUDE = 0.006f
+    const val FLARE_TIME_CONSTANT = 0.35f
+    const val CATCH_FLARE = 1.2f
+    val CHEST = GhoulUv(0.5094f, 0.3173f)
+    val BILLBOARD_BASE = -(1f - FEET_V) * BILLBOARD_HEIGHT
+}
+
+/** Pure concept-art animation state. All shader phases stay bounded and never use raw uptime. */
+internal class GhoulConceptMotion {
+    var phaseA = 0f
+        private set
+    var phaseB = 0f
+        private set
+    var flare = 0f
+        private set
+    private var bobPhase = 0f
+    private var swayPhase = 0f
+
+    val bob: Float get() = GhoulConceptArt.BOB_AMPLITUDE * sin(bobPhase)
+    val sway: Float get() = SWAY_RADIANS * sin(swayPhase)
+
+    fun advance(dt: Float, state: GhoulState) {
+        if (!dt.isFinite() || dt <= 0f) return
+        var rateA = 0f
+        var rateB = 0f
+        when (state) {
+            GhoulState.Wandering -> { rateA = 1.2f; rateB = 0.8f }
+            GhoulState.Hunting -> { rateA = 2.1f; rateB = 1.3f }
+            GhoulState.Searching -> { rateA = 1.6f; rateB = 1f }
+            GhoulState.Inactive, GhoulState.Stunned -> Unit
+        }
+        phaseA = wrapPhase(phaseA + dt * rateA)
+        phaseB = wrapPhase(phaseB + dt * rateB)
+        bobPhase = wrapPhase(bobPhase + dt * BOB_RADIANS_PER_SECOND)
+        swayPhase = wrapPhase(swayPhase + dt * SWAY_RADIANS_PER_SECOND)
+        val target = when (state) {
+            GhoulState.Hunting -> 1f
+            GhoulState.Searching -> 0.35f
+            else -> 0f
+        }
+        val ease = 1f - exp(-dt / GhoulConceptArt.FLARE_TIME_CONSTANT)
+        flare += (target - flare) * ease
+    }
+
+    fun spikeCatch() {
+        flare = maxOf(flare, GhoulConceptArt.CATCH_FLARE)
+    }
+
+    fun desaturation(state: GhoulState): Float = if (state == GhoulState.Stunned) 0.8f else 0f
+
+    private fun wrapPhase(value: Float): Float {
+        val phase = value % GhoulShaderPhases.TWO_PI
+        return if (phase < 0f) phase + GhoulShaderPhases.TWO_PI else phase
+    }
+
+    private companion object {
+        const val BOB_RADIANS_PER_SECOND = (2.0 * PI * 0.7).toFloat()
+        const val SWAY_RADIANS_PER_SECOND = 1.6f
+        const val SWAY_RADIANS = (1.2 * PI / 180.0).toFloat()
+    }
+}
 
 /** Bounded shader phases; shaders never receive large uptime-derived values. */
 internal class GhoulShaderPhases {
@@ -278,8 +415,13 @@ internal class GhoulGlSnapshot {
     var lampRadius = 0f
     var lampPhase = 0f
     var glowPhase = 0f
-    var timeSeconds = 0f
     var diagnostics = false
+    var ghoulPhaseA = 0f
+    var ghoulPhaseB = 0f
+    var ghoulFlare = 0f
+    var ghoulBob = 0f
+    var ghoulSway = 0f
+    var ghoulDesaturation = 0f
     var lightCount = 0
     val lightXyr = FloatArray(MAX_LIGHTS * 3)
     val lightRgb = FloatArray(MAX_LIGHTS * 3)
@@ -289,7 +431,9 @@ internal class GhoulGlSnapshot {
     fun copyFrom(other: GhoulGlSnapshot) {
         maze = other.maze; cameraX = other.cameraX; cameraY = other.cameraY; yaw = other.yaw
         eye = other.eye; lampRadius = other.lampRadius; lampPhase = other.lampPhase; glowPhase = other.glowPhase
-        timeSeconds = other.timeSeconds; diagnostics = other.diagnostics
+        diagnostics = other.diagnostics
+        ghoulPhaseA = other.ghoulPhaseA; ghoulPhaseB = other.ghoulPhaseB; ghoulFlare = other.ghoulFlare
+        ghoulBob = other.ghoulBob; ghoulSway = other.ghoulSway; ghoulDesaturation = other.ghoulDesaturation
         lightCount = other.lightCount; other.lightXyr.copyInto(lightXyr); other.lightRgb.copyInto(lightRgb)
         spriteCount = other.spriteCount; other.spriteXyk.copyInto(spriteXyk)
     }

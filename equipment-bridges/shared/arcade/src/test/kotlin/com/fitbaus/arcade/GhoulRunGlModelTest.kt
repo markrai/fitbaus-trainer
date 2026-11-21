@@ -7,7 +7,9 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.File
 import kotlin.math.PI
+import kotlin.math.hypot
 
 internal class GhoulRunGlModelTest {
     @Test
@@ -91,6 +93,46 @@ internal class GhoulRunGlModelTest {
             assertTrue(phases.lamp in 0f..GhoulShaderPhases.TWO_PI, "lamp phase ${phases.lamp}")
             assertTrue(phases.glow in 0f..GhoulShaderPhases.TWO_PI, "glow phase ${phases.glow}")
         }
+    }
+
+    @Test
+    fun conceptGhoulPhasesRemainBoundedAcrossTwentyFourHoursAndFreezeStunned() {
+        val motion = GhoulConceptMotion()
+        repeat(24 * 60 * 60) {
+            motion.advance(1f, GhoulState.Hunting)
+            assertTrue(motion.phaseA in 0f..GhoulShaderPhases.TWO_PI)
+            assertTrue(motion.phaseB in 0f..GhoulShaderPhases.TWO_PI)
+        }
+        val phaseA = motion.phaseA
+        val phaseB = motion.phaseB
+        motion.advance(10f, GhoulState.Stunned)
+        assertEquals(phaseA, motion.phaseA)
+        assertEquals(phaseB, motion.phaseB)
+        assertEquals(0.8f, motion.desaturation(GhoulState.Stunned))
+    }
+
+    @Test
+    fun haloWarpIsAnchoredAtChestAndGrowsTowardTips() {
+        val chest = GhoulConceptArt.CHEST
+        assertEquals(chest, haloWarp(chest, 1.1f, 0.7f, 1f))
+        val near = GhoulUv(chest.u + 0.2f * GhoulConceptArt.HALO_RADIUS / GhoulConceptArt.ASPECT, chest.v)
+        val far = GhoulUv(chest.u + 0.9f * GhoulConceptArt.HALO_RADIUS / GhoulConceptArt.ASPECT, chest.v)
+        val nearWarp = haloWarp(near, 1.1f, 0.7f, 0f)
+        val farWarp = haloWarp(far, 1.1f, 0.7f, 0f)
+        val nearDisplacement = hypot(nearWarp.u - near.u, nearWarp.v - near.v)
+        val farDisplacement = hypot(farWarp.u - far.u, farWarp.v - far.v)
+        assertTrue(farDisplacement > nearDisplacement, "$farDisplacement must exceed $nearDisplacement")
+        assertEquals(haloWarp(near, 1.1f, 0.7f, 0f), haloWarp(near, 1.1f, 0.7f, 1f))
+    }
+
+    @Test
+    fun committedGhoulAnchorParses() {
+        val file = File("src/main/assets/arcade/ghoul/ghoul_anchor.json")
+        val anchor = GhoulAnchorParser.parse(file.readText())
+        assertEquals(1024, anchor.canvasWidth)
+        assertEquals(512, anchor.canvasHeight)
+        assertEquals(GhoulUv(0.5094f, 0.3173f), anchor.chest)
+        assertEquals(0.9901f, anchor.feet.v)
     }
 
     @Test
