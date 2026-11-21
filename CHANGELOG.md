@@ -28,7 +28,8 @@ included in this upcoming release.
 
 - **Ghoul Run controller U-turn.** D-pad Down reverses direction with one press in
   Controller or Both mode. The new Reverse direction action can be remapped
-  per controller without changing Biketris's Down/Soft drop behavior.
+  per controller without changing Biketris's Down/Soft drop behavior. Android
+  controllers that report the D-pad as a hat axis also trigger the action.
 
 - **GHOUL RUN arcade mode (playable prototype).** A seeded 11×11 maze ride,
   shown as a split screen: a Wolfenstein-style first-person view on the left
