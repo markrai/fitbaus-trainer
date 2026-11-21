@@ -202,7 +202,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             val gpu = GhoulRunGlRenderer(context.assets, glSnapshots, ::onGlFailure)
             surface.setEGLContextClientVersion(2)
             surface.setEGLContextFactory(GhoulEglContextFactory(::onGlFailure))
-            surface.preserveEGLContextOnPause = true
+            surface.preserveEGLContextOnPause = false
             surface.setRenderer(gpu)
             surface.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
             glSurface = surface
@@ -433,7 +433,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
 
     private fun updateGlLifecycle() {
         val surface = glSurface ?: return
-        val shouldRun = glAttached && !glHostPaused && windowVisibility == View.VISIBLE && visibility == View.VISIBLE &&
+        val shouldRun = glAttached && !glHostPaused && isShown && windowVisibility == View.VISIBLE &&
             glSelection.type == GhoulRendererType.Gl
         if (shouldRun && glPaused) {
             glPaused = false

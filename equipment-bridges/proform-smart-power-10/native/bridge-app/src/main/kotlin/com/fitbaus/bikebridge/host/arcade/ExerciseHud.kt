@@ -105,6 +105,7 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
     val trail: TrailRideView = TrailRideView(context)
     val ghoul: GhoulRunView = GhoulRunView(context)
     val biketris: BiketrisView = BiketrisView(context)
+    private var previousMode: ArcadeMode = ArcadeMode.Dashboard
 
     init {
         orientation = VERTICAL
@@ -118,10 +119,22 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
         addView(trail, LayoutParams(playLp))
         addView(ghoul, LayoutParams(playLp))
         addView(biketris, LayoutParams(playLp))
-        show(ArcadeMode.Bricks)
+        show(ArcadeMode.Dashboard)
     }
 
     fun show(game: ArcadeMode) {
+        if (previousMode.isGame && previousMode != game) {
+            when (previousMode) {
+                ArcadeMode.Bricks -> playground.restartGame()
+                ArcadeMode.Math -> math.restartGame()
+                ArcadeMode.Flak -> flak.restartGame()
+                ArcadeMode.TrailRide -> trail.restartGame()
+                ArcadeMode.GhoulRun -> ghoul.restartGame()
+                ArcadeMode.Biketris -> biketris.restartGame()
+                else -> Unit
+            }
+        }
+        previousMode = game
         playground.visibility = if (game == ArcadeMode.Bricks) VISIBLE else GONE
         math.visibility = if (game == ArcadeMode.Math) VISIBLE else GONE
         flak.visibility = if (game == ArcadeMode.Flak) VISIBLE else GONE
