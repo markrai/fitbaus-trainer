@@ -11,6 +11,7 @@
     <string name="settings_tab_pairing">Pairing</string>
     <string name="settings_tab_webcams">External Webcams</string>
     <string name="settings_tab_controllers">Controllers</string>
+    <string name="settings_tab_analytics">Analytics</string>
     <string name="webcam_heading">EXTERNAL WEBCAMS</string>
     <string name="webcam_none">No external UVC webcam connected.</string>
     <string name="webcam_status_idle">Select External Webcams to preview.</string>

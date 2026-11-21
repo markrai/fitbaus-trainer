@@ -97,6 +97,7 @@ internal class NativeUsbSession(
     private val permissionPollMs: Long = HostConstants.PERMISSION_POLL_MS,
     private val resistanceQueueWaitMs: Long = HostConstants.RESISTANCE_QUEUE_WAIT_MS,
     private val resistanceTransmitWaitMs: Long = HostConstants.RESISTANCE_TRANSMIT_WAIT_MS,
+    private val onRpmReading: (Int?) -> Unit = {},
 ) {
     private val running = AtomicBoolean(false)
     private val snapshot = AtomicReference(BridgeHttpJson.emptySnapshot(nowIso()))
@@ -207,6 +208,7 @@ internal class NativeUsbSession(
                 Log.e(HostConstants.LOG_TAG, "native session failed", ex)
                 publishOffline()
             } finally {
+                onRpmReading(null)
                 running.set(false)
                 failPendingResistance("usb session stopped")
                 if (!terminalFailure.get()) {
@@ -287,6 +289,7 @@ internal class NativeUsbSession(
         maxReconnectAttempts >= 0 && attempts > maxReconnectAttempts
 
     private fun publishOffline() {
+        onRpmReading(null)
         snapshot.set(ContinuousReadPlan.afterUnsuccessfulRead(snapshot.get(), connected = false))
     }
 
@@ -476,6 +479,7 @@ internal class NativeUsbSession(
             }
             consecutiveFailures = 0
             if (poll.securityBlocked) {
+                onRpmReading(null)
                 when (handleSecurityBlock(transport, allowlist, primary, adopted.deviceInfo)) {
                     N1Resume.Stop -> return SessionOutcome.Stopped
                     N1Resume.Continue -> {
@@ -498,6 +502,9 @@ internal class NativeUsbSession(
                 ),
             )
             phase.set(UsbPhase.Streaming)
+            val rpm = (poll.readings[BikeField.RPM] as? FieldValue.Number)?.value
+                ?.takeIf { it in 0L..250L }?.toInt()
+            onRpmReading(rpm)
             cycle += 1
         }
         if (!running.get()) return SessionOutcome.Stopped

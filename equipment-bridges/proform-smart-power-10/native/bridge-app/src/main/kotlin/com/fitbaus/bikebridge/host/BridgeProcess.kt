@@ -9,6 +9,7 @@ internal object BridgeProcess {
     private var heartRate: HeartRateStore? = null
     private var brightness: BrightnessStore? = null
     private var pairing: PairingTokenStore? = null
+    private var cyclingAnalytics: CyclingAnalyticsStore? = null
 
     @Synchronized
     fun heartRate(): HeartRateStore =
@@ -19,6 +20,10 @@ internal object BridgeProcess {
         brightness ?: BrightnessStore(
             SharedPreferencesIntPersistence(prefs(context, HostConstants.BRIGHTNESS_PREFS), HostConstants.BRIGHTNESS_KEY),
         ).also { brightness = it }
+
+    @Synchronized
+    fun cyclingAnalytics(context: Context): CyclingAnalyticsStore =
+        cyclingAnalytics ?: CyclingAnalyticsStore(context.applicationContext).also { cyclingAnalytics = it }
 
     @Synchronized
     fun pairing(context: Context): PairingTokenStore =

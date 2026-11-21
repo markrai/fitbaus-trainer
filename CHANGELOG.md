@@ -16,6 +16,10 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Bike console Settings brightness.** The gear-icon Settings activity now applies
+  the dashboard's persisted window brightness before its first frame and again on
+  resume, so switching screens no longer falls back to a dimmer system level.
+
 - **Ghoul Run successive steering inputs.** Webcam lean remains active across consecutive optional turns without forcing a full recenter; rapid controller button presses queue separate turns, while analog stick re-entries register distinct gestures. Precommitted junction directions can be corrected until arrival, and D-pad key/hat events share one press edge so a physical press cannot be double-counted.
 
 - **Bricks controller steering regression.** Controller mode now strictly
@@ -27,6 +31,14 @@ included in this upcoming release.
   events instead of losing all input when their kernel driver is detached.
 
 ### Added
+
+- **Native bike Analytics.** Settings now includes a lightweight Monday-to-Sunday
+  cycling chart with separate axes for spinning minutes and average RPM,
+  previous/next week navigation, lifetime spinning time, estimated pedal
+  revolutions, average moving RPM, active days, and first tracked date.
+  Valid fresh RPM samples accumulate in the native USB service even during
+  games and video playback. Daily aggregates persist in a small transactional
+  SQLite table with batched background writes and no raw telemetry logs.
 
 - **Ghoul Run heading-following 3D isometric map.** The map's viewpoint now
   follows the eased first-person heading through corners and U-turns, keeping

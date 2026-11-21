@@ -67,10 +67,15 @@ class NativeBridgeService : Service() {
         val heartRate = BridgeProcess.heartRate()
         val brightness = BridgeProcess.brightness(this)
         val pairing = BridgeProcess.pairing(this)
+        val analytics = BridgeProcess.cyclingAnalytics(this)
         val session = NativeUsbSession(
             gateway = gateway,
             requestPermission = { deviceName -> requestUsbPermission(usbManager, deviceName) },
             coldStartWritePlan = UnlockQualification.plan(),
+            onRpmReading = { rpm ->
+                if (rpm == null) analytics.breakContinuity()
+                else analytics.observe(rpm, System.nanoTime() / 1_000_000L, System.currentTimeMillis())
+            },
         )
         usb = session
         http = NativeHttpServer(
@@ -103,6 +108,7 @@ class NativeBridgeService : Service() {
             )
         }
         usb = null
+        BridgeProcess.cyclingAnalytics(this).flushAsync()
         http?.stop()
         if (receiverRegistered) {
             unregisterReceiver(usbReceiver)
