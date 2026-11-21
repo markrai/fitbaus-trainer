@@ -9,6 +9,45 @@ import org.junit.jupiter.api.Test
 
 class GameControllerInputTest {
     @Test
+    fun reversePressIsOneShotUntilReleaseEvenWithKeyRepeats() {
+        val press = ControllerPressEdge()
+        press.update(true, 0)
+        assertTrue(press.take())
+        assertFalse(press.take())
+        press.update(true, 1)
+        press.update(true, 0)
+        assertFalse(press.take())
+        press.update(false, 0)
+        press.update(true, 0)
+        assertTrue(press.take())
+        press.reset()
+        assertFalse(press.take())
+        press.update(true, 0)
+        assertTrue(press.take())
+    }
+
+    @Test
+    fun keyboardAndDpadHatDownShareOneReverseEdge() {
+        val input = ControllerReverseInput()
+        input.onKey(true, 0)
+        assertTrue(input.sample(true))
+        assertFalse(input.sample(true))
+        input.onKey(false, 0)
+        assertFalse(input.sample(true))
+        assertFalse(input.sample(false))
+        assertTrue(input.sample(true))
+        assertFalse(input.sample(true))
+        input.reset()
+        assertFalse(input.sample(false))
+        input.onKey(true, 0)
+        assertTrue(input.sample(false))
+        input.onKey(true, 1)
+        assertFalse(input.sample(false))
+        input.onKey(false, 0)
+        assertFalse(input.sample(false))
+    }
+
+    @Test
     fun deadzoneRejectsDriftAndPreservesFullStickTravel() {
         assertEquals(0f, ControllerSteering.axis(0f))
         assertEquals(0f, ControllerSteering.axis(0.12f))

@@ -13,6 +13,7 @@ internal object GameControlCatalog {
     private val right = GameControl("right", "Move right", KeyEvent.KEYCODE_DPAD_RIGHT)
     private val down = GameControl("down", "Soft drop", KeyEvent.KEYCODE_DPAD_DOWN)
     private val rotate = GameControl("rotate", "Rotate clockwise", KeyEvent.KEYCODE_BUTTON_A)
+    private val reverse = GameControl("reverse", "Reverse direction", KeyEvent.KEYCODE_DPAD_DOWN)
     private val restart = GameControl("restart", "Restart game")
 
     fun actions(mode: ArcadeMode?): List<GameControl> = when (mode) {
@@ -20,7 +21,7 @@ internal object GameControlCatalog {
         ArcadeMode.Math -> listOf(restart)
         ArcadeMode.Flak -> listOf(restart)
         ArcadeMode.TrailRide -> listOf(restart)
-        ArcadeMode.GhoulRun -> listOf(left, right, restart)
+        ArcadeMode.GhoulRun -> listOf(left, right, reverse, restart)
         ArcadeMode.Biketris -> listOf(left, right, down, rotate)
         else -> emptyList()
     }

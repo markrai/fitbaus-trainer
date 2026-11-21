@@ -85,43 +85,91 @@ internal object ControllerGameplayKeys {
     fun consumes(keyCode: Int): Boolean = keyCode >= KeyEvent.KEYCODE_UNKNOWN
 }
 
+internal class ControllerPressEdge {
+    private var held = false
+    private var pending = false
+
+    fun update(down: Boolean, repeatCount: Int) {
+        if (down && !held && repeatCount == 0) pending = true
+        held = down
+    }
+
+    fun take(): Boolean = pending.also { pending = false }
+
+    fun reset() {
+        held = false
+        pending = false
+    }
+}
+
+internal class ControllerReverseInput {
+    private val press = ControllerPressEdge()
+    private var keyDown = false
+    private var hatDown = false
+
+    fun onKey(down: Boolean, repeatCount: Int) {
+        keyDown = down
+        press.update(keyDown || hatDown, repeatCount)
+    }
+
+    fun sample(hatDown: Boolean): Boolean {
+        this.hatDown = hatDown
+        press.update(keyDown || hatDown, 0)
+        return press.take()
+    }
+
+    fun reset() {
+        keyDown = false
+        hatDown = false
+        press.reset()
+    }
+}
+
 internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var activeDeviceId = -1
+    private var activeDeviceDescriptor: String? = null
     private var positionX = 0.5f
     private var axisX = 0f
     private var axisY = 0f
+    private var hatY = 0f
     private var leftDown = false
     private var rightDown = false
     private var downDown = false
     private var rotationPending = false
     private var leftPending = false
     private var rightPending = false
+    private val reverseInput = ControllerReverseInput()
     private var previousNanos = -1L
 
     fun refresh() {
         val next = ControllerDevices.chosen(
             ControllerDevices.visible(),
             prefs.getString(ControllerDevices.SELECTED, null),
-        )?.id ?: -1
-        if (next != activeDeviceId) {
-            activeDeviceId = next
+        )
+        if ((next?.id ?: -1) != activeDeviceId) {
+            activeDeviceId = next?.id ?: -1
             resetTransient()
         }
+        activeDeviceDescriptor = next?.descriptor
     }
 
     fun resetTransient() {
         axisX = 0f
         axisY = 0f
+        hatY = 0f
         leftDown = false
         rightDown = false
         downDown = false
         rotationPending = false
         leftPending = false
         rightPending = false
+        reverseInput.reset()
         previousNanos = -1L
     }
 
     fun hasController(): Boolean = activeDeviceId >= 0
+
+    fun selectedDescriptor(): String? = activeDeviceDescriptor
 
     fun ownsDevice(deviceId: Int): Boolean = deviceId >= 0 && deviceId == activeDeviceId
 
@@ -139,6 +187,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
                     if (down && event.repeatCount == 0) rightPending = true
                 }
                 "down" -> downDown = down
+                "reverse" -> reverseInput.onKey(down, event.repeatCount)
                 "rotate" -> if (down && event.repeatCount == 0) rotationPending = true
             }
         }
@@ -159,11 +208,13 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         )
     }
 
-    fun takeGhoulRunInput(): GhoulRunControllerInput {
+    fun takeGhoulRunInput(allowHatDown: Boolean = false): GhoulRunControllerInput {
+        val reverse = reverseInput.sample(allowHatDown && hatY > 0.45f)
         val input = GhoulRunControllerInput(
             leftPressed = leftPending,
             rightPressed = rightPending,
             stickX = ControllerSteering.axis(axisX),
+            reversePressed = reverse,
         )
         leftPending = false
         rightPending = false
@@ -178,7 +229,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         val hat = if (device.getMotionRange(MotionEvent.AXIS_HAT_X) != null) event.getAxisValue(MotionEvent.AXIS_HAT_X) else 0f
         axisX = if (abs(hat) > 0.1f) hat else stick
         val stickY = if (device.getMotionRange(MotionEvent.AXIS_Y) != null) event.getAxisValue(MotionEvent.AXIS_Y) else 0f
-        val hatY = if (device.getMotionRange(MotionEvent.AXIS_HAT_Y) != null) event.getAxisValue(MotionEvent.AXIS_HAT_Y) else 0f
+        hatY = if (device.getMotionRange(MotionEvent.AXIS_HAT_Y) != null) event.getAxisValue(MotionEvent.AXIS_HAT_Y) else 0f
         axisY = if (abs(hatY) > 0.1f) hatY else stickY
         return true
     }

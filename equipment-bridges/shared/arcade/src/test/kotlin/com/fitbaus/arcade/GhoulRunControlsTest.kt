@@ -344,6 +344,23 @@ class GhoulRunControlsTest {
     }
 
     @Test
+    fun controllerReverseClearsArmedTurnAndDoesNotRepeatOnIdleFrames() {
+        val rig = liveRig(seed = 9L)
+        val idle = GhoulRunControllerInput()
+        repeat(10) { rig.tick(controller = idle) }
+        val cell = rig.game.world.start
+        val direction = rig.game.world.exits(cell).first()
+        rig.game.placeRider(cell, direction, 0.3f)
+        rig.tick(controller = GhoulRunControllerInput(leftPressed = true))
+        assertEquals(GhoulLane.Left, rig.session.lane)
+        rig.tick(controller = GhoulRunControllerInput(reversePressed = true))
+        assertEquals(direction.opposite, rig.game.heading)
+        assertEquals(GhoulLane.Center, rig.session.lane)
+        rig.tick(controller = idle)
+        assertEquals(direction.opposite, rig.game.heading)
+    }
+
+    @Test
     fun releasedStickRecentres() {
         val game = GhoulRunGame(seed = 6L)
         val session = GhoulRunSession(game)

@@ -432,6 +432,12 @@ internal class GhoulRunGame(
 
     fun restart(newSeed: Long = seed + 1L) = resetMaze(newSeed, resetCatches = true)
 
+    fun reverseDirection(): Boolean {
+        if (phase != GhoulPhase.Playing || respawnLeft > 0f) return false
+        reverseOnSegment()
+        return true
+    }
+
     private fun moveRider(dt: Float) {
         if (waitingForChoice) {
             speed = 0f

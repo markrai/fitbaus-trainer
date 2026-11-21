@@ -426,6 +426,9 @@ class NativeBridgeActivity : Activity() {
             arcadeContent.ghoul.controllerAvailable = gameController.hasController()
             val source = arcadeContent.ghoul.inputSource
             val controllerOnly = source == GhoulRunInputSource.Controller
+            val reverseFromHat = gameController.selectedDescriptor()?.let { descriptor ->
+                gameBindings.action(ArcadeMode.GhoulRun, descriptor, KeyEvent.KEYCODE_DPAD_DOWN)?.id == "reverse"
+            } == true
             arcadeContent.ghoul.render(
                 if (controllerOnly) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost) else handInput.latest(now),
                 cameraSession.state(),
@@ -437,7 +440,7 @@ class NativeBridgeActivity : Activity() {
                 rpmObservedAt = telemetry?.rpm?.observedAt,
                 diagnostics = arcadeDiagnosticsText(now, info),
                 cameraInfo = if (controllerOnly) null else info,
-                controller = if (source == GhoulRunInputSource.Webcam) null else gameController.takeGhoulRunInput(),
+                controller = if (source == GhoulRunInputSource.Webcam) null else gameController.takeGhoulRunInput(reverseFromHat),
             )
             return
         }
