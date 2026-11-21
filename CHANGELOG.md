@@ -32,6 +32,14 @@ included in this upcoming release.
 
 ### Added
 
+- **Native bike Analytics.** Settings now includes a lightweight Monday-to-Sunday
+  cycling chart with separate axes for spinning minutes and average RPM,
+  previous/next week navigation, lifetime spinning time, estimated pedal
+  revolutions, average moving RPM, active days, and first tracked date.
+  Valid fresh RPM samples accumulate in the native USB service even during
+  games and video playback. Daily aggregates persist in a small transactional
+  SQLite table with batched background writes and no raw telemetry logs.
+
 - **Ghoul Run heading-following 3D isometric map.** The map's viewpoint now
   follows the eased first-person heading through corners and U-turns, keeping
   travel in the upper-right isometric direction while preserving upright wall

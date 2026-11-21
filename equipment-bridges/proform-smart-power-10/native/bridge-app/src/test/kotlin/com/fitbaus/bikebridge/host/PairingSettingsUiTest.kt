@@ -15,6 +15,7 @@ class PairingSettingsUiTest {
         ).readText()
         assertTrue(source.contains("SettingsTab.Pairing"))
         assertTrue(source.contains("SettingsTab.Webcams"))
+        assertTrue(source.contains("SettingsTab.Analytics"))
         assertTrue(source.contains("settings_tab_pairing"))
         assertTrue(source.contains("settings_tab_webcams"))
         assertTrue(source.contains("ExternalWebcamPreview"))
@@ -46,6 +47,29 @@ class PairingSettingsUiTest {
         val resume = settings.substringAfter("override fun onResume()")
             .substringBefore("override fun onPause()")
         assertTrue(resume.contains("applyStoredBrightness()"))
+    }
+
+    @Test
+    fun analyticsTabReadsServiceOwnedPermanentDailyHistoryWithWeekNavigation() {
+        val settings = File("src/main/kotlin/com/fitbaus/bikebridge/host/PairingActivity.kt").readText()
+        val chart = File("src/main/kotlin/com/fitbaus/bikebridge/host/CyclingAnalyticsPanel.kt").readText()
+        val storage = File("src/main/kotlin/com/fitbaus/bikebridge/host/CyclingAnalyticsStore.kt").readText()
+        val service = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeService.kt").readText()
+        val usb = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeUsbSession.kt").readText()
+        assertTrue(settings.contains("showTab(SettingsTab.Analytics)"))
+        assertTrue(settings.contains("CyclingAnalyticsPanel(this)"))
+        assertTrue(settings.contains("cyclingAnalytics(this).readSnapshot"))
+        assertTrue(chart.contains("monday.minusWeeks(1)"))
+        assertTrue(chart.contains("monday.plusWeeks(1)"))
+        assertTrue(chart.contains("currentMonday()"))
+        assertTrue(chart.contains("previous.isEnabled"))
+        assertTrue(chart.contains("next.isEnabled"))
+        assertTrue(service.contains("onRpmReading = { rpm ->"))
+        assertTrue(usb.contains("onRpmReading(rpm)"))
+        assertTrue(storage.contains("CREATE TABLE cycling_daily"))
+        assertTrue(storage.contains("INSERT OR IGNORE INTO cycling_daily"))
+        assertTrue(storage.contains("db.beginTransaction()"))
+        assertTrue(storage.contains("worker.schedule({ flushPending() }, 30L, TimeUnit.SECONDS)"))
     }
 
     @Test

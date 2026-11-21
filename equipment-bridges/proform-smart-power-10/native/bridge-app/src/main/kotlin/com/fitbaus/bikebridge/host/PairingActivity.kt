@@ -49,7 +49,7 @@ import java.util.concurrent.atomic.AtomicInteger
 internal const val CONTROLLER_GAME_CONTEXT = "com.fitbaus.bikebridge.CONTROLLER_GAME"
 
 class PairingActivity : Activity() {
-    private enum class SettingsTab { Pairing, Webcams, Controllers }
+    private enum class SettingsTab { Pairing, Webcams, Controllers, Analytics }
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private lateinit var endpointValue: TextView
@@ -57,9 +57,11 @@ class PairingActivity : Activity() {
     private lateinit var pairingPanel: View
     private lateinit var webcamPanel: View
     private lateinit var controllerPanel: View
+    private lateinit var analyticsPanel: CyclingAnalyticsPanel
     private lateinit var pairingTab: TextView
     private lateinit var webcamTab: TextView
     private lateinit var controllerTab: TextView
+    private lateinit var analyticsTab: TextView
     private lateinit var controllerList: TextView
     private lateinit var controllerSelection: TextView
     private lateinit var controllerEvents: TextView
@@ -142,6 +144,7 @@ class PairingActivity : Activity() {
         bindPairing()
         if (activeTab == SettingsTab.Webcams) refreshWebcams(startPreview = true)
         if (activeTab == SettingsTab.Controllers) startControllerPolling()
+        if (activeTab == SettingsTab.Analytics) refreshAnalytics()
     }
 
     override fun onPause() {
@@ -196,9 +199,11 @@ class PairingActivity : Activity() {
         pairingPanel.visibility = if (tab == SettingsTab.Pairing) View.VISIBLE else View.GONE
         webcamPanel.visibility = if (tab == SettingsTab.Webcams) View.VISIBLE else View.GONE
         controllerPanel.visibility = if (tab == SettingsTab.Controllers) View.VISIBLE else View.GONE
+        analyticsPanel.visibility = if (tab == SettingsTab.Analytics) View.VISIBLE else View.GONE
         styleTab(pairingTab, tab == SettingsTab.Pairing)
         styleTab(webcamTab, tab == SettingsTab.Webcams)
         styleTab(controllerTab, tab == SettingsTab.Controllers)
+        styleTab(analyticsTab, tab == SettingsTab.Analytics)
         uiHandler.removeCallbacks(controllerPoll)
         if (tab != SettingsTab.Controllers) {
             awaitingGameButton = null
@@ -213,6 +218,20 @@ class PairingActivity : Activity() {
             stopPreview()
         }
         if (tab == SettingsTab.Controllers) startControllerPolling()
+        if (tab == SettingsTab.Analytics) refreshAnalytics()
+    }
+
+    private fun refreshAnalytics() {
+        analyticsPanel.showLoading()
+        BridgeProcess.cyclingAnalytics(this).readSnapshot { result ->
+            uiHandler.post {
+                if (!uiAlive(SettingsTab.Analytics)) return@post
+                result.fold(
+                    onSuccess = { analyticsPanel.showSnapshot(it) },
+                    onFailure = { analyticsPanel.showError() },
+                )
+            }
+        }
     }
 
     private fun startControllerPolling() {
@@ -708,9 +727,11 @@ class PairingActivity : Activity() {
         pairingPanel = buildPairingPanel()
         webcamPanel = buildWebcamPanel()
         controllerPanel = buildControllerPanel()
+        analyticsPanel = CyclingAnalyticsPanel(this)
         body.addView(pairingPanel)
         body.addView(webcamPanel)
         body.addView(controllerPanel)
+        body.addView(analyticsPanel)
         val scroll = ScrollView(this)
         scroll.isFillViewport = true
         scroll.addView(body)
@@ -745,9 +766,13 @@ class PairingActivity : Activity() {
         controllerTab = tabLabel(getString(R.string.settings_tab_controllers)) {
             showTab(SettingsTab.Controllers)
         }
+        analyticsTab = tabLabel(getString(R.string.settings_tab_analytics)) {
+            showTab(SettingsTab.Analytics)
+        }
         row.addView(pairingTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(webcamTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(controllerTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(analyticsTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         return row
     }
 
