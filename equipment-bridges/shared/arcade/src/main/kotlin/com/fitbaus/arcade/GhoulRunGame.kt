@@ -870,14 +870,31 @@ internal class GhoulRunGame(
     private fun continuousPathDistance(monster: GhoulMonster): Float {
         val sameEdge = sameEdgeDistance(monster)
         if (sameEdge != null) return sameEdge
-        val riderEnds = edgeEndpoints(riderCell, heading, progress)
-        val ghoulEnds = edgeEndpoints(monster.cell, monster.heading, monster.progress)
-        var best = Float.POSITIVE_INFINITY
-        for ((riderEnd, riderCost) in riderEnds) for ((ghoulEnd, ghoulCost) in ghoulEnds) {
-            val cells = world.pathDistance(riderEnd, ghoulEnd) ?: continue
-            best = min(best, riderCost + cells + ghoulCost)
+        val width = config.width
+        val riderStart = riderCell.row * width + riderCell.col
+        val ghoulStart = monster.cell.row * width + monster.cell.col
+        val riderMoves = world.isOpen(riderCell, heading)
+        val ghoulMoves = world.isOpen(monster.cell, monster.heading)
+        val riderNext = riderStart + heading.dr * width + heading.dc
+        val ghoulNext = ghoulStart + monster.heading.dr * width + monster.heading.dc
+        val riderStartCost = if (riderMoves) progress else 0f
+        val ghoulStartCost = if (ghoulMoves) monster.progress else 0f
+        val startDistance = world.pathDistanceIndex(riderStart, ghoulStart)
+        var nearest = if (startDistance < 0) Float.POSITIVE_INFINITY else
+            riderStartCost + startDistance + ghoulStartCost
+        if (ghoulMoves) {
+            val distance = world.pathDistanceIndex(riderStart, ghoulNext)
+            if (distance >= 0) nearest = min(nearest, riderStartCost + distance + 1f - monster.progress)
         }
-        return best
+        if (riderMoves) {
+            val distance = world.pathDistanceIndex(riderNext, ghoulStart)
+            if (distance >= 0) nearest = min(nearest, 1f - progress + distance + ghoulStartCost)
+            if (ghoulMoves) {
+                val both = world.pathDistanceIndex(riderNext, ghoulNext)
+                if (both >= 0) nearest = min(nearest, 2f - progress - monster.progress + both)
+            }
+        }
+        return nearest
     }
 
     private fun sameEdgeDistance(monster: GhoulMonster): Float? {
