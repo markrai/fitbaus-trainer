@@ -52,6 +52,21 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private var selectedInput = prefs?.getString(GhoulRunInputSelection.PREF_KEY, null)
     private var difficultyIndex = (prefs?.getInt(DIFFICULTY_KEY, 1) ?: 1).coerceIn(0, SPRINT_DELTAS.lastIndex)
+    private var mapViewMode = if (prefs?.getString(MAP_VIEW_KEY, null) == GhoulMapViewMode.Overlay.name) {
+        GhoulMapViewMode.Overlay
+    } else {
+        GhoulMapViewMode.Split
+    }
+    private var mapWidthShare = (prefs?.getFloat(MAP_WIDTH_KEY, GhoulMapOverlayLayout.DEFAULT_WIDTH_SHARE)
+        ?: GhoulMapOverlayLayout.DEFAULT_WIDTH_SHARE)
+        .coerceIn(GhoulMapOverlayLayout.MIN_WIDTH_SHARE, GhoulMapOverlayLayout.MAX_WIDTH_SHARE)
+    private var mapHeightShare = (prefs?.getFloat(MAP_HEIGHT_KEY, GhoulMapOverlayLayout.DEFAULT_HEIGHT_SHARE)
+        ?: GhoulMapOverlayLayout.DEFAULT_HEIGHT_SHARE)
+        .coerceIn(GhoulMapOverlayLayout.MIN_HEIGHT_SHARE, GhoulMapOverlayLayout.MAX_HEIGHT_SHARE)
+    private var mapOpacityPercent = GhoulMapOverlayLayout.opacity(
+        prefs?.getInt(MAP_OPACITY_KEY, GhoulMapOverlayLayout.DEFAULT_OPACITY)
+            ?: GhoulMapOverlayLayout.DEFAULT_OPACITY,
+    )
     private var seed = System.nanoTime()
     private var game = newGame(seed)
     private var session = GhoulRunSession(game)
@@ -176,6 +191,21 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val difficultyRect = RectF()
     private val fpRect = RectF()
     private val mapRect = RectF()
+    private val resizeHandleRect = RectF()
+    private val viewModeRect = RectF()
+    private val mapOpacityRect = RectF()
+    private var resizingMap = false
+    private var adjustingMapOpacity = false
+    private var opacityPointerId = -1
+    private var opacityInitialValue = 0
+    private var resizePointerId = -1
+    private var resizeStartX = 0f
+    private var resizeStartY = 0f
+    private var resizeStartWidth = 0f
+    private var resizeStartHeight = 0f
+    private var resizeInitialWidthShare = 0f
+    private var resizeInitialHeightShare = 0f
+    private var resizeTileWidth = 0f
     private val slotRect = RectF()
     private var shaderKey = 0L
 
@@ -371,24 +401,47 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val started = System.nanoTime()
         drawSelectors(canvas)
         val top = TOP_UI * density
-        val splitX = (width * SPLIT_RATIO).roundToInt().toFloat()
-        fpRect.set(0f, top, splitX, height.toFloat())
-        mapRect.set(splitX, top, width.toFloat(), height.toFloat())
+        val overlayMode = mapViewMode == GhoulMapViewMode.Overlay
+        val bounds = GhoulMapOverlayLayout.bounds(
+            width.toFloat(), height.toFloat(), top, MAP_INSET * density,
+            mapViewMode, mapWidthShare, mapHeightShare,
+        )
+        mapRect.set(bounds.left, bounds.top, bounds.right, bounds.bottom)
+        fpRect.set(0f, top, if (overlayMode) width.toFloat() else bounds.left, height.toFloat())
         val now = System.nanoTime()
 
-        canvas.save()
-        canvas.clipRect(mapRect)
-        drawMapHalf(canvas, now)
-        canvas.restore()
+        if (overlayMode) {
+            if (glSelection.type == GhoulRendererType.Fallback) {
+                canvas.save()
+                canvas.clipRect(fpRect)
+                drawFirstPerson(canvas, now, drawHud = false)
+                canvas.restore()
+            }
+            canvas.save()
+            canvas.clipRect(mapRect)
+            drawMapHalf(canvas, now, translucent = true)
+            canvas.restore()
+            canvas.save()
+            canvas.clipRect(fpRect)
+            drawFirstPersonHud(canvas, now)
+            canvas.restore()
+            drawMapResizeHandle(canvas)
+        } else {
+            canvas.save()
+            canvas.clipRect(mapRect)
+            drawMapHalf(canvas, now)
+            canvas.restore()
 
-        canvas.save()
-        canvas.clipRect(fpRect)
-        if (glSelection.type == GhoulRendererType.Fallback) drawFirstPerson(canvas, now) else drawFirstPersonHud(canvas, now)
-        canvas.restore()
+            canvas.save()
+            canvas.clipRect(fpRect)
+            if (glSelection.type == GhoulRendererType.Fallback) drawFirstPerson(canvas, now) else drawFirstPersonHud(canvas, now)
+            canvas.restore()
 
-        stroke.color = DIVIDER
-        stroke.strokeWidth = 2f * density
-        canvas.drawLine(splitX, top, splitX, height.toFloat(), stroke)
+            stroke.color = DIVIDER
+            stroke.strokeWidth = 2f * density
+            canvas.drawLine(mapRect.left, top, mapRect.left, height.toFloat(), stroke)
+            resizeHandleRect.setEmpty()
+        }
 
         drawScreenFeedback(canvas, now, top)
         session.message()?.let { banner(canvas, it, width / 2f, height * 0.35f, width * 0.47f, Color.WHITE) }
@@ -406,7 +459,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val surface = glSurface
         if (surface != null) {
             val params = surface.layoutParams as LayoutParams
-            params.width = (measuredWidth * SPLIT_RATIO * GL_RENDER_SCALE).roundToInt().coerceAtLeast(1)
+            params.width = (measuredWidth * if (mapViewMode == GhoulMapViewMode.Overlay) 1f else SPLIT_RATIO)
+                .roundToInt().coerceAtLeast(1)
             params.height = (measuredHeight - TOP_UI * density).roundToInt().coerceAtLeast(1)
             params.topMargin = (TOP_UI * density).roundToInt()
         }
@@ -543,7 +597,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
 
     // ---------------------------------------------------------------- first person
 
-    private fun drawFirstPerson(canvas: Canvas, now: Long) {
+    private fun drawFirstPerson(canvas: Canvas, now: Long, drawHud: Boolean = true) {
         val halfW = fpRect.width()
         val halfH = fpRect.height()
         if (halfW < 8f || halfH < 8f) return
@@ -591,14 +645,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         fpRenderMs = ema(fpRenderMs, (uploadStart - renderStart) / 1_000_000f)
         fpUploadMs = ema(fpUploadMs, (uploadEnd - uploadStart) / 1_000_000f)
 
-        drawFpOverlays(canvas, now)
-        val gaugeTop = fpRect.bottom - GAUGE_HEIGHT * density
-        drawCompass(canvas)
-        drawHearts(canvas, now)
-        drawSteering(canvas, now)
-        drawHint(canvas, gaugeTop)
-        drawSpeedGauge(canvas, gaugeTop, now)
-        drawPhase(canvas, gaugeTop)
+        if (drawHud) drawFirstPersonHud(canvas, now)
     }
 
     private fun drawFirstPersonHud(canvas: Canvas, now: Long) {
@@ -1122,28 +1169,42 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
 
     // ---------------------------------------------------------------- map half
 
-    private fun drawMapHalf(canvas: Canvas, now: Long) {
+    private fun drawMapHalf(canvas: Canvas, now: Long, translucent: Boolean = false) {
         val hunted = game.ghoul.state == GhoulState.Hunting
         val zoom = if (hunted) 0.80f else 1f
         mapCamera.follow(rig.yaw)
-        val baseW = min(mapRect.width() / 10f, mapRect.height() / 7f).roundToInt().toFloat()
+        val baseW = if (translucent && resizingMap) resizeTileWidth else
+            min(mapRect.width() / 10f, mapRect.height() / 7f).roundToInt().toFloat()
         val tileW = baseW * zoom
         val tileH = tileW / 2f
         val ox = mapRect.centerX()
         val oy = mapRect.centerY()
         refreshNoiseDistances()
+        if (translucent) {
+            paint.color = Color.argb(58, 8, 17, 24)
+            canvas.drawRoundRect(mapRect, 7f * density, 7f * density, paint)
+        }
+        val layer = if (translucent) canvas.saveLayerAlpha(
+            mapRect.left, mapRect.top, mapRect.right, mapRect.bottom,
+            mapOpacityPercent * 255 / 100,
+        ) else -1
         canvas.save()
         canvas.scale(zoom, zoom, ox, oy)
         drawMaze(canvas, ox, oy, baseW, baseW / 2f)
+        if (!translucent) drawMapObjectives(canvas, ox, oy, baseW, baseW / 2f)
         canvas.restore()
         drawLampShade(canvas, ox, oy, tileW, tileH)
+        if (translucent) {
+            canvas.restoreToCount(layer)
+            drawMapObjectives(canvas, ox, oy, tileW, tileH)
+        }
         drawEntities(canvas, ox, oy, tileW, tileH, now)
         drawThreat(canvas, ox, oy, tileW, tileH, now)
         drawMapNorthIndicator(canvas)
         if (game.config.keyCount > 0) {
             text.textSize = 14f * density
             text.color = Color.WHITE
-            canvas.drawText("KEYS ${game.keysFound}/${game.config.keyCount}", mapRect.left + 12f * density, mapRect.bottom - 14f * density, text)
+            canvas.drawText("KEYS ${game.keysFound}/${game.config.keyCount}", mapRect.left + (if (translucent) 58f else 12f) * density, mapRect.bottom - 14f * density, text)
         }
         text.textSize = 11f * density
         text.color = LABEL
@@ -1184,6 +1245,11 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             )
         }
         drawNoiseTint(canvas, ox, oy, tw, th, camR, camC)
+    }
+
+    private fun drawMapObjectives(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float) {
+        val camR = cameraRow * 2f + 1f
+        val camC = cameraCol * 2f + 1f
         val light = game.lightRadius
         for (cell in game.world.shrines) drawObjectiveAt(canvas, cell, ox, oy, tw, th, camR, camC, light)
         drawObjectiveAt(canvas, game.world.exit, ox, oy, tw, th, camR, camC, light)
@@ -1643,6 +1709,28 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         selector(canvas, controllerRect, "CONTROLLER", inputSource == GhoulRunInputSource.Controller, controllerAvailable)
         selector(canvas, bothRect, "BOTH", inputSource == GhoulRunInputSource.Both, controllerAvailable)
         selector(canvas, difficultyRect, "+${SPRINT_DELTAS[difficultyIndex]} RPM", true, true)
+        viewModeRect.set(bothRect.right + 7f * density, y,
+            bothRect.right + 111f * density, y + h)
+        selector(canvas, viewModeRect, if (mapViewMode == GhoulMapViewMode.Split) "VIEW SPLIT" else "VIEW OVERLAY", true, true)
+        val opacityLeft = viewModeRect.right + 6f * density
+        if (mapViewMode == GhoulMapViewMode.Overlay && opacityLeft + 98f * density < difficultyRect.left) {
+            mapOpacityRect.set(opacityLeft, y, opacityLeft + 98f * density, y + h)
+            selector(canvas, mapOpacityRect, "MAP ${mapOpacityPercent}%", true, true)
+            val start = mapOpacityRect.left + 9f * density
+            val end = mapOpacityRect.right - 9f * density
+            val trackY = mapOpacityRect.bottom - 4f * density
+            val fraction = (mapOpacityPercent - GhoulMapOverlayLayout.MIN_OPACITY).toFloat() /
+                (GhoulMapOverlayLayout.MAX_OPACITY - GhoulMapOverlayLayout.MIN_OPACITY)
+            stroke.strokeWidth = 2f * density
+            stroke.color = Color.rgb(43, 62, 69)
+            canvas.drawLine(start, trackY, end, trackY, stroke)
+            stroke.color = Color.WHITE
+            canvas.drawLine(start, trackY, start + fraction * (end - start), trackY, stroke)
+            paint.color = Color.WHITE
+            canvas.drawCircle(start + fraction * (end - start), trackY, 3f * density, paint)
+        } else {
+            mapOpacityRect.setEmpty()
+        }
     }
 
     private fun selector(canvas: Canvas, rect: RectF, label: String, selected: Boolean, enabled: Boolean) {
@@ -1736,7 +1824,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val lines = diagnosticsLines
         text.textSize = 10f * density
         val lineHeight = 14f * density
-        val left = mapRect.left + 8f * density
+        val left = if (mapViewMode == GhoulMapViewMode.Overlay) 8f * density else mapRect.left + 8f * density
         val top = mapRect.top + 52f * density
         paint.color = Color.argb(210, 0, 0, 0)
         canvas.drawRect(left, top, width - 8f * density, top + lines.size * lineHeight + 8f * density, paint)
@@ -1780,15 +1868,155 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
 
     private fun ema(previous: Float, sample: Float): Float = if (previous <= 0f) sample else previous + (sample - previous) * 0.1f
 
-    private fun handleTouch(event: MotionEvent): Boolean {
-        if (event.actionMasked != MotionEvent.ACTION_UP) return true
-        when {
-            webcamRect.contains(event.x, event.y) -> selectInputSource(GhoulRunInputSource.Webcam)
-            controllerRect.contains(event.x, event.y) -> selectInputSource(GhoulRunInputSource.Controller)
-            bothRect.contains(event.x, event.y) -> selectInputSource(GhoulRunInputSource.Both)
-            difficultyRect.contains(event.x, event.y) -> selectDeveloperOption(0)
+    private fun drawMapResizeHandle(canvas: Canvas) {
+        val unit = density
+        resizeHandleRect.set(
+            mapRect.left + 3f * unit, mapRect.bottom - 47f * unit,
+            mapRect.left + 47f * unit, mapRect.bottom - 3f * unit,
+        )
+        stroke.color = Color.argb(200, 180, 205, 215)
+        stroke.strokeWidth = 1.5f * unit
+        canvas.drawRoundRect(mapRect, 7f * unit, 7f * unit, stroke)
+        paint.color = Color.argb(215, 8, 19, 26)
+        canvas.drawRoundRect(resizeHandleRect, 7f * unit, 7f * unit, paint)
+        val cx = resizeHandleRect.centerX()
+        val cy = resizeHandleRect.centerY()
+        stroke.color = Color.WHITE
+        stroke.strokeWidth = 2.5f * unit
+        canvas.drawLine(cx + 10f * unit, cy - 10f * unit, cx - 10f * unit, cy + 10f * unit, stroke)
+        canvas.drawLine(cx - 10f * unit, cy - 1f * unit, cx - 10f * unit, cy + 10f * unit, stroke)
+        canvas.drawLine(cx - 10f * unit, cy + 10f * unit, cx + 1f * unit, cy + 10f * unit, stroke)
+    }
+
+    private fun setMapViewMode(mode: GhoulMapViewMode) {
+        if (mode == mapViewMode) return
+        mapViewMode = mode
+        resizingMap = false
+        prefs?.edit()?.putString(MAP_VIEW_KEY, mode.name)?.apply()
+        requestLayout()
+        glSurface?.requestLayout()
+        overlay.invalidate()
+    }
+
+    private fun updateMapResize(x: Float, y: Float) {
+        val shares = GhoulMapOverlayLayout.resizedShares(
+            mapWidthShare, mapHeightShare, resizeStartWidth, resizeStartHeight,
+            x - resizeStartX, y - resizeStartY, width.toFloat(),
+            height - TOP_UI * density,
+        )
+        mapWidthShare = shares.first
+        mapHeightShare = shares.second
+        overlay.invalidate()
+    }
+
+    private fun updateMapOpacity(x: Float) {
+        val start = mapOpacityRect.left + 9f * density
+        val usableWidth = (mapOpacityRect.width() - 18f * density).coerceAtLeast(1f)
+        val fraction = (x - start) / usableWidth
+        mapOpacityPercent = GhoulMapOverlayLayout.opacityAtFraction(fraction)
+        overlay.invalidate()
+    }
+
+    private fun finishMapOpacity(commit: Boolean) {
+        if (!adjustingMapOpacity) return
+        adjustingMapOpacity = false
+        opacityPointerId = -1
+        if (commit) {
+            prefs?.edit()?.putInt(MAP_OPACITY_KEY, mapOpacityPercent)?.apply()
+        } else {
+            mapOpacityPercent = opacityInitialValue
         }
-        overlay.performClick()
+        overlay.invalidate()
+    }
+
+    private fun finishMapResize(commit: Boolean) {
+        if (!resizingMap) return
+        resizingMap = false
+        resizePointerId = -1
+        if (commit) {
+            prefs?.edit()?.putFloat(MAP_WIDTH_KEY, mapWidthShare)
+                ?.putFloat(MAP_HEIGHT_KEY, mapHeightShare)?.apply()
+        } else {
+            mapWidthShare = resizeInitialWidthShare
+            mapHeightShare = resizeInitialHeightShare
+        }
+        overlay.invalidate()
+    }
+
+    private fun handleTouch(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (mapViewMode == GhoulMapViewMode.Overlay && mapOpacityRect.contains(event.x, event.y)) {
+                    adjustingMapOpacity = true
+                    opacityPointerId = event.getPointerId(0)
+                    opacityInitialValue = mapOpacityPercent
+                    updateMapOpacity(event.x)
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
+                if (mapViewMode == GhoulMapViewMode.Overlay && resizeHandleRect.contains(event.x, event.y)) {
+                    resizingMap = true
+                    resizePointerId = event.getPointerId(0)
+                    resizeStartX = event.x
+                    resizeStartY = event.y
+                    resizeStartWidth = mapRect.width()
+                    resizeStartHeight = mapRect.height()
+                    resizeInitialWidthShare = mapWidthShare
+                    resizeInitialHeightShare = mapHeightShare
+                    resizeTileWidth = min(mapRect.width() / 10f, mapRect.height() / 7f).roundToInt().toFloat()
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (adjustingMapOpacity) {
+                    val index = event.findPointerIndex(opacityPointerId)
+                    if (index >= 0) updateMapOpacity(event.getX(index))
+                }
+                if (resizingMap) {
+                    val index = event.findPointerIndex(resizePointerId)
+                    if (index >= 0) updateMapResize(event.getX(index), event.getY(index))
+                }
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (adjustingMapOpacity && event.getPointerId(event.actionIndex) == opacityPointerId) {
+                    updateMapOpacity(event.getX(event.actionIndex))
+                    finishMapOpacity(true)
+                }
+                if (resizingMap && event.getPointerId(event.actionIndex) == resizePointerId) {
+                    updateMapResize(event.getX(event.actionIndex), event.getY(event.actionIndex))
+                    finishMapResize(true)
+                }
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                finishMapOpacity(false)
+                finishMapResize(false)
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                if (adjustingMapOpacity) {
+                    updateMapOpacity(event.x)
+                    finishMapOpacity(true)
+                } else if (resizingMap) {
+                    updateMapResize(event.x, event.y)
+                    finishMapResize(true)
+                } else {
+                    when {
+                        webcamRect.contains(event.x, event.y) -> selectInputSource(GhoulRunInputSource.Webcam)
+                        controllerRect.contains(event.x, event.y) -> selectInputSource(GhoulRunInputSource.Controller)
+                        bothRect.contains(event.x, event.y) -> selectInputSource(GhoulRunInputSource.Both)
+                        difficultyRect.contains(event.x, event.y) -> selectDeveloperOption(0)
+                        viewModeRect.contains(event.x, event.y) -> setMapViewMode(
+                            if (mapViewMode == GhoulMapViewMode.Split) GhoulMapViewMode.Overlay else GhoulMapViewMode.Split,
+                        )
+                    }
+                }
+                overlay.performClick()
+                return true
+            }
+        }
         return true
     }
 
@@ -1799,6 +2027,11 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         const val TAG = "GhoulRun"
         const val PREFS = "fitbaus_arcade"
         const val DIFFICULTY_KEY = "ghoul_run_sprint_delta"
+        const val MAP_VIEW_KEY = "ghoul_run_map_view_mode"
+        const val MAP_WIDTH_KEY = "ghoul_run_map_overlay_width"
+        const val MAP_HEIGHT_KEY = "ghoul_run_map_overlay_height"
+        const val MAP_OPACITY_KEY = "ghoul_run_map_overlay_opacity"
+        const val MAP_INSET = 10f
         const val STALL_NANOS = 500_000_000L
         const val TIMING_LOG_NANOS = 5_000_000_000L
         const val DIAGNOSTICS_REFRESH_NANOS = 250_000_000L

@@ -67,6 +67,17 @@ included in this upcoming release.
 
 ### Added
 
+- **Ghoul Run split/overlay map layouts.** Keep the existing side-by-side
+  first-person and isometric map view, or switch to a full-width first-person
+  scene with a translucent upper-right navigation map. The overlay begins at
+  38% of screen width and has a draggable lower-left resize handle with
+  minimum 36% width and 48% of the playable height. Resize is bounded to
+  leave HUD space, and holds map tile scale steady until the drag ends to
+  avoid rebuilding cached tiles on every touch move. The mode, overlay size,
+  and adjustable 20–80% opacity persist across sessions. Important map
+  entities, objectives, and threat indicators remain legible and fog of war
+  is unchanged. Both GLES2 and software fallback use the same layout.
+
 - **Ghoul Run industrial horror atmosphere.** Replace warm brick corridors
   with cold riveted steel panels, vents, reinforcing ribs and weathered floor
   surfaces. Four lightweight procedural variants per wall, floor and ceiling
