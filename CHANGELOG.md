@@ -16,6 +16,13 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run unexpected controller turns.** Controller button and stick turns
+  now arm only the immediate choice junction and expire after 2.5 seconds.
+  Rapid double inputs can still queue the following junction when choices
+  are directly adjacent. Neutral or expired commands cannot retain an old
+  precommitted turn; controller presses during warm-up or GO are ignored.
+  Continuous webcam lean and automatic single-path corners are unchanged.
+
 - **Ghoul Run controller startup.** Controller-only steering now skips the
   left/right/center lean verification after the normal cadence warm-up and
   proceeds through the existing one-second GO countdown. Webcam and Both modes
