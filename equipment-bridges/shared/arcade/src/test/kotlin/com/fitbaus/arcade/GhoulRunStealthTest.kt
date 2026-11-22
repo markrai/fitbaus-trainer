@@ -54,7 +54,9 @@ class GhoulRunStealthTest {
         assertEquals(GhoulState.Inspecting, game.ghoul.state)
         assertEquals(row, game.ghoul.row, 0.0001f)
         assertEquals(col, game.ghoul.col, 0.0001f)
-        while (game.ghoul.state == GhoulState.Inspecting) step(game)
+        repeat((game.config.stealthInspectSeconds / game.config.step).toInt() + 2) {
+            if (game.ghoul.state == GhoulState.Inspecting) step(game)
+        }
         assertEquals(GhoulState.Searching, game.ghoul.state)
         assertEquals(heading.opposite, game.ghoul.heading)
         assertEquals(row, game.ghoul.row, 0.0001f)
@@ -82,7 +84,9 @@ class GhoulRunStealthTest {
     fun pedalingAfterNearMissImmediatelyRestartsTheHunt() {
         val game = settledEncounter()
         run(game, 0.35f)
-        while (game.ghoul.state == GhoulState.Inspecting) step(game)
+        repeat((game.config.stealthInspectSeconds / game.config.step).toInt() + 2) {
+            if (game.ghoul.state == GhoulState.Inspecting) step(game)
+        }
         assertEquals(GhoulState.Searching, game.ghoul.state)
         run(game, 0.2f)
         step(game, rpm = 70f)
@@ -131,7 +135,9 @@ class GhoulRunStealthTest {
     fun previouslySparedQuietRiderDoesNotTriggerAnImmediateSecondInspection() {
         val game = settledEncounter()
         run(game, 0.35f)
-        while (game.ghoul.state == GhoulState.Inspecting) step(game)
+        repeat((game.config.stealthInspectSeconds / game.config.step).toInt() + 2) {
+            if (game.ghoul.state == GhoulState.Inspecting) step(game)
+        }
         assertTrue(game.ghoul.retreating)
         assertEquals(game.world.start.moved(game.heading), game.ghoul.sparedRiderAt)
         run(game, 0.25f)
