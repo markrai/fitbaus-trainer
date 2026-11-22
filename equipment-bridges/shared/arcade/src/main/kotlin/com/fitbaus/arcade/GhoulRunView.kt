@@ -1186,7 +1186,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         }
         val layer = if (translucent) canvas.saveLayerAlpha(
             mapRect.left, mapRect.top, mapRect.right, mapRect.bottom,
-            mapOpacityPercent * 255 / 100, Canvas.ALL_SAVE_FLAG,
+            mapOpacityPercent * 255 / 100,
         ) else -1
         canvas.save()
         canvas.scale(zoom, zoom, ox, oy)
