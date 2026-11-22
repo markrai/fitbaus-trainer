@@ -180,7 +180,7 @@ internal class GhoulRunGame(
     val riderRow: Float get() = riderCell.row + heading.dr * progress
     val riderCol: Float get() = riderCell.col + heading.dc * progress
     val lampLevel: Float get() = lightRadius / config.sprintLightRadius
-    val pathGap: Float get() = ghouls.minOfOrNull(::continuousPathDistance) ?: Float.POSITIVE_INFINITY
+    val pathGap: Float get() = continuousPathDistance(nearestThreat)
     val huntingGhouls: Int get() = ghouls.count { it.state == GhoulState.Hunting }
     val nearestThreat: GhoulMonster get() {
         var nearest: GhoulMonster? = null
@@ -721,7 +721,7 @@ internal class GhoulRunGame(
         }
         if (maybeInspectQuietRider(monster, quiet, riderTarget, continuousPathDistance(monster))) return
         if (monster.state != GhoulState.Stunned && monster.state != GhoulState.Inspecting &&
-            invulnerableLeft <= 0f && pathGap <= config.catchDistance) catchRider(monster)
+            invulnerableLeft <= 0f && continuousPathDistance(monster) <= config.catchDistance) catchRider(monster)
     }
 
     private fun maybeInspectQuietRider(monster: GhoulMonster, quiet: Boolean, riderTarget: MazeCell, gap: Float): Boolean {
