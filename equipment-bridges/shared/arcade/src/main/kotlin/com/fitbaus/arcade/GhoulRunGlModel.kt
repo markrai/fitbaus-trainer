@@ -431,6 +431,7 @@ internal class GhoulGlSnapshot {
     var lampRadius = 0f
     var lampPhase = 0f
     var glowPhase = 0f
+    var smokeSeconds = 0f
     var diagnostics = false
     var ghoulPhaseA = 0f
     var ghoulPhaseB = 0f
@@ -447,6 +448,7 @@ internal class GhoulGlSnapshot {
     fun copyFrom(other: GhoulGlSnapshot) {
         maze = other.maze; cameraX = other.cameraX; cameraY = other.cameraY; yaw = other.yaw
         eye = other.eye; lampRadius = other.lampRadius; lampPhase = other.lampPhase; glowPhase = other.glowPhase
+        smokeSeconds = other.smokeSeconds
         diagnostics = other.diagnostics
         ghoulPhaseA = other.ghoulPhaseA; ghoulPhaseB = other.ghoulPhaseB; ghoulFlare = other.ghoulFlare
         ghoulBob = other.ghoulBob; ghoulSway = other.ghoulSway; ghoulDesaturation = other.ghoulDesaturation
