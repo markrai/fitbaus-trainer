@@ -312,27 +312,38 @@ internal object GhoulMazeMesher {
             bx: Float, by: Float, bz: Float,
             cx: Float, cy: Float, cz: Float,
             dx: Float, dy: Float, dz: Float,
-            nx: Float, ny: Float, nz: Float,
+            nx: Float, ny: Float, nz: Float, variant: Int,
         ) {
-            vertex(ax, ay, az, nx, ny, nz, 0f, 0f); vertex(bx, by, bz, nx, ny, nz, 1f, 0f)
-            vertex(cx, cy, cz, nx, ny, nz, 1f, 1f); vertex(ax, ay, az, nx, ny, nz, 0f, 0f)
-            vertex(cx, cy, cz, nx, ny, nz, 1f, 1f); vertex(dx, dy, dz, nx, ny, nz, 0f, 1f)
+            val gutter = 0.5f / GhoulIndustrialArt.ATLAS_SIZE
+            val u0 = (variant % 2) * 0.5f + gutter
+            val v0 = (variant / 2) * 0.5f + gutter
+            val u1 = u0 + 0.5f - 2f * gutter
+            val v1 = v0 + 0.5f - 2f * gutter
+            vertex(ax, ay, az, nx, ny, nz, u0, v0); vertex(bx, by, bz, nx, ny, nz, u1, v0)
+            vertex(cx, cy, cz, nx, ny, nz, u1, v1); vertex(ax, ay, az, nx, ny, nz, u0, v0)
+            vertex(cx, cy, cz, nx, ny, nz, u1, v1); vertex(dx, dy, dz, nx, ny, nz, u0, v1)
         }
         // Keep material ranges contiguous so the renderer needs three draw calls for the maze.
         for (row in 0 until maze.rows) for (col in 0 until maze.cols) if (maze.isFloor(row, col)) {
             val x = col.toFloat(); val y = row.toFloat()
-            quad(x, y, 0f, x + 1f, y, 0f, x + 1f, y + 1f, 0f, x, y + 1f, 0f, 0f, 0f, 1f)
+            quad(x, y, 0f, x + 1f, y, 0f, x + 1f, y + 1f, 0f, x, y + 1f, 0f,
+                0f, 0f, 1f, GhoulIndustrialArt.variant(maze.seed, row, col, 0))
         }
         for (row in 0 until maze.rows) for (col in 0 until maze.cols) if (maze.isFloor(row, col)) {
             val x = col.toFloat(); val y = row.toFloat()
-            quad(x, y + 1f, 1f, x + 1f, y + 1f, 1f, x + 1f, y, 1f, x, y, 1f, 0f, 0f, -1f)
+            quad(x, y + 1f, 1f, x + 1f, y + 1f, 1f, x + 1f, y, 1f, x, y, 1f,
+                0f, 0f, -1f, GhoulIndustrialArt.variant(maze.seed, row, col, 1))
         }
         for (row in 0 until maze.rows) for (col in 0 until maze.cols) if (maze.isFloor(row, col)) {
             val x = col.toFloat(); val y = row.toFloat()
-            if (!maze.isFloor(row - 1, col)) quad(x + 1f, y, 0f, x, y, 0f, x, y, 1f, x + 1f, y, 1f, 0f, 1f, 0f)
-            if (!maze.isFloor(row + 1, col)) quad(x, y + 1f, 0f, x + 1f, y + 1f, 0f, x + 1f, y + 1f, 1f, x, y + 1f, 1f, 0f, -1f, 0f)
-            if (!maze.isFloor(row, col - 1)) quad(x, y, 0f, x, y + 1f, 0f, x, y + 1f, 1f, x, y, 1f, 1f, 0f, 0f)
-            if (!maze.isFloor(row, col + 1)) quad(x + 1f, y + 1f, 0f, x + 1f, y, 0f, x + 1f, y, 1f, x + 1f, y + 1f, 1f, -1f, 0f, 0f)
+            if (!maze.isFloor(row - 1, col)) quad(x + 1f, y, 0f, x, y, 0f, x, y, 1f, x + 1f, y, 1f,
+                0f, 1f, 0f, GhoulIndustrialArt.variant(maze.seed, row, col, 2))
+            if (!maze.isFloor(row + 1, col)) quad(x, y + 1f, 0f, x + 1f, y + 1f, 0f, x + 1f, y + 1f, 1f, x, y + 1f, 1f,
+                0f, -1f, 0f, GhoulIndustrialArt.variant(maze.seed, row, col, 3))
+            if (!maze.isFloor(row, col - 1)) quad(x, y, 0f, x, y + 1f, 0f, x, y + 1f, 1f, x, y, 1f,
+                1f, 0f, 0f, GhoulIndustrialArt.variant(maze.seed, row, col, 4))
+            if (!maze.isFloor(row, col + 1)) quad(x + 1f, y + 1f, 0f, x + 1f, y, 0f, x + 1f, y, 1f, x + 1f, y + 1f, 1f,
+                -1f, 0f, 0f, GhoulIndustrialArt.variant(maze.seed, row, col, 5))
         }
         check(at == data.size)
         return GhoulMazeMesh(data, floorVertices, ceilingVertices, wallVertices)
