@@ -143,8 +143,8 @@ internal class GhoulSpriteDraw {
  * console's interpreted ART: [pixels] is COLUMN-MAJOR (pixel (x, y) at `x * height + y`) so each
  * column is one contiguous run filled with a handful of `System.arraycopy` calls from prebuilt
  * shade spans, never a per-pixel loop. The view uploads it as a transposed bitmap and draws it
- * through a transposing matrix with filtering off. Walls, floor and ceiling fade to black at the
- * lamp radius. Billboards are not rasterised here: [draws] lists each visible sprite's rectangle
+ * through a transposing matrix with filtering off. Industrial panels use stable maze-seeded
+ * variation and atmospheric distance fog. Billboards are not rasterised here: [draws] lists each visible sprite's rectangle
  * and the column runs where it beats the per-column depth buffer, far to near.
  */
 internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegrees: Float = 70f) {
@@ -158,7 +158,7 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
     /** Floor/ceiling shades for a horizon at the centre, padded so head bob can shift it. */
     private val background = IntArray(height + 2 * MAX_SHIFT)
     private var backgroundLamp = Int.MIN_VALUE
-    private val brickSpans = Array(LEVELS + 1) { IntArray(height) }
+    private val wallSpans = Array(LEVELS + 1) { Array(FOG_LEVELS + 1) { IntArray(height) } }
     private val order = ArrayList<GhoulSprite>()
     private var lightTiles = 1f
 
@@ -173,9 +173,11 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
     init {
         require(width > 0 && height > 0)
         for (level in 0..LEVELS) {
-            val color = shade(WALL, level.toFloat() / LEVELS)
-            val span = brickSpans[level]
-            for (y in 0 until height) span[y] = color
+            val lit = shade(WALL, level.toFloat() / LEVELS)
+            for (fogLevel in 0..FOG_LEVELS) {
+                val color = blend(lit, GhoulIndustrialArt.FOG_COLOR, fogLevel * MAX_FOG / FOG_LEVELS)
+                wallSpans[level][fogLevel].fill(color)
+            }
         }
     }
 
@@ -213,7 +215,7 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
         val pix = pixels
         val bg = background
         val bgStart = MAX_SHIFT - shift
-        val spans = brickSpans
+        val spans = wallSpans
         val halfFocal = 0.5f * focal
         for (column in 0 until width) {
             val base = column * h
@@ -234,34 +236,31 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
                 if (pilot > f) f = pilot
             }
             if (sides[column] != GhoulRaycaster.SIDE_X) f *= SIDE_Y_SHADE
-            val level = (f * LEVELS).toInt()
-            val brick = spans[level]
+            val level = (f * LEVELS).toInt().coerceIn(0, LEVELS)
+            val fogLevel = (GhoulIndustrialArt.fog(d, 0.5f) * FOG_LEVELS / MAX_FOG)
+                .toInt().coerceIn(0, FOG_LEVELS)
+            val plate = spans[level][fogLevel]
+            System.arraycopy(plate, 0, pix, base + y0, y1 - y0 + 1)
             val lineH = half + half
-            System.arraycopy(brick, 0, pix, base + y0, y1 - y0 + 1)
             if (lineH < TEXTURE_MIN_LINE) continue
-            // Brick texture with few native copies: three mortar lines, plus vertical joints only where u says so.
-            val mortar = spans[(level * MORTAR_SHADE).toInt()]
-            val bandH = lineH / BANDS
-            val line = max(1, (lineH * 0.06f).toInt())
-            for (band in 1 until BANDS) {
-                var s = (top + band * bandH).toInt()
-                val e = min(y1, s + line - 1)
-                if (s < y0) s = y0
-                if (e >= s) System.arraycopy(mortar, 0, pix, base + s, e - s + 1)
-            }
+            val seam = spans[(level * SEAM_SHADE).toInt()][fogLevel]
             val u = wallU[column]
-            val first = when {
-                u < JOINT_WIDTH -> 0
-                u >= 0.5f && u < 0.5f + JOINT_WIDTH -> 1
-                else -> continue
+            if (u < JOINT_WIDTH || u > 1f - JOINT_WIDTH) {
+                System.arraycopy(seam, 0, pix, base + y0, y1 - y0 + 1)
+                continue
             }
-            var band = first
-            while (band < BANDS) {
-                var s = (top + band * bandH).toInt()
-                val e = min(y1, (top + (band + 1) * bandH).toInt() - 1)
-                if (s < y0) s = y0
-                if (e >= s) System.arraycopy(mortar, 0, pix, base + s, e - s + 1)
-                band += 2
+            val variant = GhoulIndustrialArt.variant(grid.seed, hits.tileRow[column], hits.tileCol[column], sides[column] + 2)
+            if (variant == 2 && (u in 0.24f..0.30f || u in 0.70f..0.76f)) {
+                System.arraycopy(seam, 0, pix, base + y0, y1 - y0 + 1)
+                continue
+            }
+            val bands = if (variant == 1) 6 else 3
+            val line = max(1, (lineH * if (variant == 1) 0.045f else 0.028f).toInt())
+            for (band in 1 until bands) {
+                if (variant == 1 && band % 2 != 0) continue
+                val start = max(y0, (top + band * lineH / bands).toInt())
+                val end = min(y1, start + line - 1)
+                if (end >= start) System.arraycopy(seam, 0, pix, base + start, end - start + 1)
             }
         }
         val columns = System.nanoTime()
@@ -278,9 +277,13 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
         for (py in background.indices) {
             val centre = py + 0.5f
             background[py] = if (centre > horizon) {
-                shade(FLOOR, light(k / (centre - horizon)))
+                val distance = k / (centre - horizon)
+                blend(shade(FLOOR, light(distance)), GhoulIndustrialArt.FOG_COLOR,
+                    GhoulIndustrialArt.fog(distance, 0f))
             } else {
-                shade(CEILING, light(k / (horizon - centre)))
+                val distance = k / (horizon - centre)
+                blend(shade(CEILING, light(distance)), GhoulIndustrialArt.FOG_COLOR,
+                    GhoulIndustrialArt.fog(distance, 1f))
             }
         }
     }
@@ -372,19 +375,20 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
         const val MAX_SPRITES = 12
         const val MAX_SHIFT = 12
         const val LEVELS = 64
-        const val BANDS = 4
+        const val FOG_LEVELS = 8
+        const val MAX_FOG = 0.72f
         const val TEXTURE_MIN_LINE = 24f
-        const val JOINT_WIDTH = 0.04f
+        const val JOINT_WIDTH = 0.05f
         const val NEAR_CLIP = 0.15f
         const val PILOT_TILES = 1.6f
         const val PILOT_LEVEL = 0.28f
         const val INV_PILOT = 1f / PILOT_TILES
         const val SIDE_Y_SHADE = 0.68f
-        const val MORTAR_SHADE = 0.72f
+        const val SEAM_SHADE = 0.44f
 
-        val FLOOR = rgb(74, 66, 58)
-        val CEILING = rgb(30, 32, 40)
-        val WALL = rgb(150, 146, 138)
+        val FLOOR = rgb(70, 79, 87)
+        val CEILING = rgb(41, 49, 57)
+        val WALL = rgb(102, 115, 124)
 
         fun rgb(r: Int, g: Int, b: Int): Int = OPAQUE or (r shl 16) or (g shl 8) or b
 
@@ -393,6 +397,15 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
             if (t <= 0f) return 1f
             val s = 1f - t
             return s * s * (3f - 2f * s)
+        }
+
+        fun blend(color: Int, fog: Int, weight: Float): Int {
+            val k = (weight.coerceIn(0f, 1f) * 256f).toInt()
+            val inverse = 256 - k
+            val r = (((color shr 16 and 255) * inverse + (fog shr 16 and 255) * k) shr 8)
+            val g = (((color shr 8 and 255) * inverse + (fog shr 8 and 255) * k) shr 8)
+            val b = (((color and 255) * inverse + (fog and 255) * k) shr 8)
+            return rgb(r, g, b)
         }
 
         fun shade(color: Int, f: Float): Int {
