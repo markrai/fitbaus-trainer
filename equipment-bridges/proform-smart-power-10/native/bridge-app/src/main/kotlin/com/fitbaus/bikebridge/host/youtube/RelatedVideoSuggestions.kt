@@ -51,11 +51,11 @@ internal object RelatedVideoSuggestions {
         for (seed in selected) {
             if (Thread.currentThread().isInterrupted) throw InterruptedException("Discovery cancelled")
             try {
-                groups += fetch(seed).take(MAX_ITEMS_PER_SEED)
+                groups.add(fetch(seed).take(MAX_ITEMS_PER_SEED))
             } catch (e: Throwable) {
                 if (e is InterruptedException || Thread.currentThread().isInterrupted) throw e
                 if (firstFailure == null) firstFailure = e
-                groups += emptyList()
+                groups.add(emptyList())
             }
         }
         if (groups.all { it.isEmpty() }) firstFailure?.let { throw it }
