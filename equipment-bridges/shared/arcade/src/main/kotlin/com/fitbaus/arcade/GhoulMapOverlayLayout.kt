@@ -3,6 +3,7 @@
 package com.fitbaus.arcade
 
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 internal enum class GhoulMapViewMode { Split, Overlay }
 
@@ -41,7 +42,7 @@ internal object GhoulMapOverlayLayout {
         val width = screenWidth.coerceAtLeast(1f)
         val height = screenHeight.coerceAtLeast(1f)
         val header = headerHeight.coerceIn(0f, height - 1f)
-        if (mode == GhoulMapViewMode.Split) return GhoulMapBounds(width * 0.5f, header, width, height)
+        if (mode == GhoulMapViewMode.Split) return GhoulMapBounds((width * 0.5f).roundToInt().toFloat(), header, width, height)
         val playable = height - header
         val margin = inset.coerceIn(0f, min(width, playable) * 0.1f)
         val mapWidth = (width * widthShare.coerceIn(MIN_WIDTH_SHARE, MAX_WIDTH_SHARE))
