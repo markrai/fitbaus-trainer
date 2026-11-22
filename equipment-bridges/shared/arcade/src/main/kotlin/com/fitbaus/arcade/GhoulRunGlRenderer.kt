@@ -776,11 +776,6 @@ internal class GhoulRunGlRenderer(
                     float cavity = (1.0 - smoothstep(0.70, 0.89, shape)) * mouthOpen;
                     shaded = mix(shaded, vec3(0.36, 0.085, 0.06) * max(0.4, light), rim * 0.85);
                     shaded = mix(shaded, vec3(0.035, 0.003, 0.007), cavity * 0.98);
-                    float upperTeeth = 1.0 - smoothstep(0.07, 0.23, abs(mouthUv.y + 0.66));
-                    float lowerTeeth = 1.0 - smoothstep(0.07, 0.22, abs(mouthUv.y - 0.68));
-                    float toothColumn = smoothstep(0.16, 0.34, abs(fract(mouthUv.x * 4.0) - 0.5));
-                    float teeth = min(1.0, upperTeeth + lowerTeeth) * toothColumn * cavity;
-                    shaded = mix(shaded, vec3(0.72, 0.65, 0.53) * max(light, 0.47), teeth * 0.72);
                 }
 
                 vec2 coreScale = vec2(${GhoulEyeArt.CORE_U}, ${GhoulEyeArt.CORE_V});
