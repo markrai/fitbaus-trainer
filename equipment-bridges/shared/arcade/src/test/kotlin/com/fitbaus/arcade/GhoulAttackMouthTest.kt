@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test
 
 internal class GhoulAttackMouthTest {
     private fun target(
-        x: Float = 1f,
+        x: Float = 0.7f,
         y: Float = 0f,
         cameraYaw: Float = 0f,
         monsterHeading: MazeDirection = MazeDirection.West,
@@ -22,11 +22,14 @@ internal class GhoulAttackMouthTest {
     @Test
     fun opensOnlyDuringCloseHeadOnMutualGaze() {
         assertTrue(target() > 0f)
-        assertEquals(1f, target(x = 0.5f), 0.0001f)
+        assertEquals(1f, target(x = 0.45f), 0.0001f)
         assertEquals(0f, target(x = 1.5f))
+        assertEquals(0f, target(x = 1f))
+        assertEquals(0f, target(x = 0.95f))
         assertEquals(0f, target(x = 0.0f))
         assertEquals(0f, target(x = 1f, y = 1f))
-        assertTrue(target(x = 1f, y = 0.3f) > 0f)
+        assertTrue(target(x = 0.85f, y = 0.2f) > 0f)
+        assertTrue(target(x = 0.6f) > target(x = 0.8f))
     }
 
     @Test
@@ -37,7 +40,7 @@ internal class GhoulAttackMouthTest {
         assertEquals(0f, target(monsterHeading = MazeDirection.North))
         assertTrue(target(monsterHeading = MazeDirection.West) > 0f)
         assertTrue(target(
-            x = 0f, y = 1f, cameraYaw = PI.toFloat() / 2f,
+            x = 0f, y = 0.7f, cameraYaw = PI.toFloat() / 2f,
             monsterHeading = MazeDirection.North,
         ) > 0f)
     }
@@ -75,7 +78,7 @@ internal class GhoulAttackMouthTest {
         val direction = game.world.exits(start).first()
         game.placeRider(start, direction)
         val adjacent = start.moved(direction)
-        game.forceGhoul(adjacent, direction.opposite, state = GhoulState.Hunting)
+        game.forceGhoul(adjacent, direction.opposite, progress = 0.3f, state = GhoulState.Hunting)
         val yaw = GhoulRaycaster.yawOf(direction)
         assertTrue(GhoulAttackMouth.target(game, game.ghoul, yaw) > 0f)
 
@@ -88,8 +91,17 @@ internal class GhoulAttackMouthTest {
             }?.let { cell to it }
         }
         val wall = requireNotNull(blocked)
-        game.placeRider(wall.first, wall.second)
-        game.forceGhoul(wall.first.moved(wall.second), wall.second.opposite, state = GhoulState.Hunting)
+        game.placeRider(wall.first, wall.second, edgeProgress = 0.3f)
+        game.forceGhoul(
+            wall.first.moved(wall.second), wall.second.opposite,
+            progress = 0.3f, state = GhoulState.Hunting,
+        )
+        assertTrue(
+            GhoulAttackMouth.target(
+                game.riderCol, game.riderRow, GhoulRaycaster.yawOf(wall.second),
+                game.ghoul.col, game.ghoul.row, game.ghoul.heading, game.ghoul.state, true,
+            ) > 0f,
+        )
         assertEquals(0f, GhoulAttackMouth.target(game, game.ghoul, GhoulRaycaster.yawOf(wall.second)))
     }
 
