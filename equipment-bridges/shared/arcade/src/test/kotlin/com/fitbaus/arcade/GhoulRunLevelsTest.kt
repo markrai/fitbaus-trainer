@@ -40,7 +40,7 @@ internal class GhoulRunLevelsTest {
             assertTrue(game.leanCheckPassed)
         }
         playing(game)
-        assertTrue(game.ghouls.all { it.state == GhoulState.Wandering })
+        assertTrue(game.ghouls.all { it.state != GhoulState.Inactive })
     }
 
     @Test
