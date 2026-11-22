@@ -168,6 +168,7 @@ internal class GhoulRunGame(
     private var lastFrameNanos = Long.MIN_VALUE
     private var rng = Random(seed xor GHOUL_RANDOM_SALT)
     private var quietFor = 0f
+    private var skippedLeanCheckPending = false
 
     init { resetMaze(seed, resetCatches = true) }
 
@@ -555,7 +556,24 @@ internal class GhoulRunGame(
         reveal()
     }
 
+    internal fun skipLeanCheckWithGo() {
+        if (leanCheckPassed || skippedLeanCheckPending || phase != GhoulPhase.WarmUp && phase != GhoulPhase.LeanCheck ||
+            phase == GhoulPhase.LeanCheck && leanCheckStep >= LEAN_CHECK_ORDER.size) return
+        phase = GhoulPhase.LeanCheck
+        leanCheckStep = LEAN_CHECK_ORDER.size
+        leanCheckHeld = 0f
+        leanCheckConfirmLeft = 0f
+        phaseLeft = config.leanCheckGoSeconds
+        skippedLeanCheckPending = true
+        holdStill()
+    }
+
+    internal fun restoreLeanCheckIfSkipped() {
+        if (phase == GhoulPhase.LeanCheck && skippedLeanCheckPending && !leanCheckPassed) beginLeanCheck()
+    }
+
     private fun beginLeanCheck() {
+        skippedLeanCheckPending = false
         phase = GhoulPhase.LeanCheck
         leanCheckStep = 0
         leanCheckHeld = 0f
@@ -937,6 +955,7 @@ internal class GhoulRunGame(
         leanCheckStep = 0
         leanCheckHeld = 0f
         leanCheckConfirmLeft = 0f
+        skippedLeanCheckPending = false
         if (resetCatches) catches = 0
         ghoul = GhoulMonster(world.monsterSpawn)
         resetGhoul(active = false)
@@ -956,6 +975,7 @@ internal class GhoulRunGame(
     }
 
     private fun beginCalibratedRun() {
+        skippedLeanCheckPending = false
         leanCheckPassed = true
         phase = GhoulPhase.Playing
         phaseLeft = 0f
