@@ -223,14 +223,18 @@ After approving, the Bike Bridge's default YouTube thumbnail grid shows
 you subscribe to. Scrolling loads additional channel batches. This is not
 Google's private personalized Home recommendations algorithm.
 
-Tap **DISCOVER** beside FROM YOUR CHANNELS to fetch a small, mixed group of
-related videos based on your currently displayed subscription uploads. This
-is an on-demand, unofficial NewPipe recommendation list, not Google's private
-personalized Home ranking. Select a suggestion to play it, or tap
-**‹ FROM YOUR CHANNELS** to return to the original feed. The discovery list
-may be empty or unavailable when extraction is blocked; RETRY is manual.
-Discover is shown only for a signed-in subscription home feed. It requires
-no new OAuth scope and does not query Google's YouTube search endpoint.
+Tap **DISCOVER** beside FROM YOUR CHANNELS to load related videos based on
+your currently displayed subscription uploads. More suggestions are fetched
+in bounded batches as you approach the bottom of the grid. Results are
+deduplicated across pages, including against the source subscription uploads.
+A small number of related videos may serve as additional seeds, but discovery
+eventually ends when its bounded seed pool is exhausted. This is an unofficial
+NewPipe recommendation list, not Google's private personalized Home ranking.
+Select a suggestion to play it, or tap **‹ FROM YOUR CHANNELS** to return
+to the original feed. If a continuation fails, existing results stay visible
+and scrolling does not keep retrying; tap the message to retry. Empty batches
+can also be advanced manually. Discover appears only on an authenticated home
+feed and uses no additional OAuth scope or YouTube search API quota.
 
 Use the search field and the keyboard's **Search** action to search all of
 YouTube; the × clears the query and returns to the home feed. There are no

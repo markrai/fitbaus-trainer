@@ -52,6 +52,7 @@ internal class FakeCursor(val page: Int) : FeedCursor
 
 internal class FakeCatalog : YouTubeCatalog {
     var discoverPage: () -> FeedPage = { FeedPage(videos("trend", 3), FakeCursor(2)) }
+    var relatedPage: (List<VideoSummary>) -> FeedPage = { FeedPage(emptyList(), null) }
     val searchPages = HashMap<String, () -> FeedPage>()
     var morePage: (FakeCursor) -> FeedPage = { FeedPage(videos("more${it.page}", 2), null) }
     val resolutions = HashMap<String, () -> ResolvedVideo>()
@@ -65,6 +66,11 @@ internal class FakeCatalog : YouTubeCatalog {
     override fun search(query: String): FeedPage {
         calls += "search:$query"
         return (searchPages[query] ?: { FeedPage(videos(query, 2), null) })()
+    }
+
+    override fun related(seeds: List<VideoSummary>): FeedPage {
+        calls += "related"
+        return relatedPage(seeds)
     }
 
     override fun more(cursor: FeedCursor): FeedPage {

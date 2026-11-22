@@ -20,17 +20,24 @@ small FitBaus-owned layer.
   BACK control remains for channel/playlist hierarchy. This is not Google's
   proprietary Home recommendations.
 - **Discover:** on an authenticated subscription home grid, DISCOVER switches
-  the existing video grid to related-video suggestions. It selects at most
-  three non-live seeds, preferring distinct subscribed channels, then uses
-  NewPipe's `StreamInfo.getRelatedItems()` for up to twelve candidates per
-  seed. Round-robin mixing, filtering and ID deduplication produce at most
-  24 results and exclude videos already visible in the source sample.
-  Suggestions are fetched only when tapped, with an explicit retry and a
-  separate cancellable below-normal-priority worker. Returning to FROM YOUR
-  CHANNELS does not refetch the original feed; searching resets the discovery
-  view. Discovery never requests additional Google scopes or YouTube API
-  search quota. Unauthenticated Trending has no Discover control, and
-  extraction failures never silently replace the subscription feed.
+  the existing video grid to related-video suggestions. It draws up to
+  32 non-live initial seeds from the loaded subscribed-channel uploads,
+  preferring distinct channels. Each page resolves at most three seeds and
+  reads at most twelve NewPipe `StreamInfo.getRelatedItems()` candidates per
+  seed, mixing at most 24 videos into that page. It retains a cursor with the
+  next seed index and previously shown video IDs, so scrolling near the bottom
+  appends deduplicated suggestions without resetting the grid. Up to two
+  suggestions per initial-seed page can extend the seed queue, capped at 56
+  total seeds; follow-on seeds do not recursively create further seeds.
+  Discovery therefore lasts for many pages without an unbounded crawl.
+  Requests run on the existing cancellable, below-normal-priority worker;
+  only one continuation is in flight. Empty batches can be advanced manually.
+  Failed continuations preserve prior results and require an explicit tap
+  before retrying. Switching videos, searches, or tabs invalidates pending
+  results using generation checks. Returning to FROM YOUR CHANNELS does not
+  refetch the original feed; searching resets discovery. No additional Google
+  scopes or YouTube search quota are used. Unauthenticated Trending has no
+  Discover control, and extractor errors never replace the subscription feed.
 - **Play:** tapping a card opens the player inside the tab: video surface,
   PLAY/PAUSE (or tap the video, showing a briefly centered play/pause icon), seek bar with buffered range, elapsed and
   total time, a screen-brightness slider (5-100 %, written to the same

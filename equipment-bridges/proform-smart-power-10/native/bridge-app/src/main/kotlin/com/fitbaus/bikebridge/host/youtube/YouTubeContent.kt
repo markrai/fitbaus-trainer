@@ -322,7 +322,9 @@ internal class YouTubeContent(
             override fun onScrollStateChanged(view: AbsListView?, scrollState: Int) {}
 
             override fun onScroll(view: AbsListView?, firstVisibleItem: Int, visibleItemCount: Int, totalItemCount: Int) {
-                if (!discoveryActive && totalItemCount > 0 && firstVisibleItem + visibleItemCount >= totalItemCount - PREFETCH_ITEMS) session.loadMore(false)
+                if (totalItemCount > 0 && firstVisibleItem + visibleItemCount >= totalItemCount - PREFETCH_ITEMS) {
+                    if (discoveryActive) session.loadMoreRecommendations(false) else session.loadMore(false)
+                }
             }
         })
         body.addView(grid, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -332,7 +334,11 @@ internal class YouTubeContent(
         listMessage.gravity = Gravity.CENTER
         listOverlay.addView(listMessage, LayoutParams(dp(720), ViewGroup.LayoutParams.WRAP_CONTENT))
         listRetry.setOnClickListener {
-            if (discoveryActive) session.loadRecommendations(force = true) else session.retry()
+            if (discoveryActive) {
+                if (session.state.recommendations.status == ListStatus.Empty && session.state.recommendations.canLoadMore) {
+                    session.loadMoreRecommendations(true)
+                } else session.loadRecommendations(force = true)
+            } else session.retry()
         }
         val retryLp = LayoutParams(dp(180), dp(TOUCH_DP))
         retryLp.topMargin = dp(16)
@@ -342,7 +348,9 @@ internal class YouTubeContent(
 
         moreStatus.gravity = Gravity.CENTER
         moreStatus.minHeight = dp(40)
-        moreStatus.setOnClickListener { session.loadMore(true) }
+        moreStatus.setOnClickListener {
+            if (discoveryActive) session.loadMoreRecommendations(true) else session.loadMore(true)
+        }
         resultsScreen.addView(moreStatus, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
@@ -521,14 +529,22 @@ internal class YouTubeContent(
         listOverlay.visibility = if (overlay == null) GONE else VISIBLE
         setText(listMessage, overlay ?: "")
         listRetry.visibility = if (status == ListStatus.Error || status == ListStatus.Empty) VISIBLE else GONE
-        val more = if (discovering) "" else when {
+        val recommendations = state.recommendations
+        val more = if (discovering) when {
+            recommendations.loadingMore -> "Finding more videos…"
+            recommendations.moreFailed -> "Couldn't load more suggestions. Tap to retry."
+            recommendations.canLoadMore && recommendations.items.isNotEmpty() && recommendations.message != null -> recommendations.message
+            else -> ""
+        } else when {
             browse.loadingMore -> "Loading more…"
             browse.moreFailed -> "Couldn't load more videos. Tap to retry."
             else -> ""
         }
         setText(moreStatus, more)
         moreStatus.visibility = if (more.isEmpty()) GONE else VISIBLE
-        moreStatus.isClickable = !discovering && browse.moreFailed
+        moreStatus.isClickable = if (discovering) {
+            recommendations.moreFailed || (recommendations.canLoadMore && recommendations.message != null)
+        } else browse.moreFailed
     }
 
     private fun renderPlayback(playback: PlaybackState) {
