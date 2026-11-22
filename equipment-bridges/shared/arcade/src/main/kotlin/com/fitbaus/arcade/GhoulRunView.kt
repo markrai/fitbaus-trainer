@@ -121,11 +121,6 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val eyeCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 23, 9) }
     private val jawRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(117, 43, 34) }
     private val jawCavityPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(17, 3, 5) }
-    private val jawToothPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(180, 167, 141)
-        strokeWidth = 1.5f * density
-        strokeCap = Paint.Cap.ROUND
-    }
     private val mouthDst = RectF()
     private val spriteDst = RectF()
     private var tileArtWidth = -1
@@ -732,20 +727,9 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         mouthDst.set(centreX - radiusX, centreY - radiusY, centreX + radiusX, centreY + radiusY)
         jawRimPaint.alpha = (strength * 235f).toInt()
         jawCavityPaint.alpha = (strength * 252f).toInt()
-        jawToothPaint.alpha = (strength * 205f).toInt()
         canvas.drawOval(mouthDst, jawRimPaint)
         mouthDst.inset(radiusX * 0.16f, radiusY * 0.13f)
         canvas.drawOval(mouthDst, jawCavityPaint)
-        val toothHeight = min(radiusY * 0.29f, 7f * density)
-        if (toothHeight > 0.4f * density) {
-            for (tooth in -1..1) {
-                val x = centreX + tooth * radiusX * 0.42f
-                canvas.drawLine(x, centreY - radiusY * 0.78f,
-                    x + tooth * radiusX * 0.04f, centreY - radiusY * 0.78f + toothHeight, jawToothPaint)
-                canvas.drawLine(x, centreY + radiusY * 0.78f,
-                    x + tooth * radiusX * 0.04f, centreY + radiusY * 0.78f - toothHeight * 0.65f, jawToothPaint)
-            }
-        }
     }
 
     private fun spriteBitmap(kind: GhoulSpriteKind): Bitmap {
