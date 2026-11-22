@@ -14,6 +14,7 @@ internal class GhoulMapOverlayLayoutTest {
         assertEquals(54f, rect.top)
         assertEquals(1000f, rect.right)
         assertEquals(700f, rect.bottom)
+        assertEquals(501f, GhoulMapOverlayLayout.bounds(1001f, 700f, 54f, 10f, GhoulMapViewMode.Split).left)
     }
 
     @Test
