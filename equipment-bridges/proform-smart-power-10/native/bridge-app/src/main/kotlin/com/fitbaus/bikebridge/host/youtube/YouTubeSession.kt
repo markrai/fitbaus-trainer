@@ -81,6 +81,9 @@ internal data class RecommendationState(
     val items: List<VideoSummary> = emptyList(),
     val status: ListStatus = ListStatus.Idle,
     val message: String? = null,
+    val canLoadMore: Boolean = false,
+    val loadingMore: Boolean = false,
+    val moreFailed: Boolean = false,
 )
 
 internal data class YouTubeState(
@@ -115,6 +118,7 @@ internal class YouTubeSession(
     private var playTask: Cancellable? = null
     private var recommendationGeneration = 0L
     private var recommendationTask: Cancellable? = null
+    private var recommendationCursor: FeedCursor? = null
     private var cursor: FeedCursor? = null
     private var engine: PlayerEngine? = null
     private var resolved: ResolvedVideo? = null
@@ -159,7 +163,7 @@ internal class YouTubeSession(
         }
         val recommendations = if (state.recommendations.status == ListStatus.Loading) {
             RecommendationState()
-        } else state.recommendations
+        } else state.recommendations.copy(loadingMore = false)
         update(state.copy(active = false, screen = Screen.Results, browse = settled, playback = idlePlayback(), recommendations = recommendations))
     }
 
@@ -189,6 +193,7 @@ internal class YouTubeSession(
         if (browse.query != null || browse.feedTitle != "From your channels" || browse.status != ListStatus.Ready) return
         if (!force && state.recommendations.status in setOf(ListStatus.Loading, ListStatus.Ready, ListStatus.Empty)) return
         cancelRecommendation()
+        recommendationCursor = null
         val feed = browse.items
         if (RelatedVideoSuggestions.selectSeeds(feed).isEmpty()) {
             update(state.copy(recommendations = RecommendationState(
@@ -202,23 +207,65 @@ internal class YouTubeSession(
             val result = attempt { catalog().related(feed) }
             main.post {
                 if (generation == recommendationGeneration && !destroyed && state.active &&
-                    state.browse.query == null && state.browse.feedTitle == "From your channels") {
-                    recommendationTask = null
-                    val next = when (result) {
-                        is Outcome.Success -> RecommendationState(
-                            items = result.value.items,
-                            status = if (result.value.items.isEmpty()) ListStatus.Empty else ListStatus.Ready,
-                            message = if (result.value.items.isEmpty()) "No related videos found. Tap RETRY to try again." else null,
-                        )
-                        is Outcome.Failure -> RecommendationState(
-                            status = ListStatus.Error,
-                            message = YouTubeFormat.failure(result.kind),
-                        )
-                    }
-                    update(state.copy(recommendations = next))
+                    state.screen == Screen.Results && state.browse.query == null &&
+                    state.browse.feedTitle == "From your channels") {
+                    applyRecommendationPage(result, append = false)
                 }
             }
         }
+    }
+
+    fun loadMoreRecommendations(userInitiated: Boolean) {
+        if (!ready() || state.screen != Screen.Results) return
+        val browse = state.browse
+        if (browse.query != null || browse.feedTitle != "From your channels") return
+        val recommendation = state.recommendations
+        val next = recommendationCursor ?: return
+        if (recommendation.status !in setOf(ListStatus.Ready, ListStatus.Empty) || recommendation.loadingMore) return
+        if (!userInitiated && (recommendation.moreFailed || recommendation.message != null)) return
+        val generation = recommendationGeneration
+        update(state.copy(recommendations = recommendation.copy(loadingMore = true, moreFailed = false, message = null)))
+        recommendationTask = recommendationRunner.submit {
+            val result = attempt { catalog().more(next) }
+            main.post {
+                if (generation == recommendationGeneration && !destroyed && state.active &&
+                    state.screen == Screen.Results && state.browse.query == null &&
+                    state.browse.feedTitle == "From your channels") {
+                    applyRecommendationPage(result, append = true)
+                }
+            }
+        }
+    }
+
+    private fun applyRecommendationPage(result: Outcome<FeedPage>, append: Boolean) {
+        recommendationTask = null
+        val previous = state.recommendations
+        val next = when (result) {
+            is Outcome.Success -> {
+                recommendationCursor = result.value.cursor
+                val seen = HashSet<String>()
+                if (append) previous.items.forEach { seen.add(it.id) }
+                val newItems = result.value.items.filter { seen.add(it.id) }
+                val items = if (append) previous.items + newItems else newItems
+                val more = recommendationCursor != null
+                val message = when {
+                    items.isEmpty() && more -> "No suggestions in this batch. Tap RETRY to keep looking."
+                    items.isEmpty() -> "No related videos found. Tap RETRY to try again."
+                    append && newItems.isEmpty() && more -> "No new suggestions in this batch. Tap to keep looking."
+                    else -> null
+                }
+                RecommendationState(
+                    items = items,
+                    status = if (items.isEmpty()) ListStatus.Empty else ListStatus.Ready,
+                    message = message,
+                    canLoadMore = more,
+                )
+            }
+            is Outcome.Failure -> if (append) {
+                previous.copy(loadingMore = false, moreFailed = true, message = null)
+            } else RecommendationState(status = ListStatus.Error, message = YouTubeFormat.failure(result.kind))
+        }
+        update(state.copy(recommendations = next))
     }
 
     fun loadMore(userInitiated: Boolean) {
@@ -252,9 +299,12 @@ internal class YouTubeSession(
 
     fun open(video: VideoSummary) {
         if (!ready()) return
-        if (state.recommendations.status == ListStatus.Loading) {
+        if (state.recommendations.status == ListStatus.Loading || state.recommendations.loadingMore) {
             cancelRecommendation()
-            update(state.copy(recommendations = RecommendationState()))
+            val recommendations = if (state.recommendations.status == ListStatus.Loading) {
+                RecommendationState()
+            } else state.recommendations.copy(loadingMore = false)
+            update(state.copy(recommendations = recommendations))
         }
         rememberPosition()
         playGeneration += 1
@@ -363,6 +413,7 @@ internal class YouTubeSession(
 
     private fun loadList(query: String?) {
         cancelRecommendation()
+        recommendationCursor = null
         listGeneration += 1
         listTask?.cancel()
         cursor = null
