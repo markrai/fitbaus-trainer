@@ -52,6 +52,16 @@ included in this upcoming release.
 
 ### Added
 
+- **Ghoul Run industrial horror atmosphere.** Replace warm brick corridors
+  with cold riveted steel panels, vents, reinforcing ribs and weathered floor
+  surfaces. Four lightweight procedural variants per wall, floor and ceiling
+  section are selected deterministically from the maze seed. The existing
+  OpenGL ES 2.0 renderer retains its three maze draw calls and uses cool
+  distance/low-lying fog; ghoul and objective sprites fade into that haze.
+  The CPU fallback replaces brick bands with steel seams and matching fog,
+  while the isometric map adopts a colder steel palette. No new binary art
+  assets or heavyweight effects are required.
+
 - **Ghoul Run quiet near-miss encounters.** After the rider settles into a stop,
   an unalerted ghoul can approach to just outside contact distance, pause for a
   tense inspection, then turn away and search elsewhere. Resuming pedaling
