@@ -16,6 +16,12 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run controller startup.** Controller-only steering now skips the
+  left/right/center lean verification after the normal cadence warm-up and
+  proceeds through the existing one-second GO countdown. Webcam and Both modes
+  retain directional verification; switching back from Controller before GO
+  restores it. Later mazes continue to avoid repeating the first-run check.
+
 - **Arcade game lifecycle on tab switches.** Leaving a game for Dashboard, YouTube,
   or another game now ends the outgoing session and hides every inactive game
   view. Ghoul Run's GPU surface respects ancestor visibility and releases its
