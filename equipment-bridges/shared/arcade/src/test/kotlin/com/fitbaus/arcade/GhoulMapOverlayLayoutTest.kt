@@ -38,17 +38,58 @@ internal class GhoulMapOverlayLayoutTest {
         assertEquals(GhoulMapOverlayLayout.MAX_WIDTH_SHARE, shares.first)
         assertEquals(GhoulMapOverlayLayout.MAX_HEIGHT_SHARE, shares.second)
         val large = GhoulMapOverlayLayout.bounds(1000f, 700f, 54f, 10f, GhoulMapViewMode.Overlay, shares.first, shares.second)
-        assertEquals(a.right, large.right)
-        assertEquals(a.top, large.top)
+        assertEquals(0f, large.left, 0.001f)
+        assertEquals(54f, large.top, 0.001f)
+        assertEquals(1000f, large.right, 0.001f)
+        assertEquals(700f, large.bottom, 0.001f)
         assertTrue(large.width > a.width)
         assertTrue(large.height > a.height)
-        assertTrue(large.bottom < 700f)
 
         val tiny = GhoulMapOverlayLayout.resizedShares(
             shares.first, shares.second, large.width, large.height, 900f, -900f, 1000f, 646f,
         )
         assertEquals(GhoulMapOverlayLayout.MIN_WIDTH_SHARE, tiny.first)
         assertEquals(GhoulMapOverlayLayout.MIN_HEIGHT_SHARE, tiny.second)
+    }
+
+    @Test
+    fun heightCanFillTheViewportBehindTheRpmGaugeWithoutForcingFullWidth() {
+        val rect = GhoulMapOverlayLayout.bounds(
+            1000f, 700f, 54f, 10f, GhoulMapViewMode.Overlay,
+            GhoulMapOverlayLayout.DEFAULT_WIDTH_SHARE, GhoulMapOverlayLayout.MAX_HEIGHT_SHARE,
+        )
+        assertEquals(54f, rect.top, 0.001f)
+        assertEquals(700f, rect.bottom, 0.001f)
+        assertEquals(380f, rect.width, 0.001f)
+        assertEquals(990f, rect.right, 0.001f)
+    }
+
+    @Test
+    fun widthCanFillViewportIndependentlyOfOverlayHeight() {
+        val rect = GhoulMapOverlayLayout.bounds(
+            1000f, 700f, 54f, 10f, GhoulMapViewMode.Overlay,
+            GhoulMapOverlayLayout.MAX_WIDTH_SHARE, GhoulMapOverlayLayout.DEFAULT_HEIGHT_SHARE,
+        )
+        assertEquals(0f, rect.left, 0.001f)
+        assertEquals(1000f, rect.right, 0.001f)
+        assertEquals(64f, rect.top, 0.001f)
+        assertTrue(rect.bottom < 700f)
+    }
+
+    @Test
+    fun resizeClampsBeyondFullScreenAndPreservesExistingMinimum() {
+        val min = GhoulMapOverlayLayout.bounds(
+            1000f, 700f, 54f, 10f, GhoulMapViewMode.Overlay, -4f, -4f,
+        )
+        assertEquals(360f, min.width, 0.001f)
+        assertEquals(646f * GhoulMapOverlayLayout.MIN_HEIGHT_SHARE, min.height, 0.001f)
+        val oversized = GhoulMapOverlayLayout.bounds(
+            1000f, 700f, 54f, 10f, GhoulMapViewMode.Overlay, 3f, 3f,
+        )
+        assertEquals(0f, oversized.left, 0.001f)
+        assertEquals(54f, oversized.top, 0.001f)
+        assertEquals(1000f, oversized.right, 0.001f)
+        assertEquals(700f, oversized.bottom, 0.001f)
     }
 
     @Test
