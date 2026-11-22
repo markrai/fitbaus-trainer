@@ -126,6 +126,8 @@ class GhoulRunStartupModeTest {
         rig.game.restart(83L)
         assertEquals(GhoulPhase.WarmUp, rig.game.phase)
         rig.tick(GhoulRunInputSource.Controller)
+        assertEquals(GhoulPhase.WarmUp, rig.game.phase)
+        rig.tick(GhoulRunInputSource.Controller)
         assertEquals(GhoulPhase.Playing, rig.game.phase)
     }
 }
