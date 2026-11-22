@@ -11,7 +11,7 @@ import kotlin.math.sin
 internal object GhoulAttackMouth {
     const val CENTRE_U = 0.513f
     const val CENTRE_V = 0.236f
-    const val CLOSED_HALF_WIDTH = 0.008f
+    const val CLOSED_HALF_WIDTH = 0.003f
     const val OPEN_HALF_WIDTH = 0.022f
     const val CLOSED_HALF_HEIGHT = 0.006f
     const val OPEN_HALF_HEIGHT = 0.052f
@@ -44,7 +44,7 @@ internal object GhoulAttackMouth {
         if (towardRider < GHOUL_FACING_DOT) return 0f
         val closeness = ((ENTER_DISTANCE - distance) / (ENTER_DISTANCE - FULL_OPEN_DISTANCE))
             .coerceIn(0f, 1f)
-        return closeness * closeness * (3f - 2f * closeness)
+        return closeness
     }
 
     fun target(game: GhoulRunGame, monster: GhoulMonster, cameraYaw: Float): Float {
