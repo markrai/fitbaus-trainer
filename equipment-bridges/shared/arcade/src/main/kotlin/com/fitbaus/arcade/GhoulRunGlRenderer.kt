@@ -144,7 +144,10 @@ internal class GhoulRunGlRenderer(
         try {
             snapshots.readInto(frame)
             if (frame.diagnostics) GLES20.glClearColor(0.25f, 0f, 0.25f, 1f)
-            else GLES20.glClearColor(0.275f, 0.314f, 0.349f, 1f)
+            else {
+                val ambient = GhoulDarkness.ambient(frame.lampRadius)
+                GLES20.glClearColor(0.275f * ambient, 0.314f * ambient, 0.349f * ambient, 1f)
+            }
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
             framesDrawn += 1L
             smokeDrawCalls = 0
@@ -262,6 +265,7 @@ internal class GhoulRunGlRenderer(
 
 
     private fun drawSmoke(frame: GhoulGlSnapshot) {
+        if (frame.lampRadius <= 0f) return
         val count = GhoulSmokeArt.selectVisible(
             smokeEmitters, frame.cameraX, frame.cameraY, frame.yaw, smokeSelection, smokeDistances,
         )
@@ -652,7 +656,7 @@ internal class GhoulRunGlRenderer(
                 vec3 lit = base * min(vec3(1.35), lighting) * face;
                 float lowMist = 1.0 - clamp(vWorld.z / 0.85, 0.0, 1.0);
                 float fog = min(0.72, smoothstep(1.0, 11.0, distanceToCamera) * (0.48 + 0.20 * lowMist));
-                vec3 fogColor = vec3(0.275, 0.314, 0.349);
+                vec3 fogColor = vec3(0.275, 0.314, 0.349) * clamp(uLampRadius / 6.0, 0.0, 1.0);
                 gl_FragColor = vec4(mix(lit, fogColor, fog), 1.0);
             }
         """
@@ -692,10 +696,11 @@ internal class GhoulRunGlRenderer(
                 float pilot = 0.28 * (1.0 - smoothstep(0.35, 1.6, d));
                 float light = max(max(lamp, pilot), uGlow * (0.9 + 0.1 * sin(uGlowPhase)));
                 float fog = smoothstep(1.0, 11.0, d) * 0.42;
-                gl_FragColor = vec4(mix(texel.rgb * light, vec3(0.275, 0.314, 0.349), fog), texel.a);
+                vec3 fogColor = vec3(0.275, 0.314, 0.349) * clamp(uLampRadius / 6.0, 0.0, 1.0);
+                gl_FragColor = vec4(mix(texel.rgb * light, fogColor, fog), texel.a);
             }
         """
-        const val GHOUL_FRAGMENT = """
+        val GHOUL_FRAGMENT = """
             #ifdef GL_FRAGMENT_PRECISION_HIGH
             precision highp float;
             #else
@@ -733,13 +738,30 @@ internal class GhoulRunGlRenderer(
                 vec2 u = vec2(cos(theta), sin(theta));
                 vec2 dh = d / s - (t * tang + u * rad);
                 vec4 halo = texture2D(uHalo, uChest + dh / vec2(ASPECT, 1.0));
-                vec4 body = texture2D(uBody, vUv - vec2((uFeetV - vUv.y) * tan(uSway) / ASPECT, 0.0));
+                vec2 bodyUv = vUv - vec2((uFeetV - vUv.y) * tan(uSway) / ASPECT, 0.0);
+                vec4 body = texture2D(uBody, bodyUv);
                 vec4 c = body + halo * (1.0 - body.a);
                 c.rgb *= uTint;
                 c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.3, 0.59, 0.11))), uDesat);
                 if (c.a < 0.02) discard;
+
                 float fog = smoothstep(1.0, 11.0, distanceToCamera) * 0.46;
-                gl_FragColor = vec4(mix(c.rgb * light, vec3(0.275, 0.314, 0.349), fog), c.a);
+                vec3 fogColor = vec3(0.275, 0.314, 0.349) * clamp(uLampRadius / 6.0, 0.0, 1.0);
+                vec3 shaded = mix(c.rgb * light, fogColor, fog);
+
+                vec2 coreScale = vec2(${GhoulEyeArt.CORE_U}, ${GhoulEyeArt.CORE_V});
+                vec2 haloScale = vec2(${GhoulEyeArt.HALO_U}, ${GhoulEyeArt.HALO_V});
+                vec2 leftEye = vec2(${GhoulEyeArt.LEFT_U}, ${GhoulEyeArt.EYE_V});
+                vec2 rightEye = vec2(${GhoulEyeArt.RIGHT_U}, ${GhoulEyeArt.EYE_V});
+                float leftCore = 1.0 - smoothstep(0.30, 1.0, length((bodyUv - leftEye) / coreScale));
+                float rightCore = 1.0 - smoothstep(0.30, 1.0, length((bodyUv - rightEye) / coreScale));
+                float leftHalo = 1.0 - smoothstep(0.30, 1.0, length((bodyUv - leftEye) / haloScale));
+                float rightHalo = 1.0 - smoothstep(0.30, 1.0, length((bodyUv - rightEye) / haloScale));
+                float eyeShape = min(1.0, max(leftCore, rightCore) + max(leftHalo, rightHalo) * 0.4);
+                float eyesEnabled = smoothstep(0.2, 0.7, body.a) * (1.0 - step(0.5, uDesat));
+                float eyeGlow = eyeShape * eyesEnabled * (0.95 + 0.05 * sin(uPhaseA * 2.0));
+                vec3 emissive = vec3(1.0, 0.018, 0.006) * eyeGlow;
+                gl_FragColor = vec4(min(vec3(1.0), shaded + emissive), c.a);
             }
         """
 
