@@ -102,6 +102,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         )
     }
     private val spritePaint = Paint().apply { isFilterBitmap = true }
+    private val eyeHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(128, 205, 17, 8) }
+    private val eyeCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 23, 9) }
     private val spriteDst = RectF()
     private var tileArtWidth = -1
     private var floorLitTile: Bitmap? = null
@@ -634,6 +636,16 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                     fpRect.bottom,
                 )
                 canvas.drawBitmap(art, null, spriteDst, spritePaint)
+                if (draw.kind == GhoulSpriteKind.Ghoul) {
+                    val eyeY = spriteDst.top + spriteDst.height() * GhoulEyeArt.EYE_V
+                    val haloRadius = max(1.1f * density, spriteDst.height() * GhoulEyeArt.HALO_V)
+                    val coreRadius = max(0.65f * density, spriteDst.height() * GhoulEyeArt.CORE_V)
+                    for (eyeU in floatArrayOf(GhoulEyeArt.LEFT_U, GhoulEyeArt.RIGHT_U)) {
+                        val eyeX = spriteDst.left + spriteDst.width() * eyeU
+                        canvas.drawCircle(eyeX, eyeY, haloRadius, eyeHaloPaint)
+                        canvas.drawCircle(eyeX, eyeY, coreRadius, eyeCorePaint)
+                    }
+                }
                 canvas.restore()
             }
         }
