@@ -21,9 +21,9 @@ internal object GhoulMapOverlayLayout {
     const val DEFAULT_WIDTH_SHARE = 0.38f
     const val DEFAULT_HEIGHT_SHARE = 0.58f
     const val MIN_WIDTH_SHARE = 0.36f
-    const val MAX_WIDTH_SHARE = 0.68f
+    const val MAX_WIDTH_SHARE = 1f
     const val MIN_HEIGHT_SHARE = 0.48f
-    const val MAX_HEIGHT_SHARE = 0.76f
+    const val MAX_HEIGHT_SHARE = 1f
     const val DEFAULT_OPACITY = 40
     const val MIN_OPACITY = 20
     const val MAX_OPACITY = 80
@@ -50,12 +50,16 @@ internal object GhoulMapOverlayLayout {
         if (mode == GhoulMapViewMode.Split) return GhoulMapBounds((width * 0.5f).roundToInt().toFloat(), header, width, height)
         val playable = height - header
         val margin = inset.coerceIn(0f, min(width, playable) * 0.1f)
-        val mapWidth = (width * widthShare.coerceIn(MIN_WIDTH_SHARE, MAX_WIDTH_SHARE))
-            .coerceAtMost(width - 2f * margin)
-        val mapHeight = (playable * heightShare.coerceIn(MIN_HEIGHT_SHARE, MAX_HEIGHT_SHARE))
-            .coerceAtMost(playable - 2f * margin)
-        val right = width - margin
-        val top = header + margin
+        val selectedWidth = widthShare.coerceIn(MIN_WIDTH_SHARE, MAX_WIDTH_SHARE)
+        val selectedHeight = heightShare.coerceIn(MIN_HEIGHT_SHARE, MAX_HEIGHT_SHARE)
+        val rightInset = margin * ((MAX_WIDTH_SHARE - selectedWidth) /
+            (MAX_WIDTH_SHARE - DEFAULT_WIDTH_SHARE)).coerceIn(0f, 1f)
+        val topInset = margin * ((MAX_HEIGHT_SHARE - selectedHeight) /
+            (MAX_HEIGHT_SHARE - DEFAULT_HEIGHT_SHARE)).coerceIn(0f, 1f)
+        val mapWidth = (width * selectedWidth).coerceAtMost(width - rightInset)
+        val mapHeight = (playable * selectedHeight).coerceAtMost(playable - topInset)
+        val right = width - rightInset
+        val top = header + topInset
         return GhoulMapBounds(right - mapWidth, top, right, top + mapHeight)
     }
 
