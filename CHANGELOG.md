@@ -16,6 +16,16 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run overlay resize ceiling.** Let the translucent map grow to the
+  full width and height of the first-person playable viewport, including the
+  area behind the bottom RPM meter. The top/right inset shrinks smoothly as
+  each axis approaches full size; the existing minimum map dimensions,
+  HUD layering and saved preferences are unchanged. The resize handle
+  snaps to the viewport edge when dragged within 24dp, ensuring the complete
+  overlay is reachable on a touch display. Remove redundant controller
+  "left/right to choose" prompts and the map's north indicator without
+  affecting steering, turn choices, or map orientation.
+
 - **Ghoul Run red eyes in darkness.** Restore two emissive red eye glows
   that remain visible when pedaling stops, independently of lamp lighting
   and industrial distance fog. Make the background and fog return to black

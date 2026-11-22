@@ -959,6 +959,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
 
     private fun drawHint(canvas: Canvas, gaugeTop: Float) {
         val hint = game.hint() ?: return
+        if (hint == GhoulHint.LeanToChoose) return
         val controllerOnly = inputSource == GhoulRunInputSource.Controller
         val value = when (hint) {
             GhoulHint.ChooseTurn -> if (controllerOnly) "PRESS LEFT OR RIGHT TO TURN" else "LEAN LEFT OR RIGHT TO TURN"
@@ -1200,7 +1201,6 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         }
         drawEntities(canvas, ox, oy, tileW, tileH, now)
         drawThreat(canvas, ox, oy, tileW, tileH, now)
-        drawMapNorthIndicator(canvas)
         if (game.config.keyCount > 0) {
             text.textSize = 14f * density
             text.color = Color.WHITE
@@ -1329,21 +1329,6 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         path.lineTo(x + rx - cx, y + ry - cy - rise)
         path.close()
         canvas.drawPath(path, paint)
-    }
-
-    private fun drawMapNorthIndicator(canvas: Canvas) {
-        val x = mapRect.right - 28f * density
-        val y = mapRect.top + 80f * density
-        paint.color = PANEL
-        canvas.drawCircle(x, y, 20f * density, paint)
-        val dx = mapCamera.x(-1f, 0f, 40f)
-        val dy = mapCamera.y(-1f, 0f, 20f)
-        drawArrow(canvas, x, y, dx, dy, COMPASS, 22f * density)
-        text.textSize = 11f * density
-        text.textAlign = Paint.Align.CENTER
-        text.color = COMPASS
-        canvas.drawText("N", x, y + 34f * density, text)
-        text.textAlign = Paint.Align.LEFT
     }
 
     private fun drawObjectiveAt(
@@ -1903,6 +1888,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             mapWidthShare, mapHeightShare, resizeStartWidth, resizeStartHeight,
             x - resizeStartX, y - resizeStartY, width.toFloat(),
             height - TOP_UI * density,
+            24f * density,
         )
         mapWidthShare = shares.first
         mapHeightShare = shares.second
