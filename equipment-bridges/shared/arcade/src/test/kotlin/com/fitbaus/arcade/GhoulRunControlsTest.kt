@@ -136,7 +136,7 @@ class GhoulRunControlsTest {
             controllerAvailable = true,
             controller = GhoulRunControllerInput(leftPressed = true),
         )
-        assertEquals(GhoulLane.Left, session.lane)
+        assertEquals(GhoulLane.Center, session.lane, "warm-up input cannot queue a future turn")
     }
 
     @Test
@@ -228,7 +228,7 @@ class GhoulRunControlsTest {
         return LiveRig(game, GhoulRunSession(game, pace = pace), now)
     }
 
-    private fun LiveRig.tick(faceX: Float = 0.5f, controller: GhoulRunControllerInput? = null) {
+    private fun LiveRig.tick(faceX: Float = 0.5f, controller: GhoulRunControllerInput? = null, rpm: Int = 70) {
         now += 33 * ms
         val pad = controller != null
         session.update(
@@ -236,7 +236,7 @@ class GhoulRunControlsTest {
             if (pad) CameraState.Unavailable else CameraState.Ready,
             true,
             true,
-            70,
+            rpm,
             true,
             "t$now",
             now,
@@ -289,7 +289,7 @@ class GhoulRunControlsTest {
             for (arrival in MazeDirection.entries) {
                 if (!game.world.isOpen(junction, arrival.opposite)) continue
                 val allowed = game.world.exits(junction).filter { it != arrival.opposite }
-                if (arrival !in allowed && arrival.relativeLeft in allowed) {
+                if (allowed.size >= 2 && arrival !in allowed && arrival.relativeLeft in allowed) {
                     game.placeRider(junction.moved(arrival.opposite), arrival, 0.05f)
                     return junction to arrival
                 }
@@ -318,26 +318,156 @@ class GhoulRunControlsTest {
         assertEquals(GhoulLane.Left, rig.session.lane, "the blocked fork does not consume webcam lean")
     }
 
+    private fun LiveRig.approachConsecutiveChoices(): Pair<GhoulLane, GhoulLane> {
+        for (row in 0 until game.config.height) for (col in 0 until game.config.width) {
+            val first = MazeCell(row, col)
+            for (incoming in MazeDirection.entries) {
+                if (!game.world.isOpen(first.moved(incoming.opposite), incoming)) continue
+                if (game.world.exits(first).count { it != incoming.opposite } < 2) continue
+                for (firstLane in listOf(GhoulLane.Left, GhoulLane.Right)) {
+                    val firstTurn = game.choiceFor(first, incoming, firstLane) ?: continue
+                    if (firstTurn == incoming || firstTurn == incoming.opposite) continue
+                    if (!game.world.isOpen(first, firstTurn)) continue
+                    val second = first.moved(firstTurn)
+                    if (game.world.exits(second).count { it != firstTurn.opposite } < 2) continue
+                    for (secondLane in listOf(GhoulLane.Left, GhoulLane.Right)) {
+                        val secondTurn = game.choiceFor(second, firstTurn, secondLane) ?: continue
+                        if (secondTurn == firstTurn || secondTurn == firstTurn.opposite) continue
+                        game.placeRider(first.moved(incoming.opposite), incoming, 0.55f)
+                        return firstLane to secondLane
+                    }
+                }
+            }
+        }
+        error("no adjacent choice junctions")
+    }
+
+    private fun LiveRig.approachStraightChoice() {
+        for (row in 0 until game.config.height) for (col in 0 until game.config.width) {
+            val junction = MazeCell(row, col)
+            for (incoming in MazeDirection.entries) {
+                if (!game.world.isOpen(junction.moved(incoming.opposite), incoming)) continue
+                if (game.world.exits(junction).count { it != incoming.opposite } < 2) continue
+                if (!game.world.isOpen(junction, incoming)) continue
+                if (!game.world.isOpen(junction, incoming.relativeLeft)) continue
+                game.placeRider(junction.moved(incoming.opposite), incoming, 0.05f)
+                return
+            }
+        }
+        error("no straight-ahead choice junction")
+    }
+
     @Test
-    fun repeatedControllerPressesQueueTheFollowingTurn() {
+    fun controllerOnlyArmsTurnsAtTheApproachingJunction() {
         val rig = liveRig(seed = 9L)
-        val idle = GhoulRunControllerInput()
-        repeat(10) { rig.tick(controller = idle) }
+        rig.approachStraightChoice()
+        val approaching = rig.game.riderCell.moved(rig.game.heading)
+        val arrival = rig.game.heading
+        val selected = rig.game.choiceDecisions
         rig.tick(controller = GhoulRunControllerInput(leftPressed = true))
         assertEquals(GhoulLane.Left, rig.session.lane)
-        rig.tick(controller = GhoulRunControllerInput(leftPressed = true))
-        assertEquals(GhoulLane.Left, rig.session.lane, "two left presses must not cancel each other")
-        rig.tick(controller = GhoulRunControllerInput(rightPressed = true))
-        assertEquals(GhoulLane.Left, rig.session.lane, "new input changes the next buffered turn")
-
-        rig.approachLeftChoice()
-        val arrival = rig.game.heading
-        val turns = rig.game.choiceTurns
+        rig.tick(controller = GhoulRunControllerInput())
+        assertEquals(GhoulLane.Left, rig.session.lane)
         var guard = 0
-        while (rig.game.choiceTurns == turns && guard++ < 200) rig.tick(controller = idle)
+        while (rig.game.choiceDecisions == selected && guard++ < 100) rig.tick(controller = GhoulRunControllerInput())
+        assertEquals(approaching, rig.game.riderCell)
         assertEquals(arrival.relativeLeft, rig.game.heading)
-        rig.tick(controller = idle)
-        assertEquals(GhoulLane.Right, rig.session.lane, "the next buffered press becomes active after the first turn")
+        assertEquals(GhoulLane.Center, rig.session.lane)
+    }
+
+    @Test
+    fun rapidControllerPressesApplyToAdjacentChoiceJunctionsOnly() {
+        val rig = liveRig(seed = 9L)
+        val (first, second) = rig.approachConsecutiveChoices()
+        val initialHeading = rig.game.heading
+        val firstJunction = rig.game.riderCell.moved(initialHeading)
+        val nextHeading = if (first == GhoulLane.Left) initialHeading.relativeLeft else initialHeading.relativeRight
+        val firstDecision = rig.game.choiceDecisions
+        rig.tick(controller = if (first == GhoulLane.Left) GhoulRunControllerInput(leftPressed = true) else GhoulRunControllerInput(rightPressed = true))
+        rig.tick(controller = if (second == GhoulLane.Left) GhoulRunControllerInput(leftPressed = true) else GhoulRunControllerInput(rightPressed = true))
+        assertEquals(first, rig.session.lane)
+        var guard = 0
+        while (rig.game.choiceDecisions == firstDecision && guard++ < 110) rig.tick(controller = GhoulRunControllerInput())
+        assertEquals(firstJunction, rig.game.riderCell)
+        assertEquals(nextHeading, rig.game.heading)
+        assertEquals(second, rig.session.lane)
+        guard = 0
+        while (rig.game.choiceDecisions == firstDecision + 1 && guard++ < 110) rig.tick(controller = GhoulRunControllerInput())
+        assertEquals(if (second == GhoulLane.Left) nextHeading.relativeLeft else nextHeading.relativeRight, rig.game.heading)
+        assertEquals(GhoulLane.Center, rig.session.lane)
+    }
+
+    @Test
+    fun neutralControllerAlwaysGoesStraightWhenStraightIsAvailable() {
+        val rig = liveRig(seed = 9L)
+        rig.approachStraightChoice()
+        val initialHeading = rig.game.heading
+        val decisions = rig.game.choiceDecisions
+        var guard = 0
+        while (rig.game.choiceDecisions == decisions && guard++ < 100) rig.tick(controller = GhoulRunControllerInput())
+        assertTrue(rig.game.choiceDecisions > decisions)
+        assertEquals(0, rig.game.choiceTurns)
+        assertEquals(initialHeading, rig.game.heading)
+        assertEquals(GhoulLane.Center, rig.session.lane)
+    }
+
+    @Test
+    fun controllerPressOutsideAChoiceCannotBeCarriedToALaterFork() {
+        val rig = liveRig(seed = 9L)
+        val game = rig.game
+        var found = false
+        for (row in 0 until game.config.height) for (col in 0 until game.config.width) {
+            val cell = MazeCell(row, col)
+            for (heading in MazeDirection.entries) {
+                if (!game.world.isOpen(cell, heading)) continue
+                val next = cell.moved(heading)
+                if (game.world.exits(next).count { it != heading.opposite } >= 2) continue
+                game.placeRider(cell, heading, 0.15f)
+                found = true
+                break
+            }
+            if (found) break
+        }
+        assertTrue(found)
+        rig.tick(controller = GhoulRunControllerInput(leftPressed = true))
+        assertEquals(GhoulLane.Center, rig.session.lane)
+        rig.approachStraightChoice()
+        repeat(100) { rig.tick(controller = GhoulRunControllerInput()) }
+        assertEquals(GhoulLane.Center, rig.session.lane)
+        assertEquals(0, rig.game.choiceTurns)
+    }
+
+    @Test
+    fun anArmedControllerTurnExpiresWhenTheRiderStops() {
+        val rig = liveRig(seed = 9L)
+        rig.approachStraightChoice()
+        rig.tick(controller = GhoulRunControllerInput(leftPressed = true), rpm = 0)
+        assertEquals(GhoulLane.Left, rig.session.lane)
+        repeat(100) { rig.tick(controller = GhoulRunControllerInput(), rpm = 0) }
+        assertEquals(GhoulLane.Center, rig.session.lane)
+        assertEquals(0, rig.game.choiceTurns)
+        val arrival = rig.game.heading
+        val selected = rig.game.choiceDecisions
+        var guard = 0
+        while (rig.game.choiceDecisions == selected && guard++ < 200) rig.tick(controller = GhoulRunControllerInput())
+        assertTrue(rig.game.choiceDecisions > selected)
+        assertEquals(arrival, rig.game.heading)
+        assertEquals(0, rig.game.choiceTurns)
+    }
+
+    @Test
+    fun expiredControllerTurnCannotRemainLockedAtBlockedStraight() {
+        val rig = liveRig(seed = 9L)
+        rig.approachBlockedForkWithLeft()
+        rig.tick(controller = GhoulRunControllerInput(leftPressed = true), rpm = 0)
+        assertEquals(GhoulLane.Left, rig.session.lane)
+        repeat(105) { rig.tick(controller = GhoulRunControllerInput(), rpm = 0) }
+        assertEquals(GhoulLane.Center, rig.session.lane)
+        var guard = 0
+        while (!rig.game.waitingForChoice && guard++ < 250) rig.tick(controller = GhoulRunControllerInput())
+        assertTrue(rig.game.waitingForChoice)
+        assertEquals(0, rig.game.choiceTurns)
+        assertEquals(GhoulLane.Center, rig.session.lane)
     }
 
     @Test
@@ -345,9 +475,8 @@ class GhoulRunControlsTest {
         val rig = liveRig(seed = 9L)
         val idle = GhoulRunControllerInput()
         repeat(10) { rig.tick(controller = idle) }
-        val cell = rig.game.world.start
-        val direction = rig.game.world.exits(cell).first()
-        rig.game.placeRider(cell, direction, 0.3f)
+        rig.approachLeftChoice()
+        val direction = rig.game.heading
         rig.tick(controller = GhoulRunControllerInput(leftPressed = true))
         assertEquals(GhoulLane.Left, rig.session.lane)
         rig.tick(controller = GhoulRunControllerInput(reversePressed = true))
@@ -358,29 +487,24 @@ class GhoulRunControlsTest {
     }
 
     @Test
-    fun releasedStickStopsNewGesturesButPreservesTheQueuedTurn() {
-        val game = GhoulRunGame(seed = 6L)
-        val session = GhoulRunSession(game)
-        var now = 1_000_000_000L
-        fun tick(stick: Float, index: Int) {
-            now += 100 * ms
-            session.update(
-                HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost),
-                CameraState.Unavailable,
-                true,
-                true,
-                70,
-                true,
-                "stick$index",
-                now,
-                source = GhoulRunInputSource.Controller,
-                controllerAvailable = true,
-                controller = GhoulRunControllerInput(stickX = stick),
-            )
-        }
-        tick(1f, 0)
-        assertEquals(GhoulLane.Right, session.lane)
-        tick(0f, 1)
-        assertEquals(GhoulLane.Right, session.lane, "release must not erase a turn queued before the next junction")
+    fun analogStickReleaseDoesNotDiscardARecentNearbyTurn() {
+        val rig = liveRig(seed = 9L)
+        rig.approachStraightChoice()
+        rig.tick(controller = GhoulRunControllerInput(stickX = -1f))
+        assertEquals(GhoulLane.Left, rig.session.lane)
+        rig.tick(controller = GhoulRunControllerInput(stickX = 0f))
+        assertEquals(GhoulLane.Left, rig.session.lane)
+        repeat(110) { rig.tick(controller = GhoulRunControllerInput()) }
+        assertEquals(GhoulLane.Center, rig.session.lane)
     }
+
+    @Test
+    fun controllerStickDriftBelowSteeringThresholdCannotTurn() {
+        val rig = liveRig(seed = 9L)
+        rig.approachStraightChoice()
+        repeat(110) { rig.tick(controller = GhoulRunControllerInput(stickX = 0.17f)) }
+        assertEquals(GhoulLane.Center, rig.session.lane)
+        assertEquals(0, rig.game.choiceTurns)
+    }
+
 }

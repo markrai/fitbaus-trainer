@@ -470,9 +470,10 @@ internal class GhoulRunGame(
         val junction = riderCell.moved(heading)
         if (progress >= 1f - config.junctionLockDistance && !brakingForChoice) {
             val next = choiceFor(junction, heading, lane)
-            if (next == null && lockedChoice == null) {
+            if (next == null) {
+                lockedChoice = null
                 brakingForChoice = true
-            } else if (next != null) {
+            } else {
                 lockedChoice = next
             }
         }

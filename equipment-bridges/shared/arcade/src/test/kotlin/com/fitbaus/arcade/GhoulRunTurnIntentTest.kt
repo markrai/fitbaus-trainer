@@ -70,19 +70,24 @@ internal class GhoulRunTurnIntentTest {
     }
 
     @Test
-    fun boundedBufferKeepsTwoIntentSlotsAndLatestCorrection() {
+    fun boundedBufferTargetsAdjacentJunctionsAndExpires() {
+        val (seed, fixture) = doubleLeftFixture()
+        val (first, incoming) = fixture
+        val rig = rigFor(seed, first, incoming, controller = true)
         val buffer = GhoulTurnIntentBuffer()
-        buffer.offer(GhoulLane.Left)
-        buffer.offer(GhoulLane.Left)
+        val now = rig.now
+        buffer.offer(rig.game, GhoulLane.Left, now)
+        buffer.offer(rig.game, GhoulLane.Left, now + ms)
         assertEquals(GhoulLane.Left, buffer.current)
         assertEquals(2, buffer.size)
-        buffer.offer(GhoulLane.Right)
+        buffer.offer(rig.game, GhoulLane.Center, now + 2 * ms)
         assertEquals(2, buffer.size)
         buffer.consume()
-        assertEquals(GhoulLane.Right, buffer.current)
-        buffer.consume()
+        rig.game.placeRider(first, incoming.relativeLeft, 0f)
+        buffer.refresh(rig.game, now + 3 * ms)
+        assertEquals(GhoulLane.Left, buffer.current)
+        buffer.refresh(rig.game, now + 3_000 * ms)
         assertEquals(null, buffer.current)
-        buffer.offer(GhoulLane.Center)
         assertEquals(0, buffer.size)
     }
 
