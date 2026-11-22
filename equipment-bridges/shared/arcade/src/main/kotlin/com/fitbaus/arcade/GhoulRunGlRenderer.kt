@@ -746,7 +746,7 @@ internal class GhoulRunGlRenderer(
                 vec2 bodyUv = vUv - vec2((uFeetV - vUv.y) * tan(uSway) / ASPECT, 0.0);
                 float mouthOpen = clamp(uMouthOpen, 0.0, 1.0);
                 vec2 faceUv = bodyUv;
-                if (mouthOpen > 0.01 && abs(bodyUv.x - ${GhoulAttackMouth.CENTRE_U}) < 0.055 &&
+                if (mouthOpen > 0.001 && abs(bodyUv.x - ${GhoulAttackMouth.CENTRE_U}) < 0.055 &&
                     bodyUv.y > 0.18 && bodyUv.y < 0.36) {
                     float jawX = 1.0 - smoothstep(0.012, 0.052, abs(bodyUv.x - ${GhoulAttackMouth.CENTRE_U}));
                     float jawY = smoothstep(0.235, 0.255, bodyUv.y) *
@@ -762,7 +762,7 @@ internal class GhoulRunGlRenderer(
                 float fog = smoothstep(1.0, 11.0, distanceToCamera) * 0.46;
                 vec3 fogColor = vec3(0.275, 0.314, 0.349) * clamp(uLampRadius / 6.0, 0.0, 1.0);
                 vec3 shaded = mix(c.rgb * light, fogColor, fog);
-                if (mouthOpen > 0.01 && abs(bodyUv.x - ${GhoulAttackMouth.CENTRE_U}) < 0.055 &&
+                if (mouthOpen > 0.001 && abs(bodyUv.x - ${GhoulAttackMouth.CENTRE_U}) < 0.055 &&
                     bodyUv.y > 0.17 && bodyUv.y < 0.36) {
                     float mouthU = ${GhoulAttackMouth.CENTRE_U};
                     float mouthV = ${GhoulAttackMouth.CENTRE_V} + 0.013 * mouthOpen;
@@ -772,8 +772,8 @@ internal class GhoulRunGlRenderer(
                     );
                     vec2 mouthUv = (bodyUv - vec2(mouthU, mouthV)) / mouthScale;
                     float shape = length(mouthUv) + 0.045 * sin(mouthUv.x * 13.0);
-                    float rim = (1.0 - smoothstep(0.82, 1.05, shape)) * mouthOpen;
-                    float cavity = (1.0 - smoothstep(0.70, 0.89, shape)) * mouthOpen;
+                    float rim = 1.0 - smoothstep(0.82, 1.05, shape);
+                    float cavity = 1.0 - smoothstep(0.70, 0.89, shape);
                     shaded = mix(shaded, vec3(0.36, 0.085, 0.06) * max(0.4, light), rim * 0.85);
                     shaded = mix(shaded, vec3(0.035, 0.003, 0.007), cavity * 0.98);
                 }
