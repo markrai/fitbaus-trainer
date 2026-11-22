@@ -57,6 +57,7 @@ internal class GhoulMonster(val spawn: MazeCell) {
     var sparedRiderAt: MazeCell? = null
     var lastKnown: MazeCell = spawn
     var wanderRng = Random(1)
+    var mouthOpen = 0f
 
     val row: Float get() = cell.row + heading.dr * progress
     val col: Float get() = cell.col + heading.dc * progress
@@ -74,6 +75,7 @@ internal class GhoulMonster(val spawn: MazeCell) {
         retreating = false
         sparedRiderAt = null
         lastKnown = spawn
+        mouthOpen = 0f
     }
 }
 
