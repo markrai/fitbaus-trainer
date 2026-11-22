@@ -59,6 +59,16 @@ internal object GhoulAttackMouth {
         return if (game.world.hasLineOfSight(rider, ghoul)) facing else 0f
     }
 
+    fun halfWidth(open: Float): Float {
+        val strength = open.coerceIn(0f, 1f)
+        return CLOSED_HALF_WIDTH + (OPEN_HALF_WIDTH - CLOSED_HALF_WIDTH) * strength
+    }
+
+    fun halfHeight(open: Float): Float {
+        val strength = open.coerceIn(0f, 1f)
+        return CLOSED_HALF_HEIGHT + (OPEN_HALF_HEIGHT - CLOSED_HALF_HEIGHT) * strength
+    }
+
     fun advance(current: Float, target: Float, dt: Float): Float {
         if (!dt.isFinite() || dt <= 0f) return current.coerceIn(0f, 1f)
         val open = current.coerceIn(0f, 1f)
