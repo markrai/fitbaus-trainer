@@ -1188,8 +1188,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         canvas.save()
         canvas.scale(zoom, zoom, ox, oy)
         drawMaze(canvas, ox, oy, baseW, baseW / 2f)
+        if (!translucent) drawMapObjectives(canvas, ox, oy, baseW, baseW / 2f)
         canvas.restore()
-        if (!translucent) drawMapObjectives(canvas, ox, oy, tileW, tileH)
         drawLampShade(canvas, ox, oy, tileW, tileH)
         if (translucent) {
             canvas.restoreToCount(layer)
