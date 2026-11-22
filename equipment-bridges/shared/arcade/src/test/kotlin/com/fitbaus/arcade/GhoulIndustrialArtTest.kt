@@ -75,7 +75,8 @@ internal class GhoulIndustrialArtTest {
 
     @Test
     fun fogBuildsGraduallyAndIsDenserNearTheFloor() {
-        assertEquals(0f, GhoulIndustrialArt.fog(2f, 0.5f))
+        assertEquals(0f, GhoulIndustrialArt.fog(1f, 0.5f))
+        assertTrue(GhoulIndustrialArt.fog(2f, 0.5f) > 0f)
         val near = GhoulIndustrialArt.fog(5f, 0.5f)
         val middle = GhoulIndustrialArt.fog(9f, 0.5f)
         val far = GhoulIndustrialArt.fog(20f, 0.5f)
