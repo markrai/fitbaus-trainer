@@ -30,6 +30,11 @@ internal object GhoulMapOverlayLayout {
 
     fun opacity(value: Int): Int = (value.coerceIn(MIN_OPACITY, MAX_OPACITY) / 10) * 10
 
+    fun opacityAtFraction(fraction: Float): Int {
+        val steps = (fraction.coerceIn(0f, 1f) * 6f).roundToInt()
+        return MIN_OPACITY + steps * 10
+    }
+
     fun bounds(
         screenWidth: Float,
         screenHeight: Float,
