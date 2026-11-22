@@ -77,6 +77,17 @@ included in this upcoming release.
 
 ### Added
 
+- **Ghoul Run escalating levels.** Each successful maze escape increases the
+  level and adds one independently wandering Ghoul; Level 1 keeps its original
+  single-creature behavior. Spawn locations are deterministic and dispersed
+  across the maze. Each creature retains its own pursuit, search, inspection,
+  retreat, stun, and collision state. Shrines affect only creatures in range,
+  and the existing invulnerability period prevents stacked catches.
+  GLES2 and software renderers display multiple Ghoul sprites and glowing
+  eyes, and the map and RPM gauge report the active threats. Results,
+  countdowns, and navigation now identify the level and Ghoul count.
+  Manual restarts begin again at Level 1.
+
 - **Ghoul Run split/overlay map layouts.** Keep the existing side-by-side
   first-person and isometric map view, or switch to a full-width first-person
   scene with a translucent upper-right navigation map. The overlay begins at

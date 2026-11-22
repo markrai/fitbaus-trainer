@@ -56,6 +56,7 @@ internal class GhoulMonster(val spawn: MazeCell) {
     var retreating: Boolean = false
     var sparedRiderAt: MazeCell? = null
     var lastKnown: MazeCell = spawn
+    var wanderRng = Random(1)
 
     val row: Float get() = cell.row + heading.dr * progress
     val col: Float get() = cell.col + heading.dc * progress
@@ -90,7 +91,9 @@ internal class GhoulRunGame(
     private var revealRadius = 0f
     val shrineCooldowns = LinkedHashMap<MazeCell, Float>()
 
-    var ghoul: GhoulMonster = GhoulMonster(world.monsterSpawn)
+    val ghouls = ArrayList<GhoulMonster>()
+    val ghoul: GhoulMonster get() = ghouls.first()
+    var level: Int = 1
         private set
     var phase: GhoulPhase = GhoulPhase.WarmUp
         private set
@@ -177,7 +180,21 @@ internal class GhoulRunGame(
     val riderRow: Float get() = riderCell.row + heading.dr * progress
     val riderCol: Float get() = riderCell.col + heading.dc * progress
     val lampLevel: Float get() = lightRadius / config.sprintLightRadius
-    val pathGap: Float get() = continuousPathDistance()
+    val pathGap: Float get() = continuousPathDistance(nearestThreat)
+    val huntingGhouls: Int get() = ghouls.count { it.state == GhoulState.Hunting }
+    val nearestThreat: GhoulMonster get() {
+        var nearest: GhoulMonster? = null
+        var distance = Float.POSITIVE_INFINITY
+        for (monster in ghouls) {
+            if (monster.state == GhoulState.Inactive || monster.state == GhoulState.Stunned) continue
+            val candidate = continuousPathDistance(monster)
+            if (candidate < distance) {
+                nearest = monster
+                distance = candidate
+            }
+        }
+        return nearest ?: ghoul
+    }
     val activeChoice: MazeDirection?
         get() {
             val junction = riderCell.moved(heading)
@@ -239,10 +256,10 @@ internal class GhoulRunGame(
     fun hint(): GhoulHint? {
         if (phase != GhoulPhase.Playing || respawnLeft > 0f) return null
         return when {
-            ghoul.state == GhoulState.Inspecting -> GhoulHint.HoldStill
+            ghouls.any { it.state == GhoulState.Inspecting } -> GhoulHint.HoldStill
             waitingForChoice || brakingForChoice -> GhoulHint.ChooseTurn
-            ghoul.state == GhoulState.Hunting -> GhoulHint.PedalPastGhoul
-            ghoul.state == GhoulState.Searching -> GhoulHint.StayQuiet
+            ghouls.any { it.state == GhoulState.Hunting } -> GhoulHint.PedalPastGhoul
+            ghouls.any { it.state == GhoulState.Searching } -> GhoulHint.StayQuiet
             turnSlots() != null -> GhoulHint.LeanToChoose
             world.shrines.any { (shrineCooldowns[it] ?: 0f) <= 0f && riderPathDistanceTo(it) <= SHRINE_HINT_CELLS } ->
                 GhoulHint.RideThroughShrine
@@ -334,7 +351,7 @@ internal class GhoulRunGame(
             }
             GhoulPhase.Countdown -> {
                 phaseLeft -= dt
-                if (phaseLeft <= 0f) resetMaze(seed + 1L, resetCatches = true)
+                if (phaseLeft <= 0f) resetMaze(seed + 1L, resetCatches = true, nextLevel = true)
                 return
             }
             else -> Unit
@@ -344,8 +361,10 @@ internal class GhoulRunGame(
             if (phase != GhoulPhase.WarmUp) warmupTime = 0f
             phase = GhoulPhase.WarmUp
             warmupTime += dt
-            ghoul.state = GhoulState.Inactive
-            ghoul.speed = 0f
+            for (monster in ghouls) {
+                monster.state = GhoulState.Inactive
+                monster.speed = 0f
+            }
             holdStill()
             return
         }
@@ -386,7 +405,7 @@ internal class GhoulRunGame(
         quietFor = if (filteredRpm < config.stoppedBelowRpm) {
             (quietFor + dt).coerceAtMost(config.stealthSettleSeconds + 1f)
         } else 0f
-        if (phase == GhoulPhase.Playing) updateGhoul(dt)
+        if (phase == GhoulPhase.Playing) for (monster in ghouls) updateGhoul(monster, dt)
     }
 
     /** Direction selected at [cell] for a rider-relative lane while arriving along [arrivalHeading]. */
@@ -415,7 +434,9 @@ internal class GhoulRunGame(
         heading: MazeDirection = world.exits(cell).first(),
         progress: Float = 0f,
         state: GhoulState = GhoulState.Wandering,
+        index: Int = 0,
     ) {
+        val ghoul = ghouls[index]
         ghoul.cell = cell
         ghoul.heading = heading
         ghoul.progress = progress.coerceIn(0f, 0.999f)
@@ -529,8 +550,10 @@ internal class GhoulRunGame(
             val cooldown = shrineCooldowns[cell] ?: 0f
             if (cooldown <= 0f) {
                 shrineCooldowns[cell] = config.shrineRechargeSeconds
-                if (ghoul.state != GhoulState.Inactive && pathGap <= config.shrinePulseRadius) {
-                    stunGhoul(config.shrineStunSeconds)
+                for (monster in ghouls) {
+                    if (monster.state != GhoulState.Inactive &&
+                        continuousPathDistance(monster) <= config.shrinePulseRadius
+                    ) stunGhoul(monster, config.shrineStunSeconds)
                 }
             }
         }
@@ -621,172 +644,172 @@ internal class GhoulRunGame(
         turningLeft = 0f
     }
 
-    private fun updateGhoul(dt: Float) {
-        if (ghoul.state == GhoulState.Inactive) return
-        if (ghoul.state == GhoulState.Stunned) {
-            ghoul.speed = 0f
-            ghoul.stunLeft = (ghoul.stunLeft - dt).coerceAtLeast(0f)
-            if (ghoul.stunLeft <= 0f) ghoul.state = GhoulState.Wandering
+    private fun updateGhoul(monster: GhoulMonster, dt: Float) {
+        if (monster.state == GhoulState.Inactive) return
+        if (monster.state == GhoulState.Stunned) {
+            monster.speed = 0f
+            monster.stunLeft = (monster.stunLeft - dt).coerceAtLeast(0f)
+            if (monster.stunLeft <= 0f) monster.state = GhoulState.Wandering
             return
         }
 
         val riderTarget = currentNearestCell()
-        val gap = pathGap
+        val gap = continuousPathDistance(monster)
         val quiet = quietFor >= config.stealthSettleSeconds && speed <= STEALTH_MAX_SPEED
-        if (!quiet || ghoul.sparedRiderAt != null && ghoul.sparedRiderAt != riderTarget) {
-            ghoul.sparedRiderAt = null
-            ghoul.retreating = false
+        if (!quiet || monster.sparedRiderAt != null && monster.sparedRiderAt != riderTarget) {
+            monster.sparedRiderAt = null
+            monster.retreating = false
         }
-        if (ghoul.retreating && gap >= config.stealthInspectDistance + config.stealthRetreatClearance) {
-            ghoul.retreating = false
+        if (monster.retreating && gap >= config.stealthInspectDistance + config.stealthRetreatClearance) {
+            monster.retreating = false
         }
         val heard = noiseRadius > 0f && gap <= noiseRadius
-        val trackedUpClose = ghoul.state == GhoulState.Hunting &&
-            ghoul.contactLostFor <= 0f && gap <= config.stealthTrackedSightDistance
+        val trackedUpClose = monster.state == GhoulState.Hunting &&
+            monster.contactLostFor <= 0f && gap <= config.stealthTrackedSightDistance
         val seen = (!quiet || trackedUpClose) && gap <= lightRadius + 1f &&
-            world.hasLineOfSight(ghoulNearestCell(), riderTarget)
+            world.hasLineOfSight(ghoulNearestCell(monster), riderTarget)
 
-        if (ghoul.state == GhoulState.Inspecting) {
+        if (monster.state == GhoulState.Inspecting) {
             if (heard || !quiet) {
-                beginHunt(riderTarget)
+                beginHunt(monster, riderTarget)
             } else {
-                ghoul.speed = 0f
-                ghoul.inspectLeft -= dt
-                if (ghoul.inspectLeft <= 0f) turnAwayFromRider(riderTarget)
+                monster.speed = 0f
+                monster.inspectLeft -= dt
+                if (monster.inspectLeft <= 0f) turnAwayFromRider(monster, riderTarget)
                 return
             }
         }
 
-        if (maybeInspectQuietRider(quiet, riderTarget, gap)) return
-        when (ghoul.state) {
+        if (maybeInspectQuietRider(monster, quiet, riderTarget, gap)) return
+        when (monster.state) {
             GhoulState.Wandering -> {
-                if (heard || seen) beginHunt(riderTarget) else {
-                    ghoul.speed = config.cruiseSpeed * config.wanderSpeedRatio
-                    advanceGhoul(dt) { cell, arrival -> wanderDirection(cell, arrival) }
+                if (heard || seen) beginHunt(monster, riderTarget) else {
+                    monster.speed = config.cruiseSpeed * config.wanderSpeedRatio
+                    advanceGhoul(monster, dt) { cell, arrival -> wanderDirection(monster, cell, arrival) }
                 }
             }
             GhoulState.Hunting -> {
                 val chaseTarget: MazeCell
                 if (heard || seen) {
-                    ghoul.lastKnown = riderTarget
-                    ghoul.contactLostFor = 0f
+                    monster.lastKnown = riderTarget
+                    monster.contactLostFor = 0f
                     chaseTarget = riderTarget
                 } else {
-                    ghoul.contactLostFor += dt
-                    chaseTarget = ghoul.lastKnown
-                    if (ghoul.contactLostFor >= config.loseContactSeconds) {
-                        ghoul.state = GhoulState.Searching
-                        ghoul.searchWaitLeft = config.searchWaitSeconds
+                    monster.contactLostFor += dt
+                    chaseTarget = monster.lastKnown
+                    if (monster.contactLostFor >= config.loseContactSeconds) {
+                        monster.state = GhoulState.Searching
+                        monster.searchWaitLeft = config.searchWaitSeconds
                     }
                 }
-                ghoul.speed = config.cruiseSpeed * config.huntSpeedRatio
-                advanceGhoulToward(dt, chaseTarget)
+                monster.speed = config.cruiseSpeed * config.huntSpeedRatio
+                advanceGhoulToward(monster, dt, chaseTarget)
             }
             GhoulState.Searching -> {
                 if (heard || seen) {
-                    beginHunt(riderTarget)
-                } else if (ghoulNearestCell() != ghoul.lastKnown || ghoul.progress > 0.01f) {
-                    ghoul.speed = config.cruiseSpeed * config.searchSpeedRatio
-                    advanceGhoulToward(dt, ghoul.lastKnown)
+                    beginHunt(monster, riderTarget)
+                } else if (ghoulNearestCell(monster) != monster.lastKnown || monster.progress > 0.01f) {
+                    monster.speed = config.cruiseSpeed * config.searchSpeedRatio
+                    advanceGhoulToward(monster, dt, monster.lastKnown)
                 } else {
-                    ghoul.speed = 0f
-                    ghoul.searchWaitLeft -= dt
-                    if (ghoul.searchWaitLeft <= 0f) ghoul.state = GhoulState.Wandering
+                    monster.speed = 0f
+                    monster.searchWaitLeft -= dt
+                    if (monster.searchWaitLeft <= 0f) monster.state = GhoulState.Wandering
                 }
             }
             else -> Unit
         }
-        if (maybeInspectQuietRider(quiet, riderTarget, pathGap)) return
-        if (ghoul.state != GhoulState.Stunned && ghoul.state != GhoulState.Inspecting &&
-            invulnerableLeft <= 0f && pathGap <= config.catchDistance) catchRider()
+        if (maybeInspectQuietRider(monster, quiet, riderTarget, continuousPathDistance(monster))) return
+        if (monster.state != GhoulState.Stunned && monster.state != GhoulState.Inspecting &&
+            invulnerableLeft <= 0f && continuousPathDistance(monster) <= config.catchDistance) catchRider(monster)
     }
 
-    private fun maybeInspectQuietRider(quiet: Boolean, riderTarget: MazeCell, gap: Float): Boolean {
-        if (!quiet || ghoul.retreating || gap <= config.catchDistance || gap > config.stealthInspectDistance) return false
-        if (ghoul.state != GhoulState.Searching && ghoul.state != GhoulState.Wandering) return false
-        if (ghoul.sparedRiderAt == riderTarget) {
-            turnAwayFromRider(riderTarget)
+    private fun maybeInspectQuietRider(monster: GhoulMonster, quiet: Boolean, riderTarget: MazeCell, gap: Float): Boolean {
+        if (!quiet || monster.retreating || gap <= config.catchDistance || gap > config.stealthInspectDistance) return false
+        if (monster.state != GhoulState.Searching && monster.state != GhoulState.Wandering) return false
+        if (monster.sparedRiderAt == riderTarget) {
+            turnAwayFromRider(monster, riderTarget)
         } else {
-            ghoul.state = GhoulState.Inspecting
-            ghoul.speed = 0f
-            ghoul.inspectLeft = config.stealthInspectSeconds
-            ghoul.sparedRiderAt = riderTarget
+            monster.state = GhoulState.Inspecting
+            monster.speed = 0f
+            monster.inspectLeft = config.stealthInspectSeconds
+            monster.sparedRiderAt = riderTarget
         }
         return true
     }
 
-    private fun turnAwayFromRider(riderTarget: MazeCell) {
-        val at = ghoul.cell
-        val ahead = at.moved(ghoul.heading)
-        if (ghoul.progress > 0.001f && world.isOpen(at, ghoul.heading)) {
+    private fun turnAwayFromRider(monster: GhoulMonster, riderTarget: MazeCell) {
+        val at = monster.cell
+        val ahead = at.moved(monster.heading)
+        if (monster.progress > 0.001f && world.isOpen(at, monster.heading)) {
             val distanceBack = world.pathDistance(at, riderTarget) ?: -1
             val distanceAhead = world.pathDistance(ahead, riderTarget) ?: -1
             if (distanceBack >= distanceAhead) {
-                ghoul.cell = ahead
-                ghoul.heading = ghoul.heading.opposite
-                ghoul.progress = 1f - ghoul.progress
-                ghoul.lastKnown = at
+                monster.cell = ahead
+                monster.heading = monster.heading.opposite
+                monster.progress = 1f - monster.progress
+                monster.lastKnown = at
             } else {
-                ghoul.lastKnown = ahead
+                monster.lastKnown = ahead
             }
         } else {
-            ghoul.progress = 0f
+            monster.progress = 0f
             val away = world.exits(at).maxWithOrNull(
                 compareBy<MazeDirection> { world.pathDistance(at.moved(it), riderTarget) ?: -1 }
                     .thenBy { -it.ordinal },
             )
             if (away != null) {
-                ghoul.heading = away
-                ghoul.lastKnown = at.moved(away)
-            } else ghoul.lastKnown = at
+                monster.heading = away
+                monster.lastKnown = at.moved(away)
+            } else monster.lastKnown = at
         }
-        ghoul.state = GhoulState.Searching
-        ghoul.searchWaitLeft = config.searchWaitSeconds
-        ghoul.inspectLeft = 0f
-        ghoul.retreating = true
+        monster.state = GhoulState.Searching
+        monster.searchWaitLeft = config.searchWaitSeconds
+        monster.inspectLeft = 0f
+        monster.retreating = true
     }
 
-    private fun beginHunt(target: MazeCell) {
-        ghoul.state = GhoulState.Hunting
-        ghoul.lastKnown = target
-        ghoul.contactLostFor = 0f
-        ghoul.inspectLeft = 0f
-        ghoul.retreating = false
+    private fun beginHunt(monster: GhoulMonster, target: MazeCell) {
+        monster.state = GhoulState.Hunting
+        monster.lastKnown = target
+        monster.contactLostFor = 0f
+        monster.inspectLeft = 0f
+        monster.retreating = false
     }
 
-    private fun wanderDirection(cell: MazeCell, arrivalHeading: MazeDirection): MazeDirection? {
+    private fun wanderDirection(monster: GhoulMonster, cell: MazeCell, arrivalHeading: MazeDirection): MazeDirection? {
         val exits = world.exits(cell)
         val forward = exits.filter { it != arrivalHeading.opposite }
         val choices = forward.ifEmpty { exits }
-        return choices.takeIf { it.isNotEmpty() }?.get(rng.nextInt(choices.size))
+        return choices.takeIf { it.isNotEmpty() }?.get(monster.wanderRng.nextInt(choices.size))
     }
 
-    private fun advanceGhoulToward(dt: Float, target: MazeCell) {
-        advanceGhoul(dt) { cell, _ ->
+    private fun advanceGhoulToward(monster: GhoulMonster, dt: Float, target: MazeCell) {
+        advanceGhoul(monster, dt) { cell, _ ->
             val path = world.shortestPath(cell, target)
             if (path.size >= 2) directionBetween(path[0], path[1]) else null
         }
     }
 
-    private fun advanceGhoul(dt: Float, directionAtCell: (MazeCell, MazeDirection) -> MazeDirection?) {
-        var remaining = ghoul.speed * dt
+    private fun advanceGhoul(monster: GhoulMonster, dt: Float, directionAtCell: (MazeCell, MazeDirection) -> MazeDirection?) {
+        var remaining = monster.speed * dt
         while (remaining > 0f) {
-            if (!world.isOpen(ghoul.cell, ghoul.heading)) {
-                ghoul.heading = directionAtCell(ghoul.cell, ghoul.heading) ?: return
+            if (!world.isOpen(monster.cell, monster.heading)) {
+                monster.heading = directionAtCell(monster.cell, monster.heading) ?: return
             }
-            val edgeLeft = 1f - ghoul.progress
+            val edgeLeft = 1f - monster.progress
             if (remaining < edgeLeft) {
-                ghoul.progress += remaining
+                monster.progress += remaining
                 return
             }
             remaining -= edgeLeft
-            ghoul.cell = ghoul.cell.moved(ghoul.heading)
-            ghoul.progress = 0f
-            ghoul.heading = directionAtCell(ghoul.cell, ghoul.heading) ?: return
+            monster.cell = monster.cell.moved(monster.heading)
+            monster.progress = 0f
+            monster.heading = directionAtCell(monster.cell, monster.heading) ?: return
         }
     }
 
-    private fun catchRider() {
+    private fun catchRider(monster: GhoulMonster) {
         if (phase != GhoulPhase.Playing || invulnerableLeft > 0f) return
         catches += 1
         hearts -= 1
@@ -807,13 +830,13 @@ internal class GhoulRunGame(
             .filter { it.value >= config.catchKnockbackTiles }
             .minWithOrNull(
                 compareBy<Map.Entry<MazeCell, Int>> { it.value }
-                    .thenBy { world.pathDistance(it.key, ghoul.spawn) ?: Int.MAX_VALUE },
+                    .thenBy { world.pathDistance(it.key, monster.spawn) ?: Int.MAX_VALUE },
             )
-            ?.key ?: ghoul.spawn
-        ghoul.cell = pushed
-        ghoul.progress = 0f
-        ghoul.heading = world.exits(pushed).firstOrNull() ?: MazeDirection.East
-        stunGhoul(config.catchStunSeconds)
+            ?.key ?: monster.spawn
+        monster.cell = pushed
+        monster.progress = 0f
+        monster.heading = world.exits(pushed).firstOrNull() ?: MazeDirection.East
+        stunGhoul(monster, config.catchStunSeconds)
     }
 
     /** Runs after the out-of-hearts delay so the view can fade to black before the move. */
@@ -830,37 +853,54 @@ internal class GhoulRunGame(
         speed = 0f
         quietFor = 0f
         invulnerableLeft = config.invulnerabilitySeconds
-        resetGhoul(active = true)
+        resetGhouls(active = true)
         respawns += 1
     }
 
-    private fun stunGhoul(seconds: Float) {
-        ghoul.state = GhoulState.Stunned
-        ghoul.speed = 0f
-        ghoul.stunLeft = max(ghoul.stunLeft, seconds)
-        ghoul.contactLostFor = 0f
-        ghoul.inspectLeft = 0f
-        ghoul.retreating = false
-        ghoul.sparedRiderAt = null
+    private fun stunGhoul(monster: GhoulMonster, seconds: Float) {
+        monster.state = GhoulState.Stunned
+        monster.speed = 0f
+        monster.stunLeft = max(monster.stunLeft, seconds)
+        monster.contactLostFor = 0f
+        monster.inspectLeft = 0f
+        monster.retreating = false
+        monster.sparedRiderAt = null
     }
 
-    private fun continuousPathDistance(): Float {
-        val sameEdge = sameEdgeDistance()
+    private fun continuousPathDistance(monster: GhoulMonster): Float {
+        val sameEdge = sameEdgeDistance(monster)
         if (sameEdge != null) return sameEdge
-        val riderEnds = edgeEndpoints(riderCell, heading, progress)
-        val ghoulEnds = edgeEndpoints(ghoul.cell, ghoul.heading, ghoul.progress)
-        var best = Float.POSITIVE_INFINITY
-        for ((riderEnd, riderCost) in riderEnds) for ((ghoulEnd, ghoulCost) in ghoulEnds) {
-            val cells = world.pathDistance(riderEnd, ghoulEnd) ?: continue
-            best = min(best, riderCost + cells + ghoulCost)
+        val width = config.width
+        val riderStart = riderCell.row * width + riderCell.col
+        val ghoulStart = monster.cell.row * width + monster.cell.col
+        val riderMoves = world.isOpen(riderCell, heading)
+        val ghoulMoves = world.isOpen(monster.cell, monster.heading)
+        val riderNext = riderStart + heading.dr * width + heading.dc
+        val ghoulNext = ghoulStart + monster.heading.dr * width + monster.heading.dc
+        val riderStartCost = if (riderMoves) progress else 0f
+        val ghoulStartCost = if (ghoulMoves) monster.progress else 0f
+        val startDistance = world.pathDistanceIndex(riderStart, ghoulStart)
+        var nearest = if (startDistance < 0) Float.POSITIVE_INFINITY else
+            riderStartCost + startDistance + ghoulStartCost
+        if (ghoulMoves) {
+            val distance = world.pathDistanceIndex(riderStart, ghoulNext)
+            if (distance >= 0) nearest = min(nearest, riderStartCost + distance + 1f - monster.progress)
         }
-        return best
+        if (riderMoves) {
+            val distance = world.pathDistanceIndex(riderNext, ghoulStart)
+            if (distance >= 0) nearest = min(nearest, 1f - progress + distance + ghoulStartCost)
+            if (ghoulMoves) {
+                val both = world.pathDistanceIndex(riderNext, ghoulNext)
+                if (both >= 0) nearest = min(nearest, 2f - progress - monster.progress + both)
+            }
+        }
+        return nearest
     }
 
-    private fun sameEdgeDistance(): Float? {
-        if (riderCell == ghoul.cell && heading == ghoul.heading) return abs(progress - ghoul.progress)
-        if (riderCell == ghoul.cell.moved(ghoul.heading) && heading == ghoul.heading.opposite) {
-            return abs(progress - (1f - ghoul.progress))
+    private fun sameEdgeDistance(monster: GhoulMonster): Float? {
+        if (riderCell == monster.cell && heading == monster.heading) return abs(progress - monster.progress)
+        if (riderCell == monster.cell.moved(monster.heading) && heading == monster.heading.opposite) {
+            return abs(progress - (1f - monster.progress))
         }
         return null
     }
@@ -914,12 +954,13 @@ internal class GhoulRunGame(
 
     private fun currentNearestCell(): MazeCell = if (progress < 0.5f) riderCell else riderCell.moved(heading)
 
-    private fun ghoulNearestCell(): MazeCell = if (ghoul.progress < 0.5f) ghoul.cell else ghoul.cell.moved(ghoul.heading)
+    private fun ghoulNearestCell(monster: GhoulMonster): MazeCell = if (monster.progress < 0.5f) monster.cell else monster.cell.moved(monster.heading)
 
     private fun directionBetween(from: MazeCell, to: MazeCell): MazeDirection =
         MazeDirection.entries.first { from.moved(it) == to }
 
-    private fun resetMaze(newSeed: Long, resetCatches: Boolean) {
+    private fun resetMaze(newSeed: Long, resetCatches: Boolean, nextLevel: Boolean = false) {
+        level = if (nextLevel) level + 1 else 1
         seed = newSeed
         world.reset(seed)
         rng = Random(seed xor GHOUL_RANDOM_SALT)
@@ -958,16 +999,24 @@ internal class GhoulRunGame(
         leanCheckConfirmLeft = 0f
         skippedLeanCheckPending = false
         if (resetCatches) catches = 0
-        ghoul = GhoulMonster(world.monsterSpawn)
-        resetGhoul(active = false)
+        ghouls.clear()
+        for ((index, spawn) in world.monsterSpawns(level).withIndex()) {
+            val monster = GhoulMonster(spawn)
+            monster.wanderRng = if (index == 0) rng else
+                Random(seed xor GHOUL_RANDOM_SALT xor (index.toLong() * 0x5DEECE66DL))
+            ghouls += monster
+        }
+        resetGhouls(active = false)
         exploredTiles += MazeTile(1, 1)
         exploredGrid[world.tileCols + 1] = true
         resetClock()
     }
 
-    private fun resetGhoul(active: Boolean) {
-        val first = world.exits(ghoul.spawn).firstOrNull() ?: MazeDirection.East
-        ghoul.reset(first, active)
+    private fun resetGhouls(active: Boolean) {
+        for (monster in ghouls) {
+            val first = world.exits(monster.spawn).firstOrNull() ?: MazeDirection.East
+            monster.reset(first, active)
+        }
     }
 
     /** Carries a passed lean check over to a replacement game (e.g. a difficulty change). */
@@ -993,7 +1042,7 @@ internal class GhoulRunGame(
         quietFor = 0f
         checkpoint = world.start
         shrineCooldowns.keys.forEach { shrineCooldowns[it] = 0f }
-        resetGhoul(active = true)
+        resetGhouls(active = true)
     }
 
     private fun headingTowardExit(cell: MazeCell): MazeDirection {

@@ -458,7 +458,7 @@ internal class GhoulGlSnapshot {
 
     companion object {
         const val MAX_LIGHTS = 8
-        const val MAX_SPRITES = 12
+        const val MAX_SPRITES = 128
     }
 }
 

@@ -374,7 +374,7 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
 
     internal companion object {
         const val OPAQUE = -0x1000000
-        const val MAX_SPRITES = 12
+        const val MAX_SPRITES = 128
         const val MAX_SHIFT = 12
         const val LEVELS = 64
         const val FOG_LEVELS = 8

@@ -292,6 +292,35 @@ internal class GhoulRunWorld(val config: GhoulRunConfig = GhoulRunConfig(), seed
         } ?: ordered.first { it.key !in used }.key
     }
 
+    fun monsterSpawns(count: Int): List<MazeCell> {
+        require(count >= 1)
+        if (count == 1) return listOf(monsterSpawn)
+        val chosen = ArrayList<MazeCell>(count)
+        chosen += monsterSpawn
+        val blocked = keys.toSet() + shrines + start + exit
+        val candidates = ArrayList<MazeCell>()
+        for (row in 0 until config.height) for (col in 0 until config.width) {
+            val cell = MazeCell(row, col)
+            if (cell !in blocked && cell != monsterSpawn) candidates += cell
+        }
+        candidates.shuffle(Random(seed xor 0x4D554C544947484FL))
+        while (chosen.size < count) {
+            val next = candidates.filter { candidate ->
+                chosen.none { it == candidate }
+            }.maxWithOrNull(
+                compareBy<MazeCell> { candidate ->
+                    if ((pathDistance(start, candidate) ?: 0) >= config.monsterSpawnMinDistance) 1 else 0
+                }.thenBy { candidate ->
+                    chosen.minOf { previous -> pathDistance(candidate, previous) ?: 0 }
+                }.thenBy { candidate ->
+                    pathDistance(start, candidate) ?: 0
+                },
+            )
+            chosen += next ?: chosen[(chosen.size - 1) % chosen.size]
+        }
+        return chosen
+    }
+
     private fun takeSpread(pool: List<MazeCell>, count: Int, excluded: Set<MazeCell>): List<MazeCell> {
         if (count == 0) return emptyList()
         val selected = ArrayList<MazeCell>()
