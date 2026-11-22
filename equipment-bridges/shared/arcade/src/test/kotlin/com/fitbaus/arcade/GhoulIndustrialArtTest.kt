@@ -81,6 +81,8 @@ internal class GhoulIndustrialArtTest {
         val far = GhoulIndustrialArt.fog(20f, 0.5f)
         assertTrue(near > 0f)
         assertTrue(middle > near)
+        assertTrue(GhoulIndustrialArt.fog(4f, 0f) > 0.1f)
+        assertTrue(GhoulIndustrialArt.fog(6f, 0f) > 0.25f)
         assertTrue(far > middle)
         assertTrue(far <= 0.72f)
         assertTrue(GhoulIndustrialArt.fog(10f, 0f) > GhoulIndustrialArt.fog(10f, 1f))
