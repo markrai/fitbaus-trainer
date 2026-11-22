@@ -11,8 +11,8 @@ import kotlin.random.Random
 /** Rider-relative selection: [Left] is the rider's own left, whatever the map orientation. */
 internal enum class GhoulLane { Left, Center, Right }
 internal enum class GhoulPhase { WarmUp, LeanCheck, Playing, Results, Countdown }
-internal enum class GhoulState { Inactive, Wandering, Hunting, Searching, Stunned }
-internal enum class GhoulHint { ChooseTurn, PedalPastGhoul, StayQuiet, LeanToChoose, RideThroughShrine }
+internal enum class GhoulState { Inactive, Wandering, Hunting, Searching, Inspecting, Stunned }
+internal enum class GhoulHint { ChooseTurn, PedalPastGhoul, StayQuiet, HoldStill, LeanToChoose, RideThroughShrine }
 
 internal data class GhoulResults(val seconds: Float, val catches: Int, val keys: Int)
 
@@ -52,6 +52,9 @@ internal class GhoulMonster(val spawn: MazeCell) {
     var contactLostFor: Float = 0f
     var searchWaitLeft: Float = 0f
     var stunLeft: Float = 0f
+    var inspectLeft: Float = 0f
+    var retreating: Boolean = false
+    var sparedRiderAt: MazeCell? = null
     var lastKnown: MazeCell = spawn
 
     val row: Float get() = cell.row + heading.dr * progress
@@ -66,6 +69,9 @@ internal class GhoulMonster(val spawn: MazeCell) {
         contactLostFor = 0f
         searchWaitLeft = 0f
         stunLeft = 0f
+        inspectLeft = 0f
+        retreating = false
+        sparedRiderAt = null
         lastKnown = spawn
     }
 }
@@ -161,6 +167,7 @@ internal class GhoulRunGame(
     private var accumulator = 0f
     private var lastFrameNanos = Long.MIN_VALUE
     private var rng = Random(seed xor GHOUL_RANDOM_SALT)
+    private var quietFor = 0f
 
     init { resetMaze(seed, resetCatches = true) }
 
@@ -231,6 +238,7 @@ internal class GhoulRunGame(
     fun hint(): GhoulHint? {
         if (phase != GhoulPhase.Playing || respawnLeft > 0f) return null
         return when {
+            ghoul.state == GhoulState.Inspecting -> GhoulHint.HoldStill
             waitingForChoice || brakingForChoice -> GhoulHint.ChooseTurn
             ghoul.state == GhoulState.Hunting -> GhoulHint.PedalPastGhoul
             ghoul.state == GhoulState.Searching -> GhoulHint.StayQuiet
@@ -374,6 +382,9 @@ internal class GhoulRunGame(
             speed += (targetSpeed - speed) * min(1f, config.speedResponse * dt)
             moveRider(dt)
         }
+        quietFor = if (filteredRpm < config.stoppedBelowRpm) {
+            (quietFor + dt).coerceAtMost(config.stealthSettleSeconds + 1f)
+        } else 0f
         if (phase == GhoulPhase.Playing) updateGhoul(dt)
     }
 
@@ -412,6 +423,9 @@ internal class GhoulRunGame(
         ghoul.contactLostFor = 0f
         ghoul.searchWaitLeft = 0f
         ghoul.stunLeft = 0f
+        ghoul.inspectLeft = 0f
+        ghoul.retreating = false
+        ghoul.sparedRiderAt = null
     }
 
     internal fun placeRider(cell: MazeCell, direction: MazeDirection, edgeProgress: Float = 0f) {
@@ -597,10 +611,34 @@ internal class GhoulRunGame(
             return
         }
 
-        val gap = pathGap
         val riderTarget = currentNearestCell()
-        val heard = gap <= noiseRadius
-        val seen = gap <= lightRadius + 1f && world.hasLineOfSight(ghoulNearestCell(), riderTarget)
+        val gap = pathGap
+        val quiet = quietFor >= config.stealthSettleSeconds && speed <= STEALTH_MAX_SPEED
+        if (!quiet || ghoul.sparedRiderAt != null && ghoul.sparedRiderAt != riderTarget) {
+            ghoul.sparedRiderAt = null
+            ghoul.retreating = false
+        }
+        if (ghoul.retreating && gap >= config.stealthInspectDistance + config.stealthRetreatClearance) {
+            ghoul.retreating = false
+        }
+        val heard = noiseRadius > 0f && gap <= noiseRadius
+        val trackedUpClose = ghoul.state == GhoulState.Hunting &&
+            ghoul.contactLostFor <= 0f && gap <= config.stealthTrackedSightDistance
+        val seen = (!quiet || trackedUpClose) && gap <= lightRadius + 1f &&
+            world.hasLineOfSight(ghoulNearestCell(), riderTarget)
+
+        if (ghoul.state == GhoulState.Inspecting) {
+            if (heard || !quiet) {
+                beginHunt(riderTarget)
+            } else {
+                ghoul.speed = 0f
+                ghoul.inspectLeft -= dt
+                if (ghoul.inspectLeft <= 0f) turnAwayFromRider(riderTarget)
+                return
+            }
+        }
+
+        if (maybeInspectQuietRider(quiet, riderTarget, gap)) return
         when (ghoul.state) {
             GhoulState.Wandering -> {
                 if (heard || seen) beginHunt(riderTarget) else {
@@ -639,13 +677,62 @@ internal class GhoulRunGame(
             }
             else -> Unit
         }
-        if (ghoul.state != GhoulState.Stunned && invulnerableLeft <= 0f && pathGap <= config.catchDistance) catchRider()
+        if (maybeInspectQuietRider(quiet, riderTarget, pathGap)) return
+        if (ghoul.state != GhoulState.Stunned && ghoul.state != GhoulState.Inspecting &&
+            invulnerableLeft <= 0f && pathGap <= config.catchDistance) catchRider()
+    }
+
+    private fun maybeInspectQuietRider(quiet: Boolean, riderTarget: MazeCell, gap: Float): Boolean {
+        if (!quiet || ghoul.retreating || gap <= config.catchDistance || gap > config.stealthInspectDistance) return false
+        if (ghoul.state != GhoulState.Searching && ghoul.state != GhoulState.Wandering) return false
+        if (ghoul.sparedRiderAt == riderTarget) {
+            turnAwayFromRider(riderTarget)
+        } else {
+            ghoul.state = GhoulState.Inspecting
+            ghoul.speed = 0f
+            ghoul.inspectLeft = config.stealthInspectSeconds
+            ghoul.sparedRiderAt = riderTarget
+        }
+        return true
+    }
+
+    private fun turnAwayFromRider(riderTarget: MazeCell) {
+        val at = ghoul.cell
+        val ahead = at.moved(ghoul.heading)
+        if (ghoul.progress > 0.001f && world.isOpen(at, ghoul.heading)) {
+            val distanceBack = world.pathDistance(at, riderTarget) ?: -1
+            val distanceAhead = world.pathDistance(ahead, riderTarget) ?: -1
+            if (distanceBack >= distanceAhead) {
+                ghoul.cell = ahead
+                ghoul.heading = ghoul.heading.opposite
+                ghoul.progress = 1f - ghoul.progress
+                ghoul.lastKnown = at
+            } else {
+                ghoul.lastKnown = ahead
+            }
+        } else {
+            ghoul.progress = 0f
+            val away = world.exits(at).maxWithOrNull(
+                compareBy<MazeDirection> { world.pathDistance(at.moved(it), riderTarget) ?: -1 }
+                    .thenBy { -it.ordinal },
+            )
+            if (away != null) {
+                ghoul.heading = away
+                ghoul.lastKnown = at.moved(away)
+            } else ghoul.lastKnown = at
+        }
+        ghoul.state = GhoulState.Searching
+        ghoul.searchWaitLeft = config.searchWaitSeconds
+        ghoul.inspectLeft = 0f
+        ghoul.retreating = true
     }
 
     private fun beginHunt(target: MazeCell) {
         ghoul.state = GhoulState.Hunting
         ghoul.lastKnown = target
         ghoul.contactLostFor = 0f
+        ghoul.inspectLeft = 0f
+        ghoul.retreating = false
     }
 
     private fun wanderDirection(cell: MazeCell, arrivalHeading: MazeDirection): MazeDirection? {
@@ -722,6 +809,7 @@ internal class GhoulRunGame(
         waitingForChoice = false
         turningLeft = 0f
         speed = 0f
+        quietFor = 0f
         invulnerableLeft = config.invulnerabilitySeconds
         resetGhoul(active = true)
         respawns += 1
@@ -732,6 +820,9 @@ internal class GhoulRunGame(
         ghoul.speed = 0f
         ghoul.stunLeft = max(ghoul.stunLeft, seconds)
         ghoul.contactLostFor = 0f
+        ghoul.inspectLeft = 0f
+        ghoul.retreating = false
+        ghoul.sparedRiderAt = null
     }
 
     private fun continuousPathDistance(): Float {
@@ -832,6 +923,7 @@ internal class GhoulRunGame(
         targetSpeed = 0f
         lightRadius = 0f
         noiseRadius = 0f
+        quietFor = 0f
         elapsed = 0f
         hearts = config.startingHearts
         invulnerableLeft = 0f
@@ -877,6 +969,7 @@ internal class GhoulRunGame(
         waitingForChoice = false
         turningLeft = 0f
         elapsed = 0f
+        quietFor = 0f
         checkpoint = world.start
         shrineCooldowns.keys.forEach { shrineCooldowns[it] = 0f }
         resetGhoul(active = true)
@@ -892,6 +985,7 @@ internal class GhoulRunGame(
     private companion object {
         const val GHOUL_RANDOM_SALT: Long = 0x47484F554CL
         const val SHRINE_HINT_CELLS = 3f
+        const val STEALTH_MAX_SPEED = 0.06f
         val LEAN_CHECK_ORDER = listOf(GhoulLane.Left, GhoulLane.Right, GhoulLane.Center)
     }
 }

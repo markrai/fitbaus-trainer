@@ -901,6 +901,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             GhoulHint.ChooseTurn -> if (controllerOnly) "PRESS LEFT OR RIGHT TO TURN" else "LEAN LEFT OR RIGHT TO TURN"
             GhoulHint.PedalPastGhoul -> "PEDAL PAST THE GHOUL MARK"
             GhoulHint.StayQuiet -> "EASE OFF - STAY QUIET"
+            GhoulHint.HoldStill -> "DON'T MOVE"
             GhoulHint.LeanToChoose -> if (controllerOnly) "PRESS LEFT/RIGHT TO CHOOSE" else "LEAN TO CHOOSE"
             GhoulHint.RideThroughShrine -> "RIDE THROUGH THE SHRINE"
         }
@@ -908,6 +909,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             GhoulHint.ChooseTurn -> HIGHLIGHT
             GhoulHint.PedalPastGhoul -> Color.rgb(255, 90, 80)
             GhoulHint.StayQuiet -> SEARCHING
+            GhoulHint.HoldStill -> SEARCHING
             GhoulHint.LeanToChoose -> HIGHLIGHT
             GhoulHint.RideThroughShrine -> SHRINE_READY
         }
@@ -941,6 +943,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             game.phase == GhoulPhase.WarmUp -> "WARM UP" to Color.WHITE
             hunted && game.speed > game.ghoulHuntSpeed -> "PULLING AWAY" to RIDER
             hunted -> "IT'S GAINING" to GHOUL
+            game.ghoul.state == GhoulState.Inspecting -> "DON'T MOVE" to SEARCHING
             game.ghoul.state == GhoulState.Searching -> "STAY QUIET" to SEARCHING
             else -> "QUIET" to QUIET_TEXT
         }
@@ -1577,7 +1580,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
 
     private fun drawThreat(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float, now: Long) {
         val state = game.ghoul.state
-        if (state != GhoulState.Hunting && state != GhoulState.Searching) return
+        if (state != GhoulState.Hunting && state != GhoulState.Searching && state != GhoulState.Inspecting) return
         val hunted = state == GhoulState.Hunting
         val pulse = ((sin(now / 160_000_000.0) + 1.0) * 0.5).toFloat()
         if (hunted) {
@@ -1585,7 +1588,11 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             stroke.color = Color.argb((130 + pulse * 100).toInt(), 255, 35, 35)
             canvas.drawRect(mapRect.left + 3f * density, mapRect.top + 3f * density, mapRect.right - 3f * density, mapRect.bottom - 3f * density, stroke)
         }
-        val label = if (hunted) "HUNTED" else "SEARCHING"
+        val label = when (state) {
+            GhoulState.Hunting -> "HUNTED"
+            GhoulState.Inspecting -> "IT'S CLOSE"
+            else -> "SEARCHING"
+        }
         banner(
             canvas,
             "$label  GAP ${String.format(Locale.US, "%.1f", game.pathGap)}",
