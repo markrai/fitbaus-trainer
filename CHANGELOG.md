@@ -16,6 +16,13 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run attack-mouth timing and appearance.** Start the head-on hunting
+  jaw animation only inside 0.95 maze cells and reach full openness at
+  0.45 cells, just before the 0.35-cell catch threshold. Remove teeth
+  from both GLES2 and the Canvas fallback, preserving the dark mouth
+  cavity, gum rim, and independent red-eye glow. Cover new distance
+  thresholds and blocked line of sight in regression tests.
+
 - **Ghoul Run overlay resize ceiling.** Let the translucent map grow to the
   full width and height of the first-person playable viewport, including the
   area behind the bottom RPM meter. The top/right inset shrinks smoothly as
@@ -84,7 +91,7 @@ included in this upcoming release.
   Each Ghoul owns its own animation pose for multi-enemy levels, while
   wandering, inspecting, stunned and retreating creatures never initiate
   the attack expression. GLES2 deforms the lower face and draws a dark
-  mouth cavity, gums and teeth over the existing character texture.
+  mouth cavity and gum rim over the existing character texture.
   The software fallback draws a matching animated facial expression
   without asset downloads, new GL extensions or per-frame bitmap
   allocations. The red-eye emissive effect remains independent.

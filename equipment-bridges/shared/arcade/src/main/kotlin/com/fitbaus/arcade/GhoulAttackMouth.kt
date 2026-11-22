@@ -16,8 +16,8 @@ internal object GhoulAttackMouth {
     const val CLOSED_HALF_HEIGHT = 0.006f
     const val OPEN_HALF_HEIGHT = 0.052f
 
-    private const val ENTER_DISTANCE = 1.45f
-    private const val FULL_OPEN_DISTANCE = 0.62f
+    private const val ENTER_DISTANCE = 0.95f
+    private const val FULL_OPEN_DISTANCE = 0.45f
     private const val RIDER_FACING_DOT = 0.8660254f
     private const val GHOUL_FACING_DOT = 0.8191521f
     private const val OPEN_SECONDS = 0.28f
