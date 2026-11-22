@@ -16,6 +16,13 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run progressively growing mouth.** Replace the faint, opacity-driven
+  mouth appearance with a small dark circular opening that smoothly expands
+  into the full jaw shape. Scale the aperture itself rather than fading in
+  its darkness, and use linear distance progression within the existing
+  0.95-to-0.45-cell attack window. Keep the toothless cavity, red eyes,
+  independent Ghoul states, and both GLES2 and Canvas renderer paths.
+
 - **Ghoul Run attack-mouth timing and appearance.** Start the head-on hunting
   jaw animation only inside 0.95 maze cells and reach full openness at
   0.45 cells, just before the 0.35-cell catch threshold. Remove teeth
