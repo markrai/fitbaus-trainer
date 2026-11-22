@@ -30,6 +30,8 @@ internal class GhoulAttackMouthTest {
         assertEquals(0f, target(x = 1f, y = 1f))
         assertTrue(target(x = 0.85f, y = 0.2f) > 0f)
         assertTrue(target(x = 0.6f) > target(x = 0.8f))
+        assertEquals(0.5f, target(x = 0.7f), 0.0001f)
+        assertEquals(0.2f, target(x = 0.85f), 0.0001f)
     }
 
     @Test
@@ -67,6 +69,32 @@ internal class GhoulAttackMouthTest {
         assertEquals(0.6f, GhoulAttackMouth.advance(0.6f, 1f, Float.NaN))
         assertEquals(0f, GhoulAttackMouth.advance(-5f, 0f, 0.1f))
         assertEquals(1f, GhoulAttackMouth.advance(10f, 1f, 0.1f))
+    }
+
+    @Test
+    fun mouthStartsAsTinyCircleAndGrowsAcrossEveryFrame() {
+        val startingWidth = GhoulAttackMouth.halfWidth(0f)
+        val startingHeight = GhoulAttackMouth.halfHeight(0f)
+        assertEquals(startingHeight, startingWidth * GhoulConceptArt.ASPECT, 0.000001f)
+        var previousWidth = 0f
+        var previousHeight = 0f
+        for (step in 0..20) {
+            val open = step / 20f
+            val width = GhoulAttackMouth.halfWidth(open)
+            val height = GhoulAttackMouth.halfHeight(open)
+            assertTrue(width > previousWidth)
+            assertTrue(height > previousHeight)
+            previousWidth = width
+            previousHeight = height
+        }
+        assertEquals(GhoulAttackMouth.OPEN_HALF_WIDTH, previousWidth, 0.000001f)
+        assertEquals(GhoulAttackMouth.OPEN_HALF_HEIGHT, previousHeight, 0.000001f)
+        assertTrue(previousWidth > startingWidth * 6f)
+        assertTrue(previousHeight > startingHeight * 8f)
+        val firstFrame = GhoulAttackMouth.advance(0f, 1f, 1f / 60f)
+        assertTrue(firstFrame > 0f && firstFrame < 0.1f)
+        assertTrue(GhoulAttackMouth.halfWidth(firstFrame) > startingWidth)
+        assertTrue(GhoulAttackMouth.halfWidth(firstFrame) < GhoulAttackMouth.halfWidth(0.1f))
     }
 
     @Test
