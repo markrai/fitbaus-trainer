@@ -57,6 +57,11 @@ internal class GhoulMapOverlayLayoutTest {
         assertEquals(40, GhoulMapOverlayLayout.opacity(40))
         assertEquals(70, GhoulMapOverlayLayout.opacity(79))
         assertEquals(80, GhoulMapOverlayLayout.opacity(100))
+        assertEquals(20, GhoulMapOverlayLayout.opacityAtFraction(-1f))
+        assertEquals(20, GhoulMapOverlayLayout.opacityAtFraction(0f))
+        assertEquals(40, GhoulMapOverlayLayout.opacityAtFraction(1f / 3f))
+        assertEquals(80, GhoulMapOverlayLayout.opacityAtFraction(1f))
+        assertEquals(80, GhoulMapOverlayLayout.opacityAtFraction(2f))
     }
 
     @Test
