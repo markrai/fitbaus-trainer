@@ -200,15 +200,50 @@ internal class GhoulRunSupervisor(private val resumeStableMs: Long = 600L) {
 }
 
 internal class GhoulTurnIntentBuffer(private val capacity: Int = 2) {
-    private val commands = ArrayList<GhoulLane>(capacity)
+    private data class Intent(
+        val lane: GhoulLane,
+        val junction: MazeCell,
+        val incoming: MazeDirection,
+        val deadlineNanos: Long,
+    )
 
+    private val commands = ArrayList<Intent>(capacity)
     val size: Int get() = commands.size
-    val current: GhoulLane? get() = commands.firstOrNull()
+    val current: GhoulLane? get() = commands.firstOrNull()?.lane
 
-    fun offer(direction: GhoulLane) {
+    fun refresh(game: GhoulRunGame, nowNanos: Long) {
+        val first = commands.firstOrNull() ?: return
+        val approaching = nextJunction(game)
+        if (nowNanos >= first.deadlineNanos ||
+            approaching?.first != first.junction || approaching?.second != first.incoming
+        ) {
+            clear()
+        }
+    }
+
+    fun offer(game: GhoulRunGame, direction: GhoulLane, nowNanos: Long) {
         if (direction == GhoulLane.Center) return
-        if (commands.size < capacity) commands.add(direction)
-        else commands[commands.lastIndex] = direction
+        refresh(game, nowNanos)
+        val approaching = nextJunction(game) ?: return
+        val first = commands.firstOrNull()
+        if (first != null) {
+            val nextHeading = chosenDirection(game, first.junction, first.incoming, first.lane)
+            if (nextHeading != null) {
+                val nextJunction = first.junction.moved(nextHeading)
+                if (game.world.isOpen(first.junction, nextHeading) &&
+                    chosenDirection(game, nextJunction, nextHeading, direction) != null
+                ) {
+                    val second = Intent(direction, nextJunction, nextHeading, nowNanos + TURN_WINDOW_NANOS)
+                    if (commands.size < capacity) commands.add(second)
+                    else commands[commands.lastIndex] = second
+                    return
+                }
+            }
+        }
+        if (chosenDirection(game, approaching.first, approaching.second, direction) != null) {
+            commands.clear()
+            commands.add(Intent(direction, approaching.first, approaching.second, nowNanos + TURN_WINDOW_NANOS))
+        }
     }
 
     fun consume() {
@@ -217,6 +252,28 @@ internal class GhoulTurnIntentBuffer(private val capacity: Int = 2) {
 
     fun clear() {
         commands.clear()
+    }
+
+    private fun nextJunction(game: GhoulRunGame): Pair<MazeCell, MazeDirection>? {
+        if (game.phase != GhoulPhase.Playing || game.respawnLeft > 0f || game.turningLeft > 0f) return null
+        if (!game.waitingForChoice && !game.world.isOpen(game.riderCell, game.heading)) return null
+        return (if (game.waitingForChoice) game.riderCell else game.riderCell.moved(game.heading)) to game.heading
+    }
+
+    private fun chosenDirection(
+        game: GhoulRunGame,
+        junction: MazeCell,
+        incoming: MazeDirection,
+        lane: GhoulLane,
+    ): MazeDirection? {
+        if (!game.world.contains(junction)) return null
+        if (game.world.exits(junction).count { it != incoming.opposite } < 2) return null
+        val expected = if (lane == GhoulLane.Left) incoming.relativeLeft else incoming.relativeRight
+        return expected.takeIf { it == game.choiceFor(junction, incoming, lane) }
+    }
+
+    private companion object {
+        const val TURN_WINDOW_NANOS = 2_500_000_000L
     }
 }
 
@@ -265,6 +322,9 @@ internal class GhoulRunSession(
         if (!live) {
             game.resetClock()
             pace.pauseClock()
+            controllerTurns.clear()
+            stickLanes.reset()
+            previousStickLane = GhoulLane.Center
             lastSteps = 0
             return hold
         }
@@ -278,6 +338,7 @@ internal class GhoulRunSession(
             }
         }
         val reversed = useController && controller.reversePressed && game.reverseDirection()
+        controllerTurns.refresh(game, nowNanos)
         if (game.choiceDecisions != seenChoiceDecisions) {
             if (game.choiceDecisions < seenChoiceDecisions) controllerTurns.clear()
             else repeat((game.choiceDecisions - seenChoiceDecisions).coerceAtMost(2)) { controllerTurns.consume() }
@@ -303,11 +364,13 @@ internal class GhoulRunSession(
                 else -> GhoulLane.Center
             }
             if (stickLane != previousStickLane && stickLane != GhoulLane.Center && buttonLane == GhoulLane.Center) {
-                controllerTurns.offer(stickLane)
+                controllerTurns.offer(game, stickLane, nowNanos)
             }
             previousStickLane = stickLane
             val count = if (buttonLane == GhoulLane.Left) leftPulses else rightPulses
-            repeat(if (buttonLane == GhoulLane.Center) 0 else count) { controllerTurns.offer(buttonLane) }
+            repeat(if (buttonLane == GhoulLane.Center) 0 else count) {
+                controllerTurns.offer(game, buttonLane, nowNanos)
+            }
         }
         val webcamLane = if (source != GhoulRunInputSource.Controller && steer.state == FaceControlState.Tracking) {
             headLanes.update(steer.steer)
@@ -329,6 +392,7 @@ internal class GhoulRunSession(
         if (game.choiceDecisions != seenChoiceDecisions) {
             repeat((game.choiceDecisions - seenChoiceDecisions).coerceAtMost(2)) { controllerTurns.consume() }
             seenChoiceDecisions = game.choiceDecisions
+            controllerTurns.refresh(game, nowNanos)
             lane = controllerTurns.current ?: webcamLane
         }
         return hold
