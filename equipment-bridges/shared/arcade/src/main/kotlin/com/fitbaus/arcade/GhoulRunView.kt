@@ -119,6 +119,14 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val spritePaint = Paint().apply { isFilterBitmap = true }
     private val eyeHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(128, 205, 17, 8) }
     private val eyeCorePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 23, 9) }
+    private val jawRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(117, 43, 34) }
+    private val jawCavityPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(17, 3, 5) }
+    private val jawToothPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(180, 167, 141)
+        strokeWidth = 1.5f * density
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val mouthDst = RectF()
     private val spriteDst = RectF()
     private var tileArtWidth = -1
     private var floorLitTile: Bitmap? = null
@@ -312,6 +320,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val dt = if (session.live && interval in 1 until STALL_NANOS) interval / 1_000_000_000f else 0f
         trackFeedback(now)
         rig.update(game, dt)
+        GhoulAttackMouth.update(game, rig.yaw, dt)
         val cadenceHz = session.cadenceReading.filteredRpm.coerceAtLeast(0f) / 60f
         shaderPhases.advance(dt, cadenceHz)
         smokeSeconds = (smokeSeconds + dt) % 240f
@@ -575,6 +584,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         frame.spriteXyk[at] = GhoulRaycaster.cellX(world.exit.col.toFloat())
         frame.spriteXyk[at + 1] = GhoulRaycaster.cellY(world.exit.row.toFloat())
         frame.spriteXyk[at + 2] = (if (game.exitOpen) GhoulSpriteKind.Exit else GhoulSpriteKind.ExitLocked).ordinal.toFloat()
+        frame.spriteMouth[spriteCount] = 0f
         spriteCount += 1
         for (shrine in world.shrines) if (spriteCount < GhoulGlSnapshot.MAX_SPRITES) {
             at = spriteCount * 3
@@ -583,6 +593,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             frame.spriteXyk[at + 2] = (
                 if ((game.shrineCooldowns[shrine] ?: 0f) <= 0f) GhoulSpriteKind.ShrineReady else GhoulSpriteKind.ShrineSpent
             ).ordinal.toFloat()
+            frame.spriteMouth[spriteCount] = 0f
             spriteCount += 1
         }
         for (monster in game.ghouls) {
@@ -593,6 +604,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             frame.spriteXyk[at + 2] = (
                 if (monster.state == GhoulState.Stunned) GhoulSpriteKind.GhoulStunned else GhoulSpriteKind.Ghoul
             ).ordinal.toFloat()
+            frame.spriteMouth[spriteCount] = monster.mouthOpen
             spriteCount += 1
         }
         frame.spriteCount = spriteCount
@@ -689,6 +701,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 )
                 canvas.drawBitmap(art, null, spriteDst, spritePaint)
                 if (draw.kind == GhoulSpriteKind.Ghoul) {
+                    drawAttackMouth(canvas, draw.mouthOpen)
                     val eyeY = spriteDst.top + spriteDst.height() * GhoulEyeArt.EYE_V
                     val haloRadius = max(1.1f * density, spriteDst.height() * GhoulEyeArt.HALO_V)
                     val coreRadius = max(0.65f * density, spriteDst.height() * GhoulEyeArt.CORE_V)
@@ -700,6 +713,37 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                     }
                 }
                 canvas.restore()
+            }
+        }
+    }
+
+    private fun drawAttackMouth(canvas: Canvas, open: Float) {
+        if (open <= 0.01f) return
+        val strength = open.coerceIn(0f, 1f)
+        val centreX = spriteDst.left + spriteDst.width() * GhoulAttackMouth.CENTRE_U
+        val centreY = spriteDst.top + spriteDst.height() *
+            (GhoulAttackMouth.CENTRE_V + 0.013f * strength)
+        val radiusX = spriteDst.width() *
+            (GhoulAttackMouth.CLOSED_HALF_WIDTH +
+                (GhoulAttackMouth.OPEN_HALF_WIDTH - GhoulAttackMouth.CLOSED_HALF_WIDTH) * strength)
+        val radiusY = spriteDst.height() *
+            (GhoulAttackMouth.CLOSED_HALF_HEIGHT +
+                (GhoulAttackMouth.OPEN_HALF_HEIGHT - GhoulAttackMouth.CLOSED_HALF_HEIGHT) * strength)
+        mouthDst.set(centreX - radiusX, centreY - radiusY, centreX + radiusX, centreY + radiusY)
+        jawRimPaint.alpha = (strength * 235f).toInt()
+        jawCavityPaint.alpha = (strength * 252f).toInt()
+        jawToothPaint.alpha = (strength * 205f).toInt()
+        canvas.drawOval(mouthDst, jawRimPaint)
+        mouthDst.inset(radiusX * 0.16f, radiusY * 0.13f)
+        canvas.drawOval(mouthDst, jawCavityPaint)
+        val toothHeight = min(radiusY * 0.29f, 7f * density)
+        if (toothHeight > 0.4f * density) {
+            for (tooth in -1..1) {
+                val x = centreX + tooth * radiusX * 0.42f
+                canvas.drawLine(x, centreY - radiusY * 0.78f,
+                    x + tooth * radiusX * 0.04f, centreY - radiusY * 0.78f + toothHeight, jawToothPaint)
+                canvas.drawLine(x, centreY + radiusY * 0.78f,
+                    x + tooth * radiusX * 0.04f, centreY + radiusY * 0.78f - toothHeight * 0.65f, jawToothPaint)
             }
         }
     }
@@ -745,13 +789,14 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private fun buildSprites() {
         sprites.clear()
         var used = 0
-        fun add(x: Float, y: Float, kind: GhoulSpriteKind, lift: Float = 0f) {
+        fun add(x: Float, y: Float, kind: GhoulSpriteKind, lift: Float = 0f, mouthOpen: Float = 0f) {
             if (used == spritePool.size) spritePool += GhoulSprite(0f, 0f, kind)
             val sprite = spritePool[used++]
             sprite.x = x
             sprite.y = y
             sprite.kind = kind
             sprite.lift = lift
+            sprite.mouthOpen = mouthOpen
             sprites += sprite
         }
         val world = game.world
@@ -774,6 +819,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 GhoulRaycaster.cellX(monster.col),
                 GhoulRaycaster.cellY(monster.row),
                 if (monster.state == GhoulState.Stunned) GhoulSpriteKind.GhoulStunned else GhoulSpriteKind.Ghoul,
+                mouthOpen = monster.mouthOpen,
             )
         }
     }
