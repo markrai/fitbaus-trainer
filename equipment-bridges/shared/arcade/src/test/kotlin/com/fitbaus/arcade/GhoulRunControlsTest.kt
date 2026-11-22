@@ -289,7 +289,7 @@ class GhoulRunControlsTest {
             for (arrival in MazeDirection.entries) {
                 if (!game.world.isOpen(junction, arrival.opposite)) continue
                 val allowed = game.world.exits(junction).filter { it != arrival.opposite }
-                if (arrival !in allowed && arrival.relativeLeft in allowed) {
+                if (allowed.size >= 2 && arrival !in allowed && arrival.relativeLeft in allowed) {
                     game.placeRider(junction.moved(arrival.opposite), arrival, 0.05f)
                     return junction to arrival
                 }
@@ -401,7 +401,8 @@ class GhoulRunControlsTest {
         rig.approachStraightChoice()
         val initialHeading = rig.game.heading
         val decisions = rig.game.choiceDecisions
-        repeat(110) { rig.tick(controller = GhoulRunControllerInput()) }
+        var guard = 0
+        while (rig.game.choiceDecisions == decisions && guard++ < 100) rig.tick(controller = GhoulRunControllerInput())
         assertTrue(rig.game.choiceDecisions > decisions)
         assertEquals(0, rig.game.choiceTurns)
         assertEquals(initialHeading, rig.game.heading)
@@ -487,10 +488,10 @@ class GhoulRunControlsTest {
     fun analogStickReleaseDoesNotDiscardARecentNearbyTurn() {
         val rig = liveRig(seed = 9L)
         rig.approachStraightChoice()
-        rig.tick(controller = GhoulRunControllerInput(stickX = 1f))
-        assertEquals(GhoulLane.Right, rig.session.lane.takeIf { it == GhoulLane.Right } ?: GhoulLane.Center)
+        rig.tick(controller = GhoulRunControllerInput(stickX = -1f))
+        assertEquals(GhoulLane.Left, rig.session.lane)
         rig.tick(controller = GhoulRunControllerInput(stickX = 0f))
-        assertEquals(GhoulLane.Right, rig.session.lane)
+        assertEquals(GhoulLane.Left, rig.session.lane)
         repeat(110) { rig.tick(controller = GhoulRunControllerInput()) }
         assertEquals(GhoulLane.Center, rig.session.lane)
     }
