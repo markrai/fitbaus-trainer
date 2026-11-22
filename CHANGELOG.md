@@ -16,6 +16,13 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run red eyes in darkness.** Restore two emissive red eye glows
+  that remain visible when pedaling stops, independently of lamp lighting
+  and industrial distance fog. Make the background and fog return to black
+  at zero lamp radius, keep stunned creatures from glowing red, and preserve
+  depth-tested wall occlusion. The CPU renderer now shows the same two-eye
+  cue when OpenGL falls back, without allocating objects every frame.
+
 - **Ghoul Run industrial fog and smoke visibility.** Bring the cool-gray distance
   fog closer to the rider and lift its contrast in both GLES2 and CPU fallback
   views. On the GLES2 path, add deterministic vents, grates, and low-mist smoke

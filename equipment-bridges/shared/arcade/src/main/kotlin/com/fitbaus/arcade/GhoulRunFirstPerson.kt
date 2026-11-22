@@ -216,6 +216,7 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
         val bg = background
         val bgStart = MAX_SHIFT - shift
         val spans = wallSpans
+        val ambient = GhoulDarkness.ambient(lampTiles)
         val halfFocal = 0.5f * focal
         for (column in 0 until width) {
             val base = column * h
@@ -237,7 +238,7 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
             }
             if (sides[column] != GhoulRaycaster.SIDE_X) f *= SIDE_Y_SHADE
             val level = (f * LEVELS).toInt().coerceIn(0, LEVELS)
-            val fogLevel = (GhoulIndustrialArt.fog(d, 0.5f) * FOG_LEVELS / MAX_FOG)
+            val fogLevel = (GhoulIndustrialArt.fog(d, 0.5f) * ambient * FOG_LEVELS / MAX_FOG)
                 .toInt().coerceIn(0, FOG_LEVELS)
             val plate = spans[level][fogLevel]
             System.arraycopy(plate, 0, pix, base + y0, y1 - y0 + 1)
@@ -272,6 +273,7 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
     }
 
     private fun fillBackground() {
+        val ambient = GhoulDarkness.ambient(lightTiles)
         val horizon = height / 2f + MAX_SHIFT
         val k = 0.5f * focal
         for (py in background.indices) {
@@ -279,11 +281,11 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
             background[py] = if (centre > horizon) {
                 val distance = k / (centre - horizon)
                 blend(shade(FLOOR, light(distance)), GhoulIndustrialArt.FOG_COLOR,
-                    GhoulIndustrialArt.fog(distance, 0f))
+                    GhoulIndustrialArt.fog(distance, 0f) * ambient)
             } else {
                 val distance = k / (horizon - centre)
                 blend(shade(CEILING, light(distance)), GhoulIndustrialArt.FOG_COLOR,
-                    GhoulIndustrialArt.fog(distance, 1f))
+                    GhoulIndustrialArt.fog(distance, 1f) * ambient)
             }
         }
     }
