@@ -323,11 +323,13 @@ class GhoulRunControlsTest {
             val first = MazeCell(row, col)
             for (incoming in MazeDirection.entries) {
                 if (!game.world.isOpen(first.moved(incoming.opposite), incoming)) continue
+                if (game.world.exits(first).count { it != incoming.opposite } < 2) continue
                 for (firstLane in listOf(GhoulLane.Left, GhoulLane.Right)) {
                     val firstTurn = game.choiceFor(first, incoming, firstLane) ?: continue
                     if (firstTurn == incoming || firstTurn == incoming.opposite) continue
                     if (!game.world.isOpen(first, firstTurn)) continue
                     val second = first.moved(firstTurn)
+                    if (game.world.exits(second).count { it != firstTurn.opposite } < 2) continue
                     for (secondLane in listOf(GhoulLane.Left, GhoulLane.Right)) {
                         val secondTurn = game.choiceFor(second, firstTurn, secondLane) ?: continue
                         if (secondTurn == firstTurn || secondTurn == firstTurn.opposite) continue
