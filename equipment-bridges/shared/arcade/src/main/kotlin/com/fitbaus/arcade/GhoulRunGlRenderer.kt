@@ -66,6 +66,13 @@ internal class GhoulRunGlRenderer(
     private var mazeProgram = 0
     private var spriteProgram = 0
     private var ghoulProgram = 0
+    private var smokeProgram = 0
+    private var smokeTexture = 0
+    private var smokeEmitters = FloatArray(0)
+    private val smokeSelection = IntArray(GhoulSmokeArt.MAX_VISIBLE_SOURCES)
+    private val smokeDistances = FloatArray(GhoulSmokeArt.MAX_VISIBLE_SOURCES)
+    @Volatile var smokeDrawCalls: Int = 0
+        private set
     private var mazeVbo = 0
     private var spriteVbo = 0
     private var mazeSeed = Long.MIN_VALUE
@@ -87,6 +94,7 @@ internal class GhoulRunGlRenderer(
     private lateinit var mazeLocations: MazeLocations
     private lateinit var spriteLocations: SpriteLocations
     private lateinit var ghoulLocations: GhoulLocations
+    private lateinit var smokeLocations: SmokeLocations
 
     override fun onSurfaceCreated(unused: GL10?, config: EGLConfig?) {
         try {
@@ -102,12 +110,17 @@ internal class GhoulRunGlRenderer(
             mazeProgram = link(MAZE_VERTEX, MAZE_FRAGMENT)
             spriteProgram = link(SPRITE_VERTEX, SPRITE_FRAGMENT)
             ghoulProgram = link(SPRITE_VERTEX, GHOUL_FRAGMENT)
+            smokeProgram = link(SPRITE_VERTEX, SMOKE_FRAGMENT)
             mazeLocations = MazeLocations(mazeProgram)
             spriteLocations = SpriteLocations(spriteProgram)
             ghoulLocations = GhoulLocations(ghoulProgram)
+            smokeLocations = SmokeLocations(smokeProgram)
             createMazeTextures()
             createSpriteTextures()
             createGhoulTextures()
+            smokeTexture = generateTexture()
+            uploadArgb(smokeTexture, GhoulSmokeArt.TEXTURE_SIZE, GhoulSmokeArt.TEXTURE_SIZE,
+                GhoulSmokeArt.texture(), mipmaps = false, repeat = false)
             createSpriteVbo()
             mazeSeed = Long.MIN_VALUE
             ready = true
@@ -131,9 +144,10 @@ internal class GhoulRunGlRenderer(
         try {
             snapshots.readInto(frame)
             if (frame.diagnostics) GLES20.glClearColor(0.25f, 0f, 0.25f, 1f)
-            else GLES20.glClearColor(0.086f, 0.122f, 0.153f, 1f)
+            else GLES20.glClearColor(0.275f, 0.314f, 0.349f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
             framesDrawn += 1L
+            smokeDrawCalls = 0
             val maze = frame.maze
             if (maze == null) return
             if (maze.seed != mazeSeed) uploadMaze(maze)
@@ -145,6 +159,7 @@ internal class GhoulRunGlRenderer(
                 FOV_RADIANS, surfaceWidth.toFloat() / surfaceHeight, NEAR, FAR,
             )
             drawMaze(frame, dirX, dirY)
+            drawSmoke(frame)
             drawSprites(frame)
             val error = GLES20.glGetError()
             lastGlError = error
@@ -167,6 +182,7 @@ internal class GhoulRunGlRenderer(
         floorCount = mesh.floorVertices
         ceilingCount = mesh.ceilingVertices
         wallCount = mesh.wallVertices
+        smokeEmitters = GhoulSmokeArt.emitters(maze)
         mazeSeed = maze.seed
     }
 
@@ -238,6 +254,49 @@ internal class GhoulRunGlRenderer(
             }
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             orderIndex += 1
+        }
+        GLES20.glDepthMask(true)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+    }
+
+
+    private fun drawSmoke(frame: GhoulGlSnapshot) {
+        val count = GhoulSmokeArt.selectVisible(
+            smokeEmitters, frame.cameraX, frame.cameraY, frame.yaw, smokeSelection, smokeDistances,
+        )
+        if (count == 0) return
+        GLES20.glUseProgram(smokeProgram)
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, spriteVbo)
+        attribute(smokeLocations.quad, 4, 16, 0)
+        uniformMatrix(smokeLocations.viewProjection, viewProjection)
+        GLES20.glUniform1f(smokeLocations.yaw, frame.yaw)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        bindTexture(smokeTexture)
+        GLES20.glUniform1i(smokeLocations.texture, 0)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glDepthMask(false)
+        for (slot in count - 1 downTo 0) {
+            val base = smokeSelection[slot] * 3
+            val phase = smokeEmitters[base + 2]
+            val distanceFade = (1f - smokeDistances[slot] / 36f).coerceIn(0f, 1f)
+            for (plume in 0 until GhoulSmokeArt.PLUMES_PER_SOURCE) {
+                val progress = GhoulSmokeArt.progress(frame.smokeSeconds, phase, plume)
+                val opacity = GhoulSmokeArt.opacity(progress) * distanceFade
+                if (opacity < 0.06f) continue
+                val drift = sin(progress * 6.2831853f + phase * 6f + plume * 2.6f) * 0.14f
+                GLES20.glUniform3f(
+                    smokeLocations.centre,
+                    smokeEmitters[base] + drift,
+                    smokeEmitters[base + 1] + drift * 0.5f,
+                    0.04f + progress * 0.38f,
+                )
+                GLES20.glUniform2f(smokeLocations.size, 0.60f + progress * 0.28f, 0.52f + progress * 0.32f)
+                GLES20.glUniform1f(smokeLocations.opacity, opacity)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+                smokeDrawCalls += 1
+            }
         }
         GLES20.glDepthMask(true)
         GLES20.glDisable(GLES20.GL_BLEND)
@@ -452,7 +511,9 @@ internal class GhoulRunGlRenderer(
     }
 
     private fun releaseHandles() {
-        mazeProgram = 0; spriteProgram = 0; ghoulProgram = 0; mazeVbo = 0; spriteVbo = 0
+        mazeProgram = 0; spriteProgram = 0; ghoulProgram = 0; smokeProgram = 0
+        mazeVbo = 0; spriteVbo = 0; smokeTexture = 0; smokeDrawCalls = 0
+        smokeEmitters = FloatArray(0)
         mazeTextures.fill(0); spriteTextures.fill(0); ghoulTextures.fill(0)
     }
 
@@ -507,6 +568,16 @@ internal class GhoulRunGlRenderer(
         val sway = uniform(program, "uSway")
         val tint = uniform(program, "uTint")
         val desaturation = uniform(program, "uDesat")
+    }
+
+    private class SmokeLocations(program: Int) {
+        val quad = attribute(program, "aQuad")
+        val viewProjection = uniform(program, "uViewProjection")
+        val centre = uniform(program, "uCentre")
+        val size = uniform(program, "uSize")
+        val yaw = uniform(program, "uYaw")
+        val texture = uniform(program, "uTexture")
+        val opacity = uniform(program, "uOpacity")
     }
 
     private companion object {
@@ -580,8 +651,8 @@ internal class GhoulRunGlRenderer(
                 vec3 base = texture2D(uTexture, vUv).rgb;
                 vec3 lit = base * min(vec3(1.35), lighting) * face;
                 float lowMist = 1.0 - clamp(vWorld.z / 0.85, 0.0, 1.0);
-                float fog = min(0.72, smoothstep(3.0, 14.0, distanceToCamera) * (0.48 + 0.20 * lowMist));
-                vec3 fogColor = vec3(0.086, 0.122, 0.153);
+                float fog = min(0.72, smoothstep(1.0, 11.0, distanceToCamera) * (0.48 + 0.20 * lowMist));
+                vec3 fogColor = vec3(0.275, 0.314, 0.349);
                 gl_FragColor = vec4(mix(lit, fogColor, fog), 1.0);
             }
         """
@@ -620,8 +691,8 @@ internal class GhoulRunGlRenderer(
                 float lamp = 1.0 - smoothstep(max(0.5, uLampRadius * 0.3), max(0.6, uLampRadius), d);
                 float pilot = 0.28 * (1.0 - smoothstep(0.35, 1.6, d));
                 float light = max(max(lamp, pilot), uGlow * (0.9 + 0.1 * sin(uGlowPhase)));
-                float fog = smoothstep(3.0, 14.0, d) * 0.46;
-                gl_FragColor = vec4(mix(texel.rgb * light, vec3(0.086, 0.122, 0.153), fog), texel.a);
+                float fog = smoothstep(1.0, 11.0, d) * 0.42;
+                gl_FragColor = vec4(mix(texel.rgb * light, vec3(0.275, 0.314, 0.349), fog), texel.a);
             }
         """
         const val GHOUL_FRAGMENT = """
@@ -667,8 +738,20 @@ internal class GhoulRunGlRenderer(
                 c.rgb *= uTint;
                 c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.3, 0.59, 0.11))), uDesat);
                 if (c.a < 0.02) discard;
-                float fog = smoothstep(3.0, 14.0, distanceToCamera) * 0.55;
-                gl_FragColor = vec4(mix(c.rgb * light, vec3(0.086, 0.122, 0.153), fog), c.a);
+                float fog = smoothstep(1.0, 11.0, distanceToCamera) * 0.46;
+                gl_FragColor = vec4(mix(c.rgb * light, vec3(0.275, 0.314, 0.349), fog), c.a);
+            }
+        """
+
+        const val SMOKE_FRAGMENT = """
+            precision mediump float;
+            uniform sampler2D uTexture;
+            uniform float uOpacity;
+            varying vec2 vUv;
+            void main() {
+                vec4 texel = texture2D(uTexture, vUv);
+                if (texel.a < 0.01) discard;
+                gl_FragColor = vec4(texel.rgb, texel.a * uOpacity);
             }
         """
     }

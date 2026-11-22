@@ -16,6 +16,14 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run industrial fog and smoke visibility.** Bring the cool-gray distance
+  fog closer to the rider and lift its contrast in both GLES2 and CPU fallback
+  views. On the GLES2 path, add deterministic vents, grates, and low-mist smoke
+  emitters with a small procedural alpha texture, gentle drift and rise,
+  wall-depth occlusion, and a strict eight-billboard-per-frame draw cap.
+  Smoke uses the existing GL surface and pauses with the game. Renderer
+  diagnostics expose smoke draw counts for on-console verification.
+
 - **Ghoul Run unexpected controller turns.** Controller button and stick turns
   now arm only the immediate choice junction and expire after 2.5 seconds.
   Rapid double inputs can still queue the following junction when choices

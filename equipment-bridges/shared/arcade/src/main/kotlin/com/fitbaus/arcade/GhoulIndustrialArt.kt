@@ -8,7 +8,7 @@ internal object GhoulIndustrialArt {
     const val TILE_SIZE = 64
     const val ATLAS_SIZE = TILE_SIZE * 2
     const val VARIANT_COUNT = 4
-    val FOG_COLOR: Int = rgb(22, 31, 39)
+    val FOG_COLOR: Int = rgb(70, 80, 89)
 
     fun variant(seed: Long, row: Int, col: Int, face: Int): Int {
         var value = seed.toInt() xor (seed ushr 32).toInt()
@@ -20,7 +20,7 @@ internal object GhoulIndustrialArt {
     }
 
     fun fog(distance: Float, height: Float): Float {
-        val t = ((distance - 3f) / 11f).coerceIn(0f, 1f)
+        val t = ((distance - 1f) / 10f).coerceIn(0f, 1f)
         val smooth = t * t * (3f - 2f * t)
         val low = 1f - (height / 0.85f).coerceIn(0f, 1f)
         return (smooth * (0.48f + 0.20f * low)).coerceIn(0f, 0.72f)

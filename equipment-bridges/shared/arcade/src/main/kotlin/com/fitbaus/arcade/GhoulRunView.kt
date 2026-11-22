@@ -127,6 +127,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val sprites = ArrayList<GhoulSprite>()
     private val spritePool = ArrayList<GhoulSprite>()
     private var bobPhase = 0f
+    private var smokeSeconds = 0f
     private val shaderPhases = GhoulShaderPhases()
     private val ghoulMotion = GhoulConceptMotion()
     private val shakeRandom = Random(7)
@@ -281,6 +282,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         rig.update(game, dt)
         val cadenceHz = session.cadenceReading.filteredRpm.coerceAtLeast(0f) / 60f
         shaderPhases.advance(dt, cadenceHz)
+        smokeSeconds = (smokeSeconds + dt) % 240f
         ghoulMotion.advance(dt, game.ghoul.state)
         if (game.speed > 0.05f) bobPhase = (bobPhase + dt * cadenceHz * 2f * TWO_PI) % TWO_PI
         val hunt = game.ghoul.state == GhoulState.Hunting
@@ -474,6 +476,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         frame.lampRadius = game.lightRadius * 2f
         frame.lampPhase = shaderPhases.lamp
         frame.glowPhase = shaderPhases.glow
+        frame.smokeSeconds = smokeSeconds
         frame.diagnostics = diagnosticsOverlay
         frame.ghoulPhaseA = ghoulMotion.phaseA
         frame.ghoulPhaseB = ghoulMotion.phaseB
@@ -1647,11 +1650,12 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val gpu = glRenderer
         if (glSelection.type == GhoulRendererType.Gl) return String.format(
             Locale.US,
-            "renderer GL %dx%d frames %d error 0x%04x | gl %.1f ms gl-frame %.1f ms | canvas %.1f ms | update %.1f ms | host-frame %.1f ms (%.0f fps)",
+            "renderer GL %dx%d frames %d error 0x%04x smoke %d | gl %.1f ms gl-frame %.1f ms | canvas %.1f ms | update %.1f ms | host-frame %.1f ms (%.0f fps)",
             gpu?.surfaceWidth ?: 0,
             gpu?.surfaceHeight ?: 0,
             gpu?.framesDrawn ?: 0L,
             gpu?.lastGlError ?: 0,
+            gpu?.smokeDrawCalls ?: 0,
             (gpu?.frameNanos ?: 0L) / 1_000_000f,
             (gpu?.frameIntervalNanos ?: 0L) / 1_000_000f,
             drawMs,
