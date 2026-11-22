@@ -234,7 +234,8 @@ internal class GhoulRunGlRenderer(
                     ghoulLocations.centre,
                     frame.spriteXyk[base], frame.spriteXyk[base + 1], GhoulConceptArt.BILLBOARD_BASE + frame.ghoulBob,
                 )
-                GLES20.glUniform1f(ghoulLocations.desaturation, frame.ghoulDesaturation)
+                GLES20.glUniform1f(ghoulLocations.desaturation,
+                    if (kind == GhoulSpriteKind.GhoulStunned) 0.8f else 0f)
             } else {
                 if (activeProgram != spriteProgram) {
                     preparePropProgram(frame)
