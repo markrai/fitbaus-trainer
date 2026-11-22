@@ -1846,9 +1846,9 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val NOISE_TINT = Color.argb(46, 255, 120, 30)
         val GAUGE_QUIET = Color.rgb(48, 78, 110)
         val GAUGE_HEARD = Color.rgb(200, 105, 35)
-        val FLOOR_LIT = Color.rgb(78, 82, 88)
-        val WALL_TOP = Color.rgb(118, 122, 130)
-        val WALL_LEFT = Color.rgb(72, 75, 82)
-        val WALL_RIGHT = Color.rgb(54, 57, 64)
+        val FLOOR_LIT = Color.rgb(66, 78, 86)
+        val WALL_TOP = Color.rgb(113, 128, 138)
+        val WALL_LEFT = Color.rgb(63, 77, 87)
+        val WALL_RIGHT = Color.rgb(45, 57, 66)
     }
 }
