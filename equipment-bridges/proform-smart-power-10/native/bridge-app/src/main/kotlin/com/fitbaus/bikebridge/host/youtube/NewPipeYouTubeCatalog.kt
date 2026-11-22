@@ -83,33 +83,25 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
     }
 
     override fun related(seeds: List<VideoSummary>): FeedPage = guard {
-        val batches = ArrayList<List<VideoSummary>>()
-        var firstFailure: Throwable? = null
-        for (seed in RelatedVideoSuggestions.selectSeeds(seeds)) {
-            if (Thread.currentThread().isInterrupted) throw InterruptedException("Discovery cancelled")
-            try {
-                val extractor = service.getStreamExtractor(service.streamLHFactory.fromId(seed.id))
-                val info = StreamInfo.getInfo(extractor)
-                batches.add(
-                    info.relatedItems.orEmpty()
-                        .asSequence()
-                        .take(RelatedVideoSuggestions.MAX_ITEMS_PER_SEED)
-                        .mapNotNull { summarize(it) }
-                        .toList(),
-                )
-            } catch (e: Throwable) {
-                if (Thread.currentThread().isInterrupted) throw e
-                if (firstFailure == null) firstFailure = e
-                batches.add(emptyList())
-            }
-        }
-        if (batches.all { it.isEmpty() }) firstFailure?.let { throw it }
-        FeedPage(RelatedVideoSuggestions.merge(seeds, batches), null)
+        RelatedVideoSuggestions.firstPage(seeds, ::relatedItems)
     }
 
     override fun more(cursor: FeedCursor): FeedPage = guard {
-        val next = cursor as NewPipeCursor
-        page(next.extractor, next.extractor.getPage(next.page), next.seen)
+        when (cursor) {
+            is RelatedVideoCursor -> RelatedVideoSuggestions.nextPage(cursor, ::relatedItems)
+            is NewPipeCursor -> page(cursor.extractor, cursor.extractor.getPage(cursor.page), cursor.seen)
+            else -> throw YouTubeException(FailureKind.Unsupported, "Unknown pagination cursor")
+        }
+    }
+
+    private fun relatedItems(seed: VideoSummary): List<VideoSummary> {
+        val extractor = service.getStreamExtractor(service.streamLHFactory.fromId(seed.id))
+        val info = StreamInfo.getInfo(extractor)
+        return info.relatedItems.orEmpty()
+            .asSequence()
+            .take(RelatedVideoSuggestions.MAX_ITEMS_PER_SEED)
+            .mapNotNull { summarize(it) }
+            .toList()
     }
 
     override fun resolve(videoId: String): ResolvedVideo = guard {
