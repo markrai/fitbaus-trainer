@@ -114,6 +114,7 @@ internal class GhoulConceptMotion {
             GhoulState.Wandering -> { rateA = 1.2f; rateB = 0.8f }
             GhoulState.Hunting -> { rateA = 2.1f; rateB = 1.3f }
             GhoulState.Searching -> { rateA = 1.6f; rateB = 1f }
+            GhoulState.Inspecting -> { rateA = 0.6f; rateB = 0.35f }
             GhoulState.Inactive, GhoulState.Stunned -> Unit
         }
         phaseA = wrapPhase(phaseA + dt * rateA)
@@ -123,6 +124,7 @@ internal class GhoulConceptMotion {
         val target = when (state) {
             GhoulState.Hunting -> 1f
             GhoulState.Searching -> 0.35f
+            GhoulState.Inspecting -> 0.6f
             else -> 0f
         }
         val ease = 1f - exp(-dt / GhoulConceptArt.FLARE_TIME_CONSTANT)
