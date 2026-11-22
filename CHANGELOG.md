@@ -39,6 +39,13 @@ included in this upcoming release.
 
 ### Added
 
+- **Ghoul Run quiet near-miss encounters.** After the rider settles into a stop,
+  an unalerted ghoul can approach to just outside contact distance, pause for a
+  tense inspection, then turn away and search elsewhere. Resuming pedaling
+  immediately restores detection and pursuit. Stopping too late, an active
+  close-range hunt, or an existing collision still costs a heart; the HUD
+  marks the inspection with DON'T MOVE.
+
 - **Native bike Analytics.** Settings now includes a lightweight Monday-to-Sunday
   cycling chart with separate axes for spinning minutes and average RPM,
   previous/next week navigation, lifetime spinning time, estimated pedal
