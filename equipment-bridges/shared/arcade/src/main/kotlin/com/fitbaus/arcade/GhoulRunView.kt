@@ -195,6 +195,9 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private val viewModeRect = RectF()
     private val mapOpacityRect = RectF()
     private var resizingMap = false
+    private var adjustingMapOpacity = false
+    private var opacityPointerId = -1
+    private var opacityInitialValue = 0
     private var resizePointerId = -1
     private var resizeStartX = 0f
     private var resizeStartY = 0f
@@ -1713,6 +1716,18 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         if (mapViewMode == GhoulMapViewMode.Overlay && opacityLeft + 98f * density < difficultyRect.left) {
             mapOpacityRect.set(opacityLeft, y, opacityLeft + 98f * density, y + h)
             selector(canvas, mapOpacityRect, "MAP ${mapOpacityPercent}%", true, true)
+            val start = mapOpacityRect.left + 9f * density
+            val end = mapOpacityRect.right - 9f * density
+            val trackY = mapOpacityRect.bottom - 4f * density
+            val fraction = (mapOpacityPercent - GhoulMapOverlayLayout.MIN_OPACITY).toFloat() /
+                (GhoulMapOverlayLayout.MAX_OPACITY - GhoulMapOverlayLayout.MIN_OPACITY)
+            stroke.strokeWidth = 2f * density
+            stroke.color = Color.rgb(43, 62, 69)
+            canvas.drawLine(start, trackY, end, trackY, stroke)
+            stroke.color = Color.WHITE
+            canvas.drawLine(start, trackY, start + fraction * (end - start), trackY, stroke)
+            paint.color = Color.WHITE
+            canvas.drawCircle(start + fraction * (end - start), trackY, 3f * density, paint)
         } else {
             mapOpacityRect.setEmpty()
         }
@@ -1894,6 +1909,26 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         overlay.invalidate()
     }
 
+    private fun updateMapOpacity(x: Float) {
+        val start = mapOpacityRect.left + 9f * density
+        val usableWidth = (mapOpacityRect.width() - 18f * density).coerceAtLeast(1f)
+        val fraction = (x - start) / usableWidth
+        mapOpacityPercent = GhoulMapOverlayLayout.opacityAtFraction(fraction)
+        overlay.invalidate()
+    }
+
+    private fun finishMapOpacity(commit: Boolean) {
+        if (!adjustingMapOpacity) return
+        adjustingMapOpacity = false
+        opacityPointerId = -1
+        if (commit) {
+            prefs?.edit()?.putInt(MAP_OPACITY_KEY, mapOpacityPercent)?.apply()
+        } else {
+            mapOpacityPercent = opacityInitialValue
+        }
+        overlay.invalidate()
+    }
+
     private fun finishMapResize(commit: Boolean) {
         if (!resizingMap) return
         resizingMap = false
@@ -1911,6 +1946,14 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private fun handleTouch(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                if (mapViewMode == GhoulMapViewMode.Overlay && mapOpacityRect.contains(event.x, event.y)) {
+                    adjustingMapOpacity = true
+                    opacityPointerId = event.getPointerId(0)
+                    opacityInitialValue = mapOpacityPercent
+                    updateMapOpacity(event.x)
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
                 if (mapViewMode == GhoulMapViewMode.Overlay && resizeHandleRect.contains(event.x, event.y)) {
                     resizingMap = true
                     resizePointerId = event.getPointerId(0)
@@ -1926,6 +1969,10 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
+                if (adjustingMapOpacity) {
+                    val index = event.findPointerIndex(opacityPointerId)
+                    if (index >= 0) updateMapOpacity(event.getX(index))
+                }
                 if (resizingMap) {
                     val index = event.findPointerIndex(resizePointerId)
                     if (index >= 0) updateMapResize(event.getX(index), event.getY(index))
@@ -1933,6 +1980,10 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 return true
             }
             MotionEvent.ACTION_POINTER_UP -> {
+                if (adjustingMapOpacity && event.getPointerId(event.actionIndex) == opacityPointerId) {
+                    updateMapOpacity(event.getX(event.actionIndex))
+                    finishMapOpacity(true)
+                }
                 if (resizingMap && event.getPointerId(event.actionIndex) == resizePointerId) {
                     updateMapResize(event.getX(event.actionIndex), event.getY(event.actionIndex))
                     finishMapResize(true)
@@ -1940,11 +1991,15 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                finishMapOpacity(false)
                 finishMapResize(false)
                 return true
             }
             MotionEvent.ACTION_UP -> {
-                if (resizingMap) {
+                if (adjustingMapOpacity) {
+                    updateMapOpacity(event.x)
+                    finishMapOpacity(true)
+                } else if (resizingMap) {
                     updateMapResize(event.x, event.y)
                     finishMapResize(true)
                 } else {
@@ -1956,15 +2011,6 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                         viewModeRect.contains(event.x, event.y) -> setMapViewMode(
                             if (mapViewMode == GhoulMapViewMode.Split) GhoulMapViewMode.Overlay else GhoulMapViewMode.Split,
                         )
-                        mapViewMode == GhoulMapViewMode.Overlay && mapOpacityRect.contains(event.x, event.y) -> {
-                            mapOpacityPercent = if (mapOpacityPercent >= GhoulMapOverlayLayout.MAX_OPACITY) {
-                                GhoulMapOverlayLayout.MIN_OPACITY
-                            } else {
-                                mapOpacityPercent + 10
-                            }
-                            prefs?.edit()?.putInt(MAP_OPACITY_KEY, mapOpacityPercent)?.apply()
-                            overlay.invalidate()
-                        }
                     }
                 }
                 overlay.performClick()
