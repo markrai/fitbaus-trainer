@@ -83,9 +83,9 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private var glMaze: GhoulGlMaze? = null
     private var glMazeGame: GhoulRunGame? = null
     private var glMazeSeed = Long.MIN_VALUE
-    private val lightCandidateX = FloatArray(GhoulGlSnapshot.MAX_LIGHTS)
-    private val lightCandidateY = FloatArray(GhoulGlSnapshot.MAX_LIGHTS)
-    private val lightCandidateKind = IntArray(GhoulGlSnapshot.MAX_LIGHTS)
+    private val lightCandidateX = FloatArray(MAX_LIGHT_CANDIDATES)
+    private val lightCandidateY = FloatArray(MAX_LIGHT_CANDIDATES)
+    private val lightCandidateKind = IntArray(MAX_LIGHT_CANDIDATES)
     private var glAttached = false
     private var glHostPaused = true
     private var glPaused = false
@@ -315,12 +315,12 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val cadenceHz = session.cadenceReading.filteredRpm.coerceAtLeast(0f) / 60f
         shaderPhases.advance(dt, cadenceHz)
         smokeSeconds = (smokeSeconds + dt) % 240f
-        ghoulMotion.advance(dt, game.ghoul.state)
+        ghoulMotion.advance(dt, game.nearestThreat.state)
         if (game.speed > 0.05f) bobPhase = (bobPhase + dt * cadenceHz * 2f * TWO_PI) % TWO_PI
-        val hunt = game.ghoul.state == GhoulState.Hunting
-        val shift = if (hunt) 0.28f else 0f
-        val targetRow = game.riderRow + (game.ghoul.row - game.riderRow) * shift
-        val targetCol = game.riderCol + (game.ghoul.col - game.riderCol) * shift
+        val hunter = game.ghouls.firstOrNull { it.state == GhoulState.Hunting }
+        val shift = if (hunter != null) 0.28f else 0f
+        val targetRow = game.riderRow + ((hunter?.row ?: game.riderRow) - game.riderRow) * shift
+        val targetCol = game.riderCol + ((hunter?.col ?: game.riderCol) - game.riderCol) * shift
         val jumped = kotlin.math.abs(targetRow - cameraRow) + kotlin.math.abs(targetCol - cameraCol) > 3f
         if (jumped && game.respawns != 0 && respawnAtNanos != Long.MIN_VALUE && now - respawnAtNanos < FADE_NANOS) {
             cameraRow = targetRow
@@ -539,7 +539,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         frame.ghoulFlare = ghoulMotion.flare
         frame.ghoulBob = ghoulMotion.bob
         frame.ghoulSway = ghoulMotion.sway
-        frame.ghoulDesaturation = ghoulMotion.desaturation(game.ghoul.state)
+        frame.ghoulDesaturation = ghoulMotion.desaturation(game.nearestThreat.state)
 
         var candidates = 0
         for (shrine in world.shrines) if ((game.shrineCooldowns[shrine] ?: 0f) <= 0f) {
@@ -556,11 +556,15 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             lightCandidateKind[candidates] = GhoulGlLightColor.EXIT_GREEN
             candidates += 1
         }
-        if (game.ghoul.state != GhoulState.Inactive && game.ghoul.state != GhoulState.Stunned && candidates < lightCandidateX.size) {
-            lightCandidateX[candidates] = GhoulRaycaster.cellX(game.ghoul.col)
-            lightCandidateY[candidates] = GhoulRaycaster.cellY(game.ghoul.row)
-            lightCandidateKind[candidates] = GhoulGlLightColor.GHOUL_RED
-            candidates += 1
+        for (monster in game.ghouls) {
+            if (monster.state != GhoulState.Inactive && monster.state != GhoulState.Stunned &&
+                candidates < lightCandidateX.size
+            ) {
+                lightCandidateX[candidates] = GhoulRaycaster.cellX(monster.col)
+                lightCandidateY[candidates] = GhoulRaycaster.cellY(monster.row)
+                lightCandidateKind[candidates] = GhoulGlLightColor.GHOUL_RED
+                candidates += 1
+            }
         }
         frame.lightCount = GhoulLightSelector.select(
             frame.cameraX, frame.cameraY, lightCandidateX, lightCandidateY, lightCandidateKind, candidates,
@@ -581,12 +585,13 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             ).ordinal.toFloat()
             spriteCount += 1
         }
-        if (game.ghoul.state != GhoulState.Inactive && spriteCount < GhoulGlSnapshot.MAX_SPRITES) {
+        for (monster in game.ghouls) {
+            if (monster.state == GhoulState.Inactive || spriteCount >= GhoulGlSnapshot.MAX_SPRITES) continue
             at = spriteCount * 3
-            frame.spriteXyk[at] = GhoulRaycaster.cellX(game.ghoul.col)
-            frame.spriteXyk[at + 1] = GhoulRaycaster.cellY(game.ghoul.row)
+            frame.spriteXyk[at] = GhoulRaycaster.cellX(monster.col)
+            frame.spriteXyk[at + 1] = GhoulRaycaster.cellY(monster.row)
             frame.spriteXyk[at + 2] = (
-                if (game.ghoul.state == GhoulState.Stunned) GhoulSpriteKind.GhoulStunned else GhoulSpriteKind.Ghoul
+                if (monster.state == GhoulState.Stunned) GhoulSpriteKind.GhoulStunned else GhoulSpriteKind.Ghoul
             ).ordinal.toFloat()
             spriteCount += 1
         }
@@ -763,11 +768,12 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 if (ready) GhoulSpriteKind.ShrineReady else GhoulSpriteKind.ShrineSpent,
             )
         }
-        if (game.ghoul.state != GhoulState.Inactive) {
+        for (monster in game.ghouls) {
+            if (monster.state == GhoulState.Inactive) continue
             add(
-                GhoulRaycaster.cellX(game.ghoul.col),
-                GhoulRaycaster.cellY(game.ghoul.row),
-                if (game.ghoul.state == GhoulState.Stunned) GhoulSpriteKind.GhoulStunned else GhoulSpriteKind.Ghoul,
+                GhoulRaycaster.cellX(monster.col),
+                GhoulRaycaster.cellY(monster.row),
+                if (monster.state == GhoulState.Stunned) GhoulSpriteKind.GhoulStunned else GhoulSpriteKind.Ghoul,
             )
         }
     }
@@ -781,7 +787,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     private fun drawFpOverlays(canvas: Canvas, now: Long) {
         ensureShaders()
         val ghoulThreat = game.phase == GhoulPhase.Playing &&
-            game.ghoul.state != GhoulState.Inactive && game.ghoul.state != GhoulState.Stunned
+            game.ghouls.any { it.state != GhoulState.Inactive && it.state != GhoulState.Stunned }
         val gap = game.pathGap
         if (ghoulThreat && gap < PROXIMITY_TILES) {
             val intensity = ((PROXIMITY_TILES - gap) / PROXIMITY_TILES).coerceIn(0f, 1f)
@@ -1002,13 +1008,13 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         text.color = LABEL
         canvas.drawText("RPM", rpmX + rpmWidth + 6f * density, rpmY, text)
 
-        val hunted = game.ghoul.state == GhoulState.Hunting
+        val hunted = game.huntingGhouls > 0
         val (status, statusColor) = when {
             game.phase == GhoulPhase.WarmUp -> "WARM UP" to Color.WHITE
             hunted && game.speed > game.ghoulHuntSpeed -> "PULLING AWAY" to RIDER
             hunted -> "IT'S GAINING" to GHOUL
-            game.ghoul.state == GhoulState.Inspecting -> "DON'T MOVE" to SEARCHING
-            game.ghoul.state == GhoulState.Searching -> "STAY QUIET" to SEARCHING
+            game.ghouls.any { it.state == GhoulState.Inspecting } -> "DON'T MOVE" to SEARCHING
+            game.ghouls.any { it.state == GhoulState.Searching } -> "STAY QUIET" to SEARCHING
             else -> "QUIET" to QUIET_TEXT
         }
         text.textAlign = Paint.Align.RIGHT
@@ -1112,11 +1118,11 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 banner(canvas, if (done) "$label ✓" else label, cx, midY, maxHalf, if (done) EXIT_OPEN else Color.WHITE, 30f)
             }
             GhoulPhase.Results -> game.results?.let {
-                banner(canvas, "ESCAPED  ${it.seconds.toInt()}s  CATCHES ${it.catches}", cx, midY, maxHalf, EXIT_OPEN)
+                banner(canvas, "LEVEL ${game.level} ESCAPED  ${it.seconds.toInt()}s  CATCHES ${it.catches}", cx, midY, maxHalf, EXIT_OPEN)
             }
             GhoulPhase.Countdown -> banner(
                 canvas,
-                "NEW MAZE IN ${ceil(game.phaseLeft).toInt().coerceAtLeast(1)}",
+                "LEVEL ${game.level + 1}  ${game.level + 1} GHOULS IN ${ceil(game.phaseLeft).toInt().coerceAtLeast(1)}",
                 cx, midY, maxHalf, Color.WHITE,
             )
             GhoulPhase.Playing -> Unit
@@ -1171,7 +1177,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     // ---------------------------------------------------------------- map half
 
     private fun drawMapHalf(canvas: Canvas, now: Long, translucent: Boolean = false) {
-        val hunted = game.ghoul.state == GhoulState.Hunting
+        val hunted = game.huntingGhouls > 0
         val zoom = if (hunted) 0.80f else 1f
         mapCamera.follow(rig.yaw)
         val baseW = if (translucent && resizingMap) resizeTileWidth else
@@ -1211,6 +1217,10 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         text.textAlign = Paint.Align.RIGHT
         canvas.drawText("MAP", mapRect.right - 10f * density, mapRect.bottom - 10f * density, text)
         text.textAlign = Paint.Align.LEFT
+        text.textSize = 12f * density
+        text.color = HIGHLIGHT
+        canvas.drawText("LEVEL ${game.level}  |  ${game.ghouls.size} GHOULS",
+            mapRect.left + 10f * density, mapRect.top + 19f * density, text)
     }
 
     private fun refreshNoiseDistances() {
@@ -1580,14 +1590,15 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     }
 
     private fun drawEntities(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float, now: Long) {
-        if (game.ghoul.state != GhoulState.Inactive) {
-            val ghoulPoint = projectWorld(game.ghoul.row, game.ghoul.col, ox, oy, tw, th)
-            paint.color = if (game.ghoul.state == GhoulState.Stunned) GHOUL_STUNNED else GHOUL
+        for (monster in game.ghouls) {
+            if (monster.state == GhoulState.Inactive) continue
+            val point = projectWorld(monster.row, monster.col, ox, oy, tw, th)
+            paint.color = if (monster.state == GhoulState.Stunned) GHOUL_STUNNED else GHOUL
             canvas.drawRect(
-                ghoulPoint.first - tw * 0.16f,
-                ghoulPoint.second - th * 0.78f,
-                ghoulPoint.first + tw * 0.16f,
-                ghoulPoint.second,
+                point.first - tw * 0.16f,
+                point.second - th * 0.78f,
+                point.first + tw * 0.16f,
+                point.second,
                 paint,
             )
         }
@@ -1646,8 +1657,12 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     }
 
     private fun drawThreat(canvas: Canvas, ox: Float, oy: Float, tw: Float, th: Float, now: Long) {
-        val state = game.ghoul.state
-        if (state != GhoulState.Hunting && state != GhoulState.Searching && state != GhoulState.Inspecting) return
+        val state = when {
+            game.huntingGhouls > 0 -> GhoulState.Hunting
+            game.ghouls.any { it.state == GhoulState.Inspecting } -> GhoulState.Inspecting
+            game.ghouls.any { it.state == GhoulState.Searching } -> GhoulState.Searching
+            else -> return
+        }
         val hunted = state == GhoulState.Hunting
         val pulse = ((sin(now / 160_000_000.0) + 1.0) * 0.5).toFloat()
         if (hunted) {
@@ -1664,19 +1679,24 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             canvas,
             "$label  GAP ${String.format(Locale.US, "%.1f", game.pathGap)}",
             mapRect.centerX(),
-            mapRect.top + 32f * density,
+            mapRect.top + 57f * density,
             mapRect.width() * 0.47f,
             if (hunted) Color.rgb(255, 75, 60) else SEARCHING,
         )
-        val p = projectWorld(game.ghoul.row, game.ghoul.col, ox, oy, tw, th)
-        if (p.first !in mapRect.left..mapRect.right || p.second !in mapRect.top..mapRect.bottom) {
-            paint.color = if (hunted) GHOUL else SEARCHING
-            canvas.drawCircle(
-                p.first.coerceIn(mapRect.left + 14f * density, mapRect.right - 14f * density),
-                p.second.coerceIn(mapRect.top + 14f * density, mapRect.bottom - 14f * density),
-                9f * density,
-                paint,
-            )
+        for (monster in game.ghouls) {
+            if (monster.state != GhoulState.Hunting && monster.state != GhoulState.Searching &&
+                monster.state != GhoulState.Inspecting
+            ) continue
+            val point = projectWorld(monster.row, monster.col, ox, oy, tw, th)
+            if (point.first !in mapRect.left..mapRect.right || point.second !in mapRect.top..mapRect.bottom) {
+                paint.color = if (monster.state == GhoulState.Hunting) GHOUL else SEARCHING
+                canvas.drawCircle(
+                    point.first.coerceIn(mapRect.left + 14f * density, mapRect.right - 14f * density),
+                    point.second.coerceIn(mapRect.top + 14f * density, mapRect.bottom - 14f * density),
+                    9f * density,
+                    paint,
+                )
+            }
         }
     }
 
@@ -2018,6 +2038,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         const val MAP_HEIGHT_KEY = "ghoul_run_map_overlay_height"
         const val MAP_OPACITY_KEY = "ghoul_run_map_overlay_opacity"
         const val MAP_INSET = 10f
+        const val MAX_LIGHT_CANDIDATES = 128
         const val STALL_NANOS = 500_000_000L
         const val TIMING_LOG_NANOS = 5_000_000_000L
         const val DIAGNOSTICS_REFRESH_NANOS = 250_000_000L
