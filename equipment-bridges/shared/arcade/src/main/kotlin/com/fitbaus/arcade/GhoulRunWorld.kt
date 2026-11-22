@@ -40,6 +40,11 @@ internal data class GhoulRunConfig(
     val loseContactSeconds: Float = 2f,
     val searchWaitSeconds: Float = 3f,
     val catchDistance: Float = 0.35f,
+    val stealthSettleSeconds: Float = 0.85f,
+    val stealthInspectDistance: Float = 0.6f,
+    val stealthInspectSeconds: Float = 1f,
+    val stealthTrackedSightDistance: Float = 1.25f,
+    val stealthRetreatClearance: Float = 0.45f,
     val catchKnockbackTiles: Int = 4,
     val catchStunSeconds: Float = 3f,
     val invulnerabilitySeconds: Float = 3f,
@@ -68,6 +73,9 @@ internal data class GhoulRunConfig(
         require(wanderSpeedRatio > 0f && searchSpeedRatio > wanderSpeedRatio && huntSpeedRatio > 1f)
         require(cruiseSpeed * huntSpeedRatio < sprintSpeed) { "sprinting must outrun the Ghoul" }
         require(loseContactSeconds > 0f && searchWaitSeconds > 0f && catchDistance in 0f..1f)
+        require(stealthSettleSeconds > 0f && stealthInspectSeconds > 0f)
+        require(stealthInspectDistance > catchDistance && stealthInspectDistance < 1f)
+        require(stealthTrackedSightDistance > stealthInspectDistance && stealthRetreatClearance > 0f)
         require(catchKnockbackTiles > 0 && catchStunSeconds > 0f && invulnerabilitySeconds >= catchStunSeconds)
         require(respawnSeconds >= 0f && respawnSeconds < invulnerabilitySeconds)
         require(startingHearts > 0 && shrinePulseRadius > 0f && shrineStunSeconds > 0f && shrineRechargeSeconds > 0f)
