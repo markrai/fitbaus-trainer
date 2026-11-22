@@ -404,7 +404,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             mapViewMode, mapWidthShare, mapHeightShare,
         )
         mapRect.set(bounds.left, bounds.top, bounds.right, bounds.bottom)
-        fpRect.set(0f, top, if (overlayMode) width.toFloat() else width * SPLIT_RATIO, height.toFloat())
+        fpRect.set(0f, top, if (overlayMode) width.toFloat() else bounds.left, height.toFloat())
         val now = System.nanoTime()
 
         if (overlayMode) {
