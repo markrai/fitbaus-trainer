@@ -1219,7 +1219,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         text.textAlign = Paint.Align.LEFT
         text.textSize = 12f * density
         text.color = HIGHLIGHT
-        canvas.drawText("LEVEL ${game.level}  |  ${game.ghouls.size} GHOULS",
+        val ghoulLabel = if (game.ghouls.size == 1) "GHOUL" else "GHOULS"
+        canvas.drawText("LEVEL ${game.level}  |  ${game.ghouls.size} $ghoulLabel",
             mapRect.left + 10f * density, mapRect.top + 19f * density, text)
     }
 
