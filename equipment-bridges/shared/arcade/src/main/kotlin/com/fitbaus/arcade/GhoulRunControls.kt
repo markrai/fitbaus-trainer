@@ -270,6 +270,13 @@ internal class GhoulRunSession(
         }
         cadenceReading = pace.advanceWarmup()
         val useController = controller != null && source != GhoulRunInputSource.Webcam
+        if (cadenceReading.calibrated) {
+            if (source == GhoulRunInputSource.Controller && useController && controllerAvailable) {
+                game.skipLeanCheckWithGo()
+            } else if (source != GhoulRunInputSource.Controller) {
+                game.restoreLeanCheckIfSkipped()
+            }
+        }
         val reversed = useController && controller.reversePressed && game.reverseDirection()
         if (game.choiceDecisions != seenChoiceDecisions) {
             if (game.choiceDecisions < seenChoiceDecisions) controllerTurns.clear()
