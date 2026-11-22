@@ -130,7 +130,8 @@ internal class GhoulRunGlRenderer(
         if (!ready) return
         try {
             snapshots.readInto(frame)
-            if (frame.diagnostics) GLES20.glClearColor(0.25f, 0f, 0.25f, 1f) else GLES20.glClearColor(0f, 0f, 0f, 1f)
+            if (frame.diagnostics) GLES20.glClearColor(0.25f, 0f, 0.25f, 1f)
+            else GLES20.glClearColor(0.086f, 0.122f, 0.153f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
             framesDrawn += 1L
             val maze = frame.maze
@@ -302,9 +303,9 @@ internal class GhoulRunGlRenderer(
 
     private fun createMazeTextures() {
         GLES20.glGenTextures(mazeTextures.size, mazeTextures, 0)
-        uploadProcedural(mazeTextures[0], TextureKind.Floor)
-        uploadProcedural(mazeTextures[1], TextureKind.Ceiling)
-        uploadProcedural(mazeTextures[2], TextureKind.Brick)
+        uploadIndustrial(mazeTextures[0], GhoulIndustrialSurface.Floor)
+        uploadIndustrial(mazeTextures[1], GhoulIndustrialSurface.Ceiling)
+        uploadIndustrial(mazeTextures[2], GhoulIndustrialSurface.Wall)
     }
 
     private fun createSpriteTextures() {
@@ -359,35 +360,10 @@ internal class GhoulRunGlRenderer(
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
     }
 
-    private fun uploadProcedural(texture: Int, kind: TextureKind) {
-        val size = TEXTURE_SIZE
-        val pixels = IntArray(size * size)
-        var y = 0
-        while (y < size) {
-            var x = 0
-            while (x < size) {
-                val noise = ((x * 17 + y * 31 + x * y * 3) and 15) - 7
-                val color = when (kind) {
-                    TextureKind.Floor -> {
-                        val joint = x % 16 <= 1 || y % 16 <= 1
-                        if (joint) rgb(35, 32, 30) else rgb(76 + noise, 68 + noise, 58 + noise)
-                    }
-                    TextureKind.Ceiling -> {
-                        val panel = x % 32 <= 1 || y % 32 <= 1
-                        if (panel) rgb(16, 18, 22) else rgb(34 + noise / 2, 36 + noise / 2, 42 + noise / 2)
-                    }
-                    TextureKind.Brick -> {
-                        val row = y / 12
-                        val joint = y % 12 <= 1 || (x + if (row % 2 == 0) 0 else 16) % 32 <= 1
-                        if (joint) rgb(56, 54, 52) else rgb(148 + noise, 140 + noise, 132 + noise)
-                    }
-                }
-                pixels[y * size + x] = color
-                x += 1
-            }
-            y += 1
-        }
-        uploadArgb(texture, size, size, pixels, mipmaps = true, repeat = true)
+    private fun uploadIndustrial(texture: Int, surface: GhoulIndustrialSurface) {
+        val pixels = GhoulIndustrialArt.atlas(surface)
+        uploadArgb(texture, GhoulIndustrialArt.ATLAS_SIZE, GhoulIndustrialArt.ATLAS_SIZE, pixels,
+            mipmaps = true, repeat = false)
     }
 
     private fun uploadArgb(texture: Int, width: Int, height: Int, pixels: IntArray, mipmaps: Boolean, repeat: Boolean) {
@@ -485,12 +461,7 @@ internal class GhoulRunGlRenderer(
     private fun floatBuffer(values: FloatArray): FloatBuffer =
         ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply { put(values); position(0) }
 
-    private fun rgb(r: Int, g: Int, b: Int): Int = -0x1000000 or (r.coerceIn(0, 255) shl 16) or
-        (g.coerceIn(0, 255) shl 8) or b.coerceIn(0, 255)
-
-    private enum class TextureKind { Floor, Ceiling, Brick }
-
-    private class MazeLocations(program: Int) {
+     private class MazeLocations(program: Int) {
         val position = attribute(program, "aPosition")
         val normal = attribute(program, "aNormal")
         val uv = attribute(program, "aUv")
@@ -551,8 +522,7 @@ internal class GhoulRunGlRenderer(
         const val FOV_RADIANS = (70.0 * PI / 180.0).toFloat()
         const val NEAR = 0.08f
         const val FAR = 60f
-        const val TEXTURE_SIZE = 64
-        const val GHOUL_BODY_ASSET = "arcade/ghoul/ghoul_body.png"
+         const val GHOUL_BODY_ASSET = "arcade/ghoul/ghoul_body.png"
         const val GHOUL_HALO_ASSET = "arcade/ghoul/ghoul_halo.png"
         const val GHOUL_ANCHOR_ASSET = "arcade/ghoul/ghoul_anchor.json"
 
@@ -567,7 +537,7 @@ internal class GhoulRunGlRenderer(
             void main() {
                 vWorld = aPosition;
                 vNormal = aNormal;
-                vUv = aUv * 2.0;
+                vUv = aUv;
                 gl_Position = uViewProjection * vec4(aPosition, 1.0);
             }
         """
@@ -596,7 +566,7 @@ internal class GhoulRunGlRenderer(
                 float lamp = (1.0 - smoothstep(radius * 0.30, radius, distanceToCamera)) * cone;
                 lamp *= 0.975 + 0.025 * sin(uLampPhase);
                 float pilot = 0.28 * (1.0 - smoothstep(0.35, 1.6, distanceToCamera));
-                vec3 lighting = vec3(max(lamp, pilot)) * vec3(1.0, 0.86, 0.68);
+                vec3 lighting = vec3(max(lamp, pilot)) * vec3(0.83, 0.94, 1.0);
                 for (int i = 0; i < 8; ++i) {
                     if (i < uLightCount) {
                         vec3 toLight = vec3(uLightXyr[i].xy, 0.55) - vWorld;
@@ -606,10 +576,13 @@ internal class GhoulRunGlRenderer(
                         lighting += uLightRgb[i] * falloff * lambert;
                     }
                 }
-                float face = 0.55 + 0.45 * abs(vNormal.z + vNormal.x * 0.55 - vNormal.y * 0.25);
-                float fog = 1.0 - smoothstep(20.0, 42.0, distanceToCamera);
+                float face = 0.65 + 0.35 * abs(vNormal.z + vNormal.x * 0.55 - vNormal.y * 0.25);
                 vec3 base = texture2D(uTexture, vUv).rgb;
-                gl_FragColor = vec4(base * min(vec3(1.35), lighting) * face * fog, 1.0);
+                vec3 lit = base * min(vec3(1.35), lighting) * face;
+                float lowMist = 1.0 - clamp(vWorld.z / 0.85, 0.0, 1.0);
+                float fog = min(0.72, smoothstep(3.0, 14.0, distanceToCamera) * (0.48 + 0.20 * lowMist));
+                vec3 fogColor = vec3(0.086, 0.122, 0.153);
+                gl_FragColor = vec4(mix(lit, fogColor, fog), 1.0);
             }
         """
         const val SPRITE_VERTEX = """
@@ -647,7 +620,8 @@ internal class GhoulRunGlRenderer(
                 float lamp = 1.0 - smoothstep(max(0.5, uLampRadius * 0.3), max(0.6, uLampRadius), d);
                 float pilot = 0.28 * (1.0 - smoothstep(0.35, 1.6, d));
                 float light = max(max(lamp, pilot), uGlow * (0.9 + 0.1 * sin(uGlowPhase)));
-                gl_FragColor = vec4(texel.rgb * light, texel.a);
+                float fog = smoothstep(3.0, 14.0, d) * 0.46;
+                gl_FragColor = vec4(mix(texel.rgb * light, vec3(0.086, 0.122, 0.153), fog), texel.a);
             }
         """
         const val GHOUL_FRAGMENT = """
@@ -693,7 +667,8 @@ internal class GhoulRunGlRenderer(
                 c.rgb *= uTint;
                 c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.3, 0.59, 0.11))), uDesat);
                 if (c.a < 0.02) discard;
-                gl_FragColor = vec4(c.rgb * light, c.a);
+                float fog = smoothstep(3.0, 14.0, distanceToCamera) * 0.55;
+                gl_FragColor = vec4(mix(c.rgb * light, vec3(0.086, 0.122, 0.153), fog), c.a);
             }
         """
     }

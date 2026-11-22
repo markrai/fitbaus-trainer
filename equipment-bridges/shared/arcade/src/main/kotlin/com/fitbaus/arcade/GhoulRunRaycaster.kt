@@ -15,7 +15,7 @@ import kotlin.math.tan
  * y in [row, row + 1), so x follows columns (east) and y follows rows (south). Anything outside
  * the grid is solid.
  */
-internal class GhoulRayGrid(val rows: Int, val cols: Int, internal val solid: BooleanArray) {
+internal class GhoulRayGrid(val rows: Int, val cols: Int, internal val solid: BooleanArray, val seed: Long = 0L) {
     init {
         require(rows > 0 && cols > 0 && solid.size == rows * cols)
     }
@@ -28,7 +28,7 @@ internal class GhoulRayGrid(val rows: Int, val cols: Int, internal val solid: Bo
             val rows = world.tileRows
             val cols = world.tileCols
             val solid = BooleanArray(rows * cols) { index -> !world.isFloorTile(MazeTile(index / cols, index % cols)) }
-            return GhoulRayGrid(rows, cols, solid)
+            return GhoulRayGrid(rows, cols, solid, world.seed)
         }
     }
 }
