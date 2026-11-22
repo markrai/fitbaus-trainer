@@ -640,7 +640,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                     val eyeY = spriteDst.top + spriteDst.height() * GhoulEyeArt.EYE_V
                     val haloRadius = max(1.1f * density, spriteDst.height() * GhoulEyeArt.HALO_V)
                     val coreRadius = max(0.65f * density, spriteDst.height() * GhoulEyeArt.CORE_V)
-                    for (eyeU in floatArrayOf(GhoulEyeArt.LEFT_U, GhoulEyeArt.RIGHT_U)) {
+                    for (eyeIndex in 0..1) {
+                        val eyeU = if (eyeIndex == 0) GhoulEyeArt.LEFT_U else GhoulEyeArt.RIGHT_U
                         val eyeX = spriteDst.left + spriteDst.width() * eyeU
                         canvas.drawCircle(eyeX, eyeY, haloRadius, eyeHaloPaint)
                         canvas.drawCircle(eyeX, eyeY, coreRadius, eyeCorePaint)
