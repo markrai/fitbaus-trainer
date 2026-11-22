@@ -33,7 +33,7 @@ internal class GhoulMapOverlayLayoutTest {
         val a = GhoulMapOverlayLayout.bounds(1000f, 700f, 54f, 10f, GhoulMapViewMode.Overlay)
         val shares = GhoulMapOverlayLayout.resizedShares(
             GhoulMapOverlayLayout.DEFAULT_WIDTH_SHARE, GhoulMapOverlayLayout.DEFAULT_HEIGHT_SHARE,
-            a.width, a.height, -700f, 500f, 1000f, 646f,
+            a.width, a.height, -700f, 500f, 1000f, 646f, 24f,
         )
         assertEquals(GhoulMapOverlayLayout.MAX_WIDTH_SHARE, shares.first)
         assertEquals(GhoulMapOverlayLayout.MAX_HEIGHT_SHARE, shares.second)
@@ -46,10 +46,43 @@ internal class GhoulMapOverlayLayoutTest {
         assertTrue(large.height > a.height)
 
         val tiny = GhoulMapOverlayLayout.resizedShares(
-            shares.first, shares.second, large.width, large.height, 900f, -900f, 1000f, 646f,
+            shares.first, shares.second, large.width, large.height, 900f, -900f, 1000f, 646f, 24f,
         )
         assertEquals(GhoulMapOverlayLayout.MIN_WIDTH_SHARE, tiny.first)
         assertEquals(GhoulMapOverlayLayout.MIN_HEIGHT_SHARE, tiny.second)
+    }
+
+    @Test
+    fun dragNearTheViewportEdgeSnapsToFullCoverage() {
+        val start = GhoulMapOverlayLayout.bounds(1000f, 700f, 54f, 10f, GhoulMapViewMode.Overlay)
+        val widthAlmostFull = 1000f - 12f
+        val heightAlmostFull = 646f - 12f
+        val shares = GhoulMapOverlayLayout.resizedShares(
+            GhoulMapOverlayLayout.DEFAULT_WIDTH_SHARE, GhoulMapOverlayLayout.DEFAULT_HEIGHT_SHARE,
+            start.width, start.height,
+            start.width - widthAlmostFull, heightAlmostFull - start.height,
+            1000f, 646f, 24f,
+        )
+        assertEquals(1f, shares.first)
+        assertEquals(1f, shares.second)
+        val bounds = GhoulMapOverlayLayout.bounds(
+            1000f, 700f, 54f, 10f, GhoulMapViewMode.Overlay, shares.first, shares.second,
+        )
+        assertEquals(0f, bounds.left, 0.001f)
+        assertEquals(54f, bounds.top, 0.001f)
+        assertEquals(1000f, bounds.right, 0.001f)
+        assertEquals(700f, bounds.bottom, 0.001f)
+    }
+
+    @Test
+    fun dragOutsideSnapRangeRemainsGradual() {
+        val resized = GhoulMapOverlayLayout.resizedShares(
+            GhoulMapOverlayLayout.DEFAULT_WIDTH_SHARE, GhoulMapOverlayLayout.DEFAULT_HEIGHT_SHARE,
+            380f, 374.68f, -570f, 221.32f,
+            1000f, 646f, 24f,
+        )
+        assertEquals(0.95f, resized.first, 0.0001f)
+        assertEquals(0.9226f, resized.second, 0.0001f)
     }
 
     @Test
