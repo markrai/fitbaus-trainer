@@ -309,6 +309,8 @@ internal class GhoulRunWorld(val config: GhoulRunConfig = GhoulRunConfig(), seed
                 chosen.none { it == candidate }
             }.maxWithOrNull(
                 compareBy<MazeCell> { candidate ->
+                    if ((pathDistance(start, candidate) ?: 0) >= config.monsterSpawnMinDistance) 1 else 0
+                }.thenBy { candidate ->
                     chosen.minOf { previous -> pathDistance(candidate, previous) ?: 0 }
                 }.thenBy { candidate ->
                     pathDistance(start, candidate) ?: 0
