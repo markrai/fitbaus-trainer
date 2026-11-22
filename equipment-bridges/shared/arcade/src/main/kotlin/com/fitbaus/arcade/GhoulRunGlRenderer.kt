@@ -236,6 +236,8 @@ internal class GhoulRunGlRenderer(
                 )
                 GLES20.glUniform1f(ghoulLocations.desaturation,
                     if (kind == GhoulSpriteKind.GhoulStunned) 0.8f else 0f)
+                GLES20.glUniform1f(ghoulLocations.mouthOpen,
+                    if (kind == GhoulSpriteKind.GhoulStunned) 0f else frame.spriteMouth[index])
             } else {
                 if (activeProgram != spriteProgram) {
                     preparePropProgram(frame)
@@ -573,6 +575,7 @@ internal class GhoulRunGlRenderer(
         val sway = uniform(program, "uSway")
         val tint = uniform(program, "uTint")
         val desaturation = uniform(program, "uDesat")
+        val mouthOpen = uniform(program, "uMouthOpen")
     }
 
     private class SmokeLocations(program: Int) {
@@ -719,6 +722,7 @@ internal class GhoulRunGlRenderer(
             uniform float uSway;
             uniform vec3 uTint;
             uniform float uDesat;
+            uniform float uMouthOpen;
             varying vec2 vUv;
             varying vec3 vWorld;
             void main() {
@@ -740,7 +744,16 @@ internal class GhoulRunGlRenderer(
                 vec2 dh = d / s - (t * tang + u * rad);
                 vec4 halo = texture2D(uHalo, uChest + dh / vec2(ASPECT, 1.0));
                 vec2 bodyUv = vUv - vec2((uFeetV - vUv.y) * tan(uSway) / ASPECT, 0.0);
-                vec4 body = texture2D(uBody, bodyUv);
+                float mouthOpen = clamp(uMouthOpen, 0.0, 1.0);
+                vec2 faceUv = bodyUv;
+                if (mouthOpen > 0.01 && abs(bodyUv.x - ${GhoulAttackMouth.CENTRE_U}) < 0.055 &&
+                    bodyUv.y > 0.18 && bodyUv.y < 0.36) {
+                    float jawX = 1.0 - smoothstep(0.012, 0.052, abs(bodyUv.x - ${GhoulAttackMouth.CENTRE_U}));
+                    float jawY = smoothstep(0.235, 0.255, bodyUv.y) *
+                                 (1.0 - smoothstep(0.315, 0.355, bodyUv.y));
+                    faceUv.y -= 0.026 * mouthOpen * jawX * jawY;
+                }
+                vec4 body = texture2D(uBody, faceUv);
                 vec4 c = body + halo * (1.0 - body.a);
                 c.rgb *= uTint;
                 c.rgb = mix(c.rgb, vec3(dot(c.rgb, vec3(0.3, 0.59, 0.11))), uDesat);
@@ -749,6 +762,26 @@ internal class GhoulRunGlRenderer(
                 float fog = smoothstep(1.0, 11.0, distanceToCamera) * 0.46;
                 vec3 fogColor = vec3(0.275, 0.314, 0.349) * clamp(uLampRadius / 6.0, 0.0, 1.0);
                 vec3 shaded = mix(c.rgb * light, fogColor, fog);
+                if (mouthOpen > 0.01 && abs(bodyUv.x - ${GhoulAttackMouth.CENTRE_U}) < 0.055 &&
+                    bodyUv.y > 0.17 && bodyUv.y < 0.36) {
+                    float mouthU = ${GhoulAttackMouth.CENTRE_U};
+                    float mouthV = ${GhoulAttackMouth.CENTRE_V} + 0.013 * mouthOpen;
+                    vec2 mouthScale = vec2(
+                        mix(${GhoulAttackMouth.CLOSED_HALF_WIDTH}, ${GhoulAttackMouth.OPEN_HALF_WIDTH}, mouthOpen),
+                        mix(${GhoulAttackMouth.CLOSED_HALF_HEIGHT}, ${GhoulAttackMouth.OPEN_HALF_HEIGHT}, mouthOpen)
+                    );
+                    vec2 mouthUv = (bodyUv - vec2(mouthU, mouthV)) / mouthScale;
+                    float shape = length(mouthUv) + 0.045 * sin(mouthUv.x * 13.0);
+                    float rim = (1.0 - smoothstep(0.82, 1.05, shape)) * mouthOpen;
+                    float cavity = (1.0 - smoothstep(0.70, 0.89, shape)) * mouthOpen;
+                    shaded = mix(shaded, vec3(0.36, 0.085, 0.06) * max(0.4, light), rim * 0.85);
+                    shaded = mix(shaded, vec3(0.035, 0.003, 0.007), cavity * 0.98);
+                    float upperTeeth = 1.0 - smoothstep(0.07, 0.23, abs(mouthUv.y + 0.66));
+                    float lowerTeeth = 1.0 - smoothstep(0.07, 0.22, abs(mouthUv.y - 0.68));
+                    float toothColumn = smoothstep(0.16, 0.34, abs(fract(mouthUv.x * 4.0) - 0.5));
+                    float teeth = min(1.0, upperTeeth + lowerTeeth) * toothColumn * cavity;
+                    shaded = mix(shaded, vec3(0.72, 0.65, 0.53) * max(light, 0.47), teeth * 0.72);
+                }
 
                 vec2 coreScale = vec2(${GhoulEyeArt.CORE_U}, ${GhoulEyeArt.CORE_V});
                 vec2 haloScale = vec2(${GhoulEyeArt.HALO_U}, ${GhoulEyeArt.HALO_V});

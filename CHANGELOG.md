@@ -77,6 +77,18 @@ included in this upcoming release.
 
 ### Added
 
+- **Ghoul Run close-range attack expression.** A hunting Ghoul opens its
+  mouth progressively only when the rider looks toward it, the creature
+  faces the rider, their path is unobstructed, and they are within close
+  encounter range. The mouth closes smoothly when any condition breaks.
+  Each Ghoul owns its own animation pose for multi-enemy levels, while
+  wandering, inspecting, stunned and retreating creatures never initiate
+  the attack expression. GLES2 deforms the lower face and draws a dark
+  mouth cavity, gums and teeth over the existing character texture.
+  The software fallback draws a matching animated facial expression
+  without asset downloads, new GL extensions or per-frame bitmap
+  allocations. The red-eye emissive effect remains independent.
+
 - **Ghoul Run escalating levels.** Each successful maze escape increases the
   level and adds one independently wandering Ghoul; Level 1 keeps its original
   single-creature behavior. Spawn locations are deterministic and dispersed

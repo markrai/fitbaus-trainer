@@ -1,0 +1,114 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package com.fitbaus.arcade
+
+import kotlin.math.PI
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+internal class GhoulAttackMouthTest {
+    private fun target(
+        x: Float = 1f,
+        y: Float = 0f,
+        cameraYaw: Float = 0f,
+        monsterHeading: MazeDirection = MazeDirection.West,
+        state: GhoulState = GhoulState.Hunting,
+        visible: Boolean = true,
+    ): Float = GhoulAttackMouth.target(
+        0f, 0f, cameraYaw, x, y, monsterHeading, state, visible,
+    )
+
+    @Test
+    fun opensOnlyDuringCloseHeadOnMutualGaze() {
+        assertTrue(target() > 0f)
+        assertEquals(1f, target(x = 0.5f), 0.0001f)
+        assertEquals(0f, target(x = 1.5f))
+        assertEquals(0f, target(x = 0.0f))
+        assertEquals(0f, target(x = 1f, y = 1f))
+        assertTrue(target(x = 1f, y = 0.3f) > 0f)
+    }
+
+    @Test
+    fun lookingAwayOrGhoulFacingAwayPreventsExpression() {
+        assertEquals(0f, target(cameraYaw = PI.toFloat() / 2f))
+        assertEquals(0f, target(cameraYaw = PI.toFloat()))
+        assertEquals(0f, target(monsterHeading = MazeDirection.East))
+        assertEquals(0f, target(monsterHeading = MazeDirection.North))
+        assertTrue(target(monsterHeading = MazeDirection.West) > 0f)
+        assertTrue(target(
+            x = 0f, y = 1f, cameraYaw = PI.toFloat() / 2f,
+            monsterHeading = MazeDirection.North,
+        ) > 0f)
+    }
+
+    @Test
+    fun searchingInspectingWanderingAndStunnedGhoulsNeverOpen() {
+        for (state in GhoulState.entries) {
+            val expected = if (state == GhoulState.Hunting) target() else 0f
+            assertEquals(expected, target(state = state))
+        }
+        assertEquals(0f, target(visible = false))
+        assertEquals(0f, target(cameraYaw = Float.NaN))
+    }
+
+    @Test
+    fun opensAndClosesSmoothlyWithoutFrameRateDependence() {
+        var opening = 0f
+        repeat(14) { opening = GhoulAttackMouth.advance(opening, 1f, 0.02f) }
+        assertEquals(1f, opening, 0.0001f)
+        var closing = opening
+        repeat(12) { closing = GhoulAttackMouth.advance(closing, 0f, 0.02f) }
+        assertEquals(0f, closing, 0.0001f)
+        assertEquals(0.6f, GhoulAttackMouth.advance(0.6f, 1f, 0f))
+        assertEquals(0.6f, GhoulAttackMouth.advance(0.6f, 1f, Float.NaN))
+        assertEquals(0f, GhoulAttackMouth.advance(-5f, 0f, 0.1f))
+        assertEquals(1f, GhoulAttackMouth.advance(10f, 1f, 0.1f))
+    }
+
+    @Test
+    fun worldLineOfSightAndGameplayStateGateTheMouth() {
+        val game = GhoulRunGame(seed = 54321L)
+        game.markLeanCheckPassed()
+        game.step(game.config.step, GhoulLane.Center, 0f, 90f, 90f)
+        val start = game.world.start
+        val direction = game.world.exits(start).first()
+        game.placeRider(start, direction)
+        val adjacent = start.moved(direction)
+        game.forceGhoul(adjacent, direction.opposite, state = GhoulState.Hunting)
+        val yaw = GhoulRaycaster.yawOf(direction)
+        assertTrue(GhoulAttackMouth.target(game, game.ghoul, yaw) > 0f)
+
+        var blocked: Pair<MazeCell, MazeDirection>? = null
+        for (row in 0 until game.config.height) for (col in 0 until game.config.width) {
+            val cell = MazeCell(row, col)
+            if (blocked != null) continue
+            blocked = MazeDirection.entries.firstOrNull {
+                game.world.contains(cell.moved(it)) && !game.world.isOpen(cell, it)
+            }?.let { cell to it }
+        }
+        val wall = requireNotNull(blocked)
+        game.placeRider(wall.first, wall.second)
+        game.forceGhoul(wall.first.moved(wall.second), wall.second.opposite, state = GhoulState.Hunting)
+        assertEquals(0f, GhoulAttackMouth.target(game, game.ghoul, GhoulRaycaster.yawOf(wall.second)))
+    }
+
+    @Test
+    fun independentMonsterPoseResetsWithoutChangingItsGameState() {
+        val first = GhoulMonster(MazeCell(0, 0))
+        val second = GhoulMonster(MazeCell(1, 1))
+        first.mouthOpen = 0.9f
+        second.mouthOpen = 0.4f
+        first.reset(MazeDirection.East, true)
+        assertEquals(0f, first.mouthOpen)
+        assertEquals(0.4f, second.mouthOpen)
+        val snapshot = GhoulGlSnapshot()
+        snapshot.spriteCount = 2
+        snapshot.spriteMouth[0] = first.mouthOpen
+        snapshot.spriteMouth[1] = second.mouthOpen
+        val copied = GhoulGlSnapshot()
+        copied.copyFrom(snapshot)
+        assertEquals(0f, copied.spriteMouth[0])
+        assertEquals(0.4f, copied.spriteMouth[1])
+    }
+}

@@ -15,7 +15,7 @@ import kotlin.math.tan
 internal enum class GhoulSpriteKind { Ghoul, GhoulStunned, Exit, ExitLocked, ShrineReady, ShrineSpent }
 
 /** A billboard in continuous tile space; [lift] raises it off the floor in wall heights. */
-internal class GhoulSprite(var x: Float, var y: Float, var kind: GhoulSpriteKind, var lift: Float = 0f) {
+internal class GhoulSprite(var x: Float, var y: Float, var kind: GhoulSpriteKind, var lift: Float = 0f, var mouthOpen: Float = 0f) {
     internal var depth = 0f
 }
 
@@ -128,6 +128,7 @@ internal class GhoulSpriteDraw {
 
     /** Lamp level 0..1 (already including any glow) the view applies as a multiply filter. */
     var light = 1f
+    var mouthOpen = 0f
 
     /** Inclusive [start, end] column pairs where the sprite is in front of the wall. */
     val runs = IntArray(MAX_RUNS * 2)
@@ -352,6 +353,7 @@ internal class GhoulFirstPersonRenderer(val width: Int, val height: Int, fovDegr
             draw.width = sw
             draw.height = sh
             draw.light = max(light(depth), spriteGlow(kind, time))
+            draw.mouthOpen = sprite.mouthOpen
             drawCount += 1
         }
     }

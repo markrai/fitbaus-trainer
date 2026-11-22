@@ -444,6 +444,7 @@ internal class GhoulGlSnapshot {
     val lightRgb = FloatArray(MAX_LIGHTS * 3)
     var spriteCount = 0
     val spriteXyk = FloatArray(MAX_SPRITES * 3)
+    val spriteMouth = FloatArray(MAX_SPRITES)
 
     fun copyFrom(other: GhoulGlSnapshot) {
         maze = other.maze; cameraX = other.cameraX; cameraY = other.cameraY; yaw = other.yaw
@@ -454,6 +455,7 @@ internal class GhoulGlSnapshot {
         ghoulBob = other.ghoulBob; ghoulSway = other.ghoulSway; ghoulDesaturation = other.ghoulDesaturation
         lightCount = other.lightCount; other.lightXyr.copyInto(lightXyr); other.lightRgb.copyInto(lightRgb)
         spriteCount = other.spriteCount; other.spriteXyk.copyInto(spriteXyk)
+        other.spriteMouth.copyInto(spriteMouth)
     }
 
     companion object {
