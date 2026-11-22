@@ -72,10 +72,14 @@ internal object GhoulMapOverlayLayout {
         deltaY: Float,
         screenWidth: Float,
         playableHeight: Float,
+        edgeSnapPixels: Float,
     ): Pair<Float, Float> {
         if (screenWidth <= 0f || playableHeight <= 0f) return widthShare to heightShare
-        val resizedWidth = ((startWidth - deltaX) / screenWidth).coerceIn(MIN_WIDTH_SHARE, MAX_WIDTH_SHARE)
-        val resizedHeight = ((startHeight + deltaY) / playableHeight).coerceIn(MIN_HEIGHT_SHARE, MAX_HEIGHT_SHARE)
+        val widthFraction = ((startWidth - deltaX) / screenWidth).coerceIn(MIN_WIDTH_SHARE, MAX_WIDTH_SHARE)
+        val heightFraction = ((startHeight + deltaY) / playableHeight).coerceIn(MIN_HEIGHT_SHARE, MAX_HEIGHT_SHARE)
+        val snap = edgeSnapPixels.coerceAtLeast(0f)
+        val resizedWidth = if (widthFraction >= 1f - snap / screenWidth) MAX_WIDTH_SHARE else widthFraction
+        val resizedHeight = if (heightFraction >= 1f - snap / playableHeight) MAX_HEIGHT_SHARE else heightFraction
         return resizedWidth to resizedHeight
     }
 }
