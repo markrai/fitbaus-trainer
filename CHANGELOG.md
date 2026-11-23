@@ -19,9 +19,14 @@ See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
 
 ### Changed
 
+- **Arcade game selection names.** Rename the three game-selection tabs from
+  FLAK RUN to **MAVERICK**, TRAIL RIDE to **TRAILS**, and GHOUL RUN to
+  **IT HEARS YOU**. Existing game identifiers, controller mappings, saved
+  preferences, and gameplay behavior are unchanged.
+
 - **Trail Ride HUD refinement.** Remove the flashing “STEER LEFT” and
-  “STEER RIGHT” guidance banners. Existing trail-edge visuals, off-trail
-  speed reduction and other gameplay prompts remain unchanged.
+  “STEER RIGHT” guidance banners. The normal dirt-path boundary markers,
+  off-trail speed reduction and other gameplay prompts remain intact.
 
 - **Trail Ride visual fidelity upgrade.** Keep the existing first-person
   steering, terrain projection, face-tracking jumps, hazard collision,
@@ -36,6 +41,11 @@ See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
   warning and timing indicators.
 
 ### Fixed
+
+- **TRAILS edge flashing.** Remove the orange warning blink on the left or
+  right path edge when riding near the boundary. Both edges retain their
+  ordinary terrain-blended colors. Off-trail detection, speed reduction,
+  steering, and collision handling are unchanged.
 
 - **Android 5.1 YouTube video-surface rendering.** Route video through a
   `TextureView` on Android versions below 7.0 instead of relying on a separately
