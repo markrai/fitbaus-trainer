@@ -54,6 +54,7 @@ internal class FakeCatalog : YouTubeCatalog {
     var discoverPage: () -> FeedPage = { FeedPage(videos("trend", 3), FakeCursor(2)) }
     var relatedPage: (List<VideoSummary>) -> FeedPage = { FeedPage(emptyList(), null) }
     val searchPages = HashMap<String, () -> FeedPage>()
+    var channelPage: (String) -> FeedPage = { FeedPage(videos("channel", 3), FakeCursor(2)) }
     var morePage: (FakeCursor) -> FeedPage = { FeedPage(videos("more${it.page}", 2), null) }
     val resolutions = HashMap<String, () -> ResolvedVideo>()
     val calls = ArrayList<String>()
@@ -66,6 +67,11 @@ internal class FakeCatalog : YouTubeCatalog {
     override fun search(query: String): FeedPage {
         calls += "search:$query"
         return (searchPages[query] ?: { FeedPage(videos(query, 2), null) })()
+    }
+
+    override fun channelVideos(channelUrl: String): FeedPage {
+        calls += "channel:$channelUrl"
+        return channelPage(channelUrl)
     }
 
     override fun related(seeds: List<VideoSummary>): FeedPage {
