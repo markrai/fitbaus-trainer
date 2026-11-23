@@ -849,7 +849,7 @@ records and are not renumbered.
   for Bluetooth LE, Keep Awake, and text-to-speech. Native builds use
   `CapacitorHttp` for SISU `/health` and `/workout/ingest`; the hosted PWA path
   (Web Bluetooth, browser speech, Screen Wake Lock, service worker) is
-  unchanged. See [NATIVE-DEVELOPMENT.md](NATIVE-DEVELOPMENT.md).
+  unchanged. See [NATIVE-DEVELOPMENT.md](docs/NATIVE-DEVELOPMENT.MD).
 
 ## [0.9.41] - 2026-02-22
 
