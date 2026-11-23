@@ -33,6 +33,89 @@ class YouTubeSessionTest {
     )
 
     @Test
+    fun channelAvatarOpensExactChannelVideosAndRestoresPreviousResults() {
+        val channelUrl = "https://www.youtube.com/channel/UC0000000000000000000000"
+        session.start()
+        runner.runAll()
+        val original = session.state.browse.items
+        val originalVideo = original[0].copy(channelUrl = channelUrl, channelAvatarUrl = "https://yt3.ggpht.com/avatar")
+        session.open(originalVideo)
+        runner.runAll()
+        assertTrue(session.hasEngine)
+        assertEquals(channelUrl, session.state.playback.video?.channelUrl)
+        assertTrue(session.openChannel(session.state.playback.video!!))
+        assertTrue(engines.last.released)
+        assertEquals(Screen.Results, session.state.screen)
+        assertEquals("Channel · VIDEOS", session.state.browse.title)
+        assertEquals(ListStatus.Loading, session.state.browse.status)
+        runner.runAll()
+        assertEquals("channel:$channelUrl", catalog.calls.last())
+        assertEquals(3, session.state.browse.items.size)
+        assertTrue(session.state.browse.canLoadMore)
+        session.loadMore(true)
+        runner.runAll()
+        assertEquals(5, session.state.browse.items.size)
+        session.open(session.state.browse.items[0])
+        runner.runAll()
+        session.back()
+        assertEquals(5, session.state.browse.items.size)
+        session.backFromChannel()
+        assertEquals(original, session.state.browse.items)
+        assertNull(session.state.browse.channelUrl)
+        session.loadMore(true)
+        runner.runAll()
+        assertEquals(5, session.state.browse.items.size)
+    }
+
+    @Test
+    fun channelErrorsRetryTheChannelAndNotTrendingOrSearch() {
+        val channelUrl = "https://www.youtube.com/@testchannel"
+        session.start()
+        runner.runAll()
+        session.open(session.state.browse.items[0].copy(channelUrl = channelUrl))
+        runner.runAll()
+        catalog.channelPage = { throw IllegalStateException("channel temporarily unavailable") }
+        assertTrue(session.openChannel(session.state.playback.video!!))
+        runner.runAll()
+        assertEquals(ListStatus.Error, session.state.browse.status)
+        catalog.channelPage = { FeedPage(videos("fixed", 2), null) }
+        session.retry()
+        runner.runAll()
+        assertEquals(ListStatus.Ready, session.state.browse.status)
+        assertEquals(2, session.state.browse.items.size)
+        assertEquals(2, catalog.calls.count { it == "channel:$channelUrl" })
+    }
+
+    @Test
+    fun exitingChannelDiscardsItsPendingResponse() {
+        val channelUrl = "https://www.youtube.com/@testchannel"
+        session.start()
+        runner.runAll()
+        val previous = session.state.browse
+        session.open(previous.items[0].copy(channelUrl = channelUrl))
+        runner.runAll()
+        assertTrue(session.openChannel(session.state.playback.video!!))
+        session.backFromChannel()
+        runner.runAll()
+        assertEquals(previous, session.state.browse)
+        assertNull(session.state.browse.channelUrl)
+    }
+
+    @Test
+    fun absentOrInvalidChannelLinksNeverExitPlayback() {
+        session.start()
+        runner.runAll()
+        session.open(session.state.browse.items[0])
+        runner.runAll()
+        assertFalse(session.openChannel(session.state.playback.video!!))
+        assertTrue(session.hasEngine)
+        assertEquals(Screen.Player, session.state.screen)
+        assertFalse(session.openChannel(session.state.playback.video!!.copy(channelUrl = "https://youtube.com.evil.test/@wrong")))
+        assertTrue(session.hasEngine)
+        assertEquals(Screen.Player, session.state.screen)
+    }
+
+    @Test
     fun startingLoadsADiscoveryFeedOffTheUiThread() {
         assertEquals(ListStatus.Idle, session.state.browse.status)
         session.start()
