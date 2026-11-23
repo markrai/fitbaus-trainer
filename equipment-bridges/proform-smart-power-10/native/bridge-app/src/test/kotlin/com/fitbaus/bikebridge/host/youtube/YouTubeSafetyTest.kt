@@ -72,7 +72,7 @@ class YouTubeSafetyTest {
             permissions,
         )
         assertFalse(manifest.contains("YouTube"), "no separate YouTube activity or launcher")
-        assertTrue(manifest.contains("android:process=\"\:speech\"".replace("\\:", ":")))
+        assertTrue(manifest.contains("android:process=\":speech\""))
         assertTrue(manifest.contains("android:exported=\"false\""))
         assertTrue(
             Regex("""<uses-permission\s+android:name="android.permission.ACCESS_NETWORK_STATE"\s+tools:node="remove"\s*/>""").containsMatchIn(manifest),
