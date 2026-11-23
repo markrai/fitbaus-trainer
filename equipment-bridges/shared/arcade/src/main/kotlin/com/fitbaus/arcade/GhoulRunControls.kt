@@ -370,7 +370,7 @@ internal class GhoulRunSession(
                 lastReadyNanos = nowNanos
             } else {
                 if (lastReadyNanos != Long.MIN_VALUE) {
-                    val dt = ((nowNanos - lastReadyNanos) / 1_000_000_000f).coerceIn(0f, game.config.maxFrame)
+                    val dt = ((nowNanos - lastReadyNanos) / 1_000_000_000f).coerceIn(0f, 0.5f)
                     readyRemaining = (readyRemaining - dt).coerceAtLeast(0f)
                 }
                 lastReadyNanos = nowNanos
