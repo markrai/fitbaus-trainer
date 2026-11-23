@@ -61,6 +61,19 @@ class TrailRideVisualContractTest {
     }
 
     @Test
+    fun trailEdgesRemainVisibleWithoutProximityFlashing() {
+        val ground = view.substringAfter("private fun drawGround(d: Float, camX: Float, yaw: Float)")
+            .substringBefore("private fun span(")
+        assertTrue(ground.contains("val edgeColor = TrailSprites.blend(EDGE, FAR_GROUND, fog)"))
+        assertTrue(ground.contains("span(row, cx - hw - edge * 0.5f, cx - hw + edge, edgeColor)"))
+        assertTrue(ground.contains("span(row, cx + hw - edge, cx + hw + edge * 0.5f, edgeColor)"))
+        assertFalse(ground.contains("game.nearEdge"))
+        assertFalse(ground.contains("edgeSide"))
+        assertFalse(ground.contains("blink"))
+        assertFalse(view.contains("WARN_EDGE"))
+    }
+
+    @Test
     fun visualChangesDoNotIntroduceSimulationOrEquipmentInputs() {
         val forbidden = listOf(
             "requestResistance", "setResistance", "requestIncline", "setIncline",
