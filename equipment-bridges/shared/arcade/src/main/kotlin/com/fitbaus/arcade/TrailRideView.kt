@@ -796,6 +796,9 @@ public class TrailRideView(context: Context) : View(context) {
             }
             if (t <= DITCH_WARN_SECONDS) return "DITCH AHEAD - GET READY TO STAND" to PROMPT_TEXT
         }
+        if (g.phase == TrailPhase.Riding && g.offTrail) {
+            return "OFF TRAIL - SLIGHT SLOWDOWN" to (if (blink) WARN_TEXT else WHITE)
+        }
         if (g.phase == TrailPhase.Riding && g.nearEdge && !g.airborne) {
             return (if (g.lateralError > 0f) "<< STEER LEFT" else "STEER RIGHT >>") to (if (blink) WARN_TEXT else WHITE)
         }
