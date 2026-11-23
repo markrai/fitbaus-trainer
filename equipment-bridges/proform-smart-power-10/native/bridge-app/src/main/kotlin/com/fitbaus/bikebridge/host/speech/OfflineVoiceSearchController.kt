@@ -14,7 +14,7 @@ import android.content.ServiceConnection
 
 internal class OfflineVoiceSearchController(
     private val activity: Activity,
-    private val onStatus: (String?) -> Unit,
+    private val onStatus: (String?, Boolean) -> Unit,
     private val onTranscript: (String) -> Unit,
     private val onFailure: (String) -> Unit,
 ) {
@@ -27,7 +27,7 @@ internal class OfflineVoiceSearchController(
     private val receiver = Messenger(Handler(Looper.getMainLooper()) { message ->
         if (active && message.arg1 == requestId) {
             when (message.what) {
-                VoiceSearchProtocol.STATUS -> onStatus(message.data.getString(VoiceSearchProtocol.TEXT))
+                VoiceSearchProtocol.STATUS -> onStatus(message.data.getString(VoiceSearchProtocol.TEXT), message.arg2 == 1)
                 VoiceSearchProtocol.RESULT -> {
                     val transcript = message.data.getString(VoiceSearchProtocol.TEXT)
                     cancel()
@@ -51,7 +51,7 @@ internal class OfflineVoiceSearchController(
         active = true
         requestId++
         val requested = requestId
-        onStatus("Preparing offline voice search…")
+        onStatus("Preparing offline voice search…", false)
         val timeout = Runnable {
             if (active && requestId == requested) {
                 cancel()
@@ -103,7 +103,7 @@ internal class OfflineVoiceSearchController(
             runCatching { activity.unbindService(it) }
         }
         connection = null
-        onStatus(null)
+        onStatus(null, false)
     }
 
     private fun fail(message: String) {

@@ -183,7 +183,7 @@ class NativeBridgeActivity : Activity() {
     private val voiceSearch: OfflineVoiceSearchController by lazy {
         OfflineVoiceSearchController(
             this,
-            onStatus = { youtubeContent.setVoiceSearchStatus(it) },
+            onStatus = { status, listening -> youtubeContent.setVoiceSearchStatus(status, listening) },
             onTranscript = { query ->
                 if (resumed && modeController.mode == ArcadeMode.YouTube &&
                     youtubeContent.session.state.active && youtubeContent.session.state.screen == Screen.Results &&

@@ -712,9 +712,11 @@ internal class YouTubeContent(
             .show()
     }
 
-    fun setVoiceSearchStatus(status: String?) {
+    fun setVoiceSearchStatus(status: String?, listening: Boolean = false) {
         voiceStatus.visibility = if (status.isNullOrBlank()) GONE else VISIBLE
         voiceStatus.text = status.orEmpty()
+        searchMic.setImageResource(if (listening) R.drawable.ic_recording_dot else R.drawable.ic_mic)
+        searchMic.contentDescription = if (listening) "Stop voice search" else "Search YouTube by voice"
         searchMic.isActivated = !status.isNullOrBlank()
     }
 

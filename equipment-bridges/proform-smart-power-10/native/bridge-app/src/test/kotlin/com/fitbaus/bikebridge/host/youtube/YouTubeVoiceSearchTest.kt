@@ -39,6 +39,25 @@ class YouTubeVoiceSearchTest {
     }
 
     @Test
+    fun microphoneOnlyShowsRedRecordingCircleWhileListening() {
+        val ui = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
+        val controller = File("src/main/kotlin/com/fitbaus/bikebridge/host/speech/OfflineVoiceSearchController.kt").readText()
+        val service = File("src/main/kotlin/com/fitbaus/bikebridge/host/speech/OfflineVoiceSearchService.kt").readText()
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val drawable = File("src/main/res/drawable/ic_recording_dot.xml").readText()
+        assertTrue(ui.contains("setVoiceSearchStatus(status: String?, listening: Boolean = false)"))
+        assertTrue(ui.contains("if (listening) R.drawable.ic_recording_dot else R.drawable.ic_mic"))
+        assertTrue(ui.contains("if (listening) \"Stop voice search\" else \"Search YouTube by voice\""))
+        assertTrue(controller.contains("onStatus(\"Preparing offline voice search…\", false)"))
+        assertTrue(controller.contains("onStatus(null, false)"))
+        assertTrue(controller.contains("message.arg2 == 1"))
+        assertTrue(service.contains("\"Listening… tap the mic to cancel\", listening = true"))
+        assertTrue(activity.contains("onStatus = { status, listening -> youtubeContent.setVoiceSearchStatus(status, listening) }"))
+        assertTrue(drawable.contains("android:shape=\"oval\""))
+        assertTrue(drawable.contains("android:color=\"#F44336\""))
+    }
+
+    @Test
     fun voiceSearchUsesAnInAppSpeechProcessWithoutAnExternalActivity() {
         val host = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val service = File("src/main/kotlin/com/fitbaus/bikebridge/host/speech/OfflineVoiceSearchService.kt").readText()

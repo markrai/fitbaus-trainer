@@ -86,7 +86,7 @@ class OfflineVoiceSearchService : Service() {
             if (!active.speech.startListening(listener(ticket), VoiceSearchProtocol.LISTEN_MS)) {
                 throw IOException("Unable to start speech capture")
             }
-            handler.post { send(ticket, VoiceSearchProtocol.STATUS, "Listening… tap the mic to cancel") }
+            handler.post { send(ticket, VoiceSearchProtocol.STATUS, "Listening… tap the mic to cancel", listening = true) }
         } catch (error: Exception) {
             Log.w("FitBausVoice", "Unable to start offline speech recognition", error)
             handler.post { complete(ticket, VoiceSearchProtocol.ERROR, "Offline voice search could not start. Try again.") }
@@ -135,9 +135,9 @@ class OfflineVoiceSearchService : Service() {
         cancel()
     }
 
-    private fun send(ticket: Int, event: Int, text: String) {
+    private fun send(ticket: Int, event: Int, text: String, listening: Boolean = false) {
         if (generation != ticket) return
-        val response = Message.obtain(null, event, requestId, 0)
+        val response = Message.obtain(null, event, requestId, if (listening) 1 else 0)
         response.data = Bundle().apply { putString(VoiceSearchProtocol.TEXT, text) }
         try {
             client?.send(response)
