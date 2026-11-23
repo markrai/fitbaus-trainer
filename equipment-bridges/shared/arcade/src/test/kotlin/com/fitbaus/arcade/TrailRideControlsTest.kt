@@ -12,7 +12,7 @@ class TrailRideControlsTest {
 
     private fun face(x: Float, atMs: Long, source: HandSource = HandSource.Camera) = HandPosition(x, 0.5f, 0.9f, atMs * ms, source)
 
-    private fun calibrated(neutral: Float = 0.5f, gain: Float = 4f): Pair<HorizontalFaceSteering, Long> {
+    private fun calibrated(neutral: Float = 0.5f, gain: Float = 2.4f): Pair<HorizontalFaceSteering, Long> {
         val s = HorizontalFaceSteering()
         s.setGain(gain)
         var t = 0L
