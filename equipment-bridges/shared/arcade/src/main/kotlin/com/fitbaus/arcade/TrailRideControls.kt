@@ -130,6 +130,8 @@ internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()
         private set
     var lastRise: Float = 0f
         private set
+    var lastY: Float = Float.NaN
+        private set
     var lastEvent: String = "waiting for face"
         private set
     var jumps: Int = 0
@@ -149,6 +151,7 @@ internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()
                 armed = false
             }
             tracking = true
+            lastY = position.y
             while (recent.isNotEmpty() && position.timestampNanos - recent.first().at > config.riseWindowNanos) {
                 recent.removeFirst()
             }
