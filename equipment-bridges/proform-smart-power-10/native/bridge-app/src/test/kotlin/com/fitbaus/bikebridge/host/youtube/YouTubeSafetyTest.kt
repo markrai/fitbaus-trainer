@@ -58,19 +58,22 @@ class YouTubeSafetyTest {
     }
 
     @Test
-    fun manifestPermissionsAndIdentityAreUnchanged() {
+    fun manifestPermissionsIncludeOnDemandVoiceButPreserveBridgeIdentity() {
         val manifest = File("src/main/AndroidManifest.xml").readText()
         val permissions = Regex("""<uses-permission\s+android:name="([^"]+)"\s*/>""").findAll(manifest).map { it.groupValues[1] }.toList()
         assertEquals(
             listOf(
                 "android.permission.INTERNET",
+                "android.permission.RECORD_AUDIO",
                 "android.permission.RECEIVE_BOOT_COMPLETED",
                 "android.permission.FOREGROUND_SERVICE",
                 "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
             ),
             permissions,
         )
-        assertFalse(manifest.contains("YouTube"), "no new activity, service or launcher")
+        assertFalse(manifest.contains("YouTube"), "no separate YouTube activity or launcher")
+        assertTrue(manifest.contains("android:process=\":speech\""))
+        assertTrue(manifest.contains("android:exported=\"false\""))
         assertTrue(
             Regex("""<uses-permission\s+android:name="android.permission.ACCESS_NETWORK_STATE"\s+tools:node="remove"\s*/>""").containsMatchIn(manifest),
             "ExoPlayer's network-state permission is stripped; NetworkTypeObserver tolerates its absence",

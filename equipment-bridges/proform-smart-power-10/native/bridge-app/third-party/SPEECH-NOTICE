@@ -1,0 +1,19 @@
+FitBaus Full includes offline voice recognition using Vosk.
+
+Vosk Android library
+Project: https://github.com/alphacep/vosk-api
+Dependency: com.alphacephei:vosk-android:0.3.75
+License: Apache License 2.0
+https://github.com/alphacep/vosk-api/blob/master/COPYING
+
+English recognition model
+Name: vosk-model-small-en-us-0.15
+Source: https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
+SHA-256: 30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498
+License: Apache License 2.0
+https://alphacephei.com/vosk/models
+
+JNA Android library
+Dependency: net.java.dev.jna:jna:5.18.1
+Project: https://github.com/java-native-access/jna
+License: LGPL 2.1 or Apache License 2.0

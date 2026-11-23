@@ -2,9 +2,9 @@
 
 package com.fitbaus.bikebridge.host
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -18,7 +18,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.speech.RecognizerIntent
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -61,7 +60,8 @@ import com.fitbaus.bikebridge.host.uvc.UvcProcess
 import com.fitbaus.bikebridge.host.youtube.BrightnessControl
 import com.fitbaus.bikebridge.host.youtube.YouTubeContent
 import com.fitbaus.bikebridge.host.youtube.YouTubeCredentialsImport
-import com.fitbaus.bikebridge.host.youtube.YouTubeVoiceSearch
+import com.fitbaus.bikebridge.host.youtube.Screen
+import com.fitbaus.bikebridge.host.speech.OfflineVoiceSearchController
 import com.fitbaus.bikebridge.protocol.BridgeHttpJson
 import com.fitbaus.bikebridge.protocol.NativeTelemetrySnapshot
 
@@ -91,7 +91,6 @@ class NativeBridgeActivity : Activity() {
     private lateinit var floatingVideoSlot: FrameLayout
     private var resumed = false
     private var pendingYouTubeImport: String? = null
-    private var pendingYouTubeVoiceSearch: String? = null
     private val modeTabs = HashMap<ArcadeMode, TextView>()
     private val handInput = HandPositionInput()
     private val exclusiveHid by lazy { ExclusiveHid(this) }
@@ -161,6 +160,7 @@ class NativeBridgeActivity : Activity() {
         }
 
         override fun stopMedia(reason: ArcadeStopReason) {
+            voiceSearch.cancel()
             if (reason == ArcadeStopReason.ExitArcade && youtubeContent.minimizeInto(floatingVideoSlot)) {
                 floatingPlayer.visibility = View.VISIBLE
             } else {
@@ -169,7 +169,7 @@ class NativeBridgeActivity : Activity() {
             }
         }
     }
-    private val modeController = ArcadeModeController(arcadeHooks)
+    private val modeController: ArcadeModeController = ArcadeModeController(arcadeHooks)
 
     private val youtubeBrightness = object : BrightnessControl {
         override fun percent(): Int = BridgeProcess.brightness(this@NativeBridgeActivity).percent() ?: systemBrightnessPercent()
@@ -178,6 +178,26 @@ class NativeBridgeActivity : Activity() {
             BridgeProcess.brightness(this@NativeBridgeActivity).record(percent)
             applyStoredBrightness()
         }
+    }
+
+    private val voiceSearch: OfflineVoiceSearchController by lazy {
+        OfflineVoiceSearchController(
+            this,
+            onStatus = { status, listening -> youtubeContent.setVoiceSearchStatus(status, listening) },
+            onTranscript = { query ->
+                if (resumed && modeController.mode == ArcadeMode.YouTube &&
+                    youtubeContent.session.state.active && youtubeContent.session.state.screen == Screen.Results &&
+                    !youtubeContent.session.hasEngine
+                ) {
+                    youtubeContent.acceptVoiceSearchResult(query)
+                }
+            },
+            onFailure = { detail ->
+                if (resumed && modeController.mode == ArcadeMode.YouTube) {
+                    Toast.makeText(this, detail, Toast.LENGTH_LONG).show()
+                }
+            },
+        )
     }
 
     private val refresh = object : Runnable {
@@ -214,10 +234,10 @@ class NativeBridgeActivity : Activity() {
         modeController.onHostResume()
         resumed = true
         processYouTubeImport()
-        deliverPendingVoiceSearch()
     }
 
     override fun onPause() {
+        voiceSearch.cancel()
         controllerOwnership.onHostPause()
         gameController.resetTransient()
         resumed = false
@@ -228,35 +248,17 @@ class NativeBridgeActivity : Activity() {
         super.onPause()
     }
 
-    @Suppress("DEPRECATION")
     private fun requestYouTubeVoiceSearch() {
-        if (modeController.mode != ArcadeMode.YouTube) return
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Search YouTube")
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        }
-        try {
-            startActivityForResult(intent, YOUTUBE_VOICE_SEARCH_REQUEST)
-        } catch (_: ActivityNotFoundException) {
-            Toast.makeText(this, "Voice search requires a speech recognition app on this console.", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != YOUTUBE_VOICE_SEARCH_REQUEST || resultCode != Activity.RESULT_OK) return
-        val matches = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-        pendingYouTubeVoiceSearch = YouTubeVoiceSearch.bestMatch(matches)
-        deliverPendingVoiceSearch()
-    }
-
-    private fun deliverPendingVoiceSearch() {
         if (!resumed || modeController.mode != ArcadeMode.YouTube) return
-        val query = pendingYouTubeVoiceSearch ?: return
-        pendingYouTubeVoiceSearch = null
-        youtubeContent.acceptVoiceSearchResult(query)
+        if (!youtubeContent.session.state.active || youtubeContent.session.state.screen != Screen.Results) return
+        if (youtubeContent.session.hasEngine) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), YOUTUBE_VOICE_PERMISSION_REQUEST)
+            return
+        }
+        voiceSearch.toggle()
     }
 
     private fun queueYouTubeImport(intent: Intent?) {
@@ -275,6 +277,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun onDestroy() {
+        voiceSearch.cancel()
         controllerOwnership.onHostPause()
         modeController.onHostDestroy()
         youtubeContent.destroy()
@@ -358,10 +361,22 @@ class NativeBridgeActivity : Activity() {
         return super.dispatchTouchEvent(event)
     }
 
+    @Suppress("DEPRECATION")
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (requestCode != CAMERA_PERMISSION_REQUEST) return
-        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-        cameraSession.onPermissionResult(granted)
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        when (requestCode) {
+            CAMERA_PERMISSION_REQUEST -> {
+                val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+                cameraSession.onPermissionResult(granted)
+            }
+            YOUTUBE_VOICE_PERMISSION_REQUEST -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                    requestYouTubeVoiceSearch()
+                } else {
+                    Toast.makeText(this, "Microphone permission is required for voice search.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun startBridgeService() {
@@ -660,6 +675,7 @@ class NativeBridgeActivity : Activity() {
             youtubeBrightness,
             onRestoreRequested = { modeController.select(ArcadeMode.YouTube) },
             onVoiceSearchRequested = { requestYouTubeVoiceSearch() },
+            onVoiceSearchCancelled = { voiceSearch.cancel() },
         )
         contentHost.addView(
             youtubeContent,
@@ -1131,7 +1147,7 @@ class NativeBridgeActivity : Activity() {
         const val REFRESH_MS = 200L
         const val ENDPOINT_REFRESH_TICKS = 10
         const val CAMERA_PERMISSION_REQUEST = 4101
-        const val YOUTUBE_VOICE_SEARCH_REQUEST = 4102
+        const val YOUTUBE_VOICE_PERMISSION_REQUEST = 4103
         const val ARCADE_DEV_PREFS = "arcade_dev"
         const val ARCADE_TRACKER_KEY = "tracker"
         const val ARCADE_OVERLAY_KEY = "overlay"

@@ -248,6 +248,7 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
                 ?: return@mapNotNull null
             if (!YouTubeIds.isValid(id) || snippet.optString("title") == "Deleted video" ||
                 snippet.optString("title") == "Private video") return@mapNotNull null
+            val videoPublishedAt = details?.optString("videoPublishedAt")?.take(40)?.takeIf { it.isNotBlank() }
             val video = VideoSummary(
                 id = id,
                 title = snippet.optString("title", id).take(200),
@@ -259,6 +260,7 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
                 channelUrl = snippet.optString("videoOwnerChannelId")
                     .takeIf { it.matches(Regex("UC[A-Za-z0-9_-]{22}")) }
                     ?.let { "https://www.youtube.com/channel/$it" },
+                publishedAtEpochSeconds = YouTubeFormat.publicationTimestamp(videoPublishedAt),
             )
             GoogleDatedVideo(video, details?.optString("videoPublishedAt")?.take(40)
                 ?.takeIf { it.isNotBlank() } ?: snippet.optString("publishedAt").take(40))

@@ -3,6 +3,10 @@
 package com.fitbaus.bikebridge.host.youtube
 
 import java.net.URI
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 internal data class VideoSummary(
     val id: String,
@@ -14,6 +18,7 @@ internal data class VideoSummary(
     val live: Boolean,
     val channelUrl: String? = null,
     val channelAvatarUrl: String? = null,
+    val publishedAtEpochSeconds: Long? = null,
 )
 
 internal object YouTubeChannelLinks {
@@ -123,6 +128,47 @@ internal object YouTubeFormat {
         count >= 1_000 -> String.format(java.util.Locale.US, "%.1fK views", count / 1_000.0)
         count == 1L -> "1 view"
         else -> "$count views"
+    }
+
+    fun publicationTimestamp(iso8601: String?): Long? {
+        val value = iso8601?.trim()?.takeIf { it.isNotEmpty() && it.length <= 40 } ?: return null
+        return runCatching { Instant.parse(value).epochSecond }
+            .recoverCatching { OffsetDateTime.parse(value).toEpochSecond() }
+            .getOrNull()
+            ?.takeIf { it > 0 }
+    }
+
+    fun age(publishedAtEpochSeconds: Long?, nowEpochSeconds: Long = System.currentTimeMillis() / 1000): String {
+        val published = publishedAtEpochSeconds ?: return ""
+        if (published <= 0 || published > nowEpochSeconds) return ""
+        val elapsed = nowEpochSeconds - published
+        if (elapsed < 60) return "just now"
+        if (elapsed < 3600) {
+            val minutes = elapsed / 60
+            return if (minutes == 1L) "1 min ago" else "$minutes mins ago"
+        }
+        if (elapsed < 86_400) {
+            val hours = elapsed / 3600
+            return if (hours == 1L) "1 hr ago" else "$hours hrs ago"
+        }
+        val days = elapsed / 86_400
+        val dates = runCatching {
+            Pair(Instant.ofEpochSecond(published).atOffset(ZoneOffset.UTC),
+                Instant.ofEpochSecond(nowEpochSeconds).atOffset(ZoneOffset.UTC))
+        }.getOrNull() ?: return ""
+        val years = ChronoUnit.YEARS.between(dates.first, dates.second)
+        if (years > 0) return if (years == 1L) "1 yr ago" else "$years yrs ago"
+        val months = ChronoUnit.MONTHS.between(dates.first, dates.second)
+        if (months > 0) return if (months == 1L) "1 month ago" else "$months months ago"
+        return if (days == 1L) "1 day ago" else "$days days ago"
+    }
+
+    fun previewMeta(video: VideoSummary, nowEpochSeconds: Long = System.currentTimeMillis() / 1000): String {
+        val parts = ArrayList<String>(3)
+        video.channel?.takeIf { it.isNotBlank() }?.let { parts += it }
+        views(video.viewCount).takeIf { it.isNotEmpty() }?.let { parts += it }
+        if (!video.live) age(video.publishedAtEpochSeconds, nowEpochSeconds).takeIf { it.isNotEmpty() }?.let { parts += it }
+        return parts.joinToString("  ·  ")
     }
 
     fun meta(video: VideoSummary): String {

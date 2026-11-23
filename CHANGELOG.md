@@ -10,12 +10,12 @@ support, is maintained on `lite/1.x`.
 
 ## [Unreleased]
 
-## [2.2.0] - Pending publication
+## [2.2.0]
 
-Full 2.2.0 (`versionCode 20200`) collects the unreleased Full 2.1.1–2.1.3
-development work since the published Full 2.1.0 release. The exact signed
-console APK still requires physical qualification before GitHub publication.
-See [Full 2.2.0 release plan](.github/release/plans/full-v2.2.0.md).
+Full 2.2.0 (`versionCode 20200`) brings together the Full 2.1.1–2.1.3
+development changes since 2.1.0: richer arcade graphics and controls,
+integrated offline YouTube voice search, publication ages on video previews,
+and improved YouTube playback and navigation.
 
 ### Changed
 
@@ -25,8 +25,8 @@ See [Full 2.2.0 release plan](.github/release/plans/full-v2.2.0.md).
   preferences, and gameplay behavior are unchanged.
 
 - **Trail Ride HUD refinement.** Remove the flashing “STEER LEFT” and
-  “STEER RIGHT” guidance banners. The normal dirt-path boundary markers,
-  off-trail speed reduction and other gameplay prompts remain intact.
+  “STEER RIGHT” guidance banners. Existing trail-edge visuals, off-trail
+  speed reduction and other gameplay prompts remain unchanged.
 
 - **Trail Ride visual fidelity upgrade.** Keep the existing first-person
   steering, terrain projection, face-tracking jumps, hazard collision,
@@ -173,12 +173,24 @@ See [Full 2.2.0 release plan](.github/release/plans/full-v2.2.0.md).
 
 ### Added
 
-- **YouTube voice search.** Add a standard microphone icon beside the existing
-  search clear button, with separate 48dp touch targets. On supported consoles,
-  Android's installed speech-recognition activity transcribes a query and
-  submits it to the normal YouTube search. Canceled/blank results leave the
-  search unchanged; devices without a speech recognizer show a clear message.
-  No new microphone permission, Google OAuth scope, or speech SDK is required.
+- **YouTube preview publication ages.** Append an optional relative age to
+  the channel and view-count metadata in video cards. Use NewPipe's existing
+  upload dates or the Google subscription feed's video publication date,
+  rather than the date a video was added to a playlist. Hide unknown,
+  future-dated or live-stream ages. No additional YouTube API requests.
+
+- **Self-contained YouTube voice search.** Keep separate microphone and clear
+  touch controls but replace the external recognition activity with bundled,
+  offline English transcription using Vosk. The build downloads and verifies
+  the pinned English model, then packages it inside the Full Bike Bridge APK.
+  Listening status stays inside the YouTube search screen, and a red circular
+  indicator replaces the mic only while audio is actually being captured.
+  Recognition runs
+  only when requested in a dedicated process, which exits after completion or
+  cancellation; active video playback, game modes and bike telemetry do not
+  share its native memory. No extra app, Google service or user setup is needed.
+  Physical-console microphone, latency, memory and accuracy tests are required
+  before a signed public release.
 
 - **YouTube channel video browsing.** The player header shows the current
   channel avatar beside the quality selector when a verified channel URL is
@@ -563,7 +575,7 @@ player, BIKETRIS, and external USB webcam support on the bike console.
   FITBAUS title. Also released in Lite 1.0.1.
 - **Release workflow.** Signed Trainer and production Bike Bridge artifacts
   are built from an existing tag, verified, and published with SHA-256
-  checksums. See [release engineering guide](.github/release/RELEASE.md).
+  checksums. See [docs/RELEASE.md](docs/RELEASE.md).
 
 ### Changed
 
@@ -859,7 +871,7 @@ records and are not renumbered.
   for Bluetooth LE, Keep Awake, and text-to-speech. Native builds use
   `CapacitorHttp` for SISU `/health` and `/workout/ingest`; the hosted PWA path
   (Web Bluetooth, browser speech, Screen Wake Lock, service worker) is
-  unchanged. See [NATIVE-DEVELOPMENT.md](docs/NATIVE-DEVELOPMENT.MD).
+  unchanged. See [NATIVE-DEVELOPMENT.md](NATIVE-DEVELOPMENT.md).
 
 ## [0.9.41] - 2026-02-22
 
@@ -1215,6 +1227,6 @@ records and are not renumbered.
   workout logic, and basic controls.
 
 [Unreleased]: https://github.com/markrai/fitbaus-trainer/commits/main/
-[2.2.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.1.0...main
+[2.2.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.1.0...v2.2.0
 [1.0.1]: https://github.com/markrai/fitbaus-trainer/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/markrai/fitbaus-trainer/tree/v1.0.0

@@ -2,7 +2,8 @@
 
 The Bike Bridge console app has a **YouTube** tab next to the game tabs. It
 browses and plays public YouTube videos natively inside `NativeBridgeActivity`
-(no WebView, no external app, no extra Activity or service). The technique is
+(no WebView or external playback app; a private background service handles
+optional offline speech recognition). The playback technique is
 the one qualified on the console with SkyTube OSS 3.003
 ([YOUTUBE-QUALIFICATION.md](YOUTUBE-QUALIFICATION.md)), reimplemented as a
 small FitBaus-owned layer.
@@ -15,8 +16,15 @@ small FitBaus-owned layer.
   more channel batches loaded as the user scrolls. The separate SEARCH and
   MY FEED buttons are removed. The search field remains, using the keyboard
   Search action for global YouTube search; its × clears the search and returns
-  to the default feed. **MY YOUTUBE** opens the account browser for channels
-  and playlists. Its top-left back arrow returns to the home grid; the lower
+  to the default feed. The microphone uses a bundled Vosk English speech model
+  for offline transcription. The normal mic remains during model preparation;
+  a red circle replaces it only when audio capture is active. Tap again to
+  cancel. The listening status stays directly below the search bar. Video cards
+  show the channel, views, and publication age when the upstream feed includes
+  an upload timestamp. NewPipe dates may be approximate; signed-in Google feeds
+  use `videoPublishedAt`, never the playlist insertion date, for the age label.
+  Missing or future dates produce no age label. **MY YOUTUBE** opens the account
+  browser for channels and playlists. Its top-left back arrow returns to the home grid; the lower
   BACK control remains for channel/playlist hierarchy. This is not Google's
   proprietary Home recommendations.
 - **Discover:** on an authenticated subscription home grid, DISCOVER switches
@@ -336,11 +344,17 @@ bike telemetry while watching video.
   resistance, pairing, camera or permissions; `YouTubeSafetyTest` enforces
   this by scanning the sources. Mode hooks never touch `NativeBridgeService`
   (`ArcadeModeTest`).
-- Manifest permissions are unchanged. ExoPlayer's `ACCESS_NETWORK_STATE` is
+- The Full Bike Bridge requests `RECORD_AUDIO` for on-demand offline speech
+  search. Android 5.1 grants it during installation; Android 6+ uses the
+  standard permission prompt. Speech runs in a non-exported, dedicated
+  `:speech` process that exits after recording. No separate speech app,
+  internet request or Google sign-in is required for transcription.
+- ExoPlayer's `ACCESS_NETWORK_STATE` is
   removed with `tools:node="remove"`; ExoPlayer's `NetworkTypeObserver`
   catches the resulting `SecurityException` and reports an unknown network.
-- The tab runs in the Bridge's process (the Bridge service has no separate
-  `android:process`). An uncaught exception in UI code would therefore
+- The YouTube UI runs in the Bridge process. The on-demand Vosk recognizer
+  runs in its own `:speech` process to isolate its substantial native memory
+  footprint. An uncaught exception in UI code would still
   restart the Bridge. All extraction, engine creation and preparation paths
   catch failures and turn them into on-screen errors; this still needs to be
   watched in the on-console soak test.
