@@ -23,6 +23,7 @@ internal data class TrailRideConfig(
     val edgeTolerance: Float = 0.15f,
     val edgeWarning: Float = 0.35f,
     val offTrailSeconds: Float = 0.3f,
+    val offTrailSpeedFactor: Float = 0.94f,
     val jumpEarlySeconds: Float = 1.25f,
     val jumpLateSeconds: Float = 0.12f,
     val jumpCueLead: Float = 0.65f,
@@ -256,7 +257,7 @@ internal class TrailRideGame(
 
     private fun ride(dt: Float, rpm: Float) {
         if (!airborne) {
-            val goal = speedFor(rpm)
+            val goal = speedFor(rpm) * if (isOffTrail() && !airborne) config.offTrailSpeedFactor else 1f
             val maxDv = config.acceleration * dt
             speed += (goal - speed).coerceIn(-maxDv, maxDv)
         }
@@ -275,7 +276,7 @@ internal class TrailRideGame(
         invulnerable = (invulnerable - dt).coerceAtLeast(0f)
         if (resolveDitches(previous)) return
         if (resolveObstacles(previous)) return
-        if (checkTrail(dt)) return
+        checkTrail(dt)
         addScore(dt * speed * DISTANCE_POINTS)
         val reached = world.level(distance)
         if (reached > levelReached) {
@@ -378,17 +379,23 @@ internal class TrailRideGame(
         return false
     }
 
-    private fun checkTrail(dt: Float): Boolean {
-        val limit = config.world.halfWidth + config.edgeTolerance
-        if (abs(lateralError) <= limit || airborne) {
+    val offTrail: Boolean
+        get() = !airborne && isOffTrail()
+
+    private fun isOffTrail(): Boolean =
+        abs(lateralError) > config.world.halfWidth + config.edgeTolerance
+
+    private fun checkTrail(dt: Float) {
+        if (!offTrail) {
             offTrailFor = 0f
-            return false
+            return
         }
+        val previous = offTrailFor
         offTrailFor += dt
-        if (offTrailFor < config.offTrailSeconds || invulnerable > 0f) return false
-        offTrails += 1
-        crash(TrailCrash.OffTrail, String.format(Locale.US, "rode off the trail (error %.2f m)", lateralError))
-        return true
+        if (previous < config.offTrailSeconds && offTrailFor >= config.offTrailSeconds) {
+            offTrails += 1
+            log(String.format(Locale.US, "left trail at %.2f m lateral error (gentle slowdown)", lateralError))
+        }
     }
 
     private fun crash(reason: TrailCrash, detail: String) {
@@ -411,7 +418,7 @@ internal class TrailRideGame(
         crashDitch = null
         val centre = world.center(distance)
         val w = config.world.halfWidth - config.riderHalfWidth
-        if (lastCrash == TrailCrash.OffTrail || abs(riderX - centre) > w) riderX = centre + (riderX - centre).coerceIn(-w * 0.5f, w * 0.5f)
+        if (abs(riderX - centre) > w) riderX = centre + (riderX - centre).coerceIn(-w * 0.5f, w * 0.5f)
         for (o in world.obstacles) if (!o.resolved && o.distance <= distance + RECOVER_CLEARANCE) o.resolved = true
         invulnerable = config.invulnerableSeconds
         speed = config.startSpeed

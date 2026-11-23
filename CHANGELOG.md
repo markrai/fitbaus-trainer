@@ -16,6 +16,18 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Trail Ride continuous off-trail riding.** Leaving the path no longer
+  triggers a crash animation, freezes game progression, or increments crash
+  counts. Instead, the current RPM-based target speed is gently reduced by
+  6% while off the trail and recovers naturally after returning. Off-trail
+  excursion statistics still count once per sustained departure.
+- **Trail Ride standing jump reliability.** Recognize a simple upward
+  displacement of the tracked face followed by face disappearance, including
+  normal camera tracking-loss latency. Remove the prior strict final-sample
+  movement, sample-gap and extended rearming requirements. Repeated camera
+  samples, downward reversal, stale loss and missing bike telemetry still
+  cannot create a jump; ordinary face loss never pauses the ride.
+
 - **Ghoul Run mouth animation pacing.** Slow close-range jaw opening
   from 0.28 to 0.65 seconds and closing from 0.24 to 0.40 seconds,
   making the toothless aperture grow visibly over more frames.

@@ -49,7 +49,8 @@ class TrailRideGameTest {
         val neutral = TrailWorlds.riding(TrailRideConfig(world = TrailWorlds.curvyEmpty()), seed = 12L)
         TrailPilots.run(neutral, 300f)
         assertTrue(neutral.offTrails >= 1, "holding the head still does not follow the bends")
-        assertEquals(TrailCrash.OffTrail, neutral.lastCrash)
+        assertEquals(TrailPhase.Riding, neutral.phase)
+        assertEquals(0, neutral.crashes, "leaving the trail should not interrupt the ride")
 
         val steered = TrailWorlds.riding(TrailRideConfig(world = TrailWorlds.curvyEmpty()), seed = 12L)
         TrailPilots.run(steered, 300f, steer = { TrailPilots.follow(it) })
@@ -72,20 +73,40 @@ class TrailRideGameTest {
     }
 
     @Test
-    fun leavingTheTrailNeedsASustainedExcursion() {
+    fun goingOffTrailSlightlySlowsTheBikeWithoutEverFreezing() {
         val g = straightGame(firstDitch = TrailWorlds.NEVER)
-        val limit = g.config.world.halfWidth + g.config.edgeTolerance
-        var beyondAt = Float.NaN
-        var edgeWarned = false
-        TrailPilots.run(g, 3f, steer = { 1f }) {
-            if (it.nearEdge) edgeWarned = true
-            if (beyondAt.isNaN() && abs(it.lateralError) > limit) beyondAt = it.elapsed
-        }
-        assertTrue(edgeWarned, "edge warning before leaving the trail")
+        val before = g.speedFor(70f)
+        TrailPilots.run(g, 4f, steer = { 1f })
+        assertTrue(g.offTrail)
         assertEquals(1, g.offTrails)
-        assertEquals(TrailCrash.OffTrail, g.lastCrash)
-        val delay = g.lastCrashAt - beyondAt
-        assertTrue(delay >= g.config.offTrailSeconds - step * 1.5f && delay <= g.config.offTrailSeconds + step * 2.5f, "tolerance before failing ($delay s)")
+        assertEquals(TrailPhase.Riding, g.phase)
+        assertEquals(0, g.crashes)
+        assertEquals(TrailCrash.None, g.lastCrash)
+        assertEquals(before * g.config.offTrailSpeedFactor, g.speed, 0.02f)
+        val distance = g.distance
+        TrailPilots.run(g, 3f, steer = { 1f })
+        assertTrue(g.distance > distance + 10f)
+        assertEquals(1, g.offTrails, "staying off the trail must not repeatedly penalize the rider")
+        assertEquals(0, g.crashes)
+        TrailPilots.run(g, 3f, steer = { 0f })
+        assertFalse(g.offTrail)
+        assertEquals(before, g.speed, 0.02f)
+        assertEquals(TrailPhase.Riding, g.phase)
+        assertEquals(0, g.crashes)
+    }
+
+    @Test
+    fun edgeExcursionCountsOnlyAfterToleranceAndRearmsOnReturn() {
+        val g = straightGame(firstDitch = TrailWorlds.NEVER)
+        assertTrue(g.config.offTrailSpeedFactor in 0.9f..0.99f)
+        TrailPilots.run(g, 4f, steer = { 1f })
+        assertEquals(1, g.offTrails)
+        TrailPilots.run(g, 3f, steer = { 0f })
+        assertFalse(g.offTrail)
+        TrailPilots.run(g, 4f, steer = { -1f })
+        assertEquals(2, g.offTrails)
+        assertEquals(TrailPhase.Riding, g.phase)
+        assertEquals(0, g.crashes)
     }
 
     @Test
@@ -308,16 +329,16 @@ class TrailRideGameTest {
     }
 
     @Test
-    fun crashesNeverEndTheRideAndRestartClearsEverything() {
+    fun offTrailRideNeverStopsAndRestartClearsEverything() {
         val g = straightGame(firstDitch = TrailWorlds.NEVER)
         TrailPilots.run(g, 60f, steer = { 1f })
-        assertTrue(g.crashes >= 8, "riding off the trail again and again (${g.crashes} crashes)")
-        assertEquals(g.crashes, g.offTrails)
-        assertTrue(g.phase == TrailPhase.Riding || g.phase == TrailPhase.Crashed, "there is no game over")
-        TrailPilots.run(g, 2f)
+        assertEquals(0, g.crashes, "off-trail must not count as a crash")
+        assertEquals(1, g.offTrails, "one sustained off-trail excursion")
+        assertEquals(TrailPhase.Riding, g.phase)
         val before = g.distance
         TrailPilots.run(g, 5f, steer = { TrailPilots.follow(it) })
-        assertTrue(g.distance > before + 20f, "the ride keeps going after any number of crashes")
+        assertTrue(g.distance > before + 20f, "the ride keeps going continuously")
+        assertEquals(0, g.crashes)
         g.requestJump()
         g.restart(7L)
         assertEquals(TrailPhase.Ready, g.phase)
