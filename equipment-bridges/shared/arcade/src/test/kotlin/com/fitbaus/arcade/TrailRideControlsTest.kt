@@ -211,7 +211,7 @@ class TrailRideControlsTest {
         assertEquals(0, d.session.jumpRequests)
         assertEquals(0, d.session.standing.jumps)
         assertTrue(d.session.live)
-        assertEquals("no upward exit", d.session.standing.lastEvent)
+        assertEquals("face lost without upward movement", d.session.standing.lastEvent)
     }
 
     @Test
@@ -337,4 +337,66 @@ class TrailRideControlsTest {
         ))
         assertEquals(0, detector.jumps)
     }
+    @Test
+    fun faceRisingAndLeavingFrameTriggersWithoutFinalStepThreshold() {
+        val detector = StandJumpDetector()
+        val base = 1_000_000_000L
+        val msNanos = 1_000_000L
+        val ys = floatArrayOf(0.59f, 0.56f, 0.54f)
+        ys.forEachIndexed { index, y ->
+            val at = base + index * 85 * msNanos
+            assertFalse(detector.update(
+                HandPosition(0.5f, y, 0.9f, at, HandSource.Camera),
+                CameraState.Ready, at, true,
+            ))
+        }
+        assertTrue(detector.armed)
+        assertTrue(detector.lastRise >= 0.04f)
+        val lostAt = base + 2 * 85 * msNanos + 550 * msNanos
+        assertTrue(detector.update(
+            HandPosition(0.5f, 0.54f, 0f, lostAt, HandSource.Lost),
+            CameraState.Ready, lostAt, true,
+        ))
+        assertEquals(1, detector.jumps)
+        assertFalse(detector.update(
+            HandPosition(0.5f, 0.54f, 0f, lostAt + 100 * msNanos, HandSource.Lost),
+            CameraState.Ready, lostAt + 100 * msNanos, true,
+        ))
+        assertEquals(1, detector.jumps)
+    }
+
+    @Test
+    fun lookingUpWithoutLosingTrackingIsNotAJump() {
+        val d = steadySession()
+        d.faceY = 0.60f
+        d.run(0.4f)
+        for (y in floatArrayOf(0.58f, 0.55f, 0.51f, 0.46f, 0.41f)) {
+            d.faceY = y
+            d.frame()
+        }
+        assertTrue(d.session.standing.armed)
+        val distance = d.game.distance
+        d.run(1f)
+        assertEquals(0, d.session.jumpRequests)
+        assertFalse(d.game.airborne)
+        assertTrue(d.game.distance > distance)
+    }
+
+    @Test
+    fun lostFaceAfterAnOldUpwardGestureDoesNotJump() {
+        val detector = StandJumpDetector()
+        val base = 1_000_000_000L
+        for ((index, y) in floatArrayOf(0.62f, 0.58f, 0.52f).withIndex()) {
+            val at = base + index * 100_000_000L
+            detector.update(HandPosition(0.5f, y, 0.9f, at, HandSource.Camera),
+                CameraState.Ready, at, true)
+        }
+        val lostAt = base + 2_000_000_000L
+        assertFalse(detector.update(
+            HandPosition(0.5f, 0.52f, 0f, lostAt, HandSource.Lost),
+            CameraState.Ready, lostAt, true,
+        ))
+        assertEquals("stale face loss", detector.lastEvent)
+    }
+
 }
