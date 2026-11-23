@@ -351,46 +351,54 @@ class TrailRideGameTest {
         assertEquals(-1, g.world.ditches.indexOfFirst { it.resolved })
     }
 
-    // ---- end to end through the session with real cadence detection ----------------------
-
-    private fun surgeRide(surgeLead: Float, surgeRpm: Int = 88): SessionDriver {
+    private fun standingRide(leadSeconds: Float): SessionDriver {
         val d = SessionDriver(TrailRideSession(TrailRideGame(TrailRideConfig(world = TrailWorlds.straight()), 3L)))
         d.untilRiding()
         val ditch = d.game.world.ditches.first()
+        var attempted = false
         var guard = 0
         while (!ditch.resolved && guard++ < 3000) {
-            val t = d.game.timeTo(ditch)
-            d.rpm = if (t <= surgeLead) surgeRpm else 70
-            d.frame()
+            if (!attempted && d.game.timeTo(ditch) <= leadSeconds) {
+                attempted = true
+                d.faceY = 0.62f
+                d.run(0.4f)
+                for (y in floatArrayOf(0.60f, 0.57f, 0.54f, 0.50f, 0.46f)) {
+                    d.faceY = y
+                    d.frame()
+                }
+                d.run(0.5f)
+                d.face = HandSource.Lost
+                d.frame()
+            } else {
+                d.frame()
+            }
         }
         return d
     }
 
     @Test
-    fun aConfirmedSurgeStartedOnTheCueClearsTheDitch() {
-        val cue = TrailRideConfig().let { it.jumpEarlySeconds + it.surgeCueLead }
-        val d = surgeRide(surgeLead = cue)
+    fun standingAtTheDitchCueClearsItWithoutPedalSurges() {
+        val cue = TrailRideConfig().let { it.jumpEarlySeconds + it.jumpCueLead }
+        val d = standingRide(cue)
         assertEquals(1, d.session.jumpRequests)
         assertEquals(1, d.game.jumpsCleared, "jump ${d.game.lastJump} at ${d.game.jumpTimeToDitch} s")
         assertEquals(0, d.game.crashes)
     }
 
     @Test
-    fun aSurgeStartedFarTooEarlyCannotClearTheDitch() {
-        val d = surgeRide(surgeLead = 3.5f)
-        assertEquals(1, d.session.jumpRequests, "holding the surge does not retrigger")
+    fun standingFarTooEarlyCannotClearTheDitch() {
+        val d = standingRide(3.5f)
+        assertEquals(1, d.session.jumpRequests)
         assertEquals(1, d.game.ditchesMissed)
         assertEquals(TrailCrash.Ditch, d.game.lastCrash)
     }
 
     @Test
-    fun theTakeoffWindowCoversRealDetectorLatency() {
-        // Telemetry every 250 ms and a 350 ms / 2-sample confirmation: the surge is confirmed
-        // 0.5-0.75 s after it starts. Any start from the cue down to ~0.9 s before the ditch must work.
+    fun theTakeoffWindowAllowsCameraFaceLossLatency() {
         var cleared = 0
-        val leads = listOf(0.95f, 1.1f, 1.25f, 1.4f, 1.55f, 1.7f)
-        for (lead in leads) if (surgeRide(lead).game.jumpsCleared == 1) cleared += 1
-        assertEquals(leads.size, cleared, "every lead in the fair span clears")
+        val leads = listOf(1.45f, 1.55f, 1.65f, 1.75f, 1.85f, 1.95f)
+        for (lead in leads) if (standingRide(lead).game.jumpsCleared == 1) cleared += 1
+        assertEquals(leads.size, cleared, "standing from the cue through the fair approach clears the ditch")
     }
 
     @Test

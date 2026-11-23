@@ -25,8 +25,7 @@ internal data class TrailRideConfig(
     val offTrailSeconds: Float = 0.3f,
     val jumpEarlySeconds: Float = 1.25f,
     val jumpLateSeconds: Float = 0.12f,
-    /** The "SURGE NOW" cue shows this long before the window opens, covering the detector's 0.5-0.75 s confirmation. */
-    val surgeCueLead: Float = 0.45f,
+    val jumpCueLead: Float = 0.65f,
     val jumpAirSeconds: Float = 1.6f,
     val hopAirSeconds: Float = 0.45f,
     val landingMargin: Float = 0.3f,
@@ -52,8 +51,8 @@ internal class TrailEvent(val atSeconds: Float, val text: String)
  *
  * The rider's lateral position chases an absolute world-x target from head steering at a bounded
  * speed; the trail centre bends independently, so following a curve takes real steering. Forward
- * progress comes from read-only cadence. A jump starts only from [requestJump], which the view
- * calls once per new confirmed cadence surge. It clears a ditch only when it started inside that
+ * progress comes from read-only cadence. A jump starts only from [requestJump], called by
+ * the session when an upward-moving face leaves the camera view. It clears a ditch only when it started inside that
  * ditch's takeoff window ([TrailRideConfig.jumpLateSeconds]..[TrailRideConfig.jumpEarlySeconds]
  * before the near edge at the current speed) and the rider stays airborne over the whole ditch.
  * Hazards are resolved by sweeping the distance covered in each step, so no step can skip one.
@@ -172,7 +171,6 @@ internal class TrailRideGame(
         pendingJump = false
     }
 
-    /** One new confirmed cadence surge. Consumed by the next simulation step; discarded unless riding. */
     fun requestJump() {
         if (phase == TrailPhase.Riding) pendingJump = true
     }

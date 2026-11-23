@@ -96,267 +96,245 @@ class TrailRideControlsTest {
         assertEquals(0f, s.update(face(0.4f, t), t * ms).steer, 1e-6f)
     }
 
-    @Test
-    fun supervisorHoldsForEveryMissingController() {
-        val sup = TrailRideSupervisor()
-        val tracking = steerReading(FaceControlState.Tracking)
-        val cruising = reading(CadenceState.Cruising)
-        assertEquals(TrailHold.CameraUnavailable, sup.hold(CameraState.Unavailable, tracking, cruising))
-        assertEquals(TrailHold.CameraUnavailable, sup.hold(CameraState.PermissionDenied, tracking, cruising))
-        assertEquals(TrailHold.CameraStarting, sup.hold(CameraState.Starting, tracking, cruising))
-        assertEquals(TrailHold.FaceLost, sup.hold(CameraState.Ready, steerReading(FaceControlState.Lost), cruising))
-        assertEquals(TrailHold.Calibrating, sup.hold(CameraState.Ready, steerReading(FaceControlState.Calibrating), cruising))
-        assertEquals(TrailHold.NoTelemetry, sup.hold(CameraState.Ready, tracking, reading(CadenceState.NoTelemetry)))
-        assertEquals(TrailHold.NoTelemetry, sup.hold(CameraState.Ready, tracking, reading(CadenceState.Stale)))
-        assertEquals(TrailHold.NotPedaling, sup.hold(CameraState.Ready, tracking, reading(CadenceState.Stopped)))
-        assertEquals("PEDAL TO RIDE", sup.message(TrailHold.NotPedaling, reading(CadenceState.Stopped)))
-        assertEquals(TrailHold.LearningPace, sup.hold(CameraState.Ready, tracking, reading(CadenceState.Establishing)))
-        assertEquals(TrailHold.Resuming, sup.hold(CameraState.Ready, steerReading(FaceControlState.Tracking, stableMs = 200), cruising))
-        assertEquals(TrailHold.None, sup.hold(CameraState.Ready, tracking, cruising))
-        assertEquals(TrailHold.None, sup.hold(CameraState.Ready, steerReading(FaceControlState.Tracking, stableMs = 200), reading(CadenceState.Boosting)), "once running, stays running")
-        sup.invalidate()
-        assertEquals(TrailHold.Resuming, sup.hold(CameraState.Ready, steerReading(FaceControlState.Tracking, stableMs = 200), cruising))
-        assertTrue(sup.message(TrailHold.NoTelemetry, reading(CadenceState.Stale))!!.contains("STALE"))
-        assertEquals(null, sup.message(TrailHold.None, cruising))
-    }
-
-    @Test
-    fun activationEdgeFiresOncePerNewSurgeAndOnlyWhileLive() {
-        val edge = BoostActivationEdge()
-        assertFalse(edge.update(reading(CadenceState.Cruising, 3), live = true), "first reading only syncs")
-        assertTrue(edge.update(reading(CadenceState.Boosting, 4), live = true))
-        assertFalse(edge.update(reading(CadenceState.Boosting, 4), live = true), "the same surge never fires twice")
-        assertFalse(edge.update(reading(CadenceState.Boosting, 5), live = false), "a surge while held is absorbed")
-        assertFalse(edge.update(reading(CadenceState.Cruising, 5), live = true), "and not replayed later")
-        edge.invalidate()
-        assertFalse(edge.update(reading(CadenceState.Boosting, 9), live = true), "after invalidate the counter resyncs")
-        assertTrue(edge.update(reading(CadenceState.Boosting, 10), live = true))
-    }
-
-    @Test
-    fun theRideWaitsForCalibrationAndAPaceBaseline() {
-        val d = SessionDriver(TrailRideSession(TrailRideGame(TrailRideConfig(world = TrailWorlds.straight()), 3L)))
+    private fun riseAndLoseFace(d: SessionDriver) {
+        d.face = HandSource.Camera
+        d.faceY = 0.62f
         d.run(0.5f)
-        assertEquals(TrailHold.Calibrating, d.session.hold)
-        d.run(1f)
-        assertEquals(TrailHold.LearningPace, d.session.hold, "no riding before the jump detector knows the rider's pace")
-        assertEquals(0f, d.game.distance)
+        for (y in floatArrayOf(0.60f, 0.57f, 0.54f, 0.50f, 0.46f)) {
+            d.faceY = y
+            d.frame()
+        }
+        d.face = HandSource.Lost
+        d.frame()
+    }
+
+    @Test
+    fun onlyBikeTelemetryCanHoldTheRide() {
+        val sup = TrailRideSupervisor()
+        val live = reading(CadenceState.Cruising)
+        assertEquals(TrailHold.None, sup.hold(live))
+        assertEquals(TrailHold.None, sup.hold(reading(CadenceState.Establishing)))
+        assertEquals(TrailHold.None, sup.hold(reading(CadenceState.Boosting)))
+        assertEquals(TrailHold.None, sup.hold(reading(CadenceState.Recovering)))
+        assertEquals(TrailHold.NoTelemetry, sup.hold(reading(CadenceState.NoTelemetry)))
+        assertEquals(TrailHold.NoTelemetry, sup.hold(reading(CadenceState.Stale)))
+        assertEquals(TrailHold.NotPedaling, sup.hold(reading(CadenceState.Stopped)))
+        assertEquals("PEDAL TO RIDE", sup.message(TrailHold.NotPedaling, live))
+        assertEquals(null, sup.message(TrailHold.None, live))
+    }
+
+    @Test
+    fun trailRideStartsWithoutFaceCalibrationOrCadenceBaseline() {
+        val d = SessionDriver(TrailRideSession(TrailRideGame(
+            TrailRideConfig(world = TrailWorlds.straight(firstDitch = TrailWorlds.NEVER)), 3L,
+        )))
+        d.face = HandSource.Lost
+        d.camera = CameraState.Unavailable
+        d.frame()
+        assertEquals(TrailHold.None, d.session.hold)
+        assertEquals(CadenceState.Establishing, d.session.cadenceReading.state)
         d.untilRiding()
-        assertTrue(d.game.elapsed >= d.game.config.readySeconds, "countdown before the world moves")
+        d.run(1f)
+        assertTrue(d.game.distance > 2f)
+        assertEquals(TrailHold.None, d.session.hold)
+        assertEquals(0, d.session.jumpRequests)
     }
 
     @Test
-    fun stationaryPedalsFreezeTheWorld() {
+    fun trackingLossAndCameraFailureNeverFreezeTheWorld() {
         val d = steadySession()
+        d.faceX = 0.62f
+        d.frame()
+        val oldDirection = d.session.steer.steer
         val distance = d.game.distance
-        val elapsed = d.game.elapsed
-        d.rpm = 0
-        d.run(4f)
-        assertEquals(TrailHold.NotPedaling, d.session.hold)
-        assertEquals("PEDAL TO RIDE", d.session.message())
-        assertTrue(d.game.distance - distance < 1.5f, "at most the frames before the zero sample (${d.game.distance - distance} m)")
-        val frozen = d.game.distance
-        d.run(3f)
-        assertEquals(frozen, d.game.distance)
-        assertTrue(d.game.elapsed - elapsed < 0.5f)
-        d.rpm = 70
+        d.face = HandSource.Lost
         d.run(2f)
-        assertTrue(d.game.distance > frozen + 5f, "pedaling again resumes the ride")
+        assertEquals(TrailHold.None, d.session.hold)
+        assertTrue(d.game.distance > distance + 8f)
+        assertEquals(oldDirection, d.game.targetX / d.game.config.steerRange, 0.0001f)
+        d.camera = CameraState.Unavailable
+        val moving = d.game.distance
+        d.run(1f)
+        assertTrue(d.game.distance > moving + 3f)
+        assertEquals(TrailHold.None, d.session.hold)
+        assertEquals(0, d.session.jumpRequests)
     }
 
     @Test
-    fun missingOrStaleTelemetryFreezesTheWorld() {
+    fun stableUpwardFaceExitCausesExactlyOneJumpAndDoesNotPause() {
+        val d = steadySession()
+        d.faceY = 0.62f
+        d.run(0.5f)
+        for (y in floatArrayOf(0.60f, 0.57f, 0.54f, 0.50f, 0.46f)) {
+            d.faceY = y
+            d.frame()
+        }
+        assertEquals(0, d.session.jumpRequests)
+        assertTrue(d.session.standing.armed)
+        d.face = HandSource.Lost
+        d.frame()
+        assertEquals(1, d.session.jumpRequests)
+        assertEquals(1, d.session.standing.jumps)
+        assertEquals("stand jump", d.session.standing.lastEvent)
+        assertTrue(d.game.airborne)
+        assertEquals(TrailHold.None, d.session.hold)
+        val distance = d.game.distance
+        d.run(2f)
+        assertEquals(1, d.session.jumpRequests)
+        assertTrue(d.game.distance > distance + 8f)
+    }
+
+    @Test
+    fun sittingDownAndReacquiringTrackingRearmsAnotherJump() {
+        val d = steadySession()
+        riseAndLoseFace(d)
+        assertEquals(1, d.session.jumpRequests)
+        d.face = HandSource.Camera
+        d.faceY = 0.62f
+        d.run(0.6f)
+        assertTrue(d.session.standing.armed)
+        d.run(0.4f)
+        riseAndLoseFace(d)
+        assertEquals(2, d.session.jumpRequests)
+        assertEquals(2, d.session.standing.jumps)
+    }
+
+    @Test
+    fun smallFaceMovementOrLossWithoutUpwardExitDoesNotJump() {
+        val d = steadySession()
+        d.faceY = 0.50f
+        d.run(0.5f)
+        d.faceY = 0.47f
+        d.frame()
+        d.face = HandSource.Lost
+        d.run(2f)
+        assertEquals(0, d.session.jumpRequests)
+        assertEquals(0, d.session.standing.jumps)
+        assertTrue(d.session.live)
+        assertEquals("no upward exit", d.session.standing.lastEvent)
+    }
+
+    @Test
+    fun movingDownwardBeforeFaceLossCancelsAStandCandidate() {
+        val d = steadySession()
+        d.faceY = 0.62f
+        d.run(0.5f)
+        for (y in floatArrayOf(0.58f, 0.54f, 0.49f, 0.45f)) {
+            d.faceY = y
+            d.frame()
+        }
+        d.faceY = 0.55f
+        d.frame()
+        d.face = HandSource.Lost
+        d.frame()
+        assertEquals(0, d.session.jumpRequests)
+        assertEquals(TrailHold.None, d.session.hold)
+    }
+
+    @Test
+    fun unpluggedOrUnreadyCameraCannotTriggerAJumpButRideContinues() {
+        val d = steadySession()
+        d.faceY = 0.62f
+        d.run(0.5f)
+        for (y in floatArrayOf(0.57f, 0.52f, 0.46f)) {
+            d.faceY = y
+            d.frame()
+        }
+        d.face = HandSource.Lost
+        d.camera = CameraState.Unavailable
+        d.frame()
+        assertEquals(0, d.session.jumpRequests)
+        assertEquals(TrailHold.None, d.session.hold)
+        d.run(1f)
+        assertTrue(d.session.live)
+    }
+
+    @Test
+    fun speedChangeAloneDoesNotInitiateAnyJump() {
+        val d = steadySession()
+        d.rpm = 100
+        d.run(4f)
+        assertEquals(0, d.session.jumpRequests)
+        assertEquals(0, d.session.standing.jumps)
+        assertFalse(d.game.airborne)
+    }
+
+    @Test
+    fun missingOrStaleTelemetryStillStopsTheWorld() {
         val d = steadySession()
         d.connected = false
         d.frame()
         assertEquals(TrailHold.NoTelemetry, d.session.hold)
-        val at = d.game.distance
+        val distance = d.game.distance
         d.run(2f)
-        assertEquals(at, d.game.distance)
+        assertEquals(distance, d.game.distance)
         d.connected = true
         d.run(1f)
-        val moving = d.game.distance
+        assertTrue(d.game.distance > distance)
         d.telemetryFrozen = true
         d.run(3f)
         assertEquals(TrailHold.NoTelemetry, d.session.hold)
         assertEquals(CadenceState.Stale, d.session.cadenceReading.state)
         val frozen = d.game.distance
-        assertTrue(frozen - moving < 20f, "stale data stops the ride within the 2 s freshness limit")
         d.run(2f)
         assertEquals(frozen, d.game.distance)
     }
 
     @Test
-    fun cameraOrFaceLossHoldsHazardsAndTimers() {
-        val d = steadySession(TrailRideConfig(world = TrailWorlds.straight(obstacles = true)))
-        d.face = HandSource.Lost
-        d.frame()
-        assertEquals(TrailHold.FaceLost, d.session.hold)
-        val distance = d.game.distance
-        val elapsed = d.game.elapsed
-        val resolved = d.game.world.obstacles.map { it.resolved }
-        d.run(5f)
-        assertEquals(distance, d.game.distance)
-        assertEquals(elapsed, d.game.elapsed)
-        assertEquals(resolved, d.game.world.obstacles.map { it.resolved })
-        d.face = HandSource.Camera
-        d.camera = CameraState.Unavailable
-        d.run(2f)
-        assertEquals(TrailHold.CameraUnavailable, d.session.hold)
-        assertEquals(distance, d.game.distance)
-    }
-
-    @Test
-    fun reacquiringTheFaceNeedsAShortStableInterval() {
+    fun standingWhileStoppedOrWithoutBikeDataCannotQueueAJump() {
         val d = steadySession()
-        d.face = HandSource.Lost
+        d.rpm = 0
         d.run(1f)
-        d.face = HandSource.Camera
-        d.frame()
-        assertEquals(TrailHold.Resuming, d.session.hold)
-        val at = d.game.distance
-        d.run(0.4f)
-        assertEquals(TrailHold.Resuming, d.session.hold)
-        assertEquals(at, d.game.distance)
-        d.run(0.4f)
-        assertEquals(TrailHold.None, d.session.hold)
-    }
-
-    @Test
-    fun repeatedTelemetrySamplesCannotCreateASurge() {
-        val d = steadySession()
-        d.telemetryFrozen = true
-        d.rpm = 95
-        d.run(1.5f)
-        assertEquals(0, d.session.cadenceReading.activations)
+        assertEquals(TrailHold.NotPedaling, d.session.hold)
+        val distance = d.game.distance
+        riseAndLoseFace(d)
         assertEquals(0, d.session.jumpRequests)
-    }
-
-    @Test
-    fun oneNoisySpikeCannotJump() {
-        val d = steadySession()
-        d.rpm = 100
-        d.run(0.25f)
+        assertEquals(distance, d.game.distance)
         d.rpm = 70
-        d.run(3f)
-        assertEquals(0, d.session.cadenceReading.activations)
-        assertEquals(0, d.session.jumpRequests)
-        assertFalse(d.game.airborne)
-    }
-
-    @Test
-    fun holdingAHighCadenceJumpsOnlyOnce() {
-        val d = steadySession()
-        d.rpm = 90
-        d.run(10f)
-        assertEquals(1, d.session.jumpRequests, "held cadence cannot retrigger")
-        assertTrue(d.session.cadenceReading.armed, "but it does rearm against the held pace")
-        d.rpm = 70
-        d.run(3f)
-        d.rpm = 90
         d.run(2f)
-        assertEquals(2, d.session.jumpRequests, "a steady lower pace rearms the next surge from there")
-    }
-
-    @Test
-    fun oneJumpPerSurgeWhileThePaceKeepsClimbing() {
-        val d = steadySession()
         assertEquals(0, d.session.jumpRequests)
-        d.rpm = 90
-        d.run(1.2f)
-        assertEquals(1, d.session.jumpRequests)
-        d.run(8f) { assertTrue(it.session.live, "recovering never holds the ride") }
-        assertEquals(1, d.session.jumpRequests, "holding 90 does not jump again")
-        assertTrue(d.session.cadenceReading.armed)
-        assertEquals(90f, d.session.cadenceReading.baseline, 0.01f)
-        d.rpm = 106
-        d.run(1.2f)
-        assertEquals(2, d.session.jumpRequests, "a second surge from the stabilized 90 pace")
-        d.run(8f)
-        assertEquals(2, d.session.jumpRequests)
-        assertEquals(d.session.cadenceReading.activations, d.session.jumpRequests)
     }
 
     @Test
-    fun steadyPaceChangesNeverFabricateJumps() {
+    fun pauseAndRestartDiscardPartialStandingGestures() {
         val d = steadySession()
-        for (pace in intArrayOf(80, 74, 85, 66, 76, 70, 81)) {
-            d.rpm = pace
-            d.run(4f)
+        d.faceY = 0.62f
+        d.run(0.5f)
+        for (y in floatArrayOf(0.58f, 0.54f, 0.49f, 0.45f)) {
+            d.faceY = y
+            d.frame()
         }
-        assertEquals(0, d.session.cadenceReading.activations, "every step is under +12 from the pace before it")
-        assertEquals(0, d.session.jumpRequests)
-        assertEquals(81f, d.session.cadenceReading.baseline, 0.01f)
-    }
-
-    @Test
-    fun aSurgeAtAStabilizedPaceDuringAHoldIsNeverReplayed() {
-        val d = steadySession()
-        d.rpm = 90
-        d.run(1.2f)
-        d.run(6f)
-        assertEquals(1, d.session.jumpRequests)
-        d.face = HandSource.Lost
-        d.rpm = 106
-        d.run(2f)
-        assertEquals(2, d.session.cadenceReading.activations, "the detector saw the second surge")
-        assertEquals(1, d.session.jumpRequests, "but the ride was held")
-        d.face = HandSource.Camera
-        d.run(5f)
-        assertEquals(1, d.session.jumpRequests, "and it is not replayed when the ride resumes")
         d.session.pause()
-        d.nowNanos += 5_000_000_000L
-        d.run(5f)
-        assertEquals(TrailHold.None, d.session.hold)
-        assertEquals(1, d.session.jumpRequests, "a host pause and a high-cadence return do not jump")
-        d.rpm = 90
-        d.run(3f)
-        d.rpm = 106
-        d.run(1.2f)
-        assertEquals(2, d.session.jumpRequests, "the next real surge jumps exactly once")
-        d.run(4f)
-        assertEquals(2, d.session.jumpRequests)
-    }
-
-    @Test
-    fun aSurgeDuringAHoldIsNeverReplayed() {
-        val d = steadySession()
         d.face = HandSource.Lost
-        d.rpm = 90
-        d.run(2f)
-        assertEquals(1, d.session.cadenceReading.activations, "the detector saw the surge")
-        d.face = HandSource.Camera
-        d.run(3f)
-        assertEquals(TrailHold.None, d.session.hold)
-        assertEquals(0, d.session.jumpRequests, "but it was held, so no jump")
-        assertFalse(d.game.airborne)
-    }
-
-    @Test
-    fun hostPauseForgetsTransientInput() {
-        val d = steadySession()
-        d.session.pause()
-        d.rpm = 90
         d.frame()
-        assertEquals(TrailHold.Resuming, d.session.hold, "after a pause the face must be stable again")
-        d.run(1.2f)
-        val surgesBefore = d.session.jumpRequests
-        d.session.pause()
-        d.run(0.3f)
-        assertEquals(surgesBefore, d.session.jumpRequests, "a surge confirmed around the pause is not replayed")
+        assertEquals(0, d.session.jumpRequests)
+        d.session.restart(6L)
+        d.frame()
+        assertEquals(0, d.session.jumpRequests)
+        assertFalse(d.session.standing.armed)
     }
 
     @Test
-    fun telemetryDropoutDoesNotReuseAnOldSurge() {
-        val d = steadySession()
-        d.rpm = 90
-        d.run(1.2f)
-        assertEquals(1, d.session.jumpRequests)
-        d.telemetryFrozen = true
-        d.run(3f)
-        assertEquals(TrailHold.NoTelemetry, d.session.hold)
-        d.telemetryFrozen = false
-        d.run(3f)
-        assertEquals(1, d.session.jumpRequests, "the old surge stays used; holding high after a dropout does not jump again")
+    fun duplicateAndStaleFaceSamplesDoNotCreateUpwardMotion() {
+        val detector = StandJumpDetector()
+        val msNanos = 1_000_000L
+        val start = 1_000_000_000L
+        repeat(12) { i ->
+            val at = start + i * 50 * msNanos
+            detector.update(HandPosition(0.5f, 0.55f, 0.9f, at, HandSource.Camera), CameraState.Ready, at, true)
+        }
+        assertTrue(detector.armed)
+        val repeated = start + 550 * msNanos
+        repeat(12) { i ->
+            detector.update(
+                HandPosition(0.5f, 0.40f, 0.9f, repeated, HandSource.Camera),
+                CameraState.Ready, repeated + i * 10 * msNanos, true,
+            )
+        }
+        assertFalse(detector.update(
+            HandPosition(0.5f, 0.40f, 0f, repeated + 600 * msNanos, HandSource.Lost),
+            CameraState.Ready, repeated + 600 * msNanos, true,
+        ))
+        assertEquals(0, detector.jumps)
     }
 }

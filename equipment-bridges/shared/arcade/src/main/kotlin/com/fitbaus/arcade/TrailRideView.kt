@@ -221,8 +221,8 @@ private class TrailSprite(val near: Bitmap, val far: Bitmap, val meters: Float)
 
 /**
  * TRAIL RIDE: a first-person mountain-bike ride through an endless forest. Steer with small
- * horizontal head movements (Face tracking), keep pedaling to roll, and jump ditches with a timed,
- * confirmed cadence surge (read-only RPM). Rendered into a 256x144 framebuffer scaled with
+ * horizontal head movements (Face tracking), keep pedaling to roll, and jump ditches by standing
+ * until the upward-moving face leaves the camera view. Rendered into a 256x144 framebuffer scaled with
  * nearest-neighbour filtering. Never sends anything to the bike.
  */
 public class TrailRideView(context: Context) : View(context) {
@@ -231,7 +231,6 @@ public class TrailRideView(context: Context) : View(context) {
     private val density = resources.displayMetrics.density
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private var sensitivityIndex = (prefs?.getInt(SENSITIVITY_KEY, DEFAULT_SENSITIVITY) ?: DEFAULT_SENSITIVITY).coerceIn(0, SENSITIVITIES.size - 1)
-    private var deltaIndex = (prefs?.getInt(DELTA_KEY, DEFAULT_DELTA) ?: DEFAULT_DELTA).coerceIn(0, DELTAS.size - 1)
     private var seedIndex = (prefs?.getInt(SEED_KEY, 0) ?: 0).coerceIn(0, SEEDS.size - 1)
     private var ditchTiming = prefs?.getBoolean(TIMING_KEY, false) ?: false
     private val game = TrailRideGame(seed = nextSeed()).also { g -> g.onEvent = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, it) } }
@@ -332,7 +331,6 @@ public class TrailRideView(context: Context) : View(context) {
         setBackgroundColor(TrailSprites.rgb(0, 0, 0))
         isClickable = true
         session.steering.setGain(SENSITIVITIES[sensitivityIndex])
-        session.cadence.setDelta(DELTAS[deltaIndex])
     }
 
     private val hold: TrailHold
@@ -367,7 +365,7 @@ public class TrailRideView(context: Context) : View(context) {
         val start = System.nanoTime()
         if (simulatedCadence) {
             if (now - simulatedSample >= SIM_SAMPLE_NANOS) simulatedSample = now
-            val simRpm = if (simulatedPress) SIM_RPM + DELTAS[deltaIndex] + 4 else SIM_RPM
+            val simRpm = if (simulatedPress) SIM_RPM + 30 else SIM_RPM
             session.update(position, camera, true, true, simRpm, true, "sim-$simulatedSample", now, simulated = true)
         } else {
             session.update(position, camera, connected, initialized, rpm, rpmCurrent, rpmObservedAt, now)
@@ -400,7 +398,6 @@ public class TrailRideView(context: Context) : View(context) {
 
     public fun developerOptions(): List<String> = listOf(
         "Head sensitivity: ${SENSITIVITY_LABELS[sensitivityIndex]} (tap to change)",
-        "Jump surge threshold: +${DELTAS[deltaIndex]} RPM above your baseline (tap to change)",
         "Recenter head now (look straight ahead)",
         if (ditchTiming) "Ditch timing guide: ON (tap to hide)" else "Ditch timing guide: OFF (tap to show)",
         "World seed: ${if (SEEDS[seedIndex] == 0L) "random each ride" else "fixed ${SEEDS[seedIndex]}"} (tap to change, restarts)",
@@ -415,27 +412,22 @@ public class TrailRideView(context: Context) : View(context) {
                 session.steering.setGain(SENSITIVITIES[sensitivityIndex])
                 prefs?.edit()?.putInt(SENSITIVITY_KEY, sensitivityIndex)?.apply()
             }
-            1 -> {
-                deltaIndex = (deltaIndex + 1) % DELTAS.size
-                session.cadence.setDelta(DELTAS[deltaIndex])
-                prefs?.edit()?.putInt(DELTA_KEY, deltaIndex)?.apply()
-            }
-            2 -> session.recenter()
-            3 -> {
+            1 -> session.recenter()
+            2 -> {
                 ditchTiming = !ditchTiming
                 prefs?.edit()?.putBoolean(TIMING_KEY, ditchTiming)?.apply()
             }
-            4 -> {
+            3 -> {
                 seedIndex = (seedIndex + 1) % SEEDS.size
                 prefs?.edit()?.putInt(SEED_KEY, seedIndex)?.apply()
                 restartGame()
             }
-            5 -> {
+            4 -> {
                 simulatedCadence = !simulatedCadence
                 simulatedPress = false
                 session.resetCadence()
             }
-            6 -> restartGame()
+            5 -> restartGame()
         }
         invalidate()
     }
@@ -799,10 +791,10 @@ public class TrailRideView(context: Context) : View(context) {
         val ditch = g.nextDitch()
         if (ditch != null && g.phase == TrailPhase.Riding && ditch.start > g.distance) {
             val t = g.timeTo(ditch)
-            if (t <= g.config.jumpEarlySeconds + g.config.surgeCueLead && t >= g.config.jumpLateSeconds) {
-                return (if (cadenceReading.armed) "SURGE NOW!" else "STEADY PACE, THEN SURGE!") to (if (blink) PROMPT_TEXT else WHITE)
+            if (t <= g.config.jumpEarlySeconds + g.config.jumpCueLead && t >= g.config.jumpLateSeconds) {
+                return "STAND UP TO JUMP!" to PROMPT_TEXT
             }
-            if (t <= DITCH_WARN_SECONDS) return "DITCH AHEAD - GET READY TO SURGE" to PROMPT_TEXT
+            if (t <= DITCH_WARN_SECONDS) return "DITCH AHEAD - GET READY TO STAND" to PROMPT_TEXT
         }
         if (g.phase == TrailPhase.Riding && g.nearEdge && !g.airborne) {
             return (if (g.lateralError > 0f) "<< STEER LEFT" else "STEER RIGHT >>") to (if (blink) WARN_TEXT else WHITE)
@@ -841,28 +833,11 @@ public class TrailRideView(context: Context) : View(context) {
         meterRect.set(meterLeft, baseline - 14f * density, meterLeft + meterW, baseline)
         px.color = METER_BACK
         canvas.drawRect(meterRect, px)
-        val shown = when (c.state) {
-            CadenceState.Boosting -> 1f
-            CadenceState.Cruising -> if (c.baseline.isNaN() || c.rpm == null) 0f else ((c.rpm - c.baseline) / (c.threshold - c.baseline)).coerceIn(0f, 1f)
-            CadenceState.Establishing, CadenceState.Recovering -> c.steadyProgress
-            else -> 0f
-        }
-        px.color = when (c.state) {
-            CadenceState.Boosting -> METER_BOOST
-            CadenceState.Cruising -> METER_READY
-            CadenceState.Establishing, CadenceState.Recovering -> METER_STEADY
-            else -> METER_IDLE
-        }
+        val shown = ((c.rpm ?: 0).toFloat() / game.config.maxSpeedRpm).coerceIn(0f, 1f)
+        px.color = if (c.pedaling) METER_READY else METER_IDLE
         canvas.drawRect(meterRect.left, meterRect.top, meterRect.left + meterW * shown, meterRect.bottom, px)
-        val label = when (c.state) {
-            CadenceState.Boosting -> "SURGE!"
-            CadenceState.Establishing -> "LEARNING PACE"
-            CadenceState.Cruising -> "SURGE TO JUMP"
-            CadenceState.Recovering -> "STABILIZE PACE"
-            else -> "JUMP --"
-        }
         hudPaint.textSize = 12f * density
-        val labelText = if (c.simulated) "SIMULATED $label" else label
+        val labelText = if (c.simulated) "SIM RPM ${c.rpm ?: 0}" else "RPM ${c.rpm ?: 0}"
         hudPaint.color = if (c.simulated) WARN_TEXT else WHITE
         canvas.drawText(labelText, meterLeft - hudPaint.measureText(labelText) - 8f * density, baseline - 2f * density, hudPaint)
         hudPaint.color = WHITE
@@ -910,15 +885,11 @@ public class TrailRideView(context: Context) : View(context) {
                 g.riderVx, g.speed, g.phase, hold,
             ),
             String.format(
-                Locale.US, "rpm %s%s  age %d ms  %s  armed %s  baseline %s  threshold %s  pace %s +/-%s n %d steady %d%%  confirm %d  near-baseline %s ago  boost %d ms  surges %d",
-                c.rpm?.toString() ?: "-", if (c.simulated) " (SIMULATED)" else "", c.sampleAgeMs, c.state, if (c.armed) "yes" else "no",
-                if (c.baseline.isNaN()) "-" else String.format(Locale.US, "%.1f", c.baseline),
-                if (c.threshold.isNaN()) "-" else String.format(Locale.US, "%.1f", c.threshold),
-                if (c.pace.isNaN()) "-" else String.format(Locale.US, "%.1f", c.pace),
-                if (c.paceSpread.isNaN()) "-" else String.format(Locale.US, "%.1f", c.paceSpread),
-                c.paceSamples, (c.steadyProgress * 100f).toInt(), c.confirming,
-                if (c.sinceNearMs < 0) "-" else "${c.sinceNearMs} ms",
-                c.boostRemainingMs, c.activations,
+                Locale.US, "rpm %s%s  age %d ms  state %s  speed %.1f m/s  stand armed %s  rise %.3f  last %s  jump events %d",
+                c.rpm?.toString() ?: "-", if (c.simulated) " (SIMULATED)" else "",
+                c.sampleAgeMs, c.state, g.speed,
+                if (session.standing.armed) "yes" else "no",
+                session.standing.lastRise, session.standing.lastEvent, session.standing.jumps,
             ),
             String.format(
                 Locale.US, "jump %s  air %.2f s  last %s (%.2f s to ditch)  next ditch %s",
@@ -1008,16 +979,13 @@ public class TrailRideView(context: Context) : View(context) {
         const val KIND_FLAG = 9
         const val PREFS = "fitbaus_arcade"
         const val SENSITIVITY_KEY = "trail_sensitivity"
-        const val DELTA_KEY = "trail_boost_delta"
         const val SEED_KEY = "trail_seed"
         const val TIMING_KEY = "trail_ditch_timing"
         const val DEFAULT_SENSITIVITY = 1
-        const val DEFAULT_DELTA = 2
         const val SIM_RPM = 70
         const val SIM_SAMPLE_NANOS = 200_000_000L
         val SENSITIVITIES = floatArrayOf(3f, 4f, 5.5f, 7f)
         val SENSITIVITY_LABELS = arrayOf("Low", "Medium", "High", "Very high")
-        val DELTAS = intArrayOf(8, 10, 12, 15, 18)
         val SEEDS = longArrayOf(0L, 1001L, 2024L, 7777L)
         val RECT_GLOVE_L = RectF(27f, 113f, 51f, 128f)
         val RECT_GLOVE_R = RectF(205f, 113f, 229f, 128f)
