@@ -769,6 +769,7 @@ public class TrailRideView(context: Context) : View(context) {
     private fun prompt(): Pair<String, Int>? {
         val g = game
         val now = g.elapsed
+        val blink = (animSeconds * 4f).toInt() % 2 == 0
         if (g.phase == TrailPhase.Crashed) {
             return when (g.lastCrash) {
                 TrailCrash.Obstacle -> "CRASH! WATCH THE TREES"
