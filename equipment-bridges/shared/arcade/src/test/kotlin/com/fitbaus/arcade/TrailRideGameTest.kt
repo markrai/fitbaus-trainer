@@ -329,16 +329,16 @@ class TrailRideGameTest {
     }
 
     @Test
-    fun crashesNeverEndTheRideAndRestartClearsEverything() {
+    fun offTrailRideNeverStopsAndRestartClearsEverything() {
         val g = straightGame(firstDitch = TrailWorlds.NEVER)
         TrailPilots.run(g, 60f, steer = { 1f })
-        assertTrue(g.crashes >= 8, "riding off the trail again and again (${g.crashes} crashes)")
-        assertEquals(g.crashes, g.offTrails)
-        assertTrue(g.phase == TrailPhase.Riding || g.phase == TrailPhase.Crashed, "there is no game over")
-        TrailPilots.run(g, 2f)
+        assertEquals(0, g.crashes, "off-trail must not count as a crash")
+        assertEquals(1, g.offTrails, "one sustained off-trail excursion")
+        assertEquals(TrailPhase.Riding, g.phase)
         val before = g.distance
         TrailPilots.run(g, 5f, steer = { TrailPilots.follow(it) })
-        assertTrue(g.distance > before + 20f, "the ride keeps going after any number of crashes")
+        assertTrue(g.distance > before + 20f, "the ride keeps going continuously")
+        assertEquals(0, g.crashes)
         g.requestJump()
         g.restart(7L)
         assertEquals(TrailPhase.Ready, g.phase)
