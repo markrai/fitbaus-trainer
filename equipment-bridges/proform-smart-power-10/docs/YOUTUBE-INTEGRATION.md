@@ -15,7 +15,9 @@ small FitBaus-owned layer.
   more channel batches loaded as the user scrolls. The separate SEARCH and
   MY FEED buttons are removed. The search field remains, using the keyboard
   Search action for global YouTube search; its × clears the search and returns
-  to the default feed. **MY YOUTUBE** opens the account browser for channels
+  to the default feed. The microphone uses a bundled Vosk English speech model
+  for offline transcription, with a brief listening status below the search
+  bar and a second tap to cancel. **MY YOUTUBE** opens the account browser for channels
   and playlists. Its top-left back arrow returns to the home grid; the lower
   BACK control remains for channel/playlist hierarchy. This is not Google's
   proprietary Home recommendations.
@@ -336,11 +338,17 @@ bike telemetry while watching video.
   resistance, pairing, camera or permissions; `YouTubeSafetyTest` enforces
   this by scanning the sources. Mode hooks never touch `NativeBridgeService`
   (`ArcadeModeTest`).
-- Manifest permissions are unchanged. ExoPlayer's `ACCESS_NETWORK_STATE` is
+- The Full Bike Bridge requests `RECORD_AUDIO` for on-demand offline speech
+  search. Android 5.1 grants it during installation; Android 6+ uses the
+  standard permission prompt. Speech runs in a non-exported, dedicated
+  `:speech` process that exits after recording. No separate speech app,
+  internet request or Google sign-in is required for transcription.
+- ExoPlayer's `ACCESS_NETWORK_STATE` is
   removed with `tools:node="remove"`; ExoPlayer's `NetworkTypeObserver`
   catches the resulting `SecurityException` and reports an unknown network.
-- The tab runs in the Bridge's process (the Bridge service has no separate
-  `android:process`). An uncaught exception in UI code would therefore
+- The YouTube UI runs in the Bridge process. The on-demand Vosk recognizer
+  runs in its own `:speech` process to isolate its substantial native memory
+  footprint. An uncaught exception in UI code would still
   restart the Bridge. All extraction, engine creation and preparation paths
   catch failures and turn them into on-screen errors; this still needs to be
   watched in the on-console soak test.

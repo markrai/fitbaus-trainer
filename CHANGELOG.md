@@ -163,12 +163,16 @@ See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
 
 ### Added
 
-- **YouTube voice search.** Add a standard microphone icon beside the existing
-  search clear button, with separate 48dp touch targets. On supported consoles,
-  Android's installed speech-recognition activity transcribes a query and
-  submits it to the normal YouTube search. Canceled/blank results leave the
-  search unchanged; devices without a speech recognizer show a clear message.
-  No new microphone permission, Google OAuth scope, or speech SDK is required.
+- **Self-contained YouTube voice search.** Keep separate microphone and clear
+  touch controls but replace the external recognition activity with bundled,
+  offline English transcription using Vosk. The build downloads and verifies
+  the pinned English model, then packages it inside the Full Bike Bridge APK.
+  Listening status stays inside the YouTube search screen. Recognition runs
+  only when requested in a dedicated process, which exits after completion or
+  cancellation; active video playback, game modes and bike telemetry do not
+  share its native memory. No extra app, Google service or user setup is needed.
+  Physical-console microphone, latency, memory and accuracy tests are required
+  before a signed public release.
 
 - **YouTube channel video browsing.** The player header shows the current
   channel avatar beside the quality selector when a verified channel URL is
