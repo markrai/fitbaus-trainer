@@ -146,16 +146,13 @@ internal class GhoulPace(
     }
 
     fun recalibrate() {
-        filter.reset()
         warmupSamples.clear()
-        lastUpdateNanos = Long.MIN_VALUE
         warmupElapsed = 0f
         pendingWarmupNanos = 0L
         pendingSampleNanos = Long.MIN_VALUE
         trained = false
         targetBaseline = Float.NaN
         learnedBaseline = Float.NaN
-        baseline = GhoulPaceProfile.DEFAULT_RPM
         refreshReading()
     }
 }
@@ -495,8 +492,6 @@ internal class GhoulRunSession(
 
     fun recalibratePace() {
         pace.recalibrate()
-        game.resetClock()
-        supervisor.invalidate()
     }
 
 }
