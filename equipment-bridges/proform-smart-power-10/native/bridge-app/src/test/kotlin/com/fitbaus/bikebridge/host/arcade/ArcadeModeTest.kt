@@ -249,7 +249,7 @@ class ArcadeModeTest {
         assertTrue(ArcadeMode.GhoulRun.isGame)
         assertTrue(ArcadeMode.Biketris.isGame)
         assertFalse(ArcadeMode.YouTube.isGame)
-        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "FLAK RUN", "TRAIL RIDE", "GHOUL RUN", "BIKETRIS", "YouTube"), ArcadeMode.values().map { it.caption })
+        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "MAVERICK", "TRAILS", "IT HEARS YOU", "BIKETRIS", "YouTube"), ArcadeMode.values().map { it.caption })
     }
 
     @Test
