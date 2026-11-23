@@ -2,6 +2,8 @@
 
 package com.fitbaus.bikebridge.host.youtube
 
+import java.net.URI
+
 internal data class VideoSummary(
     val id: String,
     val title: String,
@@ -10,7 +12,32 @@ internal data class VideoSummary(
     val viewCount: Long,
     val thumbnailUrl: String,
     val live: Boolean,
+    val channelUrl: String? = null,
+    val channelAvatarUrl: String? = null,
 )
+
+internal object YouTubeChannelLinks {
+    private val channelPath = Regex("^/(?:channel/[A-Za-z0-9_-]+|@[A-Za-z0-9._-]+|c/[A-Za-z0-9._-]+|user/[A-Za-z0-9._-]+)$")
+
+    fun normalize(url: String?): String? {
+        val trimmed = url?.trim()?.takeIf { it.length in 20..300 } ?: return null
+        val parsed = runCatching { URI(trimmed) }.getOrNull() ?: return null
+        if (parsed.scheme != "https" || parsed.host !in setOf("youtube.com", "www.youtube.com", "m.youtube.com") ||
+            parsed.userInfo != null || parsed.port != -1 || parsed.query != null || parsed.fragment != null) return null
+        if (!channelPath.matches(parsed.path?.trimEnd('/') ?: "")) return null
+        return trimmed
+    }
+
+    fun avatar(url: String?): String? {
+        val trimmed = url?.trim()?.takeIf { it.length in 10..2048 } ?: return null
+        val parsed = runCatching { URI(trimmed) }.getOrNull() ?: return null
+        val host = parsed.host?.lowercase() ?: return null
+        if (parsed.scheme != "https" || parsed.userInfo != null || parsed.port != -1) return null
+        if (host != "ggpht.com" && !host.endsWith(".ggpht.com") &&
+            host != "googleusercontent.com" && !host.endsWith(".googleusercontent.com")) return null
+        return trimmed
+    }
+}
 
 internal interface FeedCursor
 
@@ -55,6 +82,8 @@ internal interface YouTubeCatalog {
     fun discover(): FeedPage
 
     fun search(query: String): FeedPage
+
+    fun channelVideos(channelUrl: String): FeedPage
 
     fun related(seeds: List<VideoSummary>): FeedPage = FeedPage(emptyList(), null)
 
