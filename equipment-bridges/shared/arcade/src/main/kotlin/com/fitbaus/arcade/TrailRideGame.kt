@@ -32,7 +32,7 @@ internal data class TrailRideConfig(
     val landingMargin: Float = 0.3f,
     val jumpHeight: Float = 0.55f,
     val hopHeight: Float = 0.18f,
-    val turtleShellClearHeight: Float = 0.10f,
+    val tortoiseClearHeight: Float = 0.10f,
     val crashSeconds: Float = 0.6f,
     val invulnerableSeconds: Float = 2f,
     val readySeconds: Float = 2f,
@@ -366,11 +366,12 @@ internal class TrailRideGame(
             if (o.distance > distance) break
             o.resolved = true
             if (o.distance <= previous - SWEEP_SLOP) continue
-            val overShell = o.kind == ObstacleKind.TurtleShell && airHeight >= config.turtleShellClearHeight
-            if (abs(riderX - o.x) < o.radius + reach && !overShell && invulnerable <= 0f) {
+            val overTortoise = o.kind == ObstacleKind.Tortoise && airHeight >= config.tortoiseClearHeight
+            val hazardX = o.positionAt(distance, world.config.halfWidth)
+            if (abs(riderX - hazardX) < o.radius + reach && !overTortoise && invulnerable <= 0f) {
                 o.hit = true
                 obstacleHits += 1
-                crash(TrailCrash.Obstacle, "hit ${o.kind.name.lowercase(Locale.US)} at ${o.distance.toInt()} m (dx ${String.format(Locale.US, "%.2f", riderX - o.x)})")
+                crash(TrailCrash.Obstacle, "hit ${o.kind.name.lowercase(Locale.US)} at ${o.distance.toInt()} m (dx ${String.format(Locale.US, "%.2f", riderX - hazardX)})")
                 return true
             }
             if (invulnerable <= 0f) {
