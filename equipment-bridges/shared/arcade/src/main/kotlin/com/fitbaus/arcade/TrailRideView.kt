@@ -893,9 +893,9 @@ public class TrailRideView(context: Context) : View(context) {
                 g.riderVx, g.speed, g.phase, hold,
             ),
             String.format(
-                Locale.US, "rpm %s%s  age %d ms  state %s  speed %.1f m/s  stand armed %s  rise %.3f  last %s  jump events %d",
+                Locale.US, "rpm %s%s  age %d ms  state %s  speed %.1f m/s  face Y %.3f  stand armed %s  rise %.3f  last %s  jump events %d",
                 c.rpm?.toString() ?: "-", if (c.simulated) " (SIMULATED)" else "",
-                c.sampleAgeMs, c.state, g.speed,
+                c.sampleAgeMs, c.state, g.speed, session.standing.lastY,
                 if (session.standing.armed) "yes" else "no",
                 session.standing.lastRise, session.standing.lastEvent, session.standing.jumps,
             ),
