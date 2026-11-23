@@ -120,7 +120,8 @@ public class TrailRideView(context: Context) : View(context) {
     private val rock = sprite(TrailRideArtwork.Kind.Rock, 12, 8, 0.6f)
     private val stone = sprite(TrailRideArtwork.Kind.Stone, 4, 2, 0.1f)
     private val flag = sprite(TrailRideArtwork.Kind.Flag, 6, 16, 1.5f)
-    private val spriteTable = arrayOf(pine, fir, broad, hazardTree, bush, grass, flowers, rock, stone, flag)
+    private val turtleShell = sprite(TrailRideArtwork.Kind.TurtleShell, 14, 8, 0.36f)
+    private val spriteTable = arrayOf(pine, fir, broad, hazardTree, bush, grass, flowers, rock, stone, flag, turtleShell)
 
     private val itemZ = FloatArray(MAX_ITEMS)
     private val itemX = FloatArray(MAX_ITEMS)
@@ -458,7 +459,17 @@ public class TrailRideView(context: Context) : View(context) {
         val obstacles = world.obstacles
         for (k in 0 until obstacles.size) {
             val o = obstacles[k]
-            addItem(o.distance - d, o.x, if (o.kind == ObstacleKind.Trunk) KIND_HAZARD_TREE else KIND_ROCK, if (o.kind == ObstacleKind.Trunk) 1f else 1.3f)
+            val kind = when (o.kind) {
+                ObstacleKind.Trunk -> KIND_HAZARD_TREE
+                ObstacleKind.Rock -> KIND_ROCK
+                ObstacleKind.TurtleShell -> KIND_TURTLE_SHELL
+            }
+            val scale = when (o.kind) {
+                ObstacleKind.Trunk -> 1f
+                ObstacleKind.Rock -> 1.3f
+                ObstacleKind.TurtleShell -> 1.25f
+            }
+            addItem(o.distance - d, o.x, kind, scale)
         }
         val ditches = world.ditches
         for (k in 0 until ditches.size) {
@@ -586,7 +597,7 @@ public class TrailRideView(context: Context) : View(context) {
         val blink = (animSeconds * 4f).toInt() % 2 == 0
         if (g.phase == TrailPhase.Crashed) {
             return when (g.lastCrash) {
-                TrailCrash.Obstacle -> "CRASH! WATCH THE TREES"
+                TrailCrash.Obstacle -> "CRASH! AVOID OBSTACLES"
                 TrailCrash.OffTrail -> "OFF THE TRAIL!"
                 TrailCrash.Ditch -> "MISSED THE JUMP!"
                 TrailCrash.None -> "CRASH!"
@@ -794,6 +805,7 @@ public class TrailRideView(context: Context) : View(context) {
         const val KIND_ROCK = 7
         const val KIND_STONE = 8
         const val KIND_FLAG = 9
+        const val KIND_TURTLE_SHELL = 10
         const val PREFS = "fitbaus_arcade"
         const val SENSITIVITY_KEY = "trail_sensitivity"
         const val SEED_KEY = "trail_seed"

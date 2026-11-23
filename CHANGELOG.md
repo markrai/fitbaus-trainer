@@ -30,6 +30,11 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Trail Ride crash recovery and cockpit.** Halve obstacle/ditch crash
+  recovery from 1.2 to 0.6 seconds without altering post-crash
+  invulnerability. Remove the visible hands from the first-person bike
+  handlebars while keeping the shaded grips, brake levers and bike computer.
+
 - **Trail Ride jump recognition and visibility.** The native face tracker now
   reports actual loss of the tracked face immediately to Trail Ride, instead
   of holding an outdated face position until the camera cache expires.
@@ -133,6 +138,12 @@ included in this upcoming release.
   events instead of losing all input when their kernel driver is detached.
 
 ### Added
+
+- **Trail Ride turtle shell hazards.** Occasionally render original shaded green
+  turtle shells on the road in existing isolated rock-hazard slots, preserving
+  seeded scenery, hazard spacing and ditch-clearance zones. Riders can steer
+  around a shell or hop over it when airborne high enough; ordinary rocks
+  and trees remain solid even during a hop.
 
 - **Trail Ride stand-to-jump.** Replace pedal-surge jump activation with a
   distinct upward face movement followed by tracking loss, allowing riders
