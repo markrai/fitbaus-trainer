@@ -882,7 +882,7 @@ internal class YouTubeContent(
 
         fun bind(video: VideoSummary) {
             setText(title, video.title)
-            setText(meta, listOfNotNull(video.channel?.takeIf { it.isNotBlank() }, YouTubeFormat.views(video.viewCount).takeIf { it.isNotEmpty() }).joinToString("  ·  "))
+            setText(meta, YouTubeFormat.previewMeta(video))
             val badgeText = if (video.live) "LIVE" else YouTubeFormat.duration(video.durationSeconds)
             setText(badge, badgeText)
             badge.visibility = if (badgeText.isEmpty()) GONE else VISIBLE
