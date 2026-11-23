@@ -192,6 +192,9 @@ internal class LandmarkFrameSink(
             input.publishCamera(mapped.x, mapped.y, point.confidence, end, generation)
             motion?.onFace(point.x, point.y, activeTracker.lastExtent, end)
         } else {
+            if (mode == ArcadeTrackerMode.Face && activeTracker.lastBackendStatus >= 0) {
+                input.markCameraLost(generation)
+            }
             motion?.onFaceLost(end)
         }
         publishPreview(width, height, point)
