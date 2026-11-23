@@ -155,6 +155,8 @@ internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()
             val priorLow = highestReached
             if (riseCandidate && priorLow.isFinite() && position.y > priorLow + config.downwardReset) {
                 riseCandidate = false
+                highestReached = Float.NaN
+                recent.clear()
                 lastEvent = "face moving down"
             }
             val previousHigh = recent.maxOfOrNull { it.y } ?: position.y
