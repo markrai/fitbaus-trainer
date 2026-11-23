@@ -100,6 +100,8 @@ class PassiveArcadeTest {
                 "FingerCountInput",
                 "FingerMathView",
                 "FlakView",
+                "FlakControllerInput",
+                "FlakInputSource",
                 "GhoulRunControllerInput",
                 "GhoulRunInputSource",
                 "GhoulRunView",
