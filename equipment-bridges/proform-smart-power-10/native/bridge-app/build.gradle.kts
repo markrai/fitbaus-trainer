@@ -1,4 +1,4 @@
-import java.net.URL
+import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
@@ -80,7 +80,7 @@ abstract class OfflineVoiceModelTask : DefaultTask() {
         val partial = File(model.parentFile, model.name + ".part")
         partial.delete()
         try {
-            val connection = URL("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip").openConnection()
+            val connection = URI("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip").toURL().openConnection()
             connection.connectTimeout = 30_000
             connection.readTimeout = 120_000
             connection.getInputStream().use { input ->

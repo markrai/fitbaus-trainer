@@ -99,7 +99,11 @@ class PassiveArcadeTest {
         val manifest = File("src/main/AndroidManifest.xml").readText()
         val usb = Regex("""android:name="android\.hardware\.usb\.host"\s+android:required="true"""")
         assertTrue(usb.containsMatchIn(manifest), "bridge USB host requirement unchanged")
-        assertEquals(1, Regex("""<service""").findAll(manifest).count(), "only the existing bridge service")
+        assertEquals(2, Regex("""<service""").findAll(manifest).count(), "bridge service and on-demand speech service")
+        assertTrue(manifest.contains("android:name=\".NativeBridgeService\""))
+        assertTrue(manifest.contains("android:name=\".speech.OfflineVoiceSearchService\""))
+        assertTrue(manifest.contains("android:process=\":speech\""))
+        assertTrue(Regex("""android:name="\.speech\.OfflineVoiceSearchService"\s+android:exported="false"\s+android:process=":speech" """.trim()).containsMatchIn(manifest))
         assertFalse(manifest.contains("arcade", ignoreCase = true), "no arcade activity, service or launcher")
     }
 }
