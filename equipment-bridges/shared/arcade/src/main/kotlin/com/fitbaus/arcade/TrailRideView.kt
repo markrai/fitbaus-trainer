@@ -120,8 +120,14 @@ public class TrailRideView(context: Context) : View(context) {
     private val rock = sprite(TrailRideArtwork.Kind.Rock, 12, 8, 0.6f)
     private val stone = sprite(TrailRideArtwork.Kind.Stone, 4, 2, 0.1f)
     private val flag = sprite(TrailRideArtwork.Kind.Flag, 6, 16, 1.5f)
-    private val turtleShell = sprite(TrailRideArtwork.Kind.TurtleShell, 14, 8, 0.36f)
-    private val spriteTable = arrayOf(pine, fir, broad, hazardTree, bush, grass, flowers, rock, stone, flag, turtleShell)
+    private val tortoiseRightA = sprite(TrailRideArtwork.Kind.Tortoise, 22, 12, 0.48f, stride = 0)
+    private val tortoiseRightB = sprite(TrailRideArtwork.Kind.Tortoise, 22, 12, 0.48f, stride = 1)
+    private val tortoiseLeftA = sprite(TrailRideArtwork.Kind.Tortoise, 22, 12, 0.48f, stride = 0, facingRight = false)
+    private val tortoiseLeftB = sprite(TrailRideArtwork.Kind.Tortoise, 22, 12, 0.48f, stride = 1, facingRight = false)
+    private val spriteTable = arrayOf(
+        pine, fir, broad, hazardTree, bush, grass, flowers, rock, stone, flag,
+        tortoiseRightA, tortoiseRightB, tortoiseLeftA, tortoiseLeftB,
+    )
 
     private val itemZ = FloatArray(MAX_ITEMS)
     private val itemX = FloatArray(MAX_ITEMS)
@@ -267,8 +273,11 @@ public class TrailRideView(context: Context) : View(context) {
 
     private fun nextSeed(): Long = SEEDS[seedIndex].takeIf { it != 0L } ?: (System.nanoTime() xor 0x2545F4914F6CDD1DL)
 
-    private fun sprite(kind: TrailRideArtwork.Kind, w: Int, h: Int, meters: Float): TrailSprite {
-        val art = TrailRideArtwork.create(kind, w, h)
+    private fun sprite(
+        kind: TrailRideArtwork.Kind, w: Int, h: Int, meters: Float,
+        stride: Int = 0, facingRight: Boolean = true,
+    ): TrailSprite {
+        val art = TrailRideArtwork.create(kind, w, h, stride, facingRight)
         return TrailSprite(art, TrailRideArtwork.hazed(art, FAR_HAZE), meters)
     }
 
@@ -462,14 +471,18 @@ public class TrailRideView(context: Context) : View(context) {
             val kind = when (o.kind) {
                 ObstacleKind.Trunk -> KIND_HAZARD_TREE
                 ObstacleKind.Rock -> KIND_ROCK
-                ObstacleKind.TurtleShell -> KIND_TURTLE_SHELL
+                ObstacleKind.Tortoise -> {
+                    val stride = ((d * 1.25f).toInt() and 1)
+                    if (o.crossingDirection > 0) KIND_TORTOISE_LEFT_A + stride
+                    else KIND_TORTOISE_RIGHT_A + stride
+                }
             }
             val scale = when (o.kind) {
                 ObstacleKind.Trunk -> 1f
                 ObstacleKind.Rock -> 1.3f
-                ObstacleKind.TurtleShell -> 1.25f
+                ObstacleKind.Tortoise -> 1f
             }
-            addItem(o.distance - d, o.x, kind, scale)
+            addItem(o.distance - d, o.positionAt(d, w), kind, scale)
         }
         val ditches = world.ditches
         for (k in 0 until ditches.size) {
@@ -623,9 +636,6 @@ public class TrailRideView(context: Context) : View(context) {
         }
         if (g.phase == TrailPhase.Riding && g.offTrail) {
             return "OFF TRAIL - SLIGHT SLOWDOWN" to (if (blink) WARN_TEXT else WHITE)
-        }
-        if (g.phase == TrailPhase.Riding && g.nearEdge && !g.airborne) {
-            return (if (g.lateralError > 0f) "<< STEER LEFT" else "STEER RIGHT >>") to (if (blink) WARN_TEXT else WHITE)
         }
         return null
     }
@@ -805,7 +815,10 @@ public class TrailRideView(context: Context) : View(context) {
         const val KIND_ROCK = 7
         const val KIND_STONE = 8
         const val KIND_FLAG = 9
-        const val KIND_TURTLE_SHELL = 10
+        const val KIND_TORTOISE_RIGHT_A = 10
+        const val KIND_TORTOISE_RIGHT_B = 11
+        const val KIND_TORTOISE_LEFT_A = 12
+        const val KIND_TORTOISE_LEFT_B = 13
         const val PREFS = "fitbaus_arcade"
         const val SENSITIVITY_KEY = "trail_sensitivity"
         const val SEED_KEY = "trail_seed"

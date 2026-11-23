@@ -32,7 +32,7 @@ internal data class TrailWorldConfig(
     val slalomGapMax: Float = 12f,
     val trunkRadius: Float = 0.32f,
     val rockRadius: Float = 0.28f,
-    val turtleShellChance: Float = 0.32f,
+    val tortoiseChance: Float = 0.32f,
     val minGap: Float = 1.0f,
     val firstDitchAt: Float = 230f,
     val ditchSpacing: Float = 175f,
@@ -44,7 +44,7 @@ internal data class TrailWorldConfig(
     val ditchClearAfter: Float = 26f,
 )
 
-internal enum class ObstacleKind { Trunk, Rock, TurtleShell }
+internal enum class ObstacleKind { Trunk, Rock, Tortoise }
 
 /** A collision-capable hazard. [x] is its fixed world position; [offset] is relative to the trail centre at [distance]. */
 internal class TrailObstacle(
@@ -55,9 +55,22 @@ internal class TrailObstacle(
     val x: Float,
     val radius: Float,
     val kind: ObstacleKind,
+    val crossingDirection: Int = 1,
 ) {
     var resolved: Boolean = false
     var hit: Boolean = false
+
+    fun positionAt(riderDistance: Float, halfWidth: Float): Float {
+        if (kind != ObstacleKind.Tortoise) return x
+        val crossing = ((riderDistance - (distance - CROSSING_DISTANCE)) /
+            (2f * CROSSING_DISTANCE)).coerceIn(0f, 1f)
+        return x + crossingDirection * (halfWidth + CROSSING_MARGIN) * (1f - 2f * crossing)
+    }
+
+    companion object {
+        const val CROSSING_DISTANCE = 22f
+        const val CROSSING_MARGIN = 0.35f
+    }
 }
 
 /** A ditch across the whole trail and its shoulders, from [start] to [end]. Only a timed jump crosses it. */
@@ -308,9 +321,10 @@ internal class TrailRideWorld(val config: TrailWorldConfig = TrailWorldConfig(),
             }
             GroupKind.Rock -> {
                 val offset = (hazardRng.nextFloat() * 2f - 1f) * 0.55f
-                val shell = scenery(group, 96) < config.turtleShellChance
+                val tortoise = scenery(group, 96) < config.tortoiseChance
+                val direction = if (scenery(group, 97) < 0.5f) -1 else 1
                 add(group, start, offset, config.rockRadius,
-                    if (shell) ObstacleKind.TurtleShell else ObstacleKind.Rock)
+                    if (tortoise) ObstacleKind.Tortoise else ObstacleKind.Rock, direction)
             }
             GroupKind.Gate -> {
                 val a = 0.35f + hazardRng.nextFloat() * 0.35f
@@ -330,8 +344,8 @@ internal class TrailRideWorld(val config: TrailWorldConfig = TrailWorldConfig(),
         nextGroupAt = start + length + spacing + hazardRng.nextFloat() * config.obstacleSpacingJitter
     }
 
-    private fun add(group: Int, distance: Float, offset: Float, radius: Float, kind: ObstacleKind) {
-        obstacles += TrailObstacle(nextId++, group, distance, offset, center(distance) + offset, radius, kind)
+    private fun add(group: Int, distance: Float, offset: Float, radius: Float, kind: ObstacleKind, direction: Int = 1) {
+        obstacles += TrailObstacle(nextId++, group, distance, offset, center(distance) + offset, radius, kind, direction)
         generatedObstacles += 1
     }
 

@@ -33,7 +33,7 @@ class TrailRideVisualContractTest {
             assertTrue(art.contains("Kind.${kind.name} ->"), kind.name)
             assertTrue(view.contains("TrailRideArtwork.Kind.${kind.name}"), kind.name)
         }
-        assertTrue(view.contains("TrailRideArtwork.create(kind, w, h)"))
+        assertTrue(view.contains("TrailRideArtwork.create(kind, w, h, stride, facingRight)"))
         assertTrue(view.contains("TrailRideArtwork.hazed(art, FAR_HAZE)"))
         assertTrue(view.contains("drawItems(camX, yaw)"))
         assertTrue(view.contains("itemShadow.set("))
@@ -41,15 +41,23 @@ class TrailRideVisualContractTest {
     }
 
     @Test
-    fun cockpitHasNoHandsAndTurtleShellHasDistinctArtwork() {
+    fun cockpitHasNoHandsAndWalkingTortoisesHaveDirectionalArtwork() {
         assertFalse(art.contains("c.drawOval(27f, 112f, 55f, 131f"))
         assertFalse(art.contains("c.drawOval(201f, 112f, 229f, 131f"))
         assertFalse(art.contains("Color.rgb(155, 105, 79)"))
         assertFalse(art.contains("Color.rgb(179, 130, 91)"))
-        assertTrue(art.contains("Kind.TurtleShell -> turtleShell("))
-        assertTrue(view.contains("ObstacleKind.TurtleShell -> KIND_TURTLE_SHELL"))
-        assertTrue(view.contains("private val turtleShell = sprite(TrailRideArtwork.Kind.TurtleShell"))
-        assertTrue(view.contains("spriteTable = arrayOf(pine, fir, broad, hazardTree, bush, grass, flowers, rock, stone, flag, turtleShell)"))
+        assertTrue(art.contains("Kind.Tortoise -> {"))
+        assertTrue(art.contains("tortoise(canvas, paint, w, h, stride)"))
+        assertTrue(art.contains("if (!facingRight) canvas.scale(-1f"))
+        assertTrue(view.contains("ObstacleKind.Tortoise -> {"))
+        assertTrue(view.contains("o.positionAt(d, w)"))
+        assertTrue(view.contains("private val tortoiseRightA = sprite(TrailRideArtwork.Kind.Tortoise"))
+        assertTrue(view.contains("private val tortoiseRightB = sprite(TrailRideArtwork.Kind.Tortoise"))
+        assertTrue(view.contains("private val tortoiseLeftA = sprite(TrailRideArtwork.Kind.Tortoise"))
+        assertTrue(view.contains("private val tortoiseLeftB = sprite(TrailRideArtwork.Kind.Tortoise"))
+        assertTrue(view.contains("if (o.crossingDirection > 0) KIND_TORTOISE_LEFT_A + stride"))
+        assertFalse(view.contains("STEER LEFT"))
+        assertFalse(view.contains("STEER RIGHT"))
     }
 
     @Test

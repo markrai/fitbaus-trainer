@@ -18,9 +18,9 @@ internal object TrailRideArtwork {
     const val PRESENTATION_WIDTH = 512
     const val PRESENTATION_HEIGHT = 288
 
-    enum class Kind { Pine, Fir, Broad, HazardTree, Bush, Grass, Flowers, Rock, Stone, Flag, TurtleShell }
+    enum class Kind { Pine, Fir, Broad, HazardTree, Bush, Grass, Flowers, Rock, Stone, Flag, Tortoise }
 
-    fun create(kind: Kind, width: Int, height: Int): Bitmap {
+    fun create(kind: Kind, width: Int, height: Int, stride: Int = 0, facingRight: Boolean = true): Bitmap {
         val bitmap = Bitmap.createBitmap(width * SOURCE_SCALE, height * SOURCE_SCALE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.scale(SOURCE_SCALE.toFloat(), SOURCE_SCALE.toFloat())
@@ -38,7 +38,12 @@ internal object TrailRideArtwork {
             Kind.Rock -> rock(canvas, paint, w, h, false)
             Kind.Stone -> rock(canvas, paint, w, h, true)
             Kind.Flag -> flag(canvas, paint, w, h)
-            Kind.TurtleShell -> turtleShell(canvas, paint, w, h)
+            Kind.Tortoise -> {
+                val saved = canvas.save()
+                if (!facingRight) canvas.scale(-1f, 1f, w * 0.5f, h * 0.5f)
+                tortoise(canvas, paint, w, h, stride)
+                canvas.restoreToCount(saved)
+            }
         }
         return bitmap
     }
@@ -202,46 +207,67 @@ internal object TrailRideArtwork {
         c.drawLine(w * 0.55f, h * 0.65f, w * 0.83f, h * 0.38f, p)
     }
 
-    private fun turtleShell(c: Canvas, p: Paint, w: Float, h: Float) {
-        p.color = Color.argb(105, 39, 46, 29)
-        c.drawOval(w * 0.06f, h * 0.78f, w * 0.96f, h * 0.99f, p)
-        p.color = Color.rgb(75, 59, 37)
-        c.drawRoundRect(w * 0.07f, h * 0.71f, w * 0.94f, h * 0.91f, h * 0.1f, h * 0.1f, p)
+    private fun tortoise(c: Canvas, p: Paint, w: Float, h: Float, stride: Int) {
+        val walk = if (stride == 0) -1f else 1f
+        p.color = Color.argb(85, 36, 42, 30)
+        c.drawOval(w * 0.08f, h * 0.86f, w * 0.96f, h * 0.99f, p)
+
+        p.color = Color.rgb(67, 101, 57)
+        c.drawOval(w * 0.16f, h * 0.67f + walk * h * 0.035f, w * 0.31f, h * 0.91f, p)
+        c.drawOval(w * 0.61f, h * 0.66f - walk * h * 0.035f, w * 0.75f, h * 0.91f, p)
+
+        p.color = Color.rgb(106, 138, 68)
+        val tail = Path()
+        tail.moveTo(w * 0.16f, h * 0.58f)
+        tail.lineTo(w * 0.025f, h * 0.66f)
+        tail.lineTo(w * 0.17f, h * 0.73f)
+        tail.close()
+        c.drawPath(tail, p)
+        c.drawOval(w * 0.69f, h * 0.37f, w * 0.95f, h * 0.74f, p)
+        c.drawOval(w * 0.85f, h * 0.47f, w * 0.98f, h * 0.68f, p)
+
+        p.color = Color.rgb(70, 67, 43)
+        c.drawRoundRect(w * 0.12f, h * 0.60f, w * 0.77f, h * 0.80f, h * 0.10f, h * 0.10f, p)
         p.shader = LinearGradient(
-            w * 0.18f, h * 0.06f, w * 0.84f, h * 0.79f,
-            Color.rgb(153, 180, 86), Color.rgb(49, 86, 48), Shader.TileMode.CLAMP,
+            w * 0.20f, h * 0.05f, w * 0.76f, h * 0.78f,
+            Color.rgb(177, 192, 96), Color.rgb(53, 94, 51), Shader.TileMode.CLAMP,
         )
-        val dome = Path()
-        dome.moveTo(w * 0.12f, h * 0.73f)
-        dome.cubicTo(w * 0.14f, h * 0.37f, w * 0.32f, h * 0.10f, w * 0.52f, h * 0.09f)
-        dome.cubicTo(w * 0.76f, h * 0.08f, w * 0.90f, h * 0.40f, w * 0.92f, h * 0.73f)
-        dome.close()
-        c.drawPath(dome, p)
+        val shell = Path()
+        shell.moveTo(w * 0.14f, h * 0.69f)
+        shell.cubicTo(w * 0.14f, h * 0.24f, w * 0.33f, h * 0.12f, w * 0.49f, h * 0.12f)
+        shell.cubicTo(w * 0.66f, h * 0.12f, w * 0.77f, h * 0.37f, w * 0.78f, h * 0.69f)
+        shell.close()
+        c.drawPath(shell, p)
         p.shader = null
         p.style = Paint.Style.STROKE
         p.strokeWidth = 0.55f
         p.strokeJoin = Paint.Join.ROUND
-        p.color = Color.rgb(48, 76, 42)
+        p.color = Color.rgb(55, 85, 47)
         val seams = Path()
-        seams.moveTo(w * 0.38f, h * 0.14f)
-        seams.lineTo(w * 0.30f, h * 0.44f)
-        seams.lineTo(w * 0.41f, h * 0.70f)
-        seams.moveTo(w * 0.64f, h * 0.14f)
-        seams.lineTo(w * 0.73f, h * 0.44f)
-        seams.lineTo(w * 0.63f, h * 0.70f)
-        seams.moveTo(w * 0.30f, h * 0.44f)
-        seams.lineTo(w * 0.49f, h * 0.33f)
-        seams.lineTo(w * 0.73f, h * 0.44f)
-        seams.moveTo(w * 0.49f, h * 0.33f)
-        seams.lineTo(w * 0.50f, h * 0.69f)
+        seams.moveTo(w * 0.35f, h * 0.18f)
+        seams.lineTo(w * 0.27f, h * 0.43f)
+        seams.lineTo(w * 0.34f, h * 0.69f)
+        seams.moveTo(w * 0.58f, h * 0.18f)
+        seams.lineTo(w * 0.66f, h * 0.43f)
+        seams.lineTo(w * 0.60f, h * 0.69f)
+        seams.moveTo(w * 0.27f, h * 0.43f)
+        seams.lineTo(w * 0.46f, h * 0.34f)
+        seams.lineTo(w * 0.66f, h * 0.43f)
+        seams.moveTo(w * 0.46f, h * 0.34f)
+        seams.lineTo(w * 0.47f, h * 0.66f)
         c.drawPath(seams, p)
-        p.color = Color.argb(160, 218, 219, 123)
-        p.strokeWidth = 0.5f
-        c.drawLine(w * 0.24f, h * 0.38f, w * 0.38f, h * 0.21f, p)
-        c.drawLine(w * 0.42f, h * 0.18f, w * 0.56f, h * 0.15f, p)
         p.style = Paint.Style.FILL
-        p.color = Color.rgb(136, 116, 73)
-        c.drawRoundRect(w * 0.10f, h * 0.74f, w * 0.91f, h * 0.85f, h * 0.07f, h * 0.07f, p)
+
+        p.color = Color.rgb(108, 145, 70)
+        c.drawOval(w * 0.19f, h * (0.70f + walk * 0.04f), w * 0.33f, h * (0.98f + walk * 0.02f), p)
+        c.drawOval(w * 0.58f, h * (0.70f - walk * 0.04f), w * 0.75f, h * (0.98f - walk * 0.02f), p)
+        p.color = Color.rgb(48, 66, 40)
+        c.drawOval(w * 0.855f, h * 0.42f, w * 0.898f, h * 0.48f, p)
+        p.color = Color.rgb(238, 237, 188)
+        c.drawCircle(w * 0.87f, h * 0.437f, w * 0.009f, p)
+        p.color = Color.rgb(69, 83, 47)
+        p.strokeWidth = 0.36f
+        c.drawLine(w * 0.90f, h * 0.635f, w * 0.95f, h * 0.623f, p)
     }
 
     private fun flag(c: Canvas, p: Paint, w: Float, h: Float) {
