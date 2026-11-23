@@ -99,6 +99,21 @@ included in this upcoming release.
 
 ### Added
 
+- **Trail Ride stand-to-jump.** Replace pedal-surge jump activation with a
+  distinct upward face movement followed by tracking loss, allowing riders
+  to initiate jumps by standing on the pedals. A 650 ms movement window,
+  minimum rise and final upward step, camera freshness, and a rearm
+  requirement after face reacquisition help prevent false positives.
+  **Face tracking loss never pauses the ride**, whether or not a jump
+  triggers: steering retains its last valid direction and fresh bike RPM
+  continues to control forward speed. Only stopped or stale/missing bike
+  telemetry pauses progress. Preserve ditch takeoff windows, airtime
+  scaling, collision rules and timing, with prompts that now say when to
+  stand. Remove the jump-specific surge threshold setting and replace
+  the old surge gauge with a straightforward RPM meter. Include tests
+  for standing, ordinary face loss, rearming, camera failures, pedaling
+  holds and timing at ditch approaches.
+
 - **Flak Run webcam/controller selector.** Add an in-game two-way
   WEBCAM/CONTROLLER selector immediately before the score with no combined
   mode. Controller becomes the default when a recognized gamepad is connected
