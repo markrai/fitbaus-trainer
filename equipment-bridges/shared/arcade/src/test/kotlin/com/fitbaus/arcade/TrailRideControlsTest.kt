@@ -68,6 +68,18 @@ class TrailRideControlsTest {
     }
 
     @Test
+    fun ghoulRunRetainsItsOriginalSharedSteeringDefaults() {
+        val shared = HorizontalFaceSteering()
+        assertEquals(0.012f, shared.config.deadZone, 1e-6f)
+        assertEquals(4f, shared.config.gain, 1e-6f)
+        assertEquals(0f, shared.config.smoothingSeconds, 1e-6f)
+        val trail = trailRideSteering()
+        assertEquals(0.03f, trail.config.deadZone, 1e-6f)
+        assertEquals(2.4f, trail.config.gain, 1e-6f)
+        assertEquals(0.18f, trail.config.smoothingSeconds, 1e-6f)
+    }
+
+    @Test
     fun horizontalDeadZoneGainAndClampingAreDeliberatelyLessSensitive() {
         val (s, _) = calibrated(0.5f, gain = 2.4f)
         assertEquals(0.03f, s.config.deadZone, 1e-6f)
