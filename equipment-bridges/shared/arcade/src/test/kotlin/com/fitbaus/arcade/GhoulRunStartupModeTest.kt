@@ -40,7 +40,7 @@ class GhoulRunStartupModeTest {
         }
         assertTrue(pace.baseline.isFinite())
         val game = GhoulRunGame(config, seed)
-        return Rig(game, GhoulRunSession(game, pace = pace), now)
+        return Rig(game, GhoulRunSession(game, pace = pace, readySeconds = 0f), now)
     }
 
     @Test
@@ -64,14 +64,44 @@ class GhoulRunStartupModeTest {
     }
 
     @Test
-    fun controllerStillRequiresCadenceCalibration() {
+    fun firstRunUsesSafeBaselineDuringThreeSecondControllerCountdown() {
         val game = GhoulRunGame(seed = 82L)
         val session = GhoulRunSession(game)
         val rig = Rig(game, session, 1_000_000_000L)
         repeat(15) { rig.tick(GhoulRunInputSource.Controller) }
         assertEquals(GhoulPhase.WarmUp, game.phase)
-        assertFalse(session.cadenceReading.calibrated)
+        assertTrue(session.cadenceReading.calibrated)
+        assertEquals(GhoulPaceProfile.DEFAULT_RPM, session.cadenceReading.baseline)
+        assertTrue(session.readyRemaining in 1f..2f)
         assertFalse(game.leanCheckPassed)
+        repeat(23) { rig.tick(GhoulRunInputSource.Controller) }
+        assertEquals(GhoulPhase.Playing, game.phase)
+        assertTrue(game.leanCheckPassed)
+        assertEquals(GhoulState.Wandering, game.ghoul.state)
+    }
+
+    @Test
+    fun countdownStopsWhenTelemetryIsMissingAndResumesWithoutSkippingTime() {
+        val game = GhoulRunGame(seed = 825L)
+        val session = GhoulRunSession(game)
+        val rig = Rig(game, session, 1_000_000_000L)
+        repeat(10) { rig.tick(GhoulRunInputSource.Controller) }
+        val before = session.readyRemaining
+        rig.now += 5_000_000_000L
+        session.update(
+            HandPosition(0.5f, 0.5f, 0f, rig.now, HandSource.Lost),
+            CameraState.Unavailable,
+            false, false, null, false, null, rig.now,
+            source = GhoulRunInputSource.Controller,
+            controllerAvailable = true,
+            controller = GhoulRunControllerInput(),
+        )
+        assertEquals(GhoulHold.NoTelemetry, session.hold)
+        assertEquals(before, session.readyRemaining, 0.0001f)
+        rig.tick(GhoulRunInputSource.Controller)
+        assertEquals(before, session.readyRemaining, 0.0001f)
+        repeat(35) { rig.tick(GhoulRunInputSource.Controller) }
+        assertEquals(GhoulPhase.Playing, game.phase)
     }
 
     @Test
