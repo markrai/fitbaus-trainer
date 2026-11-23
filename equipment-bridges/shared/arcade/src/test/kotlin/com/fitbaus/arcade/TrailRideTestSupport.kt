@@ -76,6 +76,7 @@ internal class SessionDriver(val session: TrailRideSession) {
     var frameMs = 33L
     var sampleEveryMs = 250L
     var faceX = 0.5f
+    var faceY = 0.5f
     var face = HandSource.Camera
     var camera = CameraState.Ready
     var connected = true
@@ -93,7 +94,7 @@ internal class SessionDriver(val session: TrailRideSession) {
             lastSampleAt = nowNanos
             sampleSeq += 1
         }
-        val position = HandPosition(faceX, 0.5f, if (face == HandSource.Lost) 0f else 0.9f, nowNanos, face)
+        val position = HandPosition(faceX, faceY, if (face == HandSource.Lost) 0f else 0.9f, nowNanos, face)
         return session.update(position, camera, connected, true, rpm, true, "rpm-$sampleSeq", nowNanos)
     }
 
