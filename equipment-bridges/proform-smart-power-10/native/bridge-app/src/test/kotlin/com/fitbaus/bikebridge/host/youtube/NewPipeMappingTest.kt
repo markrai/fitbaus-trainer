@@ -42,6 +42,7 @@ class NewPipeMappingTest {
     fun searchItemsMapToValidInternalMetadata() {
         val item = StreamInfoItem(service, "https://www.youtube.com/watch?v=aqz-KE-bpKQ", "Big Buck Bunny", StreamType.VIDEO_STREAM)
         item.uploaderName = "Blender"
+        item.uploaderUrl = "https://www.youtube.com/channel/UC0000000000000000000000"
         item.duration = 635
         item.viewCount = 12_345_678
         val summary = catalog.summarize(item)
@@ -50,6 +51,7 @@ class NewPipeMappingTest {
         assertEquals("aqz-KE-bpKQ", summary.id)
         assertEquals("Big Buck Bunny", summary.title)
         assertEquals("Blender", summary.channel)
+        assertEquals("https://www.youtube.com/channel/UC0000000000000000000000", summary.channelUrl)
         assertEquals(635, summary.durationSeconds)
         assertEquals("https://i.ytimg.com/vi/aqz-KE-bpKQ/mqdefault.jpg", summary.thumbnailUrl)
         assertFalse(summary.live)
