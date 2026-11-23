@@ -18,7 +18,7 @@ internal object TrailRideArtwork {
     const val PRESENTATION_WIDTH = 512
     const val PRESENTATION_HEIGHT = 288
 
-    enum class Kind { Pine, Fir, Broad, HazardTree, Bush, Grass, Flowers, Rock, Stone, Flag }
+    enum class Kind { Pine, Fir, Broad, HazardTree, Bush, Grass, Flowers, Rock, Stone, Flag, TurtleShell }
 
     fun create(kind: Kind, width: Int, height: Int): Bitmap {
         val bitmap = Bitmap.createBitmap(width * SOURCE_SCALE, height * SOURCE_SCALE, Bitmap.Config.ARGB_8888)
@@ -38,6 +38,7 @@ internal object TrailRideArtwork {
             Kind.Rock -> rock(canvas, paint, w, h, false)
             Kind.Stone -> rock(canvas, paint, w, h, true)
             Kind.Flag -> flag(canvas, paint, w, h)
+            Kind.TurtleShell -> turtleShell(canvas, paint, w, h)
         }
         return bitmap
     }
@@ -201,6 +202,48 @@ internal object TrailRideArtwork {
         c.drawLine(w * 0.55f, h * 0.65f, w * 0.83f, h * 0.38f, p)
     }
 
+    private fun turtleShell(c: Canvas, p: Paint, w: Float, h: Float) {
+        p.color = Color.argb(105, 39, 46, 29)
+        c.drawOval(w * 0.06f, h * 0.78f, w * 0.96f, h * 0.99f, p)
+        p.color = Color.rgb(75, 59, 37)
+        c.drawRoundRect(w * 0.07f, h * 0.71f, w * 0.94f, h * 0.91f, h * 0.1f, h * 0.1f, p)
+        p.shader = LinearGradient(
+            w * 0.18f, h * 0.06f, w * 0.84f, h * 0.79f,
+            Color.rgb(153, 180, 86), Color.rgb(49, 86, 48), Shader.TileMode.CLAMP,
+        )
+        val dome = Path()
+        dome.moveTo(w * 0.12f, h * 0.73f)
+        dome.cubicTo(w * 0.14f, h * 0.37f, w * 0.32f, h * 0.10f, w * 0.52f, h * 0.09f)
+        dome.cubicTo(w * 0.76f, h * 0.08f, w * 0.90f, h * 0.40f, w * 0.92f, h * 0.73f)
+        dome.close()
+        c.drawPath(dome, p)
+        p.shader = null
+        p.style = Paint.Style.STROKE
+        p.strokeWidth = 0.55f
+        p.strokeJoin = Paint.Join.ROUND
+        p.color = Color.rgb(48, 76, 42)
+        val seams = Path()
+        seams.moveTo(w * 0.38f, h * 0.14f)
+        seams.lineTo(w * 0.30f, h * 0.44f)
+        seams.lineTo(w * 0.41f, h * 0.70f)
+        seams.moveTo(w * 0.64f, h * 0.14f)
+        seams.lineTo(w * 0.73f, h * 0.44f)
+        seams.lineTo(w * 0.63f, h * 0.70f)
+        seams.moveTo(w * 0.30f, h * 0.44f)
+        seams.lineTo(w * 0.49f, h * 0.33f)
+        seams.lineTo(w * 0.73f, h * 0.44f)
+        seams.moveTo(w * 0.49f, h * 0.33f)
+        seams.lineTo(w * 0.50f, h * 0.69f)
+        c.drawPath(seams, p)
+        p.color = Color.argb(160, 218, 219, 123)
+        p.strokeWidth = 0.5f
+        c.drawLine(w * 0.24f, h * 0.38f, w * 0.38f, h * 0.21f, p)
+        c.drawLine(w * 0.42f, h * 0.18f, w * 0.56f, h * 0.15f, p)
+        p.style = Paint.Style.FILL
+        p.color = Color.rgb(136, 116, 73)
+        c.drawRoundRect(w * 0.10f, h * 0.74f, w * 0.91f, h * 0.85f, h * 0.07f, h * 0.07f, p)
+    }
+
     private fun flag(c: Canvas, p: Paint, w: Float, h: Float) {
         p.color = Color.rgb(46, 52, 51)
         c.drawRoundRect(w * 0.14f, h * 0.94f, w * 0.62f, h, 0.5f, 0.5f, p)
@@ -282,19 +325,6 @@ internal class TrailRideCockpit {
         p.color = Color.rgb(162, 174, 174)
         c.drawLine(67f, 120f, 82f, 127f, p)
         c.drawLine(189f, 120f, 174f, 127f, p)
-        p.color = Color.rgb(21, 34, 43)
-        c.drawOval(27f, 112f, 55f, 131f, p)
-        c.drawOval(201f, 112f, 229f, 131f, p)
-        p.shader = LinearGradient(27f, 111f, 49f, 130f,
-            Color.rgb(155, 105, 79), Color.rgb(79, 56, 54), Shader.TileMode.CLAMP)
-        c.drawOval(30f, 112f, 53f, 128f, p)
-        p.shader = LinearGradient(202f, 111f, 225f, 130f,
-            Color.rgb(155, 105, 79), Color.rgb(79, 56, 54), Shader.TileMode.CLAMP)
-        c.drawOval(203f, 112f, 226f, 128f, p)
-        p.shader = null
-        p.color = Color.rgb(179, 130, 91)
-        c.drawOval(43f, 110f, 54f, 119f, p)
-        c.drawOval(202f, 110f, 213f, 119f, p)
         p.color = Color.rgb(23, 30, 32)
         c.drawRoundRect(116f, 114f, 140f, 129f, 3f, 3f, p)
         p.color = Color.rgb(123, 141, 139)
