@@ -115,7 +115,9 @@ class LandmarkFrameSinkTest {
     @Test
     fun faceTrackerLossImmediatelyReachesTheGameWhileCameraRemainsOpen() {
         val clock = FakeClock()
-        val input = HandPositionInput(holdNanos = 500 * ms, freshNanos = 150 * ms)
+        val input = HandPositionInput(holdNanos = 500 * ms, freshNanos = 150 * ms).apply {
+            immediateFaceLoss = true
+        }
         val models = FakeHandModels()
         val sink = LandmarkFrameSink(
             backendFactory = { models },
