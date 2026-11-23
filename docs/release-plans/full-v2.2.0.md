@@ -64,6 +64,7 @@ Use the signed `fitbaus-bikebridge-full-2.2.0.apk` from that inspect run. Back u
 - [ ] Bricks and Biketris controller inputs, mappings, auto-restart or pedal-to-slow mode behave as intended.
 - [ ] External USB webcam is available and camera-game switching operates correctly.
 - [ ] YouTube: open videos directly from Discover and Search. Verify **the entire frame renders without a black left half**, across multiple videos and resolutions, and after repeated switch-to-floating-preview/restore transitions.
+- [ ] YouTube voice search mic launches the installed speech recognizer when available, submits recognized text and leaves canceled searches untouched; on consoles without a recognizer it reports that limitation without crashing.
 - [ ] YouTube channel avatar navigation, captions, video seeking, volume, brightness, and account sign-in remain functional.
 - [ ] Sustained playback for at least 10 minutes, with telemetry healthy, acceptable frame rate, memory and console temperature.
 

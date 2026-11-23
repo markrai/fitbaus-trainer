@@ -163,6 +163,13 @@ See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
 
 ### Added
 
+- **YouTube voice search.** Add a standard microphone icon beside the existing
+  search clear button, with separate 48dp touch targets. On supported consoles,
+  Android's installed speech-recognition activity transcribes a query and
+  submits it to the normal YouTube search. Canceled/blank results leave the
+  search unchanged; devices without a speech recognizer show a clear message.
+  No new microphone permission, Google OAuth scope, or speech SDK is required.
+
 - **YouTube channel video browsing.** The player header shows the current
   channel avatar beside the quality selector when a verified channel URL is
   available. Tapping it opens the channel's actual Videos tab with pagination,
