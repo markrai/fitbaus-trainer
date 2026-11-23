@@ -56,9 +56,15 @@ internal data class BrowseState(
     val canLoadMore: Boolean = false,
     val loadingMore: Boolean = false,
     val moreFailed: Boolean = false,
+    val channelUrl: String? = null,
+    val channelName: String? = null,
 ) {
     val title: String
-        get() = if (query == null) feedTitle else "Results for “$query”"
+        get() = when {
+            channelUrl != null -> "${channelName ?: "Channel"} · VIDEOS"
+            query == null -> feedTitle
+            else -> "Results for “$query”"
+        }
 }
 
 internal data class PlaybackState(
@@ -120,6 +126,8 @@ internal class YouTubeSession(
     private var recommendationTask: Cancellable? = null
     private var recommendationCursor: FeedCursor? = null
     private var cursor: FeedCursor? = null
+    private var previousBrowse: BrowseState? = null
+    private var previousCursor: FeedCursor? = null
     private var engine: PlayerEngine? = null
     private var resolved: ResolvedVideo? = null
     private var plan: StreamPlan? = null
@@ -145,7 +153,7 @@ internal class YouTubeSession(
         if (destroyed || state.active) return
         update(state.copy(active = true))
         val browse = state.browse
-        if (loadDefault && browse.items.isEmpty() && browse.status != ListStatus.Loading) loadList(browse.query)
+        if (loadDefault && browse.items.isEmpty() && browse.status != ListStatus.Loading) loadList(browse.query, browse.channelUrl, browse.channelName)
     }
 
     fun stop() {
@@ -178,13 +186,45 @@ internal class YouTubeSession(
 
     fun showTrending() {
         if (!ready()) return
+        clearChannelHistory()
         loadList(null)
     }
 
     fun search(raw: String) {
         if (!ready()) return
+        clearChannelHistory()
         val query = raw.trim().take(MAX_QUERY_LENGTH)
         loadList(query.ifEmpty { null })
+    }
+
+    fun openChannel(video: VideoSummary): Boolean {
+        if (!ready() || state.screen != Screen.Player) return false
+        val url = YouTubeChannelLinks.normalize(video.channelUrl) ?: return false
+        if (state.browse.channelUrl == null) {
+            previousBrowse = state.browse.copy(loadingMore = false)
+            previousCursor = cursor
+        }
+        stopPlayback()
+        update(state.copy(screen = Screen.Results, playback = idlePlayback()))
+        loadList(null, url, video.channel?.takeIf { it.isNotBlank() } ?: "Channel")
+        return true
+    }
+
+    fun backFromChannel() {
+        if (!ready() || state.screen != Screen.Results || state.browse.channelUrl == null) return
+        listGeneration += 1
+        listTask?.cancel()
+        listTask = null
+        cursor = previousCursor
+        val previous = previousBrowse
+        clearChannelHistory()
+        if (previous != null) update(state.copy(browse = previous))
+        else loadList(null)
+    }
+
+    private fun clearChannelHistory() {
+        previousBrowse = null
+        previousCursor = null
     }
 
     fun loadRecommendations(force: Boolean = false) {
@@ -292,7 +332,7 @@ internal class YouTubeSession(
         val browse = state.browse
         when {
             browse.status == ListStatus.Empty && browse.canLoadMore -> loadMore(true)
-            browse.status == ListStatus.Error || browse.status == ListStatus.Empty || browse.status == ListStatus.Idle -> loadList(browse.query)
+            browse.status == ListStatus.Error || browse.status == ListStatus.Empty || browse.status == ListStatus.Idle -> loadList(browse.query, browse.channelUrl, browse.channelName)
             browse.moreFailed -> loadMore(true)
         }
     }
@@ -411,7 +451,7 @@ internal class YouTubeSession(
 
     private fun ready(): Boolean = !destroyed && state.active
 
-    private fun loadList(query: String?) {
+    private fun loadList(query: String?, channelUrl: String? = null, channelName: String? = null) {
         cancelRecommendation()
         recommendationCursor = null
         listGeneration += 1
@@ -422,12 +462,20 @@ internal class YouTubeSession(
             recommendations = RecommendationState(),
             browse = BrowseState(
                 query = query,
-                feedTitle = if (query == null) feedTitle() else "Trending",
+                feedTitle = if (query == null && channelUrl == null) feedTitle() else "Trending",
                 status = ListStatus.Loading,
+                channelUrl = channelUrl,
+                channelName = channelName,
             ),
         ))
         listTask = runner.submit {
-            val result = attempt { if (query == null) catalog().discover() else catalog().search(query) }
+            val result = attempt {
+                when {
+                    channelUrl != null -> catalog().channelVideos(channelUrl)
+                    query == null -> catalog().discover()
+                    else -> catalog().search(query)
+                }
+            }
             main.post { if (generation == listGeneration && !destroyed) applyFirstPage(result) }
         }
     }
@@ -443,6 +491,7 @@ internal class YouTubeSession(
                     items = items,
                     status = if (items.isEmpty()) ListStatus.Empty else ListStatus.Ready,
                     message = if (items.isEmpty()) when {
+                        browse.channelUrl != null -> "No videos on this channel."
                         browse.query != null -> "No videos found."
                         browse.feedTitle == "From your channels" && cursor != null -> "No videos in this group. Tap RETRY to check more channels."
                         browse.feedTitle == "From your channels" -> "No recent videos found in your subscribed channels."
@@ -492,7 +541,12 @@ internal class YouTubeSession(
                 update(
                     state.copy(
                         playback = playback.copy(
-                            video = playback.video?.let { it.copy(title = summary.title.ifBlank { it.title }, channel = summary.channel ?: it.channel) },
+                            video = playback.video?.let { it.copy(
+                                title = summary.title.ifBlank { it.title },
+                                channel = summary.channel ?: it.channel,
+                                channelUrl = summary.channelUrl ?: it.channelUrl,
+                                channelAvatarUrl = summary.channelAvatarUrl ?: it.channelAvatarUrl,
+                            ) },
                             live = summary.live,
                             durationMs = if (summary.durationSeconds > 0) summary.durationSeconds * 1000 else playback.durationMs,
                             captionsAvailable = result.value.caption != null,
