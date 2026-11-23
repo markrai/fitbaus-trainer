@@ -308,15 +308,19 @@ public class FlakView(context: Context) : View(context) {
         canvas.drawText(String.format(Locale.US, "SCORE %06d", game.score), left, baseline, hudPaint)
         val livesX = left + hudPaint.measureText("SCORE 000000  ")
         for (i in 0 until game.config.lives) {
-            px.color = if (i < game.lives) Color.rgb(248, 56, 0) else Color.rgb(80, 80, 80)
-            canvas.drawRect(livesX + i * 22f * density, baseline - 12f * density, livesX + i * 22f * density + 16f * density, baseline - 2f * density, px)
+            px.color = if (i < game.lives) Color.rgb(218, 119, 77) else Color.rgb(74, 75, 76)
+            canvas.drawRoundRect(
+                livesX + i * 22f * density, baseline - 12f * density,
+                livesX + i * 22f * density + 16f * density, baseline - 2f * density,
+                2f * density, 2f * density, px,
+            )
         }
         val c = cadenceReading
         val meterW = 180f * density
         val meterLeft = left + width - meterW
         meterRect.set(meterLeft, baseline - 14f * density, meterLeft + meterW, baseline)
         px.color = Color.rgb(40, 40, 40)
-        canvas.drawRect(meterRect, px)
+        canvas.drawRoundRect(meterRect, 3f * density, 3f * density, px)
         val shown = when (c.state) {
             CadenceState.Boosting -> 1f
             CadenceState.Cruising -> if (c.baseline.isNaN() || c.rpm == null) 0f else ((c.rpm - c.baseline) / (c.threshold - c.baseline)).coerceIn(0f, 1f)
@@ -329,7 +333,10 @@ public class FlakView(context: Context) : View(context) {
             CadenceState.Establishing, CadenceState.Recovering -> Color.rgb(60, 140, 200)
             else -> Color.rgb(110, 110, 110)
         }
-        canvas.drawRect(meterRect.left, meterRect.top, meterRect.left + meterW * shown, meterRect.bottom, px)
+        if (shown > 0f) canvas.drawRoundRect(
+            meterRect.left, meterRect.top, meterRect.left + meterW * shown, meterRect.bottom,
+            3f * density, 3f * density, px,
+        )
         val label = when (c.state) {
             CadenceState.Boosting -> "DASH!"
             CadenceState.Establishing -> "LEARNING PACE"
