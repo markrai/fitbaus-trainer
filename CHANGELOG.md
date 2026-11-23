@@ -10,9 +10,12 @@ support, is maintained on `lite/1.x`.
 
 ## [Unreleased]
 
-FitBaus Full 2.1.3 (`versionCode 20103`) is in development on `main`.
-Full 2.1.1 was prepared but not published; its YouTube improvements remain
-included in this upcoming release.
+## [2.2.0] - Pending publication
+
+Full 2.2.0 (`versionCode 20200`) collects the unreleased Full 2.1.1–2.1.3
+development work since the published Full 2.1.0 release. The exact signed
+console APK still requires physical qualification before GitHub publication.
+See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
 
 ### Changed
 
@@ -33,6 +36,13 @@ included in this upcoming release.
   warning and timing indicators.
 
 ### Fixed
+
+- **Android 5.1 YouTube video-surface rendering.** Route video through a
+  `TextureView` on Android versions below 7.0 instead of relying on a separately
+  composited `SurfaceView` that can appear clipped during direct playback or
+  preview restoration. Keep `SurfaceView` on newer Android and preserve the
+  same player instance across floating-preview transitions. Physical-console
+  validation remains a release gate.
 
 - **Trail Ride horizontal steering sway.** Widen the horizontal face-tracking
   neutral dead zone from 1.2% to 3% of the camera frame, apply a modest
@@ -152,6 +162,12 @@ included in this upcoming release.
   events instead of losing all input when their kernel driver is detached.
 
 ### Added
+
+- **YouTube channel video browsing.** The player header shows the current
+  channel avatar beside the quality selector when a verified channel URL is
+  available. Tapping it opens the channel's actual Videos tab with pagination,
+  and BACK restores the previous list without requiring additional Google
+  API quota.
 
 - **Trail Ride walking tortoise hazards.** Replace occasional green turtle
   shells with original shaded tortoises, complete with heads, eyes, feet and
@@ -1181,6 +1197,7 @@ records and are not renumbered.
 - **Initial trainer** - First workout trainer UI with profile, workout data,
   workout logic, and basic controls.
 
-[Unreleased]: https://github.com/markrai/fitbaus-trainer/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/markrai/fitbaus-trainer/commits/main/
+[2.2.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.1.0...main
 [1.0.1]: https://github.com/markrai/fitbaus-trainer/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/markrai/fitbaus-trainer/tree/v1.0.0
