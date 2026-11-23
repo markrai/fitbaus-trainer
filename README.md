@@ -29,7 +29,8 @@ git clone https://github.com/markrai/fitbaus-trainer.git
 cd fitbaus-trainer
 npm ci
 npm run build
-npm run serve
+node scripts/package-web-deploy.cjs
+npx serve deploy
 ```
 
 Open the local URL shown by the server. For a production HTTPS deployment using an existing reverse proxy, see the [self-hosting guide](docs/SELF-HOSTING.md). Web Bluetooth requires a compatible browser and secure context.
