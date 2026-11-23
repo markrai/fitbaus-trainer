@@ -113,6 +113,57 @@ class LandmarkFrameSinkTest {
     }
 
     @Test
+    fun faceTrackerLossImmediatelyReachesTheGameWhileCameraRemainsOpen() {
+        val clock = FakeClock()
+        val input = HandPositionInput(holdNanos = 500 * ms, freshNanos = 150 * ms).apply {
+            immediateFaceLoss = true
+        }
+        val models = FakeHandModels()
+        val sink = LandmarkFrameSink(
+            backendFactory = { models },
+            input = input,
+            generation = input.cameraGeneration(),
+            settings = ArcadeTrackerSettings(ArcadeTrackerMode.Face, 10f, 1),
+            config = LandmarkConfig(smoothingTauNanos = 0L),
+            clock = { clock.nanos },
+            startWorker = false,
+            mode = ArcadeTrackerMode.Face,
+            trackerFactory = { backend, events ->
+                FaceTracker(backend, FaceConfig(smoothingTauNanos = 0L), events)
+            },
+        )
+        val frame = frame(1)
+        models.faces = listOf(HandShapes.face(0.95f, 320f, 300f))
+        sink.onFrame(frame, w, h)
+        assertTrue(sink.step(clock.nanos))
+        val detector = StandJumpDetector()
+        val initial = input.latest(clock.nanos)
+        assertEquals(HandSource.Camera, initial.source)
+        assertFalse(detector.update(initial, CameraState.Ready, clock.nanos, true))
+        models.faces = listOf(HandShapes.face(0.95f, 320f, 210f))
+        clock.advanceMs(110)
+        sink.onFrame(frame, w, h)
+        assertTrue(sink.step(clock.nanos))
+        val moved = input.latest(clock.nanos)
+        assertEquals(HandSource.Camera, moved.source)
+        assertFalse(detector.update(moved, CameraState.Ready, clock.nanos, true))
+        models.faces = emptyList()
+        clock.advanceMs(110)
+        sink.onFrame(frame, w, h)
+        assertTrue(sink.step(clock.nanos))
+        val lost = input.latest(clock.nanos)
+        assertEquals(HandSource.Lost, lost.source)
+        assertTrue(detector.update(lost, CameraState.Ready, clock.nanos, true))
+        assertEquals(1, detector.jumps)
+        models.faces = listOf(HandShapes.face(0.95f, 320f, 285f))
+        clock.advanceMs(110)
+        sink.onFrame(frame, w, h)
+        assertTrue(sink.step(clock.nanos))
+        assertEquals(HandSource.Camera, input.latest(clock.nanos).source)
+        sink.close()
+    }
+
+    @Test
     fun noHandPublishesNothing() {
         val rig = Rig()
         rig.sink.onFrame(frame(1), w, h)

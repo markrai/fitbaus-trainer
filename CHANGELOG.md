@@ -16,6 +16,15 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Trail Ride jump recognition and visibility.** The native face tracker now
+  reports actual loss of the tracked face immediately to Trail Ride, instead
+  of holding an outdated face position until the camera cache expires.
+  Other face-controlled games retain their existing smoothing behavior.
+  The first-person airborne lift is stronger, including on ordinary hops,
+  with an explicit HOP! banner. Add a developer-only jump animation test
+  that bypasses camera gesture recognition, plus tracked face Y diagnostics
+  and end-to-end face-detection loss tests.
+
 - **Trail Ride continuous off-trail riding.** Leaving the path no longer
   triggers a crash animation, freezes game progression, or increments crash
   counts. Instead, the current RPM-based target speed is gently reduced by

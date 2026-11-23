@@ -94,6 +94,9 @@ public class HandPositionInput(
     @Volatile
     private var activeFreshNanos: Long = freshNanos
 
+    @Volatile
+    public var immediateFaceLoss: Boolean = false
+
     internal fun configureTiming(holdNanos: Long, freshNanos: Long) {
         activeHoldNanos = holdNanos
         activeFreshNanos = freshNanos.coerceAtMost(holdNanos)
@@ -139,6 +142,10 @@ public class HandPositionInput(
     internal fun clearCamera() {
         generation.incrementAndGet()
         lastCamera.set(null)
+    }
+
+    internal fun markCameraLost(expectedGeneration: Int) {
+        if (generation.get() == expectedGeneration) lastCamera.set(null)
     }
 
     internal fun onTouch(x: Float, y: Float) {
