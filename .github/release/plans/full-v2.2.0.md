@@ -6,10 +6,11 @@ FitBaus Full 2.2.0 is a minor product version, not a separate edition. The canon
 
 ## Merge and source gates
 
-- [ ] Merge [#75](https://github.com/markrai/fitbaus-trainer/pull/75), renaming the game-selection captions to MAVERICK, TRAILS and IT HEARS YOU.
-- [ ] Merge [#76](https://github.com/markrai/fitbaus-trainer/pull/76), removing the flashing orange proximity-edge markers in TRAILS.
-- [ ] Merge this release-preparation PR after both are in `main`, and ensure no required follow-up fixes remain open.
-- [ ] Check `CHANGELOG.md` for the #75 and #76 changes, add their release entries, and replace `Pending publication` with the actual release date before tagging.
+- [x] Merge [#77](https://github.com/markrai/fitbaus-trainer/pull/77), preparing the 2.2.0 product version and release checklist.
+- [x] Merge [#75](https://github.com/markrai/fitbaus-trainer/pull/75), renaming the game-selection captions to MAVERICK, TRAILS and IT HEARS YOU.
+- [x] Merge [#76](https://github.com/markrai/fitbaus-trainer/pull/76), removing the flashing orange proximity-edge markers in TRAILS.
+- [x] Include the #75 and #76 changes in the 2.2.0 changelog. These PRs merged after #77, but all are now in `main` before the release tag.
+- [ ] Merge the documentation cleanup PR, verify no other required fixes remain open, and replace `Pending publication` with the actual release date before tagging.
 - [ ] Both CI jobs pass for the final `main` source commit: Trainer and Native Bike Bridge.
 - [ ] Verify `npm run build`, `npm run check:version`, `npm test`, and Android unit tests. The CI Trainer job additionally requires `git diff --exit-code` after the build.
 - [ ] Confirm console free storage is sufficient for the actual signed APK before installation.
