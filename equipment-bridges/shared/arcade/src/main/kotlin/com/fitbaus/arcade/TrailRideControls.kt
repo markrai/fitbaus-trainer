@@ -17,17 +17,18 @@ internal data class SteerConfig(
     val freshNanos: Long = 400_000_000L,
     val calibrationNanos: Long = 1_000_000_000L,
     val calibrationSamples: Int = 6,
-    val deadZone: Float = 0.03f,
-    val gain: Float = 2.4f,
-    val smoothingSeconds: Float = 0.18f,
+    val deadZone: Float = 0.012f,
+    val gain: Float = 4f,
+    val smoothingSeconds: Float = 0f,
 )
 
 /**
  * Horizontal head steering for TRAIL RIDE. Uses the same mirrored face x as Bricks (0 = the
  * player's left), so moving the head to the player's left steers left. The first second of fresh
  * tracking after a (re)calibration sets the neutral x; afterwards [SteerReading.steer] is the
- * time-smoothed horizontal offset from neutral, minus a neutral dead zone, times [SteerConfig.gain],
- * clamped to -1..1. Only fresh camera samples steer. The game keeps its last target on tracking loss.
+ * optionally smoothed horizontal offset from neutral, minus a neutral dead zone, times
+ * [SteerConfig.gain], clamped to -1..1. Only fresh camera samples steer. The game keeps its
+ * last target on tracking loss when the game mode supports continuing through camera loss.
  */
 internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
     var config: SteerConfig = config
@@ -226,9 +227,12 @@ internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()
     }
 }
 
+internal fun trailRideSteering(): HorizontalFaceSteering =
+    HorizontalFaceSteering(SteerConfig(deadZone = 0.03f, gain = 2.4f, smoothingSeconds = 0.18f))
+
 internal class TrailRideSession(
     val game: TrailRideGame,
-    val steering: HorizontalFaceSteering = HorizontalFaceSteering(),
+    val steering: HorizontalFaceSteering = trailRideSteering(),
     val cadence: CadenceBoost = CadenceBoost(),
     val standing: StandJumpDetector = StandJumpDetector(),
     private val supervisor: TrailRideSupervisor = TrailRideSupervisor(),
