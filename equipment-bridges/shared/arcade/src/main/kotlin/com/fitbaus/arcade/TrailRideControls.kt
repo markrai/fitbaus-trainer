@@ -19,15 +19,16 @@ internal data class SteerConfig(
     val calibrationSamples: Int = 6,
     val deadZone: Float = 0.012f,
     val gain: Float = 4f,
+    val smoothingSeconds: Float = 0f,
 )
 
 /**
  * Horizontal head steering for TRAIL RIDE. Uses the same mirrored face x as Bricks (0 = the
  * player's left), so moving the head to the player's left steers left. The first second of fresh
  * tracking after a (re)calibration sets the neutral x; afterwards [SteerReading.steer] is the
- * offset from neutral, minus a small dead zone, times [SteerConfig.gain], clamped to -1..1.
- * Only fresh camera samples steer: a lost or stale face reads [FaceControlState.Lost] and the
- * game holds instead of riding on an old value.
+ * optionally smoothed horizontal offset from neutral, minus a neutral dead zone, times
+ * [SteerConfig.gain], clamped to -1..1. Only fresh camera samples steer. The game keeps its
+ * last target on tracking loss when the game mode supports continuing through camera loss.
  */
 internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
     var config: SteerConfig = config
@@ -38,6 +39,8 @@ internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
     private var calibrationStart = Long.MIN_VALUE
     private var lastSampleNanos = Long.MIN_VALUE
     private var freshSince = Long.MIN_VALUE
+    private var smoothedX = Float.NaN
+    private var smoothingSampleNanos = Long.MIN_VALUE
 
     val calibrated: Boolean
         get() = !neutral.isNaN()
@@ -51,6 +54,8 @@ internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
         calibrationSum = 0f
         calibrationCount = 0
         calibrationStart = Long.MIN_VALUE
+        smoothedX = Float.NaN
+        smoothingSampleNanos = Long.MIN_VALUE
     }
 
     /** Forgets the fresh-tracking run so the next samples must be stable again (host pause, game switch). */
@@ -64,6 +69,8 @@ internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
         val fresh = position.source == HandSource.Camera && age in 0..config.freshNanos
         if (!fresh) {
             freshSince = Long.MIN_VALUE
+            smoothedX = Float.NaN
+            smoothingSampleNanos = Long.MIN_VALUE
             if (!calibrated) recalibrate()
             return SteerReading(FaceControlState.Lost, position.x, neutral, 0f, if (position.source == HandSource.Camera) age / 1_000_000L else -1L, 0L)
         }
@@ -83,7 +90,19 @@ internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
             }
         }
         lastSampleNanos = position.timestampNanos
-        return SteerReading(FaceControlState.Tracking, position.x, neutral, steerFor(position.x), age / 1_000_000L, stable)
+        if (config.smoothingSeconds <= 0f) {
+            return SteerReading(FaceControlState.Tracking, position.x, neutral, steerFor(position.x), age / 1_000_000L, stable)
+        }
+        if (position.timestampNanos != smoothingSampleNanos) {
+            val dt = if (smoothingSampleNanos == Long.MIN_VALUE) 0f else
+                (position.timestampNanos - smoothingSampleNanos).coerceAtLeast(0L) / 1_000_000_000f
+            val weight = if (smoothedX.isNaN() || dt <= 0f) 1f else
+                dt / (config.smoothingSeconds + dt)
+            smoothedX = if (smoothedX.isNaN()) position.x else
+                smoothedX + (position.x - smoothedX) * weight
+            smoothingSampleNanos = position.timestampNanos
+        }
+        return SteerReading(FaceControlState.Tracking, position.x, neutral, steerFor(smoothedX), age / 1_000_000L, stable)
     }
 
     fun steerFor(faceX: Float): Float {
@@ -211,9 +230,12 @@ internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()
     }
 }
 
+internal fun trailRideSteering(): HorizontalFaceSteering =
+    HorizontalFaceSteering(SteerConfig(deadZone = 0.03f, gain = 2.4f, smoothingSeconds = 0.18f))
+
 internal class TrailRideSession(
     val game: TrailRideGame,
-    val steering: HorizontalFaceSteering = HorizontalFaceSteering(),
+    val steering: HorizontalFaceSteering = trailRideSteering(),
     val cadence: CadenceBoost = CadenceBoost(),
     val standing: StandJumpDetector = StandJumpDetector(),
     private val supervisor: TrailRideSupervisor = TrailRideSupervisor(),

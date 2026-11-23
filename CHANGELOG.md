@@ -34,6 +34,16 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Trail Ride horizontal steering sway.** Widen the horizontal face-tracking
+  neutral dead zone from 1.2% to 3% of the camera frame, apply a modest
+  180 ms time-based smoothing filter only to camera X, and reduce all four
+  user-selectable head steering gains by roughly 40%. Existing saved
+  sensitivity selections remain valid; the default Medium preset is
+  gentler without requiring a settings reset. Timestamped smoothing avoids
+  dependence on render FPS and resets cleanly after tracking loss or manual
+  recentering. Camera Y and stand-to-jump recognition remain untouched, as
+  do RPM, speed, obstacles, and other games.
+
 - **Trail Ride crash recovery and cockpit.** Halve obstacle/ditch crash
   recovery from 1.2 to 0.6 seconds without altering post-crash
   invulnerability. Remove the visible hands from the first-person bike

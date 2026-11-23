@@ -826,7 +826,7 @@ public class TrailRideView(context: Context) : View(context) {
         const val DEFAULT_SENSITIVITY = 1
         const val SIM_RPM = 70
         const val SIM_SAMPLE_NANOS = 200_000_000L
-        val SENSITIVITIES = floatArrayOf(3f, 4f, 5.5f, 7f)
+        val SENSITIVITIES = floatArrayOf(1.6f, 2.4f, 3.2f, 4.2f)
         val SENSITIVITY_LABELS = arrayOf("Low", "Medium", "High", "Very high")
         val SEEDS = longArrayOf(0L, 1001L, 2024L, 7777L)
         val WHITE = TrailSprites.rgb(252, 252, 252)
