@@ -402,6 +402,7 @@ public class TrailRideView(context: Context) : View(context) {
         if (ditchTiming) "Ditch timing guide: ON (tap to hide)" else "Ditch timing guide: OFF (tap to show)",
         "World seed: ${if (SEEDS[seedIndex] == 0L) "random each ride" else "fixed ${SEEDS[seedIndex]}"} (tap to change, restarts)",
         if (simulatedCadence) "Simulated cadence (dev): ON - SIMULATED, not real pedaling" else "Simulated cadence (dev): OFF",
+        "Test jump animation (dev)",
         "Restart ride now",
     )
 
@@ -427,7 +428,8 @@ public class TrailRideView(context: Context) : View(context) {
                 simulatedPress = false
                 session.resetCadence()
             }
-            5 -> restartGame()
+            5 -> if (game.phase == TrailPhase.Riding) game.requestJump()
+            6 -> restartGame()
         }
         invalidate()
     }
@@ -444,12 +446,15 @@ public class TrailRideView(context: Context) : View(context) {
 
     // ---- world rendering -------------------------------------------------------------------
 
+    private fun visualJumpHeight(): Float =
+        game.airHeight * if (game.jumpQualified) 1.8f else 3.3f
+
     private fun drawWorld() {
         val p = projection
         val world = game.world
         val ridingVisual = game.phase == TrailPhase.Riding && hold == TrailHold.None
         val bob = if (ridingVisual && !game.airborne) 0.012f * sin(pedalPhase * 2f) else 0f
-        p.eyeHeight = EYE_HEIGHT + game.airHeight + bob
+        p.eyeHeight = EYE_HEIGHT + visualJumpHeight() + bob
         val camX = game.riderX
         val d = game.distance
         val yaw = world.slope(d)
@@ -663,7 +668,7 @@ public class TrailRideView(context: Context) : View(context) {
         val shake = if (sinceCrash in 0f..SHAKE_SECONDS) sin(sinceCrash * 70f) * 3f * (1f - sinceCrash / SHAKE_SECONDS) else 0f
         val sinceLanding = animSeconds - landedAt
         val dip = if (sinceLanding in 0f..0.25f) sin(sinceLanding / 0.25f * PI.toFloat()) * 3f else 0f
-        val lift = -game.airHeight * 15f
+        val lift = -visualJumpHeight() * 15f
         val bob = if (riding && !game.airborne) sin(pedalPhase) * 0.8f else 0f
         val rumble = if (riding && game.nearEdge && !game.airborne) (if ((animSeconds * 30f).toInt() % 2 == 0) 0.7f else -0.7f) else 0f
         c.save()
@@ -780,7 +785,7 @@ public class TrailRideView(context: Context) : View(context) {
         }
         if (g.phase == TrailPhase.Ready) return "READY... ${ceil(g.readyLeft).toInt().coerceAtLeast(1)}" to WHITE
         if (now - g.lastClearAt < 1.3f) return "NICE JUMP! +${TrailRideGame.JUMP_POINTS}" to GOOD_TEXT
-        if (g.jumpQualified) return "JUMP!" to GOOD_TEXT
+        if (g.airborne) return (if (g.jumpQualified) "JUMP!" else "HOP!") to GOOD_TEXT
         if (now - g.lastJumpAt < 1.2f) {
             when (g.lastJump) {
                 JumpResult.Early -> return "TOO EARLY!" to WARN_TEXT
