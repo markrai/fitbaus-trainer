@@ -38,6 +38,8 @@ import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.channel.ChannelInfo
+import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.exceptions.AccountTerminatedException
 import org.schabi.newpipe.extractor.exceptions.AgeRestrictedContentException
@@ -86,6 +88,15 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
         RelatedVideoSuggestions.firstPage(seeds, ::relatedItems)
     }
 
+    override fun channelVideos(channelUrl: String): FeedPage = guard {
+        val url = YouTubeChannelLinks.normalize(channelUrl)
+            ?: throw YouTubeException(FailureKind.Unavailable, "Invalid channel URL")
+        val channel = ChannelInfo.getInfo(service, url)
+        val videosTab = channel.tabs.firstOrNull { ChannelTabs.VIDEOS in it.contentFilters }
+            ?: throw YouTubeException(FailureKind.Unavailable, "No channel videos tab")
+        firstPage(service.getChannelTabExtractor(videosTab))
+    }
+
     override fun more(cursor: FeedCursor): FeedPage = guard {
         when (cursor) {
             is RelatedVideoCursor -> RelatedVideoSuggestions.nextPage(cursor, ::relatedItems)
@@ -123,6 +134,8 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
             viewCount = info.viewCount,
             thumbnailUrl = YouTubeIds.thumbnail(videoId),
             live = live,
+            channelUrl = YouTubeChannelLinks.normalize(info.uploaderUrl),
+            channelAvatarUrl = YouTubeChannelLinks.avatar(info.uploaderAvatars.firstOrNull()?.url),
         )
         val caption = try {
             CaptionPreference.preferred(NewPipeCaptions.supported(info.subtitles ?: emptyList()))
@@ -166,6 +179,8 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
             viewCount = item.viewCount,
             thumbnailUrl = YouTubeIds.thumbnail(id),
             live = NewPipeStreams.isLive(item.streamType),
+            channelUrl = YouTubeChannelLinks.normalize(item.uploaderUrl),
+            channelAvatarUrl = YouTubeChannelLinks.avatar(item.uploaderAvatars.firstOrNull()?.url),
         )
     }
 
