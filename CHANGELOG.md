@@ -99,6 +99,17 @@ included in this upcoming release.
 
 ### Added
 
+- **Flak Run visual fidelity refresh.** Keep the same 256×144 gameplay
+  coordinates and all existing jet, missile, shell, bomber, turret and bomb
+  mechanics, but draw the scene into a cached 512×288 antialiased framebuffer.
+  Replace hardcoded character-grid pixel sprites with original, code-generated
+  shaded aircraft and emplacement art, add atmospheric desert sky, layered
+  parallax ridges and subdued terrain detail, and render continuous exhaust,
+  shell glow, smoke trails and soft explosions. Filter the final bitmap and
+  round existing life/dash HUD elements for a more natural presentation.
+  Use no downloaded image assets or new dependencies; include renderer
+  geometry and effect-decay regression tests.
+
 - **Ghoul Run immediate start and background pace calibration.** Replace
   the compulsory 25-second pedaling baseline warm-up with a three-second
   start countdown. Seed a conservative 70 RPM baseline on a first run,

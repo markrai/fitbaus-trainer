@@ -14,7 +14,6 @@ import android.view.MotionEvent
 import android.view.View
 import java.util.Locale
 import kotlin.math.ceil
-import kotlin.math.sin
 
 internal enum class FlakHold { None, CameraStarting, CameraUnavailable, Calibrating, NoTelemetry, NotPedaling, Resuming }
 
@@ -51,92 +50,10 @@ internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
     }
 }
 
-internal object FlakSprites {
-    val JET = arrayOf(
-        "..GG............",
-        "..GGG...........",
-        "GGWWWWWWWW......",
-        "RWWWWWWWWWWBBW..",
-        "GGWWWWWWWWWWWWWW",
-        "..GGG...........",
-        "..GG............",
-    )
-    val FLAME = arrayOf("..YO", "YYOO", "..YO")
-    val MISSILE = arrayOf(
-        ".WWWWWWRR..",
-        "GWWWWWWWRYO",
-        ".WWWWWWRR..",
-    )
-    val TURRET = arrayOf(
-        "......DD....",
-        ".....DD.....",
-        "....DD......",
-        "..KKKKKK....",
-        ".KKKKKKKK...",
-        "KKKKKKKKKK..",
-        "KKKKKKKKKK..",
-    )
-    val PUFF = arrayOf(
-        "..WWWW..",
-        ".WWGGWW.",
-        "WWGGGGWW",
-        "WGGDDGGW",
-        "WGGDDGGW",
-        "WWGGGGWW",
-        ".WWGGWW.",
-        "..WWWW..",
-    )
-    val BLAST = arrayOf(
-        "Y..O..Y.",
-        ".YOOOY..",
-        "..OWWO.O",
-        "OOWWWWOO",
-        "O.OWWO..",
-        "..YOOOY.",
-        ".Y..O..Y",
-        "O.......",
-    )
-    val BOMBER = arrayOf(
-        "NN................",
-        "NNN......NN.......",
-        "NNNNNNNNNNNNNNN...",
-        "DNNNNNNNNNNNNNNRN.",
-        "NNNNNNNNNNNNNNNNNN",
-        "NNN......NN.......",
-        "NN................",
-    )
-    val BOMB = arrayOf(
-        ".NN.",
-        "NNNN",
-        "NRRN",
-        ".NN.",
-    )
-    val COLORS = mapOf(
-        'N' to Color.rgb(16, 16, 20),
-        'W' to Color.rgb(252, 252, 252),
-        'G' to Color.rgb(188, 188, 188),
-        'D' to Color.rgb(116, 116, 116),
-        'R' to Color.rgb(248, 56, 0),
-        'B' to Color.rgb(60, 188, 252),
-        'Y' to Color.rgb(252, 224, 168),
-        'O' to Color.rgb(252, 160, 68),
-        'K' to Color.rgb(80, 48, 0),
-    )
-
-    fun bitmap(rows: Array<String>): Bitmap {
-        val w = rows.maxOf { it.length }
-        val bmp = Bitmap.createBitmap(w, rows.size, Bitmap.Config.ARGB_8888)
-        for ((y, row) in rows.withIndex()) {
-            for ((x, ch) in row.withIndex()) bmp.setPixel(x, y, COLORS[ch] ?: Color.TRANSPARENT)
-        }
-        return bmp
-    }
-}
-
 /**
  * FLAK RUN: steer a fighter jet with small head movements (Face tracking) and escape flak by
- * briefly pedaling faster (read-only RPM). Rendered into a 256x144 framebuffer that is scaled
- * up with nearest-neighbour filtering. Never sends anything to the bike.
+ * briefly pedaling faster (read-only RPM). The 256x144 simulation is drawn with
+ * antialiased original art into a 512x288 framebuffer. Never sends anything to the bike.
  */
 public class FlakView(context: Context) : View(context) {
     public var diagnosticsOverlay: Boolean = false
@@ -166,21 +83,17 @@ public class FlakView(context: Context) : View(context) {
     private var memoryText = ""
     private var memoryAtNanos = Long.MIN_VALUE
 
-    private val fb = Bitmap.createBitmap(LOGICAL_W, LOGICAL_H, Bitmap.Config.ARGB_8888)
+    private val fb = Bitmap.createBitmap(
+        FlakVisualGeometry.BITMAP_WIDTH,
+        FlakVisualGeometry.BITMAP_HEIGHT,
+        Bitmap.Config.ARGB_8888,
+    )
     private val fbCanvas = Canvas(fb)
-    private val fbSrc = Rect(0, 0, LOGICAL_W, LOGICAL_H)
+    private val fbSrc = Rect(0, 0, FlakVisualGeometry.BITMAP_WIDTH, FlakVisualGeometry.BITMAP_HEIGHT)
     private val fbDst = Rect()
-    private val jet = FlakSprites.bitmap(FlakSprites.JET)
-    private val flame = FlakSprites.bitmap(FlakSprites.FLAME)
-    private val missile = FlakSprites.bitmap(FlakSprites.MISSILE)
-    private val turret = FlakSprites.bitmap(FlakSprites.TURRET)
-    private val puff = FlakSprites.bitmap(FlakSprites.PUFF)
-    private val blast = FlakSprites.bitmap(FlakSprites.BLAST)
-    private val bomber = FlakSprites.bitmap(FlakSprites.BOMBER)
-    private val bomb = FlakSprites.bitmap(FlakSprites.BOMB)
-    private val farHeights = IntArray(LOGICAL_W * 2) { i -> (18 + 10 * sin(i * 0.045) + 6 * sin(i * 0.13 + 1.7)).toInt() / 2 * 2 }
-    private val px = Paint()
-    private val scaledPaint = Paint().apply { isFilterBitmap = false }
+    private val visuals = FlakVisuals()
+    private val px = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val scaledPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { isDither = true }
     private val hudPaint = Paint().apply {
         color = Color.WHITE
         typeface = Typeface.MONOSPACE
@@ -288,87 +201,69 @@ public class FlakView(context: Context) : View(context) {
     private fun drawWorld() {
         val c = fbCanvas
         val cfg = game.config
-        c.drawColor(SKY)
-        val far = (game.scroll * 0.3f).toInt()
-        px.color = MOUNTAIN
-        for (x in 0 until LOGICAL_W step 2) {
-            val h = farHeights[(x + far) % farHeights.size]
-            c.drawRect(x.toFloat(), cfg.groundTop - h, x + 2f, cfg.groundTop, px)
-        }
-        px.color = SAND
-        c.drawRect(0f, cfg.groundTop, cfg.width, cfg.height, px)
-        px.color = SAND_DARK
-        val stripe = (game.scroll % 16f).toInt()
-        for (x in -16 until LOGICAL_W + 16 step 16) c.drawRect((x - stripe).toFloat(), cfg.groundTop + 6f, (x - stripe + 6).toFloat(), cfg.groundTop + 8f, px)
-        for (x in -16 until LOGICAL_W + 16 step 24) c.drawRect((x - stripe).toFloat(), cfg.groundTop + 13f, (x - stripe + 4).toFloat(), cfg.groundTop + 15f, px)
-        for (t in game.turrets) c.drawBitmap(turret, t.x - turret.width / 2f, cfg.groundTop - turret.height, null)
+        val saved = c.save()
+        c.scale(FlakVisualGeometry.RENDER_SCALE.toFloat(), FlakVisualGeometry.RENDER_SCALE.toFloat())
+        visuals.drawBackground(c, game.scroll, cfg.groundTop)
+        for (t in game.turrets) visuals.drawTurret(c, t.x, cfg.groundTop)
         val blink = (game.elapsed * 6f).toInt() % 2 == 0
         for (t in game.turrets) {
             if (!t.fired && t.fireIn <= cfg.turretWarnSeconds && blink) {
                 px.color = WARN
-                c.drawRect(t.x - 1f, cfg.groundTop - turret.height - 9f, t.x + 1f, cfg.groundTop - turret.height - 4f, px)
-                c.drawRect(t.x - 1f, cfg.groundTop - turret.height - 2f, t.x + 1f, cfg.groundTop - turret.height - 1f, px)
+                c.drawCircle(t.x + 1f, cfg.groundTop - 13f, 1.7f, px)
                 px.color = WARN_DIM
-                c.drawRect(t.x - 6f, cfg.groundTop - turret.height - 1f, t.x - 3f, cfg.groundTop - turret.height + 2f, px)
+                c.drawLine(t.x + 1f, cfg.groundTop - 17f, t.x + 1f, cfg.groundTop - 15f, px)
             }
         }
         val fastBlink = (game.elapsed * 12f).toInt() % 2 == 0
         for (sh in game.shells) {
-            px.color = SHELL_TRAIL
             for (k in 0 until Shell.TRAIL_POINTS) {
                 val tx = sh.trailX[k] - game.scroll
                 val ty = sh.trailY[k]
                 if (ty.isNaN()) continue
-                c.drawRect(tx - 1f, ty - 1f, tx + 1f, ty + 1f, px)
+                visuals.drawTrail(c, tx, ty, 0.9f, 70 + k * 8)
             }
-            val half = if (sh.terminal) 3f else 2f
-            px.color = if (if (sh.terminal) fastBlink else blink) WARN else SHELL
-            c.drawRect(sh.x - half, sh.y - half, sh.x + half, sh.y + half, px)
+            visuals.drawShell(c, sh.x, sh.y, sh.terminal, if (sh.terminal) fastBlink else blink)
         }
         for (m in game.missiles) {
             if (m.warn > 0f) {
                 if (blink) {
                     px.color = WARN
-                    c.drawRect(cfg.width - 6f, m.y - 3f, cfg.width - 2f, m.y + 3f, px)
-                    c.drawRect(cfg.width - 9f, m.y - 1f, cfg.width - 6f, m.y + 1f, px)
+                    c.drawRoundRect(cfg.width - 7f, m.y - 3f, cfg.width - 2f, m.y + 3f, 1f, 1f, px)
+                    px.color = WARN_DIM
+                    c.drawCircle(cfg.width - 8f, m.y, 1.4f, px)
                 }
             } else {
-                c.drawBitmap(missile, m.x - missile.width / 2f, m.y - missile.height / 2f, null)
+                visuals.drawMissile(c, m.x, m.y, game.elapsed)
             }
         }
         for (b in game.bombers) {
             if (b.warn > 0f) {
                 if (blink) {
                     px.color = WARN
-                    c.drawRect(2f, b.y - 3f, 6f, b.y + 3f, px)
-                    c.drawRect(6f, b.y - 1f, 9f, b.y + 1f, px)
+                    c.drawRoundRect(2f, b.y - 3f, 7f, b.y + 3f, 1f, 1f, px)
+                    px.color = WARN_DIM
+                    c.drawCircle(8.2f, b.y, 1.4f, px)
                 }
             } else {
-                c.drawBitmap(bomber, b.x - bomber.width / 2f, b.y - bomber.height / 2f, null)
+                visuals.drawBomber(c, b.x, b.y)
             }
         }
         for (b in game.bombs) {
-            px.color = SHELL_TRAIL
             for (k in 1..3) {
                 val tx = b.x - b.vx * 0.05f * k
                 val ty = b.y - b.vy * 0.05f * k
-                c.drawRect(tx - 0.5f, ty - 0.5f, tx + 0.5f, ty + 0.5f, px)
+                visuals.drawTrail(c, tx, ty, 0.7f + k * 0.1f, 115 - 25 * k)
             }
-            c.drawBitmap(bomb, b.x - bomb.width / 2f, b.y - bomb.height / 2f, null)
+            visuals.drawBomb(c, b.x, b.y)
         }
         val visible = game.invulnerable <= 0f || (game.elapsed * 12f).toInt() % 2 == 0
         if (visible && game.phase == FlakPhase.Playing) {
-            val jx = game.jetX - jet.width / 2f
-            val jy = game.jetY - jet.height / 2f
-            c.drawBitmap(jet, jx, jy, null)
-            if (game.boosting && (game.elapsed * 15f).toInt() % 2 == 0) c.drawBitmap(flame, jx - flame.width, jy + 2f, null)
+            visuals.drawJet(c, game.jetX, game.jetY, game.boosting, game.elapsed)
         }
         for (b in game.blasts) {
-            val frame = (b.age / FlakGame.BLAST_SECONDS * 3f).toInt().coerceIn(0, 2)
-            val size = (if (b.flak) 12f else 8f) + frame * 4f
-            blastRect.set(b.x - size / 2f, b.y - size / 2f, b.x + size / 2f, b.y + size / 2f)
-            c.drawBitmap(if (b.flak) puff else blast, null, blastRect, null)
+            visuals.drawExplosion(c, b.x, b.y, b.age, FlakGame.BLAST_SECONDS, b.flak)
         }
+        c.restoreToCount(saved)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -413,15 +308,19 @@ public class FlakView(context: Context) : View(context) {
         canvas.drawText(String.format(Locale.US, "SCORE %06d", game.score), left, baseline, hudPaint)
         val livesX = left + hudPaint.measureText("SCORE 000000  ")
         for (i in 0 until game.config.lives) {
-            px.color = if (i < game.lives) Color.rgb(248, 56, 0) else Color.rgb(80, 80, 80)
-            canvas.drawRect(livesX + i * 22f * density, baseline - 12f * density, livesX + i * 22f * density + 16f * density, baseline - 2f * density, px)
+            px.color = if (i < game.lives) Color.rgb(218, 119, 77) else Color.rgb(74, 75, 76)
+            canvas.drawRoundRect(
+                livesX + i * 22f * density, baseline - 12f * density,
+                livesX + i * 22f * density + 16f * density, baseline - 2f * density,
+                2f * density, 2f * density, px,
+            )
         }
         val c = cadenceReading
         val meterW = 180f * density
         val meterLeft = left + width - meterW
         meterRect.set(meterLeft, baseline - 14f * density, meterLeft + meterW, baseline)
         px.color = Color.rgb(40, 40, 40)
-        canvas.drawRect(meterRect, px)
+        canvas.drawRoundRect(meterRect, 3f * density, 3f * density, px)
         val shown = when (c.state) {
             CadenceState.Boosting -> 1f
             CadenceState.Cruising -> if (c.baseline.isNaN() || c.rpm == null) 0f else ((c.rpm - c.baseline) / (c.threshold - c.baseline)).coerceIn(0f, 1f)
@@ -434,7 +333,10 @@ public class FlakView(context: Context) : View(context) {
             CadenceState.Establishing, CadenceState.Recovering -> Color.rgb(60, 140, 200)
             else -> Color.rgb(110, 110, 110)
         }
-        canvas.drawRect(meterRect.left, meterRect.top, meterRect.left + meterW * shown, meterRect.bottom, px)
+        if (shown > 0f) canvas.drawRoundRect(
+            meterRect.left, meterRect.top, meterRect.left + meterW * shown, meterRect.bottom,
+            3f * density, 3f * density, px,
+        )
         val label = when (c.state) {
             CadenceState.Boosting -> "DASH!"
             CadenceState.Establishing -> "LEARNING PACE"
@@ -526,8 +428,8 @@ public class FlakView(context: Context) : View(context) {
     }
 
     private companion object {
-        const val LOGICAL_W = 256
-        const val LOGICAL_H = 144
+        const val LOGICAL_W = FlakVisualGeometry.WIDTH
+        const val LOGICAL_H = FlakVisualGeometry.HEIGHT
         const val PREFS = "fitbaus_arcade"
         const val SENSITIVITY_KEY = "flak_sensitivity"
         const val DELTA_KEY = "flak_boost_delta"
@@ -538,13 +440,7 @@ public class FlakView(context: Context) : View(context) {
         val SENSITIVITIES = floatArrayOf(4f, 6f, 8f, 11f)
         val SENSITIVITY_LABELS = arrayOf("Low", "Medium", "High", "Very high")
         val DELTAS = intArrayOf(8, 10, 12, 15, 18)
-        val SKY = Color.rgb(18, 44, 130)
-        val MOUNTAIN = Color.rgb(136, 20, 0)
-        val SAND = Color.rgb(240, 188, 60)
-        val SAND_DARK = Color.rgb(228, 92, 16)
         val WARN = Color.rgb(252, 252, 252)
         val WARN_DIM = Color.rgb(248, 56, 0)
-        val SHELL = Color.rgb(248, 56, 0)
-        val SHELL_TRAIL = Color.rgb(188, 188, 188)
     }
 }
