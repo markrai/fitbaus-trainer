@@ -713,20 +713,16 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     }
 
     private fun drawAttackMouth(canvas: Canvas, open: Float) {
-        if (open <= 0.01f) return
+        if (open <= 0.001f) return
         val strength = open.coerceIn(0f, 1f)
         val centreX = spriteDst.left + spriteDst.width() * GhoulAttackMouth.CENTRE_U
         val centreY = spriteDst.top + spriteDst.height() *
             (GhoulAttackMouth.CENTRE_V + 0.013f * strength)
-        val radiusX = spriteDst.width() *
-            (GhoulAttackMouth.CLOSED_HALF_WIDTH +
-                (GhoulAttackMouth.OPEN_HALF_WIDTH - GhoulAttackMouth.CLOSED_HALF_WIDTH) * strength)
-        val radiusY = spriteDst.height() *
-            (GhoulAttackMouth.CLOSED_HALF_HEIGHT +
-                (GhoulAttackMouth.OPEN_HALF_HEIGHT - GhoulAttackMouth.CLOSED_HALF_HEIGHT) * strength)
+        val radiusX = spriteDst.width() * GhoulAttackMouth.halfWidth(strength)
+        val radiusY = spriteDst.height() * GhoulAttackMouth.halfHeight(strength)
         mouthDst.set(centreX - radiusX, centreY - radiusY, centreX + radiusX, centreY + radiusY)
-        jawRimPaint.alpha = (strength * 235f).toInt()
-        jawCavityPaint.alpha = (strength * 252f).toInt()
+        jawRimPaint.alpha = 235
+        jawCavityPaint.alpha = 252
         canvas.drawOval(mouthDst, jawRimPaint)
         mouthDst.inset(radiusX * 0.16f, radiusY * 0.13f)
         canvas.drawOval(mouthDst, jawCavityPaint)

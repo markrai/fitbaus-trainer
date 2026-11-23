@@ -11,7 +11,7 @@ import kotlin.math.sin
 internal object GhoulAttackMouth {
     const val CENTRE_U = 0.513f
     const val CENTRE_V = 0.236f
-    const val CLOSED_HALF_WIDTH = 0.008f
+    const val CLOSED_HALF_WIDTH = 0.003f
     const val OPEN_HALF_WIDTH = 0.022f
     const val CLOSED_HALF_HEIGHT = 0.006f
     const val OPEN_HALF_HEIGHT = 0.052f
@@ -44,7 +44,7 @@ internal object GhoulAttackMouth {
         if (towardRider < GHOUL_FACING_DOT) return 0f
         val closeness = ((ENTER_DISTANCE - distance) / (ENTER_DISTANCE - FULL_OPEN_DISTANCE))
             .coerceIn(0f, 1f)
-        return closeness * closeness * (3f - 2f * closeness)
+        return closeness
     }
 
     fun target(game: GhoulRunGame, monster: GhoulMonster, cameraYaw: Float): Float {
@@ -57,6 +57,16 @@ internal object GhoulAttackMouth {
         val rider = if (game.progress < 0.5f) game.riderCell else game.riderCell.moved(game.heading)
         val ghoul = if (monster.progress < 0.5f) monster.cell else monster.cell.moved(monster.heading)
         return if (game.world.hasLineOfSight(rider, ghoul)) facing else 0f
+    }
+
+    fun halfWidth(open: Float): Float {
+        val strength = open.coerceIn(0f, 1f)
+        return CLOSED_HALF_WIDTH + (OPEN_HALF_WIDTH - CLOSED_HALF_WIDTH) * strength
+    }
+
+    fun halfHeight(open: Float): Float {
+        val strength = open.coerceIn(0f, 1f)
+        return CLOSED_HALF_HEIGHT + (OPEN_HALF_HEIGHT - CLOSED_HALF_HEIGHT) * strength
     }
 
     fun advance(current: Float, target: Float, dt: Float): Float {
