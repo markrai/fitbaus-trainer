@@ -877,7 +877,7 @@ internal class YouTubeContent(
             val titleLp = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             titleLp.topMargin = dp(6)
             addView(title, titleLp)
-            meta.maxLines = 1
+            meta.maxLines = 2
             meta.ellipsize = TextUtils.TruncateAt.END
             addView(meta, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
