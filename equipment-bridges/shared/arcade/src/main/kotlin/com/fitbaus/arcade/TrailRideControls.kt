@@ -110,26 +110,21 @@ internal class TrailRideSupervisor {
 }
 
 internal data class StandJumpConfig(
-    val freshNanos: Long = 400_000_000L,
-    val riseWindowNanos: Long = 650_000_000L,
-    val lossWindowNanos: Long = 950_000_000L,
-    val maximumSampleGapNanos: Long = 250_000_000L,
-    val rearmNanos: Long = 300_000_000L,
-    val rearmSamples: Int = 4,
-    val minimumRise: Float = 0.075f,
-    val minimumFinalStep: Float = 0.008f,
+    val sampleFreshNanos: Long = 500_000_000L,
+    val riseWindowNanos: Long = 1_200_000_000L,
+    val lossFreshNanos: Long = 1_250_000_000L,
+    val minimumRise: Float = 0.04f,
+    val downwardReset: Float = 0.03f,
 )
 
 internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()) {
     private data class Sample(val at: Long, val y: Float)
 
-    private val samples = ArrayDeque<Sample>()
-    private var lastProcessedAt = Long.MIN_VALUE
-    private var lastFreshAt = Long.MIN_VALUE
-    private var trackingSince = Long.MIN_VALUE
-    private var ascentAt = Long.MIN_VALUE
-    private var freshCount = 0
+    private val recent = ArrayDeque<Sample>()
     private var tracking = false
+    private var lastSampleAt = Long.MIN_VALUE
+    private var highestReached = Float.NaN
+    private var riseCandidate = false
 
     var armed: Boolean = false
         private set
@@ -143,82 +138,71 @@ internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()
     fun update(position: HandPosition, camera: CameraState, nowNanos: Long, canJump: Boolean): Boolean {
         val age = nowNanos - position.timestampNanos
         val fresh = camera == CameraState.Ready && position.source == HandSource.Camera &&
-            age in 0..config.freshNanos && position.y.isFinite() && position.y in 0f..1f
+            age in 0..config.sampleFreshNanos && position.y.isFinite() && position.y in 0f..1f
         if (fresh) {
-            if (position.timestampNanos == lastProcessedAt) return false
-            if (!tracking || lastProcessedAt != Long.MIN_VALUE &&
-                position.timestampNanos - lastProcessedAt > config.maximumSampleGapNanos
-            ) {
-                samples.clear()
-                trackingSince = nowNanos
-                freshCount = 0
-                ascentAt = Long.MIN_VALUE
+            if (position.timestampNanos == lastSampleAt) return false
+            if (!tracking) {
+                recent.clear()
+                highestReached = Float.NaN
+                lastRise = 0f
+                riseCandidate = false
                 armed = false
             }
             tracking = true
-            freshCount += 1
-            while (samples.isNotEmpty() &&
-                position.timestampNanos - samples.first().at > config.riseWindowNanos
-            ) samples.removeFirst()
-            val peak = samples.maxOfOrNull { it.y } ?: position.y
-            val previous = samples.lastOrNull()
-            val rise = (peak - position.y).coerceAtLeast(0f)
-            lastRise = rise
-            if (previous != null && position.y - previous.y >= 0.025f) {
-                ascentAt = Long.MIN_VALUE
-                lastEvent = "downward movement"
+            while (recent.isNotEmpty() && position.timestampNanos - recent.first().at > config.riseWindowNanos) {
+                recent.removeFirst()
             }
-            if (armed && rise >= config.minimumRise &&
-                previous != null && previous.y - position.y >= config.minimumFinalStep &&
-                position.timestampNanos - previous.at <= config.maximumSampleGapNanos
-            ) {
-                ascentAt = nowNanos
-                lastEvent = "upward movement"
+            val priorLow = highestReached
+            if (riseCandidate && priorLow.isFinite() && position.y > priorLow + config.downwardReset) {
+                riseCandidate = false
+                lastEvent = "face moving down"
             }
-            samples.addLast(Sample(position.timestampNanos, position.y))
-            lastProcessedAt = position.timestampNanos
-            lastFreshAt = nowNanos
-            if (!armed && nowNanos - trackingSince >= config.rearmNanos &&
-                freshCount >= config.rearmSamples
-            ) {
-                armed = true
-                lastEvent = "ready"
+            val previousHigh = recent.maxOfOrNull { it.y } ?: position.y
+            lastRise = (previousHigh - position.y).coerceAtLeast(0f)
+            recent.addLast(Sample(position.timestampNanos, position.y))
+            armed = recent.size >= 2
+            if (armed && lastRise >= config.minimumRise) {
+                riseCandidate = true
+                highestReached = if (priorLow.isFinite()) minOf(priorLow, position.y) else position.y
+                lastEvent = "face moving upward"
+            } else if (!riseCandidate) {
+                lastEvent = "tracking face"
             }
+            lastSampleAt = position.timestampNanos
             return false
         }
-        if (position.source != HandSource.Lost || !tracking) return false
-        val rising = ascentAt != Long.MIN_VALUE && lastFreshAt != Long.MIN_VALUE &&
-            nowNanos >= ascentAt && nowNanos - ascentAt <= config.lossWindowNanos &&
-            nowNanos - lastFreshAt <= config.lossWindowNanos
-        val triggered = armed && rising && canJump && camera == CameraState.Ready
+        if (!tracking) return false
+        if (position.source != HandSource.Lost || camera != CameraState.Ready) {
+            reset()
+            return false
+        }
+        val recentFace = lastSampleAt != Long.MIN_VALUE && nowNanos - lastSampleAt in 0..config.lossFreshNanos
+        val triggered = armed && riseCandidate && recentFace && canJump
         lastEvent = when {
             triggered -> "stand jump"
-            !armed -> "unarmed loss"
-            !rising -> "no upward exit"
-            !canJump -> "jump unavailable"
-            else -> "camera unavailable"
+            !riseCandidate -> "face lost without upward movement"
+            !recentFace -> "stale face loss"
+            else -> "jump unavailable"
         }
         if (triggered) jumps += 1
         tracking = false
         armed = false
-        samples.clear()
-        trackingSince = Long.MIN_VALUE
-        ascentAt = Long.MIN_VALUE
-        freshCount = 0
+        riseCandidate = false
+        lastSampleAt = Long.MIN_VALUE
+        recent.clear()
+        highestReached = Float.NaN
         return triggered
     }
 
     fun reset() {
-        samples.clear()
-        lastProcessedAt = Long.MIN_VALUE
-        lastFreshAt = Long.MIN_VALUE
-        trackingSince = Long.MIN_VALUE
-        ascentAt = Long.MIN_VALUE
-        freshCount = 0
         tracking = false
         armed = false
+        riseCandidate = false
+        lastSampleAt = Long.MIN_VALUE
+        highestReached = Float.NaN
         lastRise = 0f
         lastEvent = "waiting for face"
+        recent.clear()
     }
 }
 
