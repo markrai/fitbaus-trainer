@@ -7,6 +7,7 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import com.fitbaus.arcade.BiketrisControllerInput
+import com.fitbaus.arcade.FlakControllerInput
 import com.fitbaus.arcade.HandPosition
 import com.fitbaus.arcade.HandSource
 import com.fitbaus.arcade.GhoulRunControllerInput
@@ -166,6 +167,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     private var hatY = 0f
     private var leftDown = false
     private var rightDown = false
+    private var upDown = false
     private var downDown = false
     private var rotationPending = false
     private val leftInput = ControllerTurnPressInput()
@@ -193,6 +195,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
         hatY = 0f
         leftDown = false
         rightDown = false
+        upDown = false
         downDown = false
         rotationPending = false
         leftInput.reset()
@@ -220,6 +223,7 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
                     rightDown = down
                     rightInput.onKey(down, event.repeatCount)
                 }
+                "up" -> upDown = down
                 "down" -> downDown = down
                 "reverse" -> reverseInput.onKey(down, event.repeatCount)
                 "rotate" -> if (down && event.repeatCount == 0) rotationPending = true
@@ -229,6 +233,22 @@ internal class GameControllerInput(private val prefs: SharedPreferences) {
     }
 
     fun steeringHeld(): Boolean = leftDown || rightDown
+
+    fun takeFlakInput(): FlakControllerInput {
+        val x = when {
+            leftDown && rightDown -> 0f
+            leftDown -> -1f
+            rightDown -> 1f
+            else -> ControllerSteering.axis(axisX)
+        }
+        val y = when {
+            upDown && downDown -> 0f
+            upDown -> -1f
+            downDown -> 1f
+            else -> ControllerSteering.axis(axisY)
+        }
+        return FlakControllerInput(x, y)
+    }
 
     fun takeBiketrisInput(): BiketrisControllerInput {
         val rotate = rotationPending
