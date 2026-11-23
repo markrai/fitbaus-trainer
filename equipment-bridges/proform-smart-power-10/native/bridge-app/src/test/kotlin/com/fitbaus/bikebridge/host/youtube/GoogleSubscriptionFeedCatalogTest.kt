@@ -26,6 +26,7 @@ class GoogleSubscriptionFeedCatalogTest {
     private class Guest : YouTubeCatalog {
         var discoverCount = 0
         var searchCount = 0
+        var channelCount = 0
         var releaseCount = 0
         override fun discover(): FeedPage {
             discoverCount += 1
@@ -34,6 +35,10 @@ class GoogleSubscriptionFeedCatalogTest {
         override fun search(query: String): FeedPage {
             searchCount += 1
             return FeedPage(listOf(video("abcdefghijk", "Global search")), null)
+        }
+        override fun channelVideos(channelUrl: String): FeedPage {
+            channelCount += 1
+            return FeedPage(listOf(video("abcdefghijk", "Channel videos")), null)
         }
         override fun more(cursor: FeedCursor): FeedPage = FeedPage(emptyList(), null)
         override fun resolve(videoId: String): ResolvedVideo = error("Not needed")
@@ -134,6 +139,16 @@ class GoogleSubscriptionFeedCatalogTest {
         val catalog = GoogleSubscriptionFeedCatalog(guest, Store(), GoogleYouTubeApi(http))
         assertEquals("Global search", catalog.search("science").items.single().title)
         assertEquals(1, guest.searchCount)
+        assertTrue(http.calls.isEmpty())
+    }
+
+    @Test
+    fun channelVideosUsePublicExtractorWithoutGoogleQuota() {
+        val http = Http()
+        val guest = Guest()
+        val catalog = GoogleSubscriptionFeedCatalog(guest, Store(), GoogleYouTubeApi(http))
+        assertEquals("Channel videos", catalog.channelVideos("https://www.youtube.com/@test").items.single().title)
+        assertEquals(1, guest.channelCount)
         assertTrue(http.calls.isEmpty())
     }
 
