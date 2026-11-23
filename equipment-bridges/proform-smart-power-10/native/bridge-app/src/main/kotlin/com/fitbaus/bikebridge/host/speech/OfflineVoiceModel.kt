@@ -41,7 +41,8 @@ internal object OfflineVoiceModel {
                     if (entry.isDirectory) {
                         if (!target.isDirectory && !target.mkdirs()) throw IOException("Cannot create speech model directory")
                     } else {
-                        if (!target.parentFile.isDirectory && !target.parentFile.mkdirs()) throw IOException("Cannot create speech model path")
+                        val parent = target.parentFile ?: throw IOException("Invalid speech model path")
+                        if (!parent.isDirectory && !parent.mkdirs()) throw IOException("Cannot create speech model path")
                         FileOutputStream(target).use { output ->
                             val buffer = ByteArray(32 * 1024)
                             while (true) {
