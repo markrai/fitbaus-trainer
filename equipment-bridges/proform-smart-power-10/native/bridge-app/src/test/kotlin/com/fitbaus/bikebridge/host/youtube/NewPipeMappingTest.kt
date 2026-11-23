@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.schabi.newpipe.extractor.MediaFormat
 import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.localization.DateWrapper
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
@@ -29,6 +30,7 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.StreamType
 import org.schabi.newpipe.extractor.stream.VideoStream
 import java.net.SocketTimeoutException
+import java.time.Instant
 import java.net.UnknownHostException
 
 class NewPipeMappingTest {
@@ -45,6 +47,7 @@ class NewPipeMappingTest {
         item.uploaderUrl = "https://www.youtube.com/channel/UC0000000000000000000000"
         item.duration = 635
         item.viewCount = 12_345_678
+        item.uploadDate = DateWrapper(Instant.parse("2026-11-20T12:00:00Z"))
         val summary = catalog.summarize(item)
         assertNotNull(summary)
         summary!!
@@ -55,6 +58,7 @@ class NewPipeMappingTest {
         assertEquals(635, summary.durationSeconds)
         assertEquals("https://i.ytimg.com/vi/aqz-KE-bpKQ/mqdefault.jpg", summary.thumbnailUrl)
         assertFalse(summary.live)
+        assertEquals(Instant.parse("2026-11-20T12:00:00Z").epochSecond, summary.publishedAtEpochSeconds)
         assertEquals("Blender  ·  10:35  ·  12.3M views", YouTubeFormat.meta(summary))
     }
 
@@ -62,7 +66,10 @@ class NewPipeMappingTest {
     fun liveShortAndUnusableItemsAreHandled() {
         val live = StreamInfoItem(service, "https://www.youtube.com/watch?v=jNQXAC9IVRw", "Live", StreamType.LIVE_STREAM)
         live.duration = -1
-        assertTrue(catalog.summarize(live)!!.live)
+        live.uploadDate = DateWrapper(Instant.parse("2026-11-20T12:00:00Z"))
+        val liveSummary = catalog.summarize(live)!!
+        assertTrue(liveSummary.live)
+        assertNull(liveSummary.publishedAtEpochSeconds)
         val short = StreamInfoItem(service, "https://www.youtube.com/shorts/jNQXAC9IVRw", "Short", StreamType.VIDEO_STREAM)
         assertEquals("jNQXAC9IVRw", catalog.summarize(short)?.id)
         val upcoming = StreamInfoItem(service, "https://www.youtube.com/watch?v=jNQXAC9IVRw", "Soon", StreamType.VIDEO_STREAM)

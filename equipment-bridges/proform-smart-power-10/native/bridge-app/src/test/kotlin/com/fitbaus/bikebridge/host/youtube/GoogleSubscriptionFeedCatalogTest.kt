@@ -108,6 +108,7 @@ class GoogleSubscriptionFeedCatalogTest {
         val page = catalog.discover()
         assertEquals(8, page.items.size)
         assertEquals("Upload 8", page.items[0].title)
+        assertEquals(java.time.Instant.parse("2026-11-08T12:00:00Z").epochSecond, page.items[0].publishedAtEpochSeconds)
         assertEquals("Upload 1", page.items[7].title)
         assertNotNull(page.cursor)
         assertEquals(0, guest.discoverCount)

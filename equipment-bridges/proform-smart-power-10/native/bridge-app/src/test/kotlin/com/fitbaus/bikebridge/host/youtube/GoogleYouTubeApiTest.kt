@@ -208,6 +208,21 @@ class GoogleYouTubeApiTest {
     }
 
     @Test
+    fun videoPublicationDateIsNotPlaylistInsertionDate() {
+        val http = Http()
+        http.nextGet = GoogleHttpResponse(200, """{"items":[
+            {"snippet":{"title":"Published","publishedAt":"2026-11-20T12:00:00Z"},"contentDetails":{"videoId":"jNQXAC9IVRw","videoPublishedAt":"2022-01-01T00:00:00Z"}},
+            {"snippet":{"title":"Playlist only","publishedAt":"2026-11-22T12:00:00Z"},"contentDetails":{"videoId":"abcdefghijk"}},
+            {"snippet":{"title":"Invalid date","publishedAt":"2026-11-22T12:00:00Z"},"contentDetails":{"videoId":"23456789012","videoPublishedAt":"bad"}}
+        ]}""")
+        val videos = GoogleYouTubeApi(http).playlistItems("token", "PL123xyz").items
+        assertEquals(3, videos.size)
+        assertEquals(java.time.Instant.parse("2022-01-01T00:00:00Z").epochSecond, videos[0].publishedAtEpochSeconds)
+        assertEquals(null, videos[1].publishedAtEpochSeconds)
+        assertEquals(null, videos[2].publishedAtEpochSeconds)
+    }
+
+    @Test
     fun playlistItemsSkipDeletedPrivateOrInvalidVideos() {
         val http = Http()
         http.nextGet = GoogleHttpResponse(200, """{"items":[
