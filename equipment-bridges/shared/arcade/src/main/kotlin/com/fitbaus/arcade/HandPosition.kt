@@ -94,6 +94,9 @@ public class HandPositionInput(
     @Volatile
     private var activeFreshNanos: Long = freshNanos
 
+    @Volatile
+    internal var immediateFaceLoss: Boolean = false
+
     internal fun configureTiming(holdNanos: Long, freshNanos: Long) {
         activeHoldNanos = holdNanos
         activeFreshNanos = freshNanos.coerceAtMost(holdNanos)
