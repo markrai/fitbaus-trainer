@@ -35,26 +35,44 @@ internal data class GhoulCadenceReading(
     val calibrated: Boolean get() = baseline.isFinite()
 }
 
-/** Absolute-RPM smoothing plus a one-shot median warm-up baseline that never drifts. */
+internal object GhoulPaceProfile {
+    const val DEFAULT_RPM = 70f
+    private const val MIN_RPM = 35f
+    private const val MAX_RPM = 140f
+    private const val MAX_AGE_MS = 30L * 24L * 60L * 60L * 1000L
+
+    fun valid(rpm: Float): Boolean = rpm.isFinite() && rpm in MIN_RPM..MAX_RPM
+
+    fun restore(rpm: Float, recordedAtMs: Long, nowMs: Long): Float =
+        if (valid(rpm) && recordedAtMs > 0L && nowMs >= recordedAtMs &&
+            nowMs - recordedAtMs <= MAX_AGE_MS
+        ) rpm else Float.NaN
+}
+
 internal class GhoulPace(
     private val gameConfig: GhoulRunConfig,
     val filter: CadenceGravity = CadenceGravity(),
+    initialBaseline: Float = Float.NaN,
 ) {
     private val warmupSamples = ArrayDeque<Pair<Long, Float>>()
     private var lastUpdateNanos = Long.MIN_VALUE
     private var warmupElapsed = 0f
     private var pendingWarmupNanos = 0L
     private var pendingSampleNanos = Long.MIN_VALUE
+    private var trained = GhoulPaceProfile.valid(initialBaseline)
+    private var targetBaseline = Float.NaN
 
-    var baseline: Float = Float.NaN
+    var baseline: Float = if (trained) initialBaseline else GhoulPaceProfile.DEFAULT_RPM
+        private set
+    var learnedBaseline: Float = Float.NaN
         private set
 
     var reading: GhoulCadenceReading = GhoulCadenceReading(
         CadenceStatus.NoTelemetry,
         -1,
         filter.filteredRpm,
-        Float.NaN,
-        gameConfig.warmupSeconds,
+        baseline,
+        if (trained) 0f else gameConfig.warmupSeconds,
     )
         private set
 
@@ -76,18 +94,33 @@ internal class GhoulPace(
         return reading
     }
 
-    /** Commits warm-up time only after the supervisor confirms the game is not held. */
     fun advanceWarmup(): GhoulCadenceReading {
-        if (filter.status == CadenceStatus.Live && baseline.isNaN() && pendingSampleNanos != Long.MIN_VALUE) {
-            warmupElapsed += pendingWarmupNanos / 1_000_000_000f
+        val dt = pendingWarmupNanos / 1_000_000_000f
+        if (!trained && filter.status == CadenceStatus.Live &&
+            pendingSampleNanos != Long.MIN_VALUE && GhoulPaceProfile.valid(filter.filteredRpm)
+        ) {
+            warmupElapsed += dt
             warmupSamples.addLast(pendingSampleNanos to filter.filteredRpm)
             val cutoff = pendingSampleNanos - (gameConfig.baselineWindowSeconds * 1_000_000_000L).toLong()
             while (warmupSamples.firstOrNull()?.first?.let { it < cutoff } == true) warmupSamples.removeFirst()
-            if (warmupElapsed >= gameConfig.warmupSeconds && warmupSamples.isNotEmpty()) {
-                val values = warmupSamples.map { it.second }.sorted()
-                val middle = values.size / 2
-                baseline = if (values.size % 2 == 0) (values[middle - 1] + values[middle]) / 2f else values[middle]
+            if (warmupElapsed >= gameConfig.warmupSeconds && warmupSamples.size >= 5) {
+                val samples = warmupSamples.map { it.second }.sorted()
+                val median = if (samples.size % 2 == 0) {
+                    (samples[samples.size / 2 - 1] + samples[samples.size / 2]) / 2f
+                } else samples[samples.size / 2]
+                val spread = samples[samples.size * 3 / 4] - samples[samples.size / 4]
+                val sampleSpan = warmupSamples.last().first - warmupSamples.first().first
+                if (spread <= 12f && sampleSpan >= (gameConfig.baselineWindowSeconds * 500_000_000L).toLong()) {
+                    trained = true
+                    targetBaseline = median
+                    learnedBaseline = median
+                    warmupSamples.clear()
+                }
             }
+        }
+        if (targetBaseline.isFinite()) {
+            val maximumShift = 1.5f * dt
+            baseline += (targetBaseline - baseline).coerceIn(-maximumShift, maximumShift)
         }
         pendingWarmupNanos = 0L
         pendingSampleNanos = Long.MIN_VALUE
@@ -101,7 +134,7 @@ internal class GhoulPace(
             filter.rawRpm,
             filter.filteredRpm,
             baseline,
-            (gameConfig.warmupSeconds - warmupElapsed).coerceAtLeast(0f),
+            if (trained) 0f else (gameConfig.warmupSeconds - warmupElapsed).coerceAtLeast(0f),
         )
     }
 
@@ -119,14 +152,11 @@ internal class GhoulPace(
         warmupElapsed = 0f
         pendingWarmupNanos = 0L
         pendingSampleNanos = Long.MIN_VALUE
-        baseline = Float.NaN
-        reading = GhoulCadenceReading(
-            CadenceStatus.NoTelemetry,
-            -1,
-            filter.filteredRpm,
-            Float.NaN,
-            gameConfig.warmupSeconds,
-        )
+        trained = false
+        targetBaseline = Float.NaN
+        learnedBaseline = Float.NaN
+        baseline = GhoulPaceProfile.DEFAULT_RPM
+        refreshReading()
     }
 }
 
