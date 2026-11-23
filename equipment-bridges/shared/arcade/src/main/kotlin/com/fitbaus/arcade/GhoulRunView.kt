@@ -69,7 +69,13 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
     )
     private var seed = System.nanoTime()
     private var game = newGame(seed)
-    private var session = GhoulRunSession(game)
+    private val restoredPace = GhoulPaceProfile.restore(
+        prefs?.getFloat(PACE_BASELINE_KEY, Float.NaN) ?: Float.NaN,
+        prefs?.getLong(PACE_BASELINE_AT_KEY, 0L) ?: 0L,
+        System.currentTimeMillis(),
+    )
+    private var session = GhoulRunSession(game, pace = GhoulPace(game.config, initialBaseline = restoredPace))
+    private var persistedLearnedPace = Float.NaN
     private var lastRenderNanos = Long.MIN_VALUE
     private var cameraRow = 0f
     private var cameraCol = 0f
@@ -312,6 +318,12 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
             controllerAvailable = controllerAvailable,
             controller = if (source == GhoulRunInputSource.Webcam) null else controller,
         )
+        val learnedPace = session.pace.learnedBaseline
+        if (learnedPace.isFinite() && learnedPace != persistedLearnedPace) {
+            prefs?.edit()?.putFloat(PACE_BASELINE_KEY, learnedPace)
+                ?.putLong(PACE_BASELINE_AT_KEY, System.currentTimeMillis())?.apply()
+            persistedLearnedPace = learnedPace
+        }
         val dt = if (session.live && interval in 1 until STALL_NANOS) interval / 1_000_000_000f else 0f
         trackFeedback(now)
         rig.update(game, dt)
@@ -377,7 +389,7 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         "Sprint difficulty: +${SPRINT_DELTAS[difficultyIndex]} RPM (tap to change)",
         "Input source: ${inputSource.name} (use in-game selector)",
         "Recenter head now (look straight ahead)",
-        "Recalibrate pace (25 second warm-up)",
+        "Relearn normal pace in the background",
         "Restart maze now",
     )
 
@@ -394,7 +406,11 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
                 session = GhoulRunSession(game, pace = lockedPace)
             }
             2 -> session.recenter()
-            3 -> session.recalibratePace()
+            3 -> {
+                prefs?.edit()?.remove(PACE_BASELINE_KEY)?.remove(PACE_BASELINE_AT_KEY)?.apply()
+                persistedLearnedPace = Float.NaN
+                session.recalibratePace()
+            }
             4 -> restartGame()
         }
         overlay.invalidate()
@@ -1122,15 +1138,13 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         val midY = fpRect.top + (gaugeTop - fpRect.top) * 0.5f
         when (game.phase) {
             GhoulPhase.WarmUp -> {
-                val card = WARMUP_CARDS[(game.warmupTime / WARMUP_CARD_SECONDS).toInt() % WARMUP_CARDS.size]
-                val parts = card.split(" - ")
+                banner(canvas, "LEVEL ${game.level} - GET READY", cx, midY - 52f * density, maxHalf, LABEL, 18f)
                 banner(
                     canvas,
-                    "WARM UP - PEDAL AT YOUR NORMAL PACE  ${ceil(session.cadenceReading.warmupRemaining).toInt()}",
-                    cx, midY - 50f * density, maxHalf, LABEL, 13f,
+                    "${ceil(session.readyRemaining).toInt().coerceIn(1, 3)}",
+                    cx, midY, maxHalf, Color.WHITE, 36f,
                 )
-                banner(canvas, parts[0], cx, midY, maxHalf, Color.WHITE, 18f)
-                if (parts.size > 1) banner(canvas, parts[1], cx, midY + 34f * density, maxHalf, HIGHLIGHT, 16f)
+                banner(canvas, "PEDAL TO MOVE - STOP TO HIDE", cx, midY + 42f * density, maxHalf, HIGHLIGHT, 16f)
             }
             GhoulPhase.LeanCheck -> {
                 val press = inputSource == GhoulRunInputSource.Controller
@@ -2064,6 +2078,8 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         const val MAP_WIDTH_KEY = "ghoul_run_map_overlay_width"
         const val MAP_HEIGHT_KEY = "ghoul_run_map_overlay_height"
         const val MAP_OPACITY_KEY = "ghoul_run_map_overlay_opacity"
+        const val PACE_BASELINE_KEY = "ghoul_run_pace_baseline"
+        const val PACE_BASELINE_AT_KEY = "ghoul_run_pace_baseline_at"
         const val MAP_INSET = 10f
         const val MAX_LIGHT_CANDIDATES = 128
         const val STALL_NANOS = 500_000_000L
@@ -2082,7 +2098,6 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         const val CONE_CELLS = 1.6f
         const val GAUGE_HEIGHT = 120f
         const val PROXIMITY_TILES = 3f
-        const val WARMUP_CARD_SECONDS = 4f
         const val TWO_PI = (2.0 * PI).toFloat()
 
         const val FLASH_NANOS = 150_000_000L
@@ -2095,14 +2110,6 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         const val BLINK_NANOS = 150_000_000L
         const val GHOUL_FULL_ASSET = "arcade/ghoul/ghoul_full.png"
 
-        val WARMUP_CARDS = listOf(
-            "REACH THE EXIT - FOLLOW THE COMPASS",
-            "LEAN TO TURN - THE BIKE NEVER TURNS FOR YOU",
-            "KEEP THE NEEDLE LEFT OF THE EAR - TO STAY QUIET",
-            "HUNTED? - PEDAL PAST THE GHOUL MARK",
-            "RIDE THROUGH SHRINES - TO STUN IT",
-            "THE MAP SHOWS - WHAT'S BEHIND YOU",
-        )
         val SPRINT_DELTAS = intArrayOf(10, 20, 30)
 
         // One color, one meaning.

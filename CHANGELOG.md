@@ -99,6 +99,19 @@ included in this upcoming release.
 
 ### Added
 
+- **Ghoul Run immediate start and background pace calibration.** Replace
+  the compulsory 25-second pedaling baseline warm-up with a three-second
+  start countdown. Seed a conservative 70 RPM baseline on a first run,
+  learn a stable median unobtrusively from live pedaling, and transition
+  toward the learned value at a bounded rate to avoid sudden difficulty
+  changes. Save validated baseline RPM with a 30-day expiry for reuse
+  on subsequent launches. The manual Relearn Pace action resets the
+  saved baseline and samples again without interrupting gameplay.
+  Controller-only starts skip webcam directional verification; the
+  webcam check and all missing-telemetry safety holds remain. Subsequent
+  levels use their existing countdown rather than repeating the initial
+  start countdown.
+
 - **Ghoul Run close-range attack expression.** A hunting Ghoul opens its
   mouth progressively only when the rider looks toward it, the creature
   faces the rider, their path is unobstructed, and they are within close

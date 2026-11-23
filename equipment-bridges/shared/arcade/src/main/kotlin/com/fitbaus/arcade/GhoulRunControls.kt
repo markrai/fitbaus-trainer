@@ -35,26 +35,44 @@ internal data class GhoulCadenceReading(
     val calibrated: Boolean get() = baseline.isFinite()
 }
 
-/** Absolute-RPM smoothing plus a one-shot median warm-up baseline that never drifts. */
+internal object GhoulPaceProfile {
+    const val DEFAULT_RPM = 70f
+    private const val MIN_RPM = 35f
+    private const val MAX_RPM = 140f
+    private const val MAX_AGE_MS = 30L * 24L * 60L * 60L * 1000L
+
+    fun valid(rpm: Float): Boolean = rpm.isFinite() && rpm in MIN_RPM..MAX_RPM
+
+    fun restore(rpm: Float, recordedAtMs: Long, nowMs: Long): Float =
+        if (valid(rpm) && recordedAtMs > 0L && nowMs >= recordedAtMs &&
+            nowMs - recordedAtMs <= MAX_AGE_MS
+        ) rpm else Float.NaN
+}
+
 internal class GhoulPace(
     private val gameConfig: GhoulRunConfig,
     val filter: CadenceGravity = CadenceGravity(),
+    initialBaseline: Float = Float.NaN,
 ) {
     private val warmupSamples = ArrayDeque<Pair<Long, Float>>()
     private var lastUpdateNanos = Long.MIN_VALUE
     private var warmupElapsed = 0f
     private var pendingWarmupNanos = 0L
     private var pendingSampleNanos = Long.MIN_VALUE
+    private var trained = GhoulPaceProfile.valid(initialBaseline)
+    private var targetBaseline = Float.NaN
 
-    var baseline: Float = Float.NaN
+    var baseline: Float = if (trained) initialBaseline else GhoulPaceProfile.DEFAULT_RPM
+        private set
+    var learnedBaseline: Float = Float.NaN
         private set
 
     var reading: GhoulCadenceReading = GhoulCadenceReading(
         CadenceStatus.NoTelemetry,
         -1,
         filter.filteredRpm,
-        Float.NaN,
-        gameConfig.warmupSeconds,
+        baseline,
+        if (trained) 0f else gameConfig.warmupSeconds,
     )
         private set
 
@@ -76,18 +94,33 @@ internal class GhoulPace(
         return reading
     }
 
-    /** Commits warm-up time only after the supervisor confirms the game is not held. */
     fun advanceWarmup(): GhoulCadenceReading {
-        if (filter.status == CadenceStatus.Live && baseline.isNaN() && pendingSampleNanos != Long.MIN_VALUE) {
-            warmupElapsed += pendingWarmupNanos / 1_000_000_000f
+        val dt = pendingWarmupNanos / 1_000_000_000f
+        if (!trained && filter.status == CadenceStatus.Live &&
+            pendingSampleNanos != Long.MIN_VALUE && GhoulPaceProfile.valid(filter.filteredRpm)
+        ) {
+            warmupElapsed += dt
             warmupSamples.addLast(pendingSampleNanos to filter.filteredRpm)
             val cutoff = pendingSampleNanos - (gameConfig.baselineWindowSeconds * 1_000_000_000L).toLong()
             while (warmupSamples.firstOrNull()?.first?.let { it < cutoff } == true) warmupSamples.removeFirst()
-            if (warmupElapsed >= gameConfig.warmupSeconds && warmupSamples.isNotEmpty()) {
-                val values = warmupSamples.map { it.second }.sorted()
-                val middle = values.size / 2
-                baseline = if (values.size % 2 == 0) (values[middle - 1] + values[middle]) / 2f else values[middle]
+            if (warmupElapsed >= gameConfig.warmupSeconds && warmupSamples.size >= 5) {
+                val samples = warmupSamples.map { it.second }.sorted()
+                val median = if (samples.size % 2 == 0) {
+                    (samples[samples.size / 2 - 1] + samples[samples.size / 2]) / 2f
+                } else samples[samples.size / 2]
+                val spread = samples[samples.size * 3 / 4] - samples[samples.size / 4]
+                val sampleSpan = warmupSamples.last().first - warmupSamples.first().first
+                if (spread <= 12f && sampleSpan >= (gameConfig.baselineWindowSeconds * 500_000_000L).toLong()) {
+                    trained = true
+                    targetBaseline = median
+                    learnedBaseline = median
+                    warmupSamples.clear()
+                }
             }
+        }
+        if (targetBaseline.isFinite()) {
+            val maximumShift = 1.5f * dt
+            baseline += (targetBaseline - baseline).coerceIn(-maximumShift, maximumShift)
         }
         pendingWarmupNanos = 0L
         pendingSampleNanos = Long.MIN_VALUE
@@ -101,7 +134,7 @@ internal class GhoulPace(
             filter.rawRpm,
             filter.filteredRpm,
             baseline,
-            (gameConfig.warmupSeconds - warmupElapsed).coerceAtLeast(0f),
+            if (trained) 0f else (gameConfig.warmupSeconds - warmupElapsed).coerceAtLeast(0f),
         )
     }
 
@@ -113,20 +146,14 @@ internal class GhoulPace(
     }
 
     fun recalibrate() {
-        filter.reset()
         warmupSamples.clear()
-        lastUpdateNanos = Long.MIN_VALUE
         warmupElapsed = 0f
         pendingWarmupNanos = 0L
         pendingSampleNanos = Long.MIN_VALUE
-        baseline = Float.NaN
-        reading = GhoulCadenceReading(
-            CadenceStatus.NoTelemetry,
-            -1,
-            filter.filteredRpm,
-            Float.NaN,
-            gameConfig.warmupSeconds,
-        )
+        trained = false
+        targetBaseline = Float.NaN
+        learnedBaseline = Float.NaN
+        refreshReading()
     }
 }
 
@@ -283,12 +310,17 @@ internal class GhoulRunSession(
     val steering: HorizontalFaceSteering = HorizontalFaceSteering(),
     val pace: GhoulPace = GhoulPace(game.config),
     private val supervisor: GhoulRunSupervisor = GhoulRunSupervisor(),
+    private val readySeconds: Float = 3f,
 ) {
     private val headLanes = GhoulLeanZones(game.config.leanEnter, game.config.leanExit)
     private val stickLanes = GhoulLeanZones(game.config.leanEnter, game.config.leanExit)
     private val controllerTurns = GhoulTurnIntentBuffer()
     private var previousStickLane = GhoulLane.Center
     private var seenChoiceDecisions = game.choiceDecisions
+    private var readyActive = false
+    private var lastReadyNanos = Long.MIN_VALUE
+    var readyRemaining: Float = readySeconds.coerceAtLeast(0f)
+        private set
     var hold: GhoulHold = GhoulHold.CameraStarting
         private set
     var steer: SteerReading = SteerReading(FaceControlState.Lost, 0.5f, Float.NaN, 0f, -1L, 0L)
@@ -322,6 +354,7 @@ internal class GhoulRunSession(
         if (!live) {
             game.resetClock()
             pace.pauseClock()
+            lastReadyNanos = Long.MIN_VALUE
             controllerTurns.clear()
             stickLanes.reset()
             previousStickLane = GhoulLane.Center
@@ -330,9 +363,32 @@ internal class GhoulRunSession(
         }
         cadenceReading = pace.advanceWarmup()
         val useController = controller != null && source != GhoulRunInputSource.Webcam
+        if (game.phase == GhoulPhase.WarmUp && game.level == 1 && readySeconds > 0f) {
+            if (!readyActive) {
+                readyActive = true
+                readyRemaining = readySeconds
+                lastReadyNanos = nowNanos
+            } else {
+                if (lastReadyNanos != Long.MIN_VALUE) {
+                    val dt = ((nowNanos - lastReadyNanos) / 1_000_000_000f).coerceIn(0f, 0.5f)
+                    readyRemaining = (readyRemaining - dt).coerceAtLeast(0f)
+                }
+                lastReadyNanos = nowNanos
+            }
+            if (readyRemaining > 0f) {
+                game.resetClock()
+                lastSteps = 0
+                return hold
+            }
+        } else {
+            readyActive = false
+            readyRemaining = 0f
+            lastReadyNanos = Long.MIN_VALUE
+        }
         if (cadenceReading.calibrated) {
             if (source == GhoulRunInputSource.Controller && useController && controllerAvailable) {
-                game.skipLeanCheckWithGo()
+                if (readySeconds > 0f && game.phase == GhoulPhase.WarmUp) game.markLeanCheckPassed()
+                else game.skipLeanCheckWithGo()
             } else if (source != GhoulRunInputSource.Controller) {
                 game.restoreLeanCheckIfSkipped()
             }
@@ -403,6 +459,7 @@ internal class GhoulRunSession(
     fun pause() {
         game.resetClock()
         pace.pauseClock()
+        lastReadyNanos = Long.MIN_VALUE
         steering.invalidate()
         supervisor.invalidate()
         headLanes.reset()
@@ -414,6 +471,9 @@ internal class GhoulRunSession(
 
     fun restart(seed: Long) {
         game.restart(seed)
+        readyActive = false
+        readyRemaining = readySeconds.coerceAtLeast(0f)
+        lastReadyNanos = Long.MIN_VALUE
         steering.recalibrate()
         supervisor.invalidate()
         headLanes.reset()
@@ -432,8 +492,6 @@ internal class GhoulRunSession(
 
     fun recalibratePace() {
         pace.recalibrate()
-        game.resetClock()
-        supervisor.invalidate()
     }
 
 }

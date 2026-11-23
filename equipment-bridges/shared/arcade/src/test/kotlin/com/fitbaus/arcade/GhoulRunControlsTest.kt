@@ -54,6 +54,82 @@ class GhoulRunControlsTest {
     }
 
     @Test
+    fun startupUsesConservativeCadenceWithoutWaitingForMeasuredBaseline() {
+        val pace = GhoulPace(GhoulRunConfig())
+        assertEquals(GhoulPaceProfile.DEFAULT_RPM, pace.baseline)
+        assertEquals(GhoulPaceProfile.DEFAULT_RPM, pace.reading.baseline)
+        assertTrue(pace.reading.calibrated)
+        assertFalse(pace.learnedBaseline.isFinite())
+        val game = GhoulRunGame()
+        assertEquals(game.config.cruiseSpeed, game.speedFor(70f, pace.baseline), 0.001f)
+        assertEquals(0f, game.speedFor(0f, pace.baseline))
+    }
+
+    @Test
+    fun learnedPaceIsCapturedInBackgroundAndAppliedGradually() {
+        val config = GhoulRunConfig()
+        val pace = GhoulPace(config)
+        val now = feed(pace, config.warmupSeconds + 2f, 94)
+        assertEquals(94f, pace.learnedBaseline, 2f)
+        assertTrue(pace.baseline > GhoulPaceProfile.DEFAULT_RPM)
+        assertTrue(pace.baseline < pace.learnedBaseline)
+        val initial = pace.baseline
+        feed(pace, 1f, 94, now)
+        assertTrue(pace.baseline - initial <= 2f)
+        assertTrue(pace.baseline > initial)
+        val remembered = GhoulPace(config, initialBaseline = pace.learnedBaseline)
+        assertEquals(pace.learnedBaseline, remembered.baseline)
+        assertEquals(0f, remembered.reading.warmupRemaining)
+        assertFalse(remembered.learnedBaseline.isFinite())
+        remembered.recalibrate()
+        assertEquals(pace.learnedBaseline, remembered.baseline)
+        assertEquals(config.warmupSeconds, remembered.reading.warmupRemaining)
+        assertEquals(remembered.baseline, remembered.reading.baseline)
+    }
+
+    @Test
+    fun manualRelearnDoesNotInterruptLiveCadenceOrJumpBaseline() {
+        val config = GhoulRunConfig()
+        val pace = GhoulPace(config, initialBaseline = 96f)
+        val now = feed(pace, 2f, 96)
+        val before = pace.reading
+        pace.recalibrate()
+        assertEquals(96f, pace.baseline)
+        assertEquals(before.status, pace.reading.status)
+        assertEquals(before.filteredRpm, pace.reading.filteredRpm)
+        assertFalse(pace.learnedBaseline.isFinite())
+        feed(pace, 1f, 96, now)
+        assertEquals(96f, pace.baseline)
+    }
+
+    @Test
+    fun savedPaceMustBePlausibleRecentAndFromThePast() {
+        val now = 2_000_000_000_000L
+        val day = 24L * 60L * 60L * 1000L
+        assertEquals(93f, GhoulPaceProfile.restore(93f, now - 10L * day, now))
+        assertFalse(GhoulPaceProfile.restore(93f, now - 31L * day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(93f, now + day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(0f, now - day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(170f, now - day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(Float.NaN, now - day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(93f, 0L, now).isFinite())
+    }
+
+    @Test
+    fun backgroundLearnerRejectsStoppedCadenceAndDoesNotRelearnSprint() {
+        val config = GhoulRunConfig()
+        val pace = GhoulPace(config)
+        val stopped = feed(pace, 40f, 0)
+        assertFalse(pace.learnedBaseline.isFinite())
+        assertEquals(GhoulPaceProfile.DEFAULT_RPM, pace.baseline)
+        val trained = feed(pace, config.warmupSeconds + 1f, 75, stopped)
+        assertEquals(75f, pace.learnedBaseline, 1f)
+        val saved = pace.learnedBaseline
+        feed(pace, 35f, 115, trained)
+        assertEquals(saved, pace.learnedBaseline)
+    }
+
+    @Test
     fun staleTelemetryHoldsAndResetsTheClock() {
         val game = GhoulRunGame(seed = 3L)
         val session = GhoulRunSession(game)
