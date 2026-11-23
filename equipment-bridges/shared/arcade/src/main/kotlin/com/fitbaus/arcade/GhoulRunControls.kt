@@ -313,12 +313,17 @@ internal class GhoulRunSession(
     val steering: HorizontalFaceSteering = HorizontalFaceSteering(),
     val pace: GhoulPace = GhoulPace(game.config),
     private val supervisor: GhoulRunSupervisor = GhoulRunSupervisor(),
+    private val readySeconds: Float = 3f,
 ) {
     private val headLanes = GhoulLeanZones(game.config.leanEnter, game.config.leanExit)
     private val stickLanes = GhoulLeanZones(game.config.leanEnter, game.config.leanExit)
     private val controllerTurns = GhoulTurnIntentBuffer()
     private var previousStickLane = GhoulLane.Center
     private var seenChoiceDecisions = game.choiceDecisions
+    private var readyActive = false
+    private var lastReadyNanos = Long.MIN_VALUE
+    var readyRemaining: Float = readySeconds.coerceAtLeast(0f)
+        private set
     var hold: GhoulHold = GhoulHold.CameraStarting
         private set
     var steer: SteerReading = SteerReading(FaceControlState.Lost, 0.5f, Float.NaN, 0f, -1L, 0L)
@@ -352,6 +357,7 @@ internal class GhoulRunSession(
         if (!live) {
             game.resetClock()
             pace.pauseClock()
+            lastReadyNanos = Long.MIN_VALUE
             controllerTurns.clear()
             stickLanes.reset()
             previousStickLane = GhoulLane.Center
@@ -360,9 +366,32 @@ internal class GhoulRunSession(
         }
         cadenceReading = pace.advanceWarmup()
         val useController = controller != null && source != GhoulRunInputSource.Webcam
+        if (game.phase == GhoulPhase.WarmUp && game.level == 1 && readySeconds > 0f) {
+            if (!readyActive) {
+                readyActive = true
+                readyRemaining = readySeconds
+                lastReadyNanos = nowNanos
+            } else {
+                if (lastReadyNanos != Long.MIN_VALUE) {
+                    val dt = ((nowNanos - lastReadyNanos) / 1_000_000_000f).coerceIn(0f, game.config.maxFrame)
+                    readyRemaining = (readyRemaining - dt).coerceAtLeast(0f)
+                }
+                lastReadyNanos = nowNanos
+            }
+            if (readyRemaining > 0f) {
+                game.resetClock()
+                lastSteps = 0
+                return hold
+            }
+        } else {
+            readyActive = false
+            readyRemaining = 0f
+            lastReadyNanos = Long.MIN_VALUE
+        }
         if (cadenceReading.calibrated) {
             if (source == GhoulRunInputSource.Controller && useController && controllerAvailable) {
-                game.skipLeanCheckWithGo()
+                if (readySeconds > 0f && game.phase == GhoulPhase.WarmUp) game.markLeanCheckPassed()
+                else game.skipLeanCheckWithGo()
             } else if (source != GhoulRunInputSource.Controller) {
                 game.restoreLeanCheckIfSkipped()
             }
@@ -433,6 +462,7 @@ internal class GhoulRunSession(
     fun pause() {
         game.resetClock()
         pace.pauseClock()
+        lastReadyNanos = Long.MIN_VALUE
         steering.invalidate()
         supervisor.invalidate()
         headLanes.reset()
@@ -444,6 +474,9 @@ internal class GhoulRunSession(
 
     fun restart(seed: Long) {
         game.restart(seed)
+        readyActive = false
+        readyRemaining = readySeconds.coerceAtLeast(0f)
+        lastReadyNanos = Long.MIN_VALUE
         steering.recalibrate()
         supervisor.invalidate()
         headLanes.reset()
