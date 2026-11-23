@@ -99,6 +99,17 @@ included in this upcoming release.
 
 ### Added
 
+- **Flak Run webcam/controller selector.** Add an in-game two-way
+  WEBCAM/CONTROLLER selector immediately before the score with no combined
+  mode. Controller becomes the default when a recognized gamepad is connected
+  unless Webcam has been selected explicitly. Retain each rider's selection
+  and fall back safely to webcam when a controller disconnects.
+  Support analog-stick or per-game remappable D-pad steering for both jet
+  axes with deadzone, frame-time caps and neutral-position hold. Controller
+  flight no longer requires camera tracking or face calibration; live bike
+  telemetry and pedaling safeguards still apply. Leave cadence-based dash,
+  enemy behavior, score and collision physics unchanged.
+
 - **Flak Run visual fidelity refresh.** Keep the same 256×144 gameplay
   coordinates and all existing jet, missile, shell, bomber, turret and bomb
   mechanics, but draw the scene into a cached 512×288 antialiased framebuffer.

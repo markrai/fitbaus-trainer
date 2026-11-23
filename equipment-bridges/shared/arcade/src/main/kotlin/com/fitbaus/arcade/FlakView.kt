@@ -15,7 +15,7 @@ import android.view.View
 import java.util.Locale
 import kotlin.math.ceil
 
-internal enum class FlakHold { None, CameraStarting, CameraUnavailable, Calibrating, NoTelemetry, NotPedaling, Resuming }
+internal enum class FlakHold { None, CameraStarting, CameraUnavailable, ControllerUnavailable, Calibrating, NoTelemetry, NotPedaling, Resuming }
 
 /**
  * Decides whether the simulation may run. Any missing controller holds the game; nothing is lost while held.
@@ -25,14 +25,25 @@ internal enum class FlakHold { None, CameraStarting, CameraUnavailable, Calibrat
 internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
     private var running = false
 
-    fun hold(camera: CameraState, face: FaceControlReading, cadence: CadenceReading): FlakHold {
+    fun hold(
+        camera: CameraState,
+        face: FaceControlReading,
+        cadence: CadenceReading,
+        source: FlakInputSource = FlakInputSource.Webcam,
+        controllerReady: Boolean = false,
+    ): FlakHold {
         val hold = when {
-            camera == CameraState.Unavailable || camera == CameraState.PermissionDenied -> FlakHold.CameraUnavailable
-            camera != CameraState.Ready -> FlakHold.CameraStarting
-            face.state == FaceControlState.Calibrating || (face.state == FaceControlState.Lost && face.neutralY.isNaN()) -> FlakHold.Calibrating
+            source == FlakInputSource.Controller && !controllerReady -> FlakHold.ControllerUnavailable
+            source == FlakInputSource.Webcam &&
+                (camera == CameraState.Unavailable || camera == CameraState.PermissionDenied) -> FlakHold.CameraUnavailable
+            source == FlakInputSource.Webcam && camera != CameraState.Ready -> FlakHold.CameraStarting
+            source == FlakInputSource.Webcam &&
+                (face.state == FaceControlState.Calibrating ||
+                    (face.state == FaceControlState.Lost && face.neutralY.isNaN())) -> FlakHold.Calibrating
             cadence.state == CadenceState.NoTelemetry || cadence.state == CadenceState.Stale -> FlakHold.NoTelemetry
             cadence.state == CadenceState.Stopped -> FlakHold.NotPedaling
-            !running && face.state == FaceControlState.Tracking && face.stableMs < resumeStableMs -> FlakHold.Resuming
+            source == FlakInputSource.Webcam && !running &&
+                face.state == FaceControlState.Tracking && face.stableMs < resumeStableMs -> FlakHold.Resuming
             else -> FlakHold.None
         }
         running = hold == FlakHold.None
@@ -43,6 +54,7 @@ internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
         FlakHold.None -> null
         FlakHold.CameraUnavailable -> "CAMERA UNAVAILABLE - FLAK RUN NEEDS FACE STEERING"
         FlakHold.CameraStarting -> "STARTING CAMERA..."
+        FlakHold.ControllerUnavailable -> "CONTROLLER UNAVAILABLE - CHECK CONNECTION"
         FlakHold.Calibrating -> null
         FlakHold.NoTelemetry -> if (cadence.state == CadenceState.Stale) "BIKE DATA STALE - WAITING FOR RPM" else "NO BIKE DATA - WAITING FOR RPM"
         FlakHold.NotPedaling -> "PEDAL TO FLY"
@@ -57,6 +69,14 @@ internal class FlakSupervisor(private val resumeStableMs: Long = 600L) {
  */
 public class FlakView(context: Context) : View(context) {
     public var diagnosticsOverlay: Boolean = false
+    public var controllerAvailable: Boolean = false
+        set(value) {
+            if (field == value) return
+            val prior = inputSource
+            field = value
+            if (prior != inputSource) onSourceChanged()
+            invalidate()
+        }
 
     private val density = resources.displayMetrics.density
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -64,6 +84,29 @@ public class FlakView(context: Context) : View(context) {
     private val cadence = CadenceBoost()
     private val supervisor = FlakSupervisor()
     private val game = FlakGame().also { g -> g.onEvent = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, it) } }
+    private val controllerSteering = FlakControllerSteering(game.config).apply { syncToJet(game.jetX, game.jetY) }
+    private var selectedInput = prefs?.getString(FlakInputSelection.PREF_KEY, null)
+
+    public val inputSource: FlakInputSource
+        get() = FlakInputSelection.effective(selectedInput, controllerAvailable)
+
+    public var onInputSourceChanged: ((FlakInputSource) -> Unit)? = null
+
+    public fun selectInputSource(source: FlakInputSource) {
+        if (source == FlakInputSource.Controller && !controllerAvailable) return
+        val previous = inputSource
+        selectedInput = source.name
+        prefs?.edit()?.putString(FlakInputSelection.PREF_KEY, source.name)?.apply()
+        if (inputSource != previous) onSourceChanged()
+        invalidate()
+    }
+
+    private fun onSourceChanged() {
+        game.resetClock()
+        controllerSteering.syncToJet(game.jetX, game.jetY)
+        face.recalibrate()
+        onInputSourceChanged?.invoke(inputSource)
+    }
     private var sensitivityIndex = prefs?.getInt(SENSITIVITY_KEY, DEFAULT_SENSITIVITY) ?: DEFAULT_SENSITIVITY
     private var deltaIndex = prefs?.getInt(DELTA_KEY, DEFAULT_DELTA) ?: DEFAULT_DELTA
     private var simulatedCadence = false
@@ -112,6 +155,13 @@ public class FlakView(context: Context) : View(context) {
         textSize = 11f * density
     }
     private val meterRect = RectF()
+    private val webcamRect = RectF()
+    private val controllerRect = RectF()
+    private val sourcePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.MONOSPACE
+        isFakeBoldText = true
+        textAlign = Paint.Align.CENTER
+    }
     private val simRect = RectF()
     private val blastRect = RectF()
 
@@ -133,23 +183,33 @@ public class FlakView(context: Context) : View(context) {
         rpmObservedAt: String?,
         diagnostics: String,
         cameraInfo: ArcadeCameraInfo?,
+        controller: FlakControllerInput? = null,
     ) {
         val now = System.nanoTime()
         if (lastRenderNanos != Long.MIN_VALUE) frameWindow.record((now - lastRenderNanos) / 1_000_000f)
         lastRenderNanos = now
         info = cameraInfo
         diagnosticsText = if (failure != null && camera != CameraState.Ready) failure else diagnostics
-        faceReading = face.update(position, now)
+        val source = inputSource
+        if (source == FlakInputSource.Webcam) faceReading = face.update(position, now)
         cadenceReading = if (simulatedCadence) simulate(now) else cadence.update(connected, initialized, rpm, rpmCurrent, rpmObservedAt, now)
-        hold = supervisor.hold(camera, faceReading, cadenceReading)
-        if (faceReading.state == FaceControlState.Tracking) {
-            steerY = faceReading.target
-            steerX = faceReading.targetX
-        }
+        hold = supervisor.hold(
+            camera, faceReading, cadenceReading, source,
+            controllerReady = controllerAvailable && controller != null,
+        )
         val start = System.nanoTime()
         if (hold == FlakHold.None) {
+            if (source == FlakInputSource.Controller && controller != null) {
+                val (x, y) = controllerSteering.advance(controller, now)
+                steerX = x
+                steerY = y
+            } else if (faceReading.state == FaceControlState.Tracking) {
+                steerY = faceReading.target
+                steerX = faceReading.targetX
+            }
             lastSteps = game.advance(now, steerY, cadenceReading.boosting, steerX)
         } else {
+            controllerSteering.pause()
             game.resetClock()
             lastSteps = 0
         }
@@ -160,6 +220,7 @@ public class FlakView(context: Context) : View(context) {
 
     public fun restartGame() {
         game.restart()
+        controllerSteering.syncToJet(game.jetX, game.jetY)
         face.recalibrate()
         invalidate()
     }
@@ -283,7 +344,8 @@ public class FlakView(context: Context) : View(context) {
         val holdText = supervisor.message(hold, cadenceReading)
         if (holdText != null) {
             banner(canvas, holdText, w / 2f, top + dh * 0.45f, 7f * scale, scale)
-        } else if (faceReading.state == FaceControlState.Lost && game.phase == FlakPhase.Playing) {
+        } else if (inputSource == FlakInputSource.Webcam &&
+            faceReading.state == FaceControlState.Lost && game.phase == FlakPhase.Playing) {
             banner(canvas, "FACE LOST - LOOK AT THE SCREEN TO STEER", w / 2f, top + dh * 0.12f, 4f * scale, scale)
         } else if (game.phase == FlakPhase.GameOver) {
             banner(canvas, String.format(Locale.US, "GAME OVER  -  SCORE %06d", game.score), w / 2f, top + dh * 0.32f, 7f * scale, scale)
@@ -305,8 +367,9 @@ public class FlakView(context: Context) : View(context) {
         hudPaint.textSize = 16f * density
         hudPaint.color = Color.WHITE
         val baseline = top - 8f * density
-        canvas.drawText(String.format(Locale.US, "SCORE %06d", game.score), left, baseline, hudPaint)
-        val livesX = left + hudPaint.measureText("SCORE 000000  ")
+        val scoreLeft = drawInputSourceSelector(canvas, left, baseline)
+        canvas.drawText(String.format(Locale.US, "SCORE %06d", game.score), scoreLeft, baseline, hudPaint)
+        val livesX = scoreLeft + hudPaint.measureText("SCORE 000000  ")
         for (i in 0 until game.config.lives) {
             px.color = if (i < game.lives) Color.rgb(218, 119, 77) else Color.rgb(74, 75, 76)
             canvas.drawRoundRect(
@@ -347,6 +410,34 @@ public class FlakView(context: Context) : View(context) {
         hudPaint.textSize = 12f * density
         val labelText = if (c.simulated) "SIM $label" else label
         canvas.drawText(labelText, meterLeft - hudPaint.measureText(labelText) - 8f * density, baseline - 2f * density, hudPaint)
+    }
+
+    private fun drawInputSourceSelector(canvas: Canvas, left: Float, baseline: Float): Float {
+        val top = baseline - 17f * density
+        val height = 23f * density
+        val gap = 5f * density
+        webcamRect.set(left, top, left + 44f * density, top + height)
+        controllerRect.set(webcamRect.right + gap, top, webcamRect.right + gap + 74f * density, top + height)
+        for (source in FlakInputSource.entries) {
+            val rect = if (source == FlakInputSource.Webcam) webcamRect else controllerRect
+            val selected = source == inputSource
+            val available = source == FlakInputSource.Webcam || controllerAvailable
+            px.color = when {
+                selected -> Color.rgb(112, 174, 153)
+                available -> Color.rgb(42, 56, 65)
+                else -> Color.rgb(32, 35, 38)
+            }
+            canvas.drawRoundRect(rect, 4f * density, 4f * density, px)
+            sourcePaint.textSize = 10f * density
+            sourcePaint.color = when {
+                selected -> Color.rgb(15, 31, 30)
+                available -> Color.rgb(225, 230, 225)
+                else -> Color.rgb(111, 118, 117)
+            }
+            val label = if (source == FlakInputSource.Webcam) "WEBCAM" else "CONTROLLER"
+            canvas.drawText(label, rect.centerX(), rect.centerY() + 3.5f * density, sourcePaint)
+        }
+        return controllerRect.right + 10f * density
     }
 
     private fun drawSimButton(canvas: Canvas, right: Float, bottom: Float, scale: Int) {
@@ -406,6 +497,20 @@ public class FlakView(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
+            when {
+                webcamRect.contains(event.x, event.y) -> {
+                    selectInputSource(FlakInputSource.Webcam)
+                    performClick()
+                    return true
+                }
+                controllerRect.contains(event.x, event.y) -> {
+                    selectInputSource(FlakInputSource.Controller)
+                    performClick()
+                    return true
+                }
+            }
+        }
         if (simulatedCadence && simRect.contains(event.x, event.y)) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> simulatedPress = true

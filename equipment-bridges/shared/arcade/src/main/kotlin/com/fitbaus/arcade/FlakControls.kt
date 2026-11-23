@@ -4,6 +4,47 @@ package com.fitbaus.arcade
 
 import kotlin.math.abs
 
+public enum class FlakInputSource { Webcam, Controller }
+
+internal object FlakInputSelection {
+    const val PREF_KEY = "flak_input_source"
+
+    fun effective(saved: String?, available: Boolean): FlakInputSource =
+        if (available && saved != FlakInputSource.Webcam.name) FlakInputSource.Controller
+        else FlakInputSource.Webcam
+}
+
+public data class FlakControllerInput(val x: Float = 0f, val y: Float = 0f)
+
+internal class FlakControllerSteering(private val config: FlakConfig) {
+    var targetX: Float = 0.5f
+        private set
+    var targetY: Float = 0.5f
+        private set
+    private var previousNanos = Long.MIN_VALUE
+
+    fun syncToJet(x: Float, y: Float) {
+        targetX = ((x - config.jetMinX) / (config.jetMaxX - config.jetMinX)).coerceIn(0f, 1f)
+        targetY = ((y - config.bandTop) / (config.bandBottom - config.bandTop)).coerceIn(0f, 1f)
+        previousNanos = Long.MIN_VALUE
+    }
+
+    fun advance(input: FlakControllerInput, nowNanos: Long): Pair<Float, Float> {
+        val elapsed = if (previousNanos == Long.MIN_VALUE) 0f else
+            (nowNanos - previousNanos).coerceIn(0L, 100_000_000L) / 1_000_000_000f
+        previousNanos = nowNanos
+        val x = if (input.x.isFinite()) input.x.coerceIn(-1f, 1f) else 0f
+        val y = if (input.y.isFinite()) input.y.coerceIn(-1f, 1f) else 0f
+        targetX = (targetX + x * elapsed * config.sideSpeed / (config.jetMaxX - config.jetMinX)).coerceIn(0f, 1f)
+        targetY = (targetY + y * elapsed * config.climbSpeed / (config.bandBottom - config.bandTop)).coerceIn(0f, 1f)
+        return targetX to targetY
+    }
+
+    fun pause() {
+        previousNanos = Long.MIN_VALUE
+    }
+}
+
 internal enum class FaceControlState { Lost, Calibrating, Tracking }
 
 internal class FaceControlReading(

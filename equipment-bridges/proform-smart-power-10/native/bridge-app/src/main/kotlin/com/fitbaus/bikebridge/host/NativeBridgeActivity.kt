@@ -35,6 +35,7 @@ import com.fitbaus.arcade.ArcadeClock
 import com.fitbaus.arcade.ArcadeStatusResolver
 import com.fitbaus.arcade.BricksInputSource
 import com.fitbaus.arcade.BiketrisInputSource
+import com.fitbaus.arcade.FlakInputSource
 import com.fitbaus.arcade.GhoulRunInputSource
 import com.fitbaus.arcade.HandPosition
 import com.fitbaus.arcade.HandSource
@@ -259,6 +260,7 @@ class NativeBridgeActivity : Activity() {
                 selected.vendorId == event.device.vendorId && selected.productId == event.device.productId
             val controllerEnabled = when (mode) {
                 ArcadeMode.Bricks -> arcadeContent.playground.inputSource == BricksInputSource.Controller
+                ArcadeMode.Flak -> arcadeContent.flak.inputSource == FlakInputSource.Controller
                 ArcadeMode.Biketris -> arcadeContent.biketris.inputSource != BiketrisInputSource.Webcam
                 ArcadeMode.GhoulRun -> arcadeContent.ghoul.inputSource != GhoulRunInputSource.Webcam
                 else -> true
@@ -272,7 +274,8 @@ class NativeBridgeActivity : Activity() {
             gameController.handleKey(
                 event,
                 steerBricks = modeController.isActive && controllerEnabled &&
-                    (mode == ArcadeMode.Bricks || mode == ArcadeMode.Biketris || mode == ArcadeMode.GhoulRun),
+                    (mode == ArcadeMode.Bricks || mode == ArcadeMode.Biketris ||
+                        mode == ArcadeMode.GhoulRun || mode == ArcadeMode.Flak),
                 mappedAction = action,
             )
             return true
@@ -299,6 +302,8 @@ class NativeBridgeActivity : Activity() {
             if (modeController.isActive && (
                 modeController.mode == ArcadeMode.Bricks &&
                     arcadeContent.playground.inputSource == BricksInputSource.Controller ||
+                modeController.mode == ArcadeMode.Flak &&
+                    arcadeContent.flak.inputSource == FlakInputSource.Controller ||
                 modeController.mode == ArcadeMode.Biketris &&
                     arcadeContent.biketris.inputSource != BiketrisInputSource.Webcam
                     || modeController.mode == ArcadeMode.GhoulRun &&
@@ -392,8 +397,11 @@ class NativeBridgeActivity : Activity() {
             return
         }
         if (modeController.mode == ArcadeMode.Flak) {
+            gameController.refresh()
+            arcadeContent.flak.controllerAvailable = gameController.hasController()
+            val controllerOnly = arcadeContent.flak.inputSource == FlakInputSource.Controller
             arcadeContent.flak.render(
-                handInput.latest(now),
+                if (controllerOnly) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost) else handInput.latest(now),
                 cameraSession.state(),
                 cameraSession.failureReason(),
                 connected = telemetry?.connected == true,
@@ -402,7 +410,8 @@ class NativeBridgeActivity : Activity() {
                 rpmCurrent = telemetry?.rpm?.current == true,
                 rpmObservedAt = telemetry?.rpm?.observedAt,
                 diagnostics = arcadeDiagnosticsText(now, info),
-                cameraInfo = info,
+                cameraInfo = if (controllerOnly) null else info,
+                controller = if (controllerOnly) gameController.takeFlakInput() else null,
             )
             return
         }
@@ -588,6 +597,7 @@ class NativeBridgeActivity : Activity() {
         arcadeContent = ArcadeContent(this)
         arcadeContent.playground.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.biketris.onInputSourceChanged = { gameController.resetTransient() }
+        arcadeContent.flak.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.ghoul.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.playground.input = handInput
         arcadeContent.playground.preview = cameraSession.preview

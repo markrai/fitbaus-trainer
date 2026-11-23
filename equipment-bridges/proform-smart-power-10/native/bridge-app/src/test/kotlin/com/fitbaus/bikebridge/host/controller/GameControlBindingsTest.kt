@@ -18,7 +18,7 @@ class GameControlBindingsTest {
         assertEquals(listOf("left", "right"), GameControlCatalog.actions(ArcadeMode.Bricks).map { it.id })
         assertFalse(GameControlCatalog.actions(ArcadeMode.Bricks).any { it.id == "restart" })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.Math).map { it.id })
-        assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.Flak).map { it.id })
+        assertEquals(listOf("left", "right", "up", "down", "restart"), GameControlCatalog.actions(ArcadeMode.Flak).map { it.id })
         assertEquals(listOf("restart"), GameControlCatalog.actions(ArcadeMode.TrailRide).map { it.id })
         assertEquals(listOf("left", "right", "reverse", "restart"), GameControlCatalog.actions(ArcadeMode.GhoulRun).map { it.id })
         assertEquals(listOf("left", "right", "down", "rotate"), GameControlCatalog.actions(ArcadeMode.Biketris).map { it.id })
@@ -81,6 +81,25 @@ class GameControlBindingsTest {
         assertFalse(bindings.assign(mode, "pad-01", "restart", KeyEvent.KEYCODE_BUTTON_START))
         assertTrue(bindings.reset(mode, "pad-01"))
         assertEquals(KeyEvent.KEYCODE_BUTTON_A, bindings.keyCode(mode, "pad-01", actions[3]))
+    }
+
+    @Test
+    fun flakDirectionMappingsAreIndependentOfOtherGames() {
+        val bindings = GameControlBindings(memoryPreferences())
+        val mode = ArcadeMode.Flak
+        val actions = GameControlCatalog.actions(mode)
+        assertEquals(KeyEvent.KEYCODE_DPAD_LEFT, bindings.keyCode(mode, "pad-01", actions[0]))
+        assertEquals(KeyEvent.KEYCODE_DPAD_RIGHT, bindings.keyCode(mode, "pad-01", actions[1]))
+        assertEquals(KeyEvent.KEYCODE_DPAD_UP, bindings.keyCode(mode, "pad-01", actions[2]))
+        assertEquals(KeyEvent.KEYCODE_DPAD_DOWN, bindings.keyCode(mode, "pad-01", actions[3]))
+        assertEquals("Fly up", actions[2].label)
+        assertEquals("Fly down", actions[3].label)
+        assertTrue(bindings.assign(mode, "pad-01", "up", KeyEvent.KEYCODE_BUTTON_A))
+        assertEquals("up", bindings.action(mode, "pad-01", KeyEvent.KEYCODE_BUTTON_A)?.id)
+        assertEquals("up", bindings.action(mode, "pad-02", KeyEvent.KEYCODE_DPAD_UP)?.id)
+        assertEquals("down", bindings.action(ArcadeMode.Biketris, "pad-01", KeyEvent.KEYCODE_DPAD_DOWN)?.id)
+        assertTrue(bindings.reset(mode, "pad-01"))
+        assertEquals("up", bindings.action(mode, "pad-01", KeyEvent.KEYCODE_DPAD_UP)?.id)
     }
 
     @Test
