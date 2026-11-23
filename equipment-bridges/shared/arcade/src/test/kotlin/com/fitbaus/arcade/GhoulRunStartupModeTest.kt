@@ -149,6 +149,36 @@ class GhoulRunStartupModeTest {
     }
 
     @Test
+    fun switchingFromControllerToWebcamDuringCountdownStillChecksLean() {
+        val game = GhoulRunGame(seed = 826L)
+        val rig = Rig(game, GhoulRunSession(game), 1_000_000_000L)
+        repeat(20) { rig.tick(GhoulRunInputSource.Controller) }
+        assertEquals(GhoulPhase.WarmUp, game.phase)
+        repeat(20) { rig.tick(GhoulRunInputSource.Webcam) }
+        assertEquals(GhoulPhase.LeanCheck, game.phase)
+        assertEquals(GhoulLane.Left, game.leanCheckTarget)
+        assertFalse(game.leanCheckPassed)
+    }
+
+    @Test
+    fun nextLevelUsesExistingResultsCountdownWithoutExtraReadyDelay() {
+        val game = GhoulRunGame(seed = 827L)
+        val rig = Rig(game, GhoulRunSession(game), 1_000_000_000L)
+        repeat(40) { rig.tick(GhoulRunInputSource.Controller) }
+        assertEquals(GhoulPhase.Playing, game.phase)
+        game.visitForTest(game.world.exit)
+        assertEquals(GhoulPhase.Results, game.phase)
+        game.step(game.config.resultsSeconds + 0.1f, GhoulLane.Center, 0f, 70f, 70f)
+        assertEquals(GhoulPhase.Countdown, game.phase)
+        game.step(game.config.restartCountdownSeconds + 0.1f, GhoulLane.Center, 0f, 70f, 70f)
+        assertEquals(GhoulPhase.WarmUp, game.phase)
+        assertEquals(2, game.level)
+        repeat(3) { rig.tick(GhoulRunInputSource.Controller) }
+        assertEquals(GhoulPhase.Playing, game.phase)
+        assertEquals(2, game.ghouls.size)
+    }
+
+    @Test
     fun laterMazesDoNotRepeatControllerVerification() {
         val rig = calibratedRig()
         repeat(17) { rig.tick(GhoulRunInputSource.Controller) }
