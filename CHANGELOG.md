@@ -163,11 +163,19 @@ See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
 
 ### Added
 
+- **YouTube preview publication ages.** Append an optional relative age to
+  the channel and view-count metadata in video cards. Use NewPipe's existing
+  upload dates or the Google subscription feed's video publication date,
+  rather than the date a video was added to a playlist. Hide unknown,
+  future-dated or live-stream ages. No additional YouTube API requests.
+
 - **Self-contained YouTube voice search.** Keep separate microphone and clear
   touch controls but replace the external recognition activity with bundled,
   offline English transcription using Vosk. The build downloads and verifies
   the pinned English model, then packages it inside the Full Bike Bridge APK.
-  Listening status stays inside the YouTube search screen. Recognition runs
+  Listening status stays inside the YouTube search screen, and a red circular
+  indicator replaces the mic only while audio is actually being captured.
+  Recognition runs
   only when requested in a dedicated process, which exits after completion or
   cancellation; active video playback, game modes and bike telemetry do not
   share its native memory. No extra app, Google service or user setup is needed.

@@ -2,7 +2,8 @@
 
 The Bike Bridge console app has a **YouTube** tab next to the game tabs. It
 browses and plays public YouTube videos natively inside `NativeBridgeActivity`
-(no WebView, no external app, no extra Activity or service). The technique is
+(no WebView or external playback app; a private background service handles
+optional offline speech recognition). The playback technique is
 the one qualified on the console with SkyTube OSS 3.003
 ([YOUTUBE-QUALIFICATION.md](YOUTUBE-QUALIFICATION.md)), reimplemented as a
 small FitBaus-owned layer.
@@ -16,9 +17,14 @@ small FitBaus-owned layer.
   MY FEED buttons are removed. The search field remains, using the keyboard
   Search action for global YouTube search; its × clears the search and returns
   to the default feed. The microphone uses a bundled Vosk English speech model
-  for offline transcription, with a brief listening status below the search
-  bar and a second tap to cancel. **MY YOUTUBE** opens the account browser for channels
-  and playlists. Its top-left back arrow returns to the home grid; the lower
+  for offline transcription. The normal mic remains during model preparation;
+  a red circle replaces it only when audio capture is active. Tap again to
+  cancel. The listening status stays directly below the search bar. Video cards
+  show the channel, views, and publication age when the upstream feed includes
+  an upload timestamp. NewPipe dates may be approximate; signed-in Google feeds
+  use `videoPublishedAt`, never the playlist insertion date, for the age label.
+  Missing or future dates produce no age label. **MY YOUTUBE** opens the account
+  browser for channels and playlists. Its top-left back arrow returns to the home grid; the lower
   BACK control remains for channel/playlist hierarchy. This is not Google's
   proprietary Home recommendations.
 - **Discover:** on an authenticated subscription home grid, DISCOVER switches
