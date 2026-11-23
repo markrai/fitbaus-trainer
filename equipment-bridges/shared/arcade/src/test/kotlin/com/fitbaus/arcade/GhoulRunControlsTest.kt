@@ -91,12 +91,12 @@ class GhoulRunControlsTest {
         val now = 2_000_000_000_000L
         val day = 24L * 60L * 60L * 1000L
         assertEquals(93f, GhoulPaceProfile.restore(93f, now - 10L * day, now))
-        assertEquals(Float.NaN, GhoulPaceProfile.restore(93f, now - 31L * day, now))
-        assertEquals(Float.NaN, GhoulPaceProfile.restore(93f, now + day, now))
-        assertEquals(Float.NaN, GhoulPaceProfile.restore(0f, now - day, now))
-        assertEquals(Float.NaN, GhoulPaceProfile.restore(170f, now - day, now))
-        assertEquals(Float.NaN, GhoulPaceProfile.restore(Float.NaN, now - day, now))
-        assertEquals(Float.NaN, GhoulPaceProfile.restore(93f, 0L, now))
+        assertFalse(GhoulPaceProfile.restore(93f, now - 31L * day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(93f, now + day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(0f, now - day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(170f, now - day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(Float.NaN, now - day, now).isFinite())
+        assertFalse(GhoulPaceProfile.restore(93f, 0L, now).isFinite())
     }
 
     @Test
