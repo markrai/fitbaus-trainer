@@ -14,6 +14,20 @@ FitBaus Full 2.1.3 (`versionCode 20103`) is in development on `main`.
 Full 2.1.1 was prepared but not published; its YouTube improvements remain
 included in this upcoming release.
 
+### Changed
+
+- **Trail Ride visual fidelity upgrade.** Keep the existing first-person
+  steering, terrain projection, face-tracking jumps, hazard collision,
+  ditch timing and RPM-driven simulation, but replace the nearest-neighbor
+  256×144 presentation with a 512×288 antialiased composition. Cache original
+  four-times-resolution shaded art for conifers, broadleaf trees, hazard
+  trunks, shrubs, flowers, rocks and ditch flags. Add layered atmospheric
+  sky, softer distant mountain/forest silhouettes, subtle path texture,
+  scenery shadows and a new shaded cockpit with curved handlebars, grips,
+  levers and bike computer. Use Android Canvas without external assets,
+  dependencies or GLES requirements, and retain the existing readable
+  warning and timing indicators.
+
 ### Fixed
 
 - **Trail Ride jump recognition and visibility.** The native face tracker now
