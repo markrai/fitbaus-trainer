@@ -164,6 +164,10 @@ internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()
             val previous = samples.lastOrNull()
             val rise = (peak - position.y).coerceAtLeast(0f)
             lastRise = rise
+            if (previous != null && position.y - previous.y >= 0.025f) {
+                ascentAt = Long.MIN_VALUE
+                lastEvent = "downward movement"
+            }
             if (armed && rise >= config.minimumRise &&
                 previous != null && previous.y - position.y >= config.minimumFinalStep &&
                 position.timestampNanos - previous.at <= config.maximumSampleGapNanos
