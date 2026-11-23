@@ -117,6 +117,7 @@ internal class YouTubeContent(
     private val volumeText = label("", 14f, LABEL)
     private var seeking = false
     private var renderedItems: List<VideoSummary>? = null
+    private var renderedChannelAvatarUrl: String? = null
     private var ticking = false
 
     private val ticker = object : Runnable {
@@ -634,14 +635,15 @@ internal class YouTubeContent(
         channelButton.visibility = if (channelUrl == null) GONE else VISIBLE
         channelButton.contentDescription = "View ${channelVideo?.channel ?: "channel"} videos"
         setText(channelInitial, channelVideo?.channel?.trim()?.take(1)?.uppercase() ?: "?")
-        val avatar = YouTubeChannelLinks.avatar(channelVideo?.channelAvatarUrl)
-        if (channelUrl != null && avatar != null) {
-            channelAvatar.visibility = VISIBLE
-            loader.bind(channelAvatar, avatar)
-        } else {
-            channelAvatar.visibility = GONE
-            channelAvatar.setImageDrawable(null)
-            channelAvatar.tag = null
+        val avatar = if (channelUrl != null) YouTubeChannelLinks.avatar(channelVideo?.channelAvatarUrl) else null
+        channelAvatar.visibility = if (avatar != null) VISIBLE else GONE
+        if (avatar != renderedChannelAvatarUrl) {
+            renderedChannelAvatarUrl = avatar
+            if (avatar != null) loader.bind(channelAvatar, avatar)
+            else {
+                channelAvatar.setImageDrawable(null)
+                channelAvatar.tag = null
+            }
         }
         setText(qualityButton, if (playback.live) "LIVE" else "${if (playback.activeHeight > 0) playback.activeHeight else playback.maxHeight}p ▾")
         qualityButton.isEnabled = !playback.live
