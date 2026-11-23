@@ -169,7 +169,7 @@ class NativeBridgeActivity : Activity() {
             }
         }
     }
-    private val modeController = ArcadeModeController(arcadeHooks)
+    private val modeController: ArcadeModeController = ArcadeModeController(arcadeHooks)
 
     private val youtubeBrightness = object : BrightnessControl {
         override fun percent(): Int = BridgeProcess.brightness(this@NativeBridgeActivity).percent() ?: systemBrightnessPercent()
@@ -180,7 +180,7 @@ class NativeBridgeActivity : Activity() {
         }
     }
 
-    private val voiceSearch by lazy {
+    private val voiceSearch: OfflineVoiceSearchController by lazy {
         OfflineVoiceSearchController(
             this,
             onStatus = { youtubeContent.setVoiceSearchStatus(it) },
@@ -259,17 +259,6 @@ class NativeBridgeActivity : Activity() {
             return
         }
         voiceSearch.toggle()
-    }
-
-    @Suppress("DEPRECATION")
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != YOUTUBE_VOICE_PERMISSION_REQUEST) return
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            requestYouTubeVoiceSearch()
-        } else {
-            Toast.makeText(this, "Microphone permission is required for voice search.", Toast.LENGTH_LONG).show()
-        }
     }
 
     private fun queueYouTubeImport(intent: Intent?) {
@@ -372,10 +361,22 @@ class NativeBridgeActivity : Activity() {
         return super.dispatchTouchEvent(event)
     }
 
+    @Suppress("DEPRECATION")
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (requestCode != CAMERA_PERMISSION_REQUEST) return
-        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-        cameraSession.onPermissionResult(granted)
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        when (requestCode) {
+            CAMERA_PERMISSION_REQUEST -> {
+                val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+                cameraSession.onPermissionResult(granted)
+            }
+            YOUTUBE_VOICE_PERMISSION_REQUEST -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+                    requestYouTubeVoiceSearch()
+                } else {
+                    Toast.makeText(this, "Microphone permission is required for voice search.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun startBridgeService() {
