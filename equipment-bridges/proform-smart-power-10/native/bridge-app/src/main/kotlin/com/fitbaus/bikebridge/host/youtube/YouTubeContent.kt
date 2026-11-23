@@ -81,6 +81,8 @@ internal class YouTubeContent(
     private val searchField = EditText(context)
     private val searchClear = label("×", 30f, PRIMARY)
     private val listTitle = label("", 14f, MUTE)
+    private val channelBackButton = button("‹ BACK")
+    private lateinit var browseToolbar: LinearLayout
     private val discoveryButton = button("DISCOVER")
     private val grid = GridView(context)
     private val adapter = VideoAdapter()
@@ -91,6 +93,9 @@ internal class YouTubeContent(
 
     private val playerScreen = LinearLayout(context)
     private val videoTitle = label("", 18f, PRIMARY)
+    private val channelButton = FrameLayout(context)
+    private val channelInitial = label("", 20f, PRIMARY)
+    private val channelAvatar = ImageView(context)
     private val qualityButton = button("360p")
     private val videoFrame = AspectFrame(context)
     private lateinit var fullScreenVideoArea: FrameLayout
@@ -273,6 +278,7 @@ internal class YouTubeContent(
     private fun buildResults() {
         resultsScreen.orientation = VERTICAL
         val bar = LinearLayout(context)
+        browseToolbar = bar
         bar.orientation = HORIZONTAL
         bar.gravity = Gravity.CENTER_VERTICAL
         searchField.hint = "Search YouTube"
@@ -324,6 +330,13 @@ internal class YouTubeContent(
         val sectionBar = LinearLayout(context)
         sectionBar.orientation = HORIZONTAL
         sectionBar.gravity = Gravity.CENTER_VERTICAL
+        channelBackButton.visibility = GONE
+        channelBackButton.contentDescription = "Back to previous YouTube results"
+        channelBackButton.setOnClickListener {
+            grid.setSelection(0)
+            session.backFromChannel()
+        }
+        sectionBar.addView(channelBackButton, LayoutParams(dp(160), dp(44)))
         sectionBar.addView(listTitle, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         discoveryButton.contentDescription = "Show related video suggestions"
         discoveryButton.setOnClickListener {
@@ -400,6 +413,36 @@ internal class YouTubeContent(
         videoTitle.maxLines = 1
         videoTitle.ellipsize = TextUtils.TruncateAt.END
         top.addView(videoTitle, spaced(LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)))
+        channelButton.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(FIELD)
+        }
+        channelButton.clipToOutline = true
+        channelButton.visibility = GONE
+        channelButton.isClickable = true
+        channelButton.isFocusable = true
+        channelInitial.gravity = Gravity.CENTER
+        channelInitial.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+        channelButton.addView(
+            channelInitial,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+        channelAvatar.scaleType = ImageView.ScaleType.CENTER_CROP
+        channelButton.addView(
+            channelAvatar,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
+        channelButton.setOnClickListener {
+            val video = session.state.playback.video ?: return@setOnClickListener
+            if (session.openChannel(video)) {
+                discoveryActive = false
+                accountOpen = false
+                hideKeyboard()
+                grid.setSelection(0)
+                render(session.state)
+            }
+        }
+        top.addView(channelButton, spaced(LayoutParams(dp(48), dp(48))))
         qualityButton.setOnClickListener { chooseQuality() }
         top.addView(qualityButton, spaced(LayoutParams(dp(150), dp(TOUCH_DP))))
         playerScreen.addView(top, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -533,9 +576,12 @@ internal class YouTubeContent(
 
     private fun renderBrowse(state: YouTubeState) {
         val browse = state.browse
-        val discovering = discoveryActive && browse.query == null && browse.feedTitle == "From your channels"
+        val channel = browse.channelUrl != null
+        browseToolbar.visibility = if (channel) GONE else VISIBLE
+        channelBackButton.visibility = if (channel) VISIBLE else GONE
+        val discovering = !channel && discoveryActive && browse.query == null && browse.feedTitle == "From your channels"
         setText(listTitle, if (discovering) "DISCOVER" else browse.title.uppercase())
-        discoveryButton.visibility = if (browse.query == null && browse.feedTitle == "From your channels" &&
+        discoveryButton.visibility = if (!channel && browse.query == null && browse.feedTitle == "From your channels" &&
             browse.status == ListStatus.Ready) VISIBLE else GONE
         setText(discoveryButton, if (discovering) "‹ FROM YOUR CHANNELS" else "DISCOVER")
         discoveryButton.contentDescription = if (discovering) "Return to subscribed channels" else "Show related video suggestions"
@@ -583,6 +629,20 @@ internal class YouTubeContent(
 
     private fun renderPlayback(playback: PlaybackState) {
         setText(videoTitle, playback.video?.title ?: "")
+        val channelVideo = playback.video
+        val channelUrl = YouTubeChannelLinks.normalize(channelVideo?.channelUrl)
+        channelButton.visibility = if (channelUrl == null) GONE else VISIBLE
+        channelButton.contentDescription = "View ${channelVideo?.channel ?: "channel"} videos"
+        setText(channelInitial, channelVideo?.channel?.trim()?.take(1)?.uppercase() ?: "?")
+        val avatar = YouTubeChannelLinks.avatar(channelVideo?.channelAvatarUrl)
+        if (channelUrl != null && avatar != null) {
+            channelAvatar.visibility = VISIBLE
+            loader.bind(channelAvatar, avatar)
+        } else {
+            channelAvatar.visibility = GONE
+            channelAvatar.setImageDrawable(null)
+            channelAvatar.tag = null
+        }
         setText(qualityButton, if (playback.live) "LIVE" else "${if (playback.activeHeight > 0) playback.activeHeight else playback.maxHeight}p ▾")
         qualityButton.isEnabled = !playback.live
         videoFrame.aspect = playback.videoAspect
