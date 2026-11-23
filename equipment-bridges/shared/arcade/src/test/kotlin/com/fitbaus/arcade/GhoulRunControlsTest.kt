@@ -82,8 +82,24 @@ class GhoulRunControlsTest {
         assertEquals(0f, remembered.reading.warmupRemaining)
         assertFalse(remembered.learnedBaseline.isFinite())
         remembered.recalibrate()
-        assertEquals(GhoulPaceProfile.DEFAULT_RPM, remembered.baseline)
+        assertEquals(pace.learnedBaseline, remembered.baseline)
         assertEquals(config.warmupSeconds, remembered.reading.warmupRemaining)
+        assertEquals(remembered.baseline, remembered.reading.baseline)
+    }
+
+    @Test
+    fun manualRelearnDoesNotInterruptLiveCadenceOrJumpBaseline() {
+        val config = GhoulRunConfig()
+        val pace = GhoulPace(config, initialBaseline = 96f)
+        val now = feed(pace, 2f, 96)
+        val before = pace.reading
+        pace.recalibrate()
+        assertEquals(96f, pace.baseline)
+        assertEquals(before.status, pace.reading.status)
+        assertEquals(before.filteredRpm, pace.reading.filteredRpm)
+        assertFalse(pace.learnedBaseline.isFinite())
+        feed(pace, 1f, 96, now)
+        assertEquals(96f, pace.baseline)
     }
 
     @Test
