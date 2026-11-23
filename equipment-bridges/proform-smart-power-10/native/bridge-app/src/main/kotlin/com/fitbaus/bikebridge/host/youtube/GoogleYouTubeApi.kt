@@ -256,6 +256,9 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
                 viewCount = -1,
                 thumbnailUrl = YouTubeIds.thumbnail(id),
                 live = false,
+                channelUrl = snippet.optString("videoOwnerChannelId")
+                    .takeIf { it.matches(Regex("UC[A-Za-z0-9_-]{22}")) }
+                    ?.let { "https://www.youtube.com/channel/$it" },
             )
             GoogleDatedVideo(video, details?.optString("videoPublishedAt")?.take(40)
                 ?.takeIf { it.isNotBlank() } ?: snippet.optString("publishedAt").take(40))
