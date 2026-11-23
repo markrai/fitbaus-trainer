@@ -35,6 +35,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import com.fitbaus.bikebridge.host.R
 import com.fitbaus.bikebridge.host.arcade.ExerciseHud
 
 internal class YouTubeContent(
@@ -42,6 +43,7 @@ internal class YouTubeContent(
     private val prefs: SharedPreferences,
     private val brightness: BrightnessControl,
     private val onRestoreRequested: () -> Unit = {},
+    private val onVoiceSearchRequested: () -> Unit = {},
 ) : LinearLayout(context) {
     val hud: ExerciseHud = ExerciseHud(context)
     private val handler = Handler(Looper.getMainLooper())
@@ -82,6 +84,7 @@ internal class YouTubeContent(
     private val resultsScreen = LinearLayout(context)
     private val searchField = EditText(context)
     private val searchClear = label("×", 30f, PRIMARY)
+    private val searchMic = ImageView(context)
     private val listTitle = label("", 14f, MUTE)
     private val channelBackButton = button("‹ BACK")
     private lateinit var browseToolbar: LinearLayout
@@ -259,7 +262,7 @@ internal class YouTubeContent(
         searchField.inputType = InputType.TYPE_CLASS_TEXT
         searchField.imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         searchField.background = outline(DIVIDER, FIELD)
-        searchField.setPadding(dp(14), 0, dp(TOUCH_DP), 0)
+        searchField.setPadding(dp(14), 0, dp(TOUCH_DP * 2), 0)
         searchField.setOnEditorActionListener { _, actionId, event ->
             val enter = event != null && event.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN
             if (actionId == EditorInfo.IME_ACTION_SEARCH || enter) {
@@ -275,7 +278,16 @@ internal class YouTubeContent(
         searchClear.contentDescription = "Clear search"
         searchClear.visibility = GONE
         searchClear.setOnClickListener { returnToHome() }
-        fieldSlot.addView(searchClear, FrameLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP), Gravity.END or Gravity.CENTER_VERTICAL))
+        val clearLp = FrameLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP), Gravity.END or Gravity.CENTER_VERTICAL)
+        clearLp.rightMargin = dp(TOUCH_DP)
+        fieldSlot.addView(searchClear, clearLp)
+        searchMic.setImageResource(R.drawable.ic_mic)
+        searchMic.scaleType = ImageView.ScaleType.CENTER
+        searchMic.contentDescription = "Search YouTube by voice"
+        searchMic.isClickable = true
+        searchMic.isFocusable = true
+        searchMic.setOnClickListener { onVoiceSearchRequested() }
+        fieldSlot.addView(searchMic, FrameLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP), Gravity.END or Gravity.CENTER_VERTICAL))
         searchField.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -691,6 +703,14 @@ internal class YouTubeContent(
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    fun acceptVoiceSearchResult(query: String) {
+        val recognized = YouTubeVoiceSearch.bestMatch(listOf(query)) ?: return
+        if (!session.state.active) return
+        searchField.setText(recognized)
+        searchField.setSelection(recognized.length)
+        submitSearch()
     }
 
     private fun submitSearch() {
