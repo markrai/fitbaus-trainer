@@ -522,6 +522,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     private fun showContent(mode: ArcadeMode) {
+        handInput.immediateFaceLoss = mode == ArcadeMode.TrailRide
         dashboardContent.visibility = if (mode == ArcadeMode.Dashboard) View.VISIBLE else View.GONE
         arcadeContent.visibility = if (mode.isGame) View.VISIBLE else View.GONE
         youtubeContent.visibility = if (mode == ArcadeMode.YouTube) View.VISIBLE else View.GONE
