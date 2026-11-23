@@ -250,6 +250,7 @@ internal class YouTubeContent(
 
     fun stop() {
         restoreFullPlayer()
+        cancelPendingSurfaceRestore()
         hideKeyboard()
         clearPlaybackFeedback()
         stopTicker()
@@ -261,6 +262,7 @@ internal class YouTubeContent(
 
     fun destroy() {
         restoreFullPlayer()
+        cancelPendingSurfaceRestore()
         clearPlaybackFeedback()
         stopTicker()
         accountController.destroy()
