@@ -141,6 +141,10 @@ public class HandPositionInput(
         lastCamera.set(null)
     }
 
+    internal fun markCameraLost(expectedGeneration: Int) {
+        if (generation.get() == expectedGeneration) lastCamera.set(null)
+    }
+
     internal fun onTouch(x: Float, y: Float) {
         touchX = HandMapping.clamp01(x)
         touchY = HandMapping.clamp01(y)
