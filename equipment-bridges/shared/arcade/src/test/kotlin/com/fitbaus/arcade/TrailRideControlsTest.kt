@@ -13,7 +13,7 @@ class TrailRideControlsTest {
     private fun face(x: Float, atMs: Long, source: HandSource = HandSource.Camera) = HandPosition(x, 0.5f, 0.9f, atMs * ms, source)
 
     private fun calibrated(neutral: Float = 0.5f, gain: Float = 2.4f): Pair<HorizontalFaceSteering, Long> {
-        val s = HorizontalFaceSteering()
+        val s = trailRideSteering()
         s.setGain(gain)
         var t = 0L
         while (!s.calibrated) {
@@ -36,7 +36,7 @@ class TrailRideControlsTest {
 
     @Test
     fun calibrationNeedsOneSecondOfFreshTracking() {
-        val s = HorizontalFaceSteering()
+        val s = trailRideSteering()
         for (t in 0L..900L step 100) assertEquals(FaceControlState.Calibrating, s.update(face(0.46f, t), t * ms).state)
         val done = s.update(face(0.46f, 1000), 1000 * ms)
         assertEquals(FaceControlState.Tracking, done.state)
