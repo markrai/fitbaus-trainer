@@ -16,6 +16,14 @@ included in this upcoming release.
 
 ### Fixed
 
+- **Ghoul Run mouth animation pacing.** Slow close-range jaw opening
+  from 0.28 to 0.65 seconds and closing from 0.24 to 0.40 seconds,
+  making the toothless aperture grow visibly over more frames.
+  Preserve the 0.95-cell activation distance, 0.45-cell full-open
+  target distance, mutual-facing and line-of-sight checks, creature
+  speed, and catch distance. Add timing tests for varying simulation
+  frame sizes.
+
 - **Ghoul Run progressively growing mouth.** Replace the faint, opacity-driven
   mouth appearance with a small dark circular opening that smoothly expands
   into the full jaw shape. Scale the aperture itself rather than fading in

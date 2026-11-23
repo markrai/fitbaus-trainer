@@ -61,14 +61,32 @@ internal class GhoulAttackMouthTest {
     fun opensAndClosesSmoothlyWithoutFrameRateDependence() {
         var opening = 0f
         repeat(14) { opening = GhoulAttackMouth.advance(opening, 1f, 0.02f) }
+        assertTrue(opening in 0.40f..0.45f)
+        repeat(19) { opening = GhoulAttackMouth.advance(opening, 1f, 0.02f) }
         assertEquals(1f, opening, 0.0001f)
         var closing = opening
         repeat(12) { closing = GhoulAttackMouth.advance(closing, 0f, 0.02f) }
+        assertTrue(closing in 0.39f..0.41f)
+        repeat(8) { closing = GhoulAttackMouth.advance(closing, 0f, 0.02f) }
         assertEquals(0f, closing, 0.0001f)
         assertEquals(0.6f, GhoulAttackMouth.advance(0.6f, 1f, 0f))
         assertEquals(0.6f, GhoulAttackMouth.advance(0.6f, 1f, Float.NaN))
         assertEquals(0f, GhoulAttackMouth.advance(-5f, 0f, 0.1f))
         assertEquals(1f, GhoulAttackMouth.advance(10f, 1f, 0.1f))
+    }
+
+    @Test
+    fun slowerOpeningIsIndependentOfSimulationFrameSize() {
+        var at60Hz = 0f
+        repeat(39) { at60Hz = GhoulAttackMouth.advance(at60Hz, 1f, 1f / 60f) }
+        var at20Hz = 0f
+        repeat(13) { at20Hz = GhoulAttackMouth.advance(at20Hz, 1f, 0.05f) }
+        assertEquals(1f, at60Hz, 0.0001f)
+        assertEquals(at60Hz, at20Hz, 0.0001f)
+        var early = 0f
+        repeat(15) { early = GhoulAttackMouth.advance(early, 1f, 1f / 60f) }
+        assertTrue(early > 0.3f && early < 0.4f)
+        assertTrue(GhoulAttackMouth.halfWidth(early) < GhoulAttackMouth.halfWidth(0.5f))
     }
 
     @Test

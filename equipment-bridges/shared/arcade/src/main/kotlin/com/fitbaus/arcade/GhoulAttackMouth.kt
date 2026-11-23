@@ -20,8 +20,8 @@ internal object GhoulAttackMouth {
     private const val FULL_OPEN_DISTANCE = 0.45f
     private const val RIDER_FACING_DOT = 0.8660254f
     private const val GHOUL_FACING_DOT = 0.8191521f
-    private const val OPEN_SECONDS = 0.28f
-    private const val CLOSE_SECONDS = 0.24f
+    private const val OPEN_SECONDS = 0.65f
+    private const val CLOSE_SECONDS = 0.40f
 
     fun target(
         riderCol: Float,
