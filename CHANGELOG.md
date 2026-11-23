@@ -16,6 +16,10 @@ included in this upcoming release.
 
 ### Changed
 
+- **Trail Ride HUD refinement.** Remove the flashing “STEER LEFT” and
+  “STEER RIGHT” guidance banners. Existing trail-edge visuals, off-trail
+  speed reduction and other gameplay prompts remain unchanged.
+
 - **Trail Ride visual fidelity upgrade.** Keep the existing first-person
   steering, terrain projection, face-tracking jumps, hazard collision,
   ditch timing and RPM-driven simulation, but replace the nearest-neighbor
@@ -139,11 +143,14 @@ included in this upcoming release.
 
 ### Added
 
-- **Trail Ride turtle shell hazards.** Occasionally render original shaded green
-  turtle shells on the road in existing isolated rock-hazard slots, preserving
-  seeded scenery, hazard spacing and ditch-clearance zones. Riders can steer
-  around a shell or hop over it when airborne high enough; ordinary rocks
-  and trees remain solid even during a hop.
+- **Trail Ride walking tortoise hazards.** Replace occasional green turtle
+  shells with original shaded tortoises, complete with heads, eyes, feet and
+  two walking animation poses. Each tortoise crosses the path from left to
+  right or right to left, in a seed-stable direction. Renderer and obstacle
+  physics share the same continuously changing lateral position, tied to
+  forward travel to avoid timing drift or motion during pauses. Existing
+  hazard spacing and ditch-clearance zones remain unchanged; steer around
+  or jump over the animal, while trees and rocks remain impassable.
 
 - **Trail Ride stand-to-jump.** Replace pedal-surge jump activation with a
   distinct upward face movement followed by tracking loss, allowing riders
