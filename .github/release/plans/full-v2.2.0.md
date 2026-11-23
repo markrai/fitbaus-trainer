@@ -68,7 +68,7 @@ Use the signed `fitbaus-bikebridge-full-2.2.0.apk` from that inspect run. Back u
 - [ ] YouTube channel avatar navigation, captions, video seeking, volume, brightness, and account sign-in remain functional.
 - [ ] Sustained playback for at least 10 minutes, with telemetry healthy, acceptable frame rate, memory and console temperature.
 
-Record the actual tests, date, results, inspect run ID, source commit, signer fingerprint and APK SHA-256 in `docs/release-evidence/full-v2.2.0.md`. Do not copy historical qualification data or claim a pass without performing the test.
+Record the actual tests, date, results, inspect run ID, source commit, signer fingerprint and APK SHA-256 in `.github/release/evidence/full-v2.2.0.md`. Do not copy historical qualification data or claim a pass without performing the test.
 
 ## Register qualification and publish
 

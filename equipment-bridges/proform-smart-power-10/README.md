@@ -21,7 +21,7 @@ equipment-bridges/proform-smart-power-10/
 | ABI | x86 (`byt_t_crv2`) |
 | Stock packages | `com.ifit.standalone` (Wolf), `com.ifit.eru`, `com.ifit.launcher` |
 | Brainboard USB | VID `8508`, normal PID `2`, bootloader PID `153`, interface `0` |
-| Production package | `com.fitbaus.bikebridge` (product version from repo-root `version.js`, currently `1.0.0`) |
+| Production package | `com.fitbaus.bikebridge` (product version from repo-root `version.js`) |
 
 **Not claimed:** generic ProForm, generic exercise bikes, other iFIT equipment,
 or modern 64-bit Android consoles.

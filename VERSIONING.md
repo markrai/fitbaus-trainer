@@ -96,8 +96,8 @@ artifact filenames (for example `fitbaus-bikebridge-full-2.1.0.apk` vs
 `fitbaus-bikebridge-lite-1.0.1.apk`), not package-ID forks.
 
 Maintainer procedure, secrets, certificate pins, and physical qualification:
-see [docs/RELEASE.md](docs/RELEASE.md). The Full 2.2.0 release checklist
-is [docs/release-plans/full-v2.2.0.md](docs/release-plans/full-v2.2.0.md).
+see [.github/release/RELEASE.md](.github/release/RELEASE.md). The Full 2.2.0
+release checklist is [.github/release/plans/full-v2.2.0.md](.github/release/plans/full-v2.2.0.md).
 
 ## GitHub release procedure
 
@@ -110,7 +110,7 @@ For the published Full 2.1.0 release (historical example):
    `edition=full`, `mode=inspect`.
 3. Physically qualify the exact signed Bike Bridge APK from that candidate on
    the console, and record the evidence and qualification record (details in
-   `docs/RELEASE.md`).
+   `.github/release/RELEASE.md`).
 4. Re-run **Release** with the same `tag`, `expected_commit`, `edition=full`,
    `mode=publish`, and `candidate_run_id` pointing at the qualified inspect
    run. GitHub Actions attaches the verified public files; maintainers do not

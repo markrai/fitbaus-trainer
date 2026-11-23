@@ -164,6 +164,14 @@ test("signing policy accepts matching pin and rejects wrong identity", () => {
   );
 });
 
+test("qualified production release evidence remains tracked with the release policy", () => {
+  const policy = JSON.parse(fs.readFileSync(path.join(root, ".github/release/physical-qualification.json"), "utf8"));
+  for (const record of policy.records) {
+    assert.match(record.evidenceRef, /^\.github\/release\/evidence\/[a-z0-9.-]+\.md$/);
+    assert.ok(fs.existsSync(path.join(root, record.evidenceRef)), record.evidenceRef);
+  }
+});
+
 test("physical qualification requires exact apk/commit/cert/evidence binding", () => {
   assert.throws(
     () =>

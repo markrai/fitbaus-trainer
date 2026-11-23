@@ -15,7 +15,7 @@ support, is maintained on `lite/1.x`.
 Full 2.2.0 (`versionCode 20200`) collects the unreleased Full 2.1.1–2.1.3
 development work since the published Full 2.1.0 release. The exact signed
 console APK still requires physical qualification before GitHub publication.
-See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
+See [Full 2.2.0 release plan](.github/release/plans/full-v2.2.0.md).
 
 ### Changed
 
@@ -553,7 +553,7 @@ player, BIKETRIS, and external USB webcam support on the bike console.
   FITBAUS title. Also released in Lite 1.0.1.
 - **Release workflow.** Signed Trainer and production Bike Bridge artifacts
   are built from an existing tag, verified, and published with SHA-256
-  checksums. See [docs/RELEASE.md](docs/RELEASE.md).
+  checksums. See [release engineering guide](.github/release/RELEASE.md).
 
 ### Changed
 
