@@ -32,6 +32,7 @@ internal data class TrailWorldConfig(
     val slalomGapMax: Float = 12f,
     val trunkRadius: Float = 0.32f,
     val rockRadius: Float = 0.28f,
+    val turtleShellChance: Float = 0.32f,
     val minGap: Float = 1.0f,
     val firstDitchAt: Float = 230f,
     val ditchSpacing: Float = 175f,
@@ -43,7 +44,7 @@ internal data class TrailWorldConfig(
     val ditchClearAfter: Float = 26f,
 )
 
-internal enum class ObstacleKind { Trunk, Rock }
+internal enum class ObstacleKind { Trunk, Rock, TurtleShell }
 
 /** A collision-capable hazard. [x] is its fixed world position; [offset] is relative to the trail centre at [distance]. */
 internal class TrailObstacle(
@@ -305,7 +306,12 @@ internal class TrailRideWorld(val config: TrailWorldConfig = TrailWorldConfig(),
                 val intrude = 0.45f + hazardRng.nextFloat() * (0.4f + 0.04f * level)
                 add(group, start, side * (w - intrude + trunk), trunk, ObstacleKind.Trunk)
             }
-            GroupKind.Rock -> add(group, start, (hazardRng.nextFloat() * 2f - 1f) * 0.55f, config.rockRadius, ObstacleKind.Rock)
+            GroupKind.Rock -> {
+                val offset = (hazardRng.nextFloat() * 2f - 1f) * 0.55f
+                val shell = scenery(group, 96) < config.turtleShellChance
+                add(group, start, offset, config.rockRadius,
+                    if (shell) ObstacleKind.TurtleShell else ObstacleKind.Rock)
+            }
             GroupKind.Gate -> {
                 val a = 0.35f + hazardRng.nextFloat() * 0.35f
                 val bMax = min(0.7f, 2f * w - a - (config.minGap + 0.2f))
