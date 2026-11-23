@@ -354,8 +354,6 @@ public class TrailRideView(context: Context) : View(context) {
         val world = game.world
         val w = world.config.halfWidth
         val ditch = game.nextDitch()
-        val blink = (animSeconds * 6f).toInt() % 2 == 0
-        val edgeSide = if (game.nearEdge && game.phase == TrailPhase.Riding) (if (game.lateralError > 0f) 1 else -1) else 0
         val windowFar = if (ditch != null) ditch.start - game.config.jumpEarlySeconds * game.speed else Float.NaN
         val windowNear = if (ditch != null) ditch.start - game.config.jumpLateSeconds * game.speed else Float.NaN
         for (y in HORIZON until LOGICAL_H) {
@@ -389,9 +387,8 @@ public class TrailRideView(context: Context) : View(context) {
             }
             val edge = max(1f, 0.16f * ppm)
             val edgeColor = TrailSprites.blend(EDGE, FAR_GROUND, fog)
-            val warnColor = if (blink) WARN_EDGE else edgeColor
-            span(row, cx - hw - edge * 0.5f, cx - hw + edge, if (edgeSide < 0) warnColor else edgeColor)
-            span(row, cx + hw - edge, cx + hw + edge * 0.5f, if (edgeSide > 0) warnColor else edgeColor)
+            span(row, cx - hw - edge * 0.5f, cx - hw + edge, edgeColor)
+            span(row, cx + hw - edge, cx + hw + edge * 0.5f, edgeColor)
             if (z < 40f) {
                 val rut = max(1f, 0.07f * ppm)
                 val rutColor = TrailSprites.blend(RUT, FAR_GROUND, fog)
@@ -846,7 +843,6 @@ public class TrailRideView(context: Context) : View(context) {
         val DIRT_SHADOW = TrailSprites.rgb(129, 99, 72)
         val RUT = TrailSprites.rgb(103, 76, 56)
         val EDGE = TrailSprites.rgb(109, 93, 71)
-        val WARN_EDGE = TrailSprites.rgb(236, 92, 40)
         val LIP = TrailSprites.rgb(195, 151, 96)
         val DITCH_DARK = TrailSprites.rgb(35, 27, 24)
         val DITCH_WALL = TrailSprites.rgb(87, 66, 49)
