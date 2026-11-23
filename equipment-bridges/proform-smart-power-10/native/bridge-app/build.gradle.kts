@@ -1,3 +1,7 @@
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.security.MessageDigest
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -50,11 +54,56 @@ abstract class NoticeAssetsTask : DefaultTask() {
     }
 }
 
+abstract class OfflineVoiceModelTask : DefaultTask() {
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    private fun checksum(file: File): String {
+        val hash = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                hash.update(buffer, 0, count)
+            }
+        }
+        return hash.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    }
+
+    @TaskAction
+    fun prepare() {
+        val model = outputDir.get().asFile.resolve("speech/vosk-model-small-en-us-0.15.zip")
+        val expected = "30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498"
+        if (model.isFile && checksum(model) == expected) return
+        model.parentFile.mkdirs()
+        val partial = File(model.parentFile, model.name + ".part")
+        partial.delete()
+        try {
+            val connection = URI("https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip").toURL().openConnection()
+            connection.connectTimeout = 30_000
+            connection.readTimeout = 120_000
+            connection.getInputStream().use { input ->
+                partial.outputStream().buffered().use { output -> input.copyTo(output) }
+            }
+            check(checksum(partial) == expected) { "Pinned Vosk English model checksum mismatch" }
+            Files.move(partial.toPath(), model.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            partial.delete()
+        }
+    }
+}
+
+val offlineVoiceModel = tasks.register<OfflineVoiceModelTask>("offlineVoiceModel") {
+    outputDir.set(layout.buildDirectory.dir("generated/offline-voice-assets"))
+}
+
 val noticeAssets = tasks.register<NoticeAssetsTask>("noticeAssets") {
     sources.from(rootProject.file("equipment-protocol/NOTICE"))
     sources.from(rootProject.fileTree("equipment-protocol/licenses"))
     sources.from(rootProject.file("../../../LICENSE"))
     sources.from(file("third-party/YOUTUBE-NOTICE"))
+    sources.from(file("third-party/SPEECH-NOTICE"))
     sources.from(fileTree("third-party/licenses"))
     outputDir.set(layout.buildDirectory.dir("generated/notice-assets"))
 }
@@ -67,6 +116,7 @@ android {
         applicationId = if (isProduction) "com.fitbaus.bikebridge" else "com.fitbaus.bikebridge.native"
         minSdk = 22
         targetSdk = 34
+        ndk { abiFilters += setOf("x86") }
         versionCode = rootProject.extra["fitbausVersionCode"] as Int
         versionName = rootProject.extra["fitbausVersionName"] as String
         resValue("string", "app_name", if (isProduction) "FitBaus Bike Bridge" else "FitBaus Bike Bridge Native")
@@ -83,6 +133,10 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    androidResources {
+        noCompress += "zip"
     }
 
     signingConfigs {
@@ -137,6 +191,7 @@ android {
 androidComponents {
     onVariants { variant ->
         variant.sources.assets?.addGeneratedSourceDirectory(noticeAssets, NoticeAssetsTask::outputDir)
+        variant.sources.assets?.addGeneratedSourceDirectory(offlineVoiceModel, OfflineVoiceModelTask::outputDir)
     }
 }
 
@@ -158,6 +213,8 @@ dependencies {
     implementation("androidx.annotation:annotation:1.3.0")
     implementation("com.google.guava:guava:31.1-android")
     implementation("com.google.zxing:core:3.5.3")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
+    implementation("com.alphacephei:vosk-android:0.3.75@aar")
     testImplementation("org.json:json:20240303")
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")

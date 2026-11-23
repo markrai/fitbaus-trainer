@@ -136,6 +136,7 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
             live = live,
             channelUrl = YouTubeChannelLinks.normalize(info.uploaderUrl),
             channelAvatarUrl = YouTubeChannelLinks.avatar(info.uploaderAvatars.firstOrNull()?.url),
+            publishedAtEpochSeconds = if (live) null else runCatching { info.uploadDate?.instant?.epochSecond }.getOrNull(),
         )
         val caption = try {
             CaptionPreference.preferred(NewPipeCaptions.supported(info.subtitles ?: emptyList()))
@@ -181,6 +182,7 @@ internal class NewPipeYouTubeCatalog(downloader: Downloader = HttpUrlDownloader(
             live = NewPipeStreams.isLive(item.streamType),
             channelUrl = YouTubeChannelLinks.normalize(item.uploaderUrl),
             channelAvatarUrl = YouTubeChannelLinks.avatar(item.uploaderAvatars.firstOrNull()?.url),
+            publishedAtEpochSeconds = if (NewPipeStreams.isLive(item.streamType)) null else runCatching { item.uploadDate?.instant?.epochSecond }.getOrNull(),
         )
     }
 
