@@ -95,6 +95,7 @@ internal class YouTubeContent(
     private val videoFrame = AspectFrame(context)
     private lateinit var fullScreenVideoArea: FrameLayout
     private var floating = false
+    private var restoreSurfaceLayoutListener: View.OnLayoutChangeListener? = null
     private val captionsView = label("", 22f, PRIMARY)
     private val captionsButton = button("CC")
     private val playbackFeedback = ImageView(context)
@@ -185,6 +186,7 @@ internal class YouTubeContent(
         hideKeyboard()
         clearPlaybackFeedback()
         stopTicker()
+        cancelPendingSurfaceRestore()
         (videoFrame.parent as? ViewGroup)?.removeView(videoFrame)
         floatingSlot.addView(
             videoFrame,
@@ -198,14 +200,44 @@ internal class YouTubeContent(
 
     private fun restoreFullPlayer() {
         if (!floating) return
+        surface.visibility = View.INVISIBLE
         (videoFrame.parent as? ViewGroup)?.removeView(videoFrame)
         fullScreenVideoArea.addView(
             videoFrame,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER),
         )
         floating = false
+        val listener = object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(
+                view: View,
+                left: Int,
+                top: Int,
+                right: Int,
+                bottom: Int,
+                oldLeft: Int,
+                oldTop: Int,
+                oldRight: Int,
+                oldBottom: Int,
+            ) {
+                videoFrame.removeOnLayoutChangeListener(this)
+                restoreSurfaceLayoutListener = null
+                if (floating || videoFrame.parent !== fullScreenVideoArea) return
+                surface.visibility = View.VISIBLE
+                surface.holder.setSizeFromLayout()
+                surface.requestLayout()
+            }
+        }
+        restoreSurfaceLayoutListener = listener
+        videoFrame.addOnLayoutChangeListener(listener)
+        videoFrame.requestLayout()
         styleCaptionsForVideoSize()
         render(session.state)
+    }
+
+    private fun cancelPendingSurfaceRestore() {
+        restoreSurfaceLayoutListener?.let { videoFrame.removeOnLayoutChangeListener(it) }
+        restoreSurfaceLayoutListener = null
+        surface.visibility = View.VISIBLE
     }
 
     private fun styleCaptionsForVideoSize() {
