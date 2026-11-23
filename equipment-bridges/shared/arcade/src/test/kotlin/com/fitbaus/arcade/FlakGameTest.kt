@@ -678,7 +678,10 @@ class FlakGameTest {
     fun flakCodeNeverTouchesEquipmentControl() {
         val dir = File("src/main/kotlin/com/fitbaus/arcade")
         val flak = dir.listFiles()!!.filter { it.name.startsWith("Flak") }
-        assertEquals(setOf("FlakControls.kt", "FlakGame.kt", "FlakView.kt"), flak.map { it.name }.toSet())
+        assertEquals(
+            setOf("FlakControls.kt", "FlakGame.kt", "FlakView.kt", "FlakVisuals.kt"),
+            flak.map { it.name }.toSet(),
+        )
         for (file in flak) {
             val text = file.readText()
             for (forbidden in listOf("setResistance", "requestResistance", "UsbManager", "UsbDevice", "HttpURLConnection", "Socket", "COOLING", "Cooldown")) {
