@@ -93,62 +93,139 @@ internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
     }
 }
 
-internal enum class TrailHold { None, CameraStarting, CameraUnavailable, FaceLost, Calibrating, NoTelemetry, NotPedaling, LearningPace, Resuming }
+internal enum class TrailHold { None, NoTelemetry, NotPedaling }
 
-/**
- * Decides whether the TRAIL RIDE simulation may run. Any missing controller holds the game and
- * nothing advances while held. The cadence detector must have a baseline before riding, so a
- * ditch can never arrive while a jump is impossible.
- */
-internal class TrailRideSupervisor(private val resumeStableMs: Long = 600L) {
-    private var running = false
-
-    fun invalidate() {
-        running = false
-    }
-
-    fun hold(camera: CameraState, steer: SteerReading, cadence: CadenceReading): TrailHold {
-        val hold = when {
-            camera == CameraState.Unavailable || camera == CameraState.PermissionDenied -> TrailHold.CameraUnavailable
-            camera != CameraState.Ready -> TrailHold.CameraStarting
-            steer.state == FaceControlState.Lost -> TrailHold.FaceLost
-            steer.state == FaceControlState.Calibrating -> TrailHold.Calibrating
-            cadence.state == CadenceState.NoTelemetry || cadence.state == CadenceState.Stale -> TrailHold.NoTelemetry
-            cadence.state == CadenceState.Stopped -> TrailHold.NotPedaling
-            cadence.state == CadenceState.Establishing -> TrailHold.LearningPace
-            !running && steer.stableMs < resumeStableMs -> TrailHold.Resuming
-            else -> TrailHold.None
-        }
-        running = hold == TrailHold.None
-        return hold
+internal class TrailRideSupervisor {
+    fun hold(cadence: CadenceReading): TrailHold = when (cadence.state) {
+        CadenceState.NoTelemetry, CadenceState.Stale -> TrailHold.NoTelemetry
+        CadenceState.Stopped -> TrailHold.NotPedaling
+        else -> TrailHold.None
     }
 
     fun message(hold: TrailHold, cadence: CadenceReading): String? = when (hold) {
         TrailHold.None -> null
-        TrailHold.CameraUnavailable -> "CAMERA UNAVAILABLE - TRAIL RIDE NEEDS HEAD STEERING"
-        TrailHold.CameraStarting -> "STARTING CAMERA..."
-        TrailHold.FaceLost -> "FACE LOST - LOOK AT THE SCREEN"
-        TrailHold.Calibrating -> "LOOK STRAIGHT AHEAD - CENTERING"
         TrailHold.NoTelemetry -> if (cadence.state == CadenceState.Stale) "BIKE DATA STALE - WAITING FOR RPM" else "NO BIKE DATA - WAITING FOR RPM"
         TrailHold.NotPedaling -> "PEDAL TO RIDE"
-        TrailHold.LearningPace -> "KEEP PEDALING - LEARNING YOUR PACE"
-        TrailHold.Resuming -> "GET READY..."
     }
 }
 
-/**
- * One TRAIL RIDE frame without Android: read head steering and cadence, decide the hold, turn a
- * new confirmed surge into a jump request, and advance the fixed-step game only while live.
- * While held the game clock is reset, so nothing (hazards, jump timers, crashes) advances.
- */
+internal data class StandJumpConfig(
+    val freshNanos: Long = 400_000_000L,
+    val riseWindowNanos: Long = 650_000_000L,
+    val lossWindowNanos: Long = 950_000_000L,
+    val maximumSampleGapNanos: Long = 250_000_000L,
+    val rearmNanos: Long = 300_000_000L,
+    val rearmSamples: Int = 4,
+    val minimumRise: Float = 0.075f,
+    val minimumFinalStep: Float = 0.008f,
+)
+
+internal class StandJumpDetector(val config: StandJumpConfig = StandJumpConfig()) {
+    private data class Sample(val at: Long, val y: Float)
+
+    private val samples = ArrayDeque<Sample>()
+    private var lastProcessedAt = Long.MIN_VALUE
+    private var lastFreshAt = Long.MIN_VALUE
+    private var trackingSince = Long.MIN_VALUE
+    private var ascentAt = Long.MIN_VALUE
+    private var freshCount = 0
+    private var tracking = false
+
+    var armed: Boolean = false
+        private set
+    var lastRise: Float = 0f
+        private set
+    var lastEvent: String = "waiting for face"
+        private set
+    var jumps: Int = 0
+        private set
+
+    fun update(position: HandPosition, camera: CameraState, nowNanos: Long, canJump: Boolean): Boolean {
+        val age = nowNanos - position.timestampNanos
+        val fresh = camera == CameraState.Ready && position.source == HandSource.Camera &&
+            age in 0..config.freshNanos && position.y.isFinite() && position.y in 0f..1f
+        if (fresh) {
+            if (position.timestampNanos == lastProcessedAt) return false
+            if (!tracking || lastProcessedAt != Long.MIN_VALUE &&
+                position.timestampNanos - lastProcessedAt > config.maximumSampleGapNanos
+            ) {
+                samples.clear()
+                trackingSince = nowNanos
+                freshCount = 0
+                ascentAt = Long.MIN_VALUE
+                armed = false
+            }
+            tracking = true
+            freshCount += 1
+            while (samples.isNotEmpty() &&
+                position.timestampNanos - samples.first().at > config.riseWindowNanos
+            ) samples.removeFirst()
+            val peak = samples.maxOfOrNull { it.y } ?: position.y
+            val previous = samples.lastOrNull()
+            val rise = (peak - position.y).coerceAtLeast(0f)
+            lastRise = rise
+            if (armed && rise >= config.minimumRise &&
+                previous != null && previous.y - position.y >= config.minimumFinalStep &&
+                position.timestampNanos - previous.at <= config.maximumSampleGapNanos
+            ) {
+                ascentAt = nowNanos
+                lastEvent = "upward movement"
+            }
+            samples.addLast(Sample(position.timestampNanos, position.y))
+            lastProcessedAt = position.timestampNanos
+            lastFreshAt = nowNanos
+            if (!armed && nowNanos - trackingSince >= config.rearmNanos &&
+                freshCount >= config.rearmSamples
+            ) {
+                armed = true
+                lastEvent = "ready"
+            }
+            return false
+        }
+        if (position.source != HandSource.Lost || !tracking) return false
+        val rising = ascentAt != Long.MIN_VALUE && lastFreshAt != Long.MIN_VALUE &&
+            nowNanos >= ascentAt && nowNanos - ascentAt <= config.lossWindowNanos &&
+            nowNanos - lastFreshAt <= config.lossWindowNanos
+        val triggered = armed && rising && canJump && camera == CameraState.Ready
+        lastEvent = when {
+            triggered -> "stand jump"
+            !armed -> "unarmed loss"
+            !rising -> "no upward exit"
+            !canJump -> "jump unavailable"
+            else -> "camera unavailable"
+        }
+        if (triggered) jumps += 1
+        tracking = false
+        armed = false
+        samples.clear()
+        trackingSince = Long.MIN_VALUE
+        ascentAt = Long.MIN_VALUE
+        freshCount = 0
+        return triggered
+    }
+
+    fun reset() {
+        samples.clear()
+        lastProcessedAt = Long.MIN_VALUE
+        lastFreshAt = Long.MIN_VALUE
+        trackingSince = Long.MIN_VALUE
+        ascentAt = Long.MIN_VALUE
+        freshCount = 0
+        tracking = false
+        armed = false
+        lastRise = 0f
+        lastEvent = "waiting for face"
+    }
+}
+
 internal class TrailRideSession(
     val game: TrailRideGame,
     val steering: HorizontalFaceSteering = HorizontalFaceSteering(),
     val cadence: CadenceBoost = CadenceBoost(),
+    val standing: StandJumpDetector = StandJumpDetector(),
     private val supervisor: TrailRideSupervisor = TrailRideSupervisor(),
 ) {
-    private val edge = BoostActivationEdge()
-    var hold: TrailHold = TrailHold.CameraStarting
+    var hold: TrailHold = TrailHold.NoTelemetry
         private set
     var steer: SteerReading = SteerReading(FaceControlState.Lost, 0.5f, Float.NaN, 0f, -1L, 0L)
         private set
@@ -158,6 +235,7 @@ internal class TrailRideSession(
         private set
     var jumpRequests: Int = 0
         private set
+    private var lastSteer = 0f
 
     val live: Boolean
         get() = hold == TrailHold.None
@@ -174,14 +252,19 @@ internal class TrailRideSession(
         simulated: Boolean = false,
     ): TrailHold {
         steer = steering.update(position, nowNanos)
+        if (steer.state == FaceControlState.Tracking) lastSteer = steer.steer
         cadenceReading = cadence.update(connected, initialized, rpm, rpmCurrent, rpmObservedAt, nowNanos, simulated)
-        hold = supervisor.hold(camera, steer, cadenceReading)
-        if (edge.update(cadenceReading, live)) {
+        hold = supervisor.hold(cadenceReading)
+        if (standing.update(
+                position, camera, nowNanos,
+                canJump = live && game.phase == TrailPhase.Riding && !game.airborne,
+            )
+        ) {
             jumpRequests += 1
             game.requestJump()
         }
         if (live) {
-            lastSteps = game.advance(nowNanos, steer.steer, (cadenceReading.rpm ?: 0).toFloat())
+            lastSteps = game.advance(nowNanos, lastSteer, (cadenceReading.rpm ?: 0).toFloat())
         } else {
             game.resetClock()
             lastSteps = 0
@@ -191,47 +274,28 @@ internal class TrailRideSession(
 
     fun message(): String? = supervisor.message(hold, cadenceReading)
 
-    /** Host pause or game switch: stop the clock and forget transient input. */
     fun pause() {
         game.resetClock()
         steering.invalidate()
-        supervisor.invalidate()
-        edge.invalidate()
+        standing.reset()
+        lastSteer = 0f
     }
 
     fun restart(seed: Long) {
         game.restart(seed)
         steering.recalibrate()
-        supervisor.invalidate()
-        edge.invalidate()
+        standing.reset()
+        lastSteer = 0f
     }
 
     fun recenter() {
         steering.recalibrate()
-        supervisor.invalidate()
+        standing.reset()
+        lastSteer = 0f
     }
 
     fun resetCadence() {
         cadence.reset()
-        edge.invalidate()
-    }
-}
-
-/**
- * Turns the cadence detector's monotonic activation counter into one-shot jump requests. Only an
- * activation observed while the game is live counts; activations seen while held, or before the
- * first reading after [invalidate], are absorbed so an old surge is never replayed.
- */
-internal class BoostActivationEdge {
-    private var last = -1
-
-    fun invalidate() {
-        last = -1
-    }
-
-    fun update(reading: CadenceReading, live: Boolean): Boolean {
-        val previous = last
-        last = reading.activations
-        return live && previous >= 0 && reading.activations > previous
+        standing.reset()
     }
 }
