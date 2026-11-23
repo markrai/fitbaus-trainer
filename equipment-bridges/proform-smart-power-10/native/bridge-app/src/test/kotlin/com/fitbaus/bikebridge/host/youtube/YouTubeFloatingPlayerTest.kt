@@ -112,32 +112,42 @@ class YouTubeFloatingPlayerTest {
     }
 
     @Test
-    fun returningFromPreviewRefreshesSurfaceAfterFullSizeLayout() {
+    fun rendererSelectionAvoidsUnsynchronizedSurfaceLayersOnLegacyAndroid() {
+        assertTrue(YouTubeVideoOutput.useTextureView(22))
+        assertTrue(YouTubeVideoOutput.useTextureView(23))
+        assertFalse(YouTubeVideoOutput.useTextureView(24))
+        assertFalse(YouTubeVideoOutput.useTextureView(34))
+    }
+
+    @Test
+    fun returningFromPreviewRelayoutsVideoWithoutStaleSurfaceHolderRefreshes() {
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
         val minimize = content.substringAfter("fun minimizeInto(floatingSlot: FrameLayout)")
             .substringBefore("private fun restoreFullPlayer()")
         val restore = content.substringAfter("private fun restoreFullPlayer()")
-            .substringBefore("private fun cancelPendingSurfaceRestore()")
-        val cancel = content.substringAfter("private fun cancelPendingSurfaceRestore()")
             .substringBefore("private fun styleCaptionsForVideoSize()")
-        assertTrue(minimize.contains("cancelPendingSurfaceRestore()"))
-        assertTrue(restore.contains("surface.visibility = View.INVISIBLE"))
-        assertTrue(restore.contains("videoFrame.addOnLayoutChangeListener(listener)"))
+        assertTrue(minimize.contains("(videoFrame.parent as? ViewGroup)?.removeView(videoFrame)"))
+        assertTrue(restore.contains("fullScreenVideoArea.addView("))
         assertTrue(restore.contains("videoFrame.requestLayout()"))
-        assertTrue(restore.contains("surface.visibility = View.VISIBLE"))
-        assertTrue(restore.contains("surface.holder.setSizeFromLayout()"))
-        assertTrue(restore.contains("videoFrame.removeOnLayoutChangeListener(this)"))
-        assertTrue(cancel.contains("videoFrame.removeOnLayoutChangeListener(it)"))
-        assertTrue(cancel.contains("surface.visibility = View.VISIBLE"))
+        assertTrue(restore.contains("floating = false"))
+        assertFalse(content.contains("setSizeFromLayout()"))
+        assertFalse(content.contains("restoreSurfaceLayoutListener"))
+        assertFalse(content.contains("surface.visibility = View.INVISIBLE"))
     }
 
     @Test
-    fun miniPlayerReusesOneSurfaceAndOneEngine() {
+    fun directPlaybackAndFloatingPreviewShareTheSameLifecycleManagedVideoOutput() {
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
-        assertTrue(content.contains("private val surface = SurfaceView(context)"))
-        assertTrue(content.contains("engineFactory = PlayerEngineFactory { listener -> ExoPlayerEngine(context, surface, listener) }"))
+        val engine = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/PlayerEngine.kt").readText()
+        assertTrue(content.contains("private val videoOutput: View = if (YouTubeVideoOutput.useTextureView(Build.VERSION.SDK_INT)) TextureView(context) else SurfaceView(context)"))
+        assertTrue(content.contains("engineFactory = PlayerEngineFactory { listener -> ExoPlayerEngine(context, videoOutput, listener) }"))
+        assertTrue(content.contains("videoFrame.addView(videoOutput, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))"))
         assertTrue(content.contains("(videoFrame.parent as? ViewGroup)?.removeView(videoFrame)"))
         assertTrue(content.contains("floatingSlot.addView("))
         assertTrue(content.contains("fullScreenVideoArea.addView("))
+        assertTrue(engine.contains("is TextureView -> player.setVideoTextureView(videoOutput)"))
+        assertTrue(engine.contains("is SurfaceView -> player.setVideoSurfaceView(videoOutput)"))
+        assertTrue(engine.contains("is TextureView -> player.clearVideoTextureView(videoOutput)"))
+        assertTrue(engine.contains("is SurfaceView -> player.clearVideoSurfaceView(videoOutput)"))
     }
 }

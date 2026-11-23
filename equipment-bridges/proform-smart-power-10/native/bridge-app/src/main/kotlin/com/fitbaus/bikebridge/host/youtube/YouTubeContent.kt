@@ -11,6 +11,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
@@ -20,6 +21,7 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -45,7 +47,7 @@ internal class YouTubeContent(
     private val handler = Handler(Looper.getMainLooper())
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val loader = ThumbnailLoader(dp(THUMB_WIDTH_DP))
-    private val surface = SurfaceView(context)
+    private val videoOutput: View = if (YouTubeVideoOutput.useTextureView(Build.VERSION.SDK_INT)) TextureView(context) else SurfaceView(context)
     private val mediaSources by lazy { YouTubeMediaSources() }
 
     private val accountStore = AndroidGoogleAccountStore(context)
@@ -55,7 +57,7 @@ internal class YouTubeContent(
         catalogFactory = { GoogleSubscriptionFeedCatalog(NewPipeYouTubeCatalog(), accountStore, googleApi) },
         runner = ExecutorRunner("fitbaus-youtube"),
         main = MainThread { block -> handler.post { block() } },
-        engineFactory = PlayerEngineFactory { listener -> ExoPlayerEngine(context, surface, listener) },
+        engineFactory = PlayerEngineFactory { listener -> ExoPlayerEngine(context, videoOutput, listener) },
         preparer = MediaPreparer { handle, plan -> mediaSources.prepare(handle, plan) },
         initialMaxHeight = prefs.getInt(KEY_MAX_HEIGHT, YouTubeStreamSelector.DEFAULT_MAX_HEIGHT),
         onMaxHeightChanged = { prefs.edit().putInt(KEY_MAX_HEIGHT, it).apply() },
@@ -100,7 +102,6 @@ internal class YouTubeContent(
     private val videoFrame = AspectFrame(context)
     private lateinit var fullScreenVideoArea: FrameLayout
     private var floating = false
-    private var restoreSurfaceLayoutListener: View.OnLayoutChangeListener? = null
     private val captionsView = label("", 22f, PRIMARY)
     private val captionsButton = button("CC")
     private val playbackFeedback = ImageView(context)
@@ -192,7 +193,6 @@ internal class YouTubeContent(
         hideKeyboard()
         clearPlaybackFeedback()
         stopTicker()
-        cancelPendingSurfaceRestore()
         (videoFrame.parent as? ViewGroup)?.removeView(videoFrame)
         floatingSlot.addView(
             videoFrame,
@@ -206,44 +206,15 @@ internal class YouTubeContent(
 
     private fun restoreFullPlayer() {
         if (!floating) return
-        surface.visibility = View.INVISIBLE
         (videoFrame.parent as? ViewGroup)?.removeView(videoFrame)
         fullScreenVideoArea.addView(
             videoFrame,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER),
         )
         floating = false
-        val listener = object : View.OnLayoutChangeListener {
-            override fun onLayoutChange(
-                view: View,
-                left: Int,
-                top: Int,
-                right: Int,
-                bottom: Int,
-                oldLeft: Int,
-                oldTop: Int,
-                oldRight: Int,
-                oldBottom: Int,
-            ) {
-                videoFrame.removeOnLayoutChangeListener(this)
-                restoreSurfaceLayoutListener = null
-                if (floating || videoFrame.parent !== fullScreenVideoArea) return
-                surface.visibility = View.VISIBLE
-                surface.holder.setSizeFromLayout()
-                surface.requestLayout()
-            }
-        }
-        restoreSurfaceLayoutListener = listener
-        videoFrame.addOnLayoutChangeListener(listener)
         videoFrame.requestLayout()
         styleCaptionsForVideoSize()
         render(session.state)
-    }
-
-    private fun cancelPendingSurfaceRestore() {
-        restoreSurfaceLayoutListener?.let { videoFrame.removeOnLayoutChangeListener(it) }
-        restoreSurfaceLayoutListener = null
-        surface.visibility = View.VISIBLE
     }
 
     private fun styleCaptionsForVideoSize() {
@@ -256,7 +227,6 @@ internal class YouTubeContent(
 
     fun stop() {
         restoreFullPlayer()
-        cancelPendingSurfaceRestore()
         hideKeyboard()
         clearPlaybackFeedback()
         stopTicker()
@@ -268,7 +238,6 @@ internal class YouTubeContent(
 
     fun destroy() {
         restoreFullPlayer()
-        cancelPendingSurfaceRestore()
         clearPlaybackFeedback()
         stopTicker()
         accountController.destroy()
@@ -451,7 +420,7 @@ internal class YouTubeContent(
         val area = FrameLayout(context)
         fullScreenVideoArea = area
         area.setBackgroundColor(Color.BLACK)
-        videoFrame.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        videoFrame.addView(videoOutput, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         captionsView.gravity = Gravity.CENTER
         captionsView.setBackgroundColor(Color.argb(165, 0, 0, 0))
         captionsView.setShadowLayer(3f, 0f, 2f, Color.BLACK)

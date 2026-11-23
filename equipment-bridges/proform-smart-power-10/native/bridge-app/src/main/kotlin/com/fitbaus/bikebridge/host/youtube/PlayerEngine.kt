@@ -5,8 +5,11 @@
 package com.fitbaus.bikebridge.host.youtube
 
 import android.content.Context
+import android.os.Build
 import android.os.Looper
 import android.view.SurfaceView
+import android.view.TextureView
+import android.view.View
 import com.google.android.exoplayer2.C
 import com.google.android.exoplayer2.DefaultLoadControl
 import com.google.android.exoplayer2.DefaultRenderersFactory
@@ -92,9 +95,13 @@ internal object PlaybackFailures {
 
 internal class ExoMedia(val source: MediaSource, val maxVideoHeight: Int) : PreparedMedia
 
+internal object YouTubeVideoOutput {
+    fun useTextureView(sdkInt: Int): Boolean = sdkInt < Build.VERSION_CODES.N
+}
+
 internal class ExoPlayerEngine(
     context: Context,
-    private val surface: SurfaceView,
+    private val videoOutput: View,
     private val listener: PlayerEngineListener,
 ) : PlayerEngine {
     private var released = false
@@ -162,7 +169,11 @@ internal class ExoPlayerEngine(
 
     init {
         player.addListener(events)
-        player.setVideoSurfaceView(surface)
+        when (videoOutput) {
+            is TextureView -> player.setVideoTextureView(videoOutput)
+            is SurfaceView -> player.setVideoSurfaceView(videoOutput)
+            else -> throw IllegalArgumentException("Unsupported YouTube video output")
+        }
         player.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
     }
 
@@ -211,7 +222,10 @@ internal class ExoPlayerEngine(
         if (released) return
         released = true
         player.removeListener(events)
-        player.clearVideoSurfaceView(surface)
+        when (videoOutput) {
+            is TextureView -> player.clearVideoTextureView(videoOutput)
+            is SurfaceView -> player.clearVideoSurfaceView(videoOutput)
+        }
         player.release()
     }
 
