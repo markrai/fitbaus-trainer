@@ -135,7 +135,7 @@ Do not present unsigned APKs as install-ready releases.
 
 - Certificate pins for Trainer and production Bike Bridge are recorded in
   `.github/release/signing-policy.json`; keep the pinned fingerprints in sync
-  with the release keystores (details in `docs/RELEASE.md`)
+  with the release keystores (details in `.github/release/RELEASE.md`)
 - Verify existing GitHub Actions signing secrets remain configured
 - Production Bike Bridge physical-device qualification record for each published version
 - iOS distribution signing and a macOS build

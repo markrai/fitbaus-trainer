@@ -575,7 +575,7 @@ player, BIKETRIS, and external USB webcam support on the bike console.
   FITBAUS title. Also released in Lite 1.0.1.
 - **Release workflow.** Signed Trainer and production Bike Bridge artifacts
   are built from an existing tag, verified, and published with SHA-256
-  checksums. See [docs/RELEASE.md](docs/RELEASE.md).
+  checksums. See the [release engineering guide](.github/release/RELEASE.md).
 
 ### Changed
 
