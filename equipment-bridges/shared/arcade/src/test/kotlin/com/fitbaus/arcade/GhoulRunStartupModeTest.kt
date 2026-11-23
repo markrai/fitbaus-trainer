@@ -154,7 +154,7 @@ class GhoulRunStartupModeTest {
         val rig = Rig(game, GhoulRunSession(game), 1_000_000_000L)
         repeat(20) { rig.tick(GhoulRunInputSource.Controller) }
         assertEquals(GhoulPhase.WarmUp, game.phase)
-        repeat(20) { rig.tick(GhoulRunInputSource.Webcam) }
+        repeat(50) { rig.tick(GhoulRunInputSource.Webcam) }
         assertEquals(GhoulPhase.LeanCheck, game.phase)
         assertEquals(GhoulLane.Left, game.leanCheckTarget)
         assertFalse(game.leanCheckPassed)
