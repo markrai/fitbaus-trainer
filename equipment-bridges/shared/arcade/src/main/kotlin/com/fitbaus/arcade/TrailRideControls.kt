@@ -90,6 +90,9 @@ internal class HorizontalFaceSteering(config: SteerConfig = SteerConfig()) {
             }
         }
         lastSampleNanos = position.timestampNanos
+        if (config.smoothingSeconds <= 0f) {
+            return SteerReading(FaceControlState.Tracking, position.x, neutral, steerFor(position.x), age / 1_000_000L, stable)
+        }
         if (position.timestampNanos != smoothingSampleNanos) {
             val dt = if (smoothingSampleNanos == Long.MIN_VALUE) 0f else
                 (position.timestampNanos - smoothingSampleNanos).coerceAtLeast(0L) / 1_000_000_000f
