@@ -45,6 +45,8 @@ class NewPipePagingTest {
 
             override fun search(query: String): FeedPage = throw AssertionError()
 
+            override fun channelVideos(channelUrl: String): FeedPage = throw AssertionError()
+
             override fun more(cursor: FeedCursor): FeedPage = catalog.more(cursor)
 
             override fun resolve(videoId: String): ResolvedVideo = throw AssertionError()

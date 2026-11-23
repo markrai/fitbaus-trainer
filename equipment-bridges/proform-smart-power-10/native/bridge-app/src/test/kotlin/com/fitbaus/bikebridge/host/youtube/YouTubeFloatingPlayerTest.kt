@@ -112,6 +112,26 @@ class YouTubeFloatingPlayerTest {
     }
 
     @Test
+    fun returningFromPreviewRefreshesSurfaceAfterFullSizeLayout() {
+        val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
+        val minimize = content.substringAfter("fun minimizeInto(floatingSlot: FrameLayout)")
+            .substringBefore("private fun restoreFullPlayer()")
+        val restore = content.substringAfter("private fun restoreFullPlayer()")
+            .substringBefore("private fun cancelPendingSurfaceRestore()")
+        val cancel = content.substringAfter("private fun cancelPendingSurfaceRestore()")
+            .substringBefore("private fun styleCaptionsForVideoSize()")
+        assertTrue(minimize.contains("cancelPendingSurfaceRestore()"))
+        assertTrue(restore.contains("surface.visibility = View.INVISIBLE"))
+        assertTrue(restore.contains("videoFrame.addOnLayoutChangeListener(listener)"))
+        assertTrue(restore.contains("videoFrame.requestLayout()"))
+        assertTrue(restore.contains("surface.visibility = View.VISIBLE"))
+        assertTrue(restore.contains("surface.holder.setSizeFromLayout()"))
+        assertTrue(restore.contains("videoFrame.removeOnLayoutChangeListener(this)"))
+        assertTrue(cancel.contains("videoFrame.removeOnLayoutChangeListener(it)"))
+        assertTrue(cancel.contains("surface.visibility = View.VISIBLE"))
+    }
+
+    @Test
     fun miniPlayerReusesOneSurfaceAndOneEngine() {
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
         assertTrue(content.contains("private val surface = SurfaceView(context)"))

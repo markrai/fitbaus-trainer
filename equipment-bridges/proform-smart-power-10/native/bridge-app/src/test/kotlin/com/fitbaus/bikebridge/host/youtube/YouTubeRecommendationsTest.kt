@@ -22,6 +22,7 @@ class YouTubeRecommendationsTest {
         )
 
         override fun search(query: String): FeedPage = FeedPage(emptyList(), null)
+        override fun channelVideos(channelUrl: String): FeedPage = error("Not required")
         override fun more(cursor: FeedCursor): FeedPage = FeedPage(emptyList(), null)
         override fun resolve(videoId: String): ResolvedVideo = error("Not required")
 

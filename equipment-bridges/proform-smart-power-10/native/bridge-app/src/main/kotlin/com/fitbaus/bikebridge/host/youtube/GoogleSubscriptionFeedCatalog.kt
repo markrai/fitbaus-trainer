@@ -33,6 +33,8 @@ internal class GoogleSubscriptionFeedCatalog(
 
     override fun search(query: String): FeedPage = guest.search(query)
 
+    override fun channelVideos(channelUrl: String): FeedPage = guest.channelVideos(channelUrl)
+
     override fun related(seeds: List<VideoSummary>): FeedPage = guest.related(seeds)
 
     override fun more(cursor: FeedCursor): FeedPage = when (cursor) {
