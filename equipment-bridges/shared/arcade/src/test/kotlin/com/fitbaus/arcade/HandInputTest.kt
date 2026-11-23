@@ -113,6 +113,25 @@ class HandInputTest {
     }
 
     @Test
+    fun trackerLossImmediatelyReportsLostAndAllowsSameSessionReacquisition() {
+        val input = HandPositionInput(holdNanos = 500 * ms, freshNanos = 150 * ms)
+        val generation = input.cameraGeneration()
+        input.publishCamera(0.5f, 0.62f, 0.95f, 1_000 * ms, generation)
+        input.latest(1_001 * ms)
+        input.publishCamera(0.5f, 0.48f, 0.95f, 1_100 * ms, generation)
+        assertEquals(HandSource.Camera, input.latest(1_101 * ms).source)
+        input.markCameraLost(generation)
+        val lost = input.latest(1_102 * ms)
+        assertEquals(HandSource.Lost, lost.source)
+        assertEquals(0.48f, lost.y)
+        assertTrue(input.hasEverTracked())
+        input.publishCamera(0.5f, 0.60f, 0.95f, 1_200 * ms, generation)
+        assertEquals(HandSource.Camera, input.latest(1_201 * ms).source)
+        input.markCameraLost(generation - 1)
+        assertEquals(HandSource.Camera, input.latest(1_202 * ms).source)
+    }
+
+    @Test
     fun touchReleaseKeepsLastTouchPositionWhenNoCamera() {
         val input = HandPositionInput()
         input.onTouch(0.9f, 0.1f)
