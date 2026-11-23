@@ -46,28 +46,73 @@ class TrailRideControlsTest {
 
     @Test
     fun headToThePlayersLeftSteersLeftLikeBricks() {
-        val (s, t) = calibrated(0.5f)
+        val (s, start) = calibrated(0.5f, gain = 2.4f)
+        var t = start
+        repeat(14) {
+            s.update(face(0.4f, t), t * ms)
+            t += 100
+        }
         val left = s.update(face(0.4f, t), t * ms).steer
+        repeat(20) {
+            t += 100
+            s.update(face(0.6f, t), t * ms)
+        }
         val right = s.update(face(0.6f, t + 100), (t + 100) * ms).steer
-        assertTrue(left < 0f, "mirrored x below neutral is the player's left (Bricks moves the paddle left there)")
+        assertTrue(left < 0f, "mirrored x below neutral is the player's left")
         assertTrue(right > 0f)
-        assertEquals(-left, right, 1e-5f)
+        assertEquals(-left, right, 0.01f)
         val g = TrailWorlds.riding(TrailRideConfig(world = TrailWorlds.straight(firstDitch = TrailWorlds.NEVER)))
-        TrailPilots.run(g, 1f, steer = { left })
-        assertTrue(g.riderX < -0.5f, "the rider moves left in the world (${g.riderX})")
+        TrailPilots.run(g, 2f, steer = { left })
+        assertTrue(g.riderX < -0.35f, "the rider moves left in the world (${g.riderX})")
         assertTrue(TrailProjection().screenX(g.riderX, 3f) < 128f, "and world-left is screen-left")
     }
 
     @Test
-    fun deadZoneGainAndClamping() {
-        val (s, t) = calibrated(0.5f, gain = 4f)
-        assertEquals(0f, s.update(face(0.51f, t), t * ms).steer, 1e-6f, "small jitter inside the dead zone")
-        assertEquals((0.05f - 0.012f) * 4f, s.update(face(0.55f, t + 100), (t + 100) * ms).steer, 1e-5f)
-        s.setGain(7f)
-        assertEquals((0.05f - 0.012f) * 7f, s.update(face(0.55f, t + 200), (t + 200) * ms).steer, 1e-5f, "sensitivity scales the response")
-        assertEquals(1f, s.update(face(0.95f, t + 300), (t + 300) * ms).steer)
-        assertEquals(-1f, s.update(face(0.05f, t + 400), (t + 400) * ms).steer)
-        assertTrue(s.update(face(0.62f, t + 500), (t + 500) * ms).steer > 0.6f, "a modest head move (~0.12 of the control range) is a big steer")
+    fun horizontalDeadZoneGainAndClampingAreDeliberatelyLessSensitive() {
+        val (s, _) = calibrated(0.5f, gain = 2.4f)
+        assertEquals(0.03f, s.config.deadZone, 1e-6f)
+        assertEquals(0.18f, s.config.smoothingSeconds, 1e-6f)
+        assertEquals(0f, s.steerFor(0.525f), 1e-6f)
+        assertEquals(0f, s.steerFor(0.475f), 1e-6f)
+        assertEquals((0.05f - 0.03f) * 2.4f, s.steerFor(0.55f), 1e-5f)
+        s.setGain(4.2f)
+        assertEquals((0.05f - 0.03f) * 4.2f, s.steerFor(0.55f), 1e-5f)
+        assertEquals(1f, s.steerFor(0.95f), 1e-5f)
+        assertEquals(-1f, s.steerFor(0.05f), 1e-5f)
+    }
+
+    @Test
+    fun normalFaceJitterAndRapidAlternatingSamplesProduceNoSteeringSway() {
+        val (s, start) = calibrated(0.5f)
+        var t = start
+        repeat(60) { i ->
+            val x = if (i % 2 == 0) 0.54f else 0.46f
+            val reading = s.update(face(x, t), t * ms)
+            assertEquals(0f, reading.steer, 0.00001f, "camera X jitter should stay in neutral zone, sample $i")
+            t += 100
+        }
+        assertEquals(0f, s.update(face(0.5f, t), t * ms).steer, 0.00001f)
+    }
+
+    @Test
+    fun sustainedIntentionalMovementRemainsResponsiveWhileSingleFrameSpikesAreSmoothed() {
+        val (s, start) = calibrated(0.5f)
+        val spike = s.update(face(0.60f, start), start * ms)
+        assertTrue(kotlin.math.abs(spike.steer) < 0.10f)
+        var last = spike.steer
+        var t = start + 100
+        repeat(12) {
+            last = s.update(face(0.62f, t), t * ms).steer
+            t += 100
+        }
+        assertTrue(last > 0.15f, "a sustained head turn should still steer: $last")
+        assertTrue(last < 0.25f, "a moderate head turn should not steer hard: $last")
+        s.recalibrate()
+        while (!s.calibrated) {
+            s.update(face(0.62f, t), t * ms)
+            t += 100
+        }
+        assertEquals(0f, s.update(face(0.62f, t), t * ms).steer, 1e-6f)
     }
 
     @Test
