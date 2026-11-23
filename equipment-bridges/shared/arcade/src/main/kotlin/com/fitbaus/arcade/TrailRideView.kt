@@ -5,6 +5,7 @@ package com.fitbaus.arcade
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
@@ -20,191 +21,9 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-/** Pixel-art sprites for TRAIL RIDE, built once from code and small character maps. */
+/** Shared palette interpolation for procedural Trail Ride scenery. */
 internal object TrailSprites {
     fun rgb(r: Int, g: Int, b: Int): Int = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-
-    val HAZE: Int = rgb(150, 178, 170)
-    val PINE_DARK: Int = rgb(20, 52, 38)
-    val PINE_MID: Int = rgb(32, 82, 50)
-    val PINE_LIGHT: Int = rgb(70, 124, 62)
-    val FIR_DARK: Int = rgb(16, 44, 44)
-    val FIR_MID: Int = rgb(26, 70, 62)
-    val FIR_LIGHT: Int = rgb(58, 108, 84)
-    val LEAF_DARK: Int = rgb(44, 82, 30)
-    val LEAF_MID: Int = rgb(72, 118, 40)
-    val LEAF_LIGHT: Int = rgb(122, 162, 62)
-    val TRUNK: Int = rgb(96, 64, 40)
-    val TRUNK_DARK: Int = rgb(58, 38, 24)
-    val TRUNK_LIGHT: Int = rgb(132, 94, 60)
-
-    private val CHAR_COLORS = mapOf(
-        'K' to rgb(40, 40, 38),
-        'D' to rgb(84, 84, 80),
-        'G' to rgb(124, 124, 116),
-        'L' to rgb(168, 166, 154),
-        'd' to LEAF_DARK,
-        'm' to LEAF_MID,
-        'l' to LEAF_LIGHT,
-        'y' to rgb(196, 190, 90),
-        'O' to rgb(244, 118, 28),
-        'W' to rgb(250, 250, 244),
-        'P' to rgb(70, 70, 70),
-        's' to rgb(116, 98, 80),
-        'S' to rgb(150, 132, 110),
-    )
-
-    val ROCK = arrayOf(
-        "....LLLL....",
-        "..LLGGGGLL..",
-        ".LGGGGGGGDD.",
-        "LGGGLGGGGGDD",
-        "GGGGGGGGDDDD",
-        "GGGGGGDDDDDD",
-        "DGGGDDDDDDDK",
-        ".DDDDDDDDDK.",
-    )
-    val BUSH = arrayOf(
-        "...lml..ll..",
-        "..lmmmllmml.",
-        ".lmmdmmmmmml",
-        "lmmddmmdmmmm",
-        "mmdddmddmmdm",
-        "mddddddddddm",
-        ".dddddddddd.",
-    )
-    val GRASS = arrayOf(
-        "l..l..l",
-        "ml.m.lm",
-        ".mlmlm.",
-        "dmmdmmd",
-        ".ddddd.",
-    )
-    val FLOWERS = arrayOf(
-        ".y..W.y",
-        "ym.lmym",
-        ".mlmlm.",
-        "dmmdmmd",
-    )
-    val STONE = arrayOf(
-        ".SS.",
-        "sSSs",
-    )
-    val FLAG = arrayOf(
-        "OOOOOP",
-        "OOOOP.",
-        "OOOP..",
-        "OOP...",
-        "OP....",
-        "WP....",
-        "OP....",
-        "WP....",
-        "OP....",
-        "WP....",
-        "OP....",
-        "WP....",
-        "OP....",
-        "WP....",
-        "OP....",
-        "PP....",
-    )
-
-    fun bitmap(px: IntArray, w: Int, h: Int): Bitmap = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
-
-    /** Layered conifer: tiers widen downward, shaded dark on the left with a few highlights on the right. */
-    fun pine(w: Int, h: Int, dark: Int, mid: Int, light: Int, tiers: Int, salt: Int): IntArray {
-        val px = IntArray(w * h)
-        val trunkH = max(2, h / 8)
-        val crownH = h - trunkH
-        val cx = (w - 1) / 2f
-        for (y in crownH - 1 until h) {
-            for (x in floor(cx - 0.5f).toInt()..ceil(cx + 0.5f).toInt()) px[y * w + x] = if (x <= cx) TRUNK_DARK else TRUNK
-        }
-        for (y in 0 until crownH) {
-            val f = y.toFloat() / crownH
-            val tier = min(tiers - 1, (f * tiers).toInt())
-            val local = f * tiers - tier
-            val half = (w / 2f) * (0.22f + 0.78f * (tier + 1f) / tiers) * (0.28f + 0.72f * local)
-            val from = ceil(cx - half).toInt().coerceAtLeast(0)
-            val to = floor(cx + half).toInt().coerceAtMost(w - 1)
-            for (x in from..to) {
-                val u = (x - cx) / max(half, 0.5f)
-                val n = trailHash(salt.toLong(), y * w + x, 3)
-                px[y * w + x] = when {
-                    abs(u) > 0.82f || local > 0.9f -> dark
-                    u < -0.15f -> if (n < 0.18f) mid else dark
-                    n < 0.16f -> light
-                    else -> mid
-                }
-            }
-        }
-        return px
-    }
-
-    /** Broadleaf tree: lumpy round canopy lit from the upper right, short trunk. */
-    fun round(w: Int, h: Int, salt: Int): IntArray {
-        val px = IntArray(w * h)
-        val cx = (w - 1) / 2f
-        val trunkTop = (h * 0.55f).toInt()
-        for (y in trunkTop until h) for (x in floor(cx - 0.5f).toInt()..ceil(cx + 0.5f).toInt()) px[y * w + x] = if (x <= cx) TRUNK_DARK else TRUNK
-        val cy = h * 0.36f
-        val rx = w / 2f - 0.3f
-        val ry = h * 0.36f
-        for (y in 0 until (h * 0.75f).toInt()) {
-            for (x in 0 until w) {
-                val dx = (x - cx) / rx
-                val dy = (y - cy) / ry
-                val lump = 0.82f + 0.22f * trailHash(salt.toLong(), (x / 3) * 31 + y / 3, 5)
-                val r = dx * dx + dy * dy
-                if (r > lump * lump) continue
-                val n = trailHash(salt.toLong(), y * w + x, 7)
-                val lit = dx - dy
-                px[y * w + x] = when {
-                    r > lump * lump * 0.8f && lit < 0f -> LEAF_DARK
-                    lit > 0.5f -> if (n < 0.5f) LEAF_LIGHT else LEAF_MID
-                    lit < -0.4f -> if (n < 0.25f) LEAF_MID else LEAF_DARK
-                    else -> if (n < 0.12f) LEAF_LIGHT else LEAF_MID
-                }
-            }
-        }
-        return px
-    }
-
-    /** Hazard tree standing in the trail: a thick, clearly visible trunk with roots, crown above eye level. */
-    fun hazardTree(w: Int, h: Int): IntArray {
-        val px = IntArray(w * h)
-        val crownH = (h * 0.56f).toInt()
-        val crown = pine(w, crownH + 2, PINE_DARK, PINE_MID, PINE_LIGHT, 4, 91)
-        for (y in 0 until crownH) for (x in 0 until w) {
-            val c = crown[y * w + x]
-            if (c != 0) px[y * w + x] = c
-        }
-        val cx = (w - 1) / 2f
-        for (y in crownH - 3 until h) {
-            val flare = if (y >= h - 3) (y - (h - 4)) * 1f else 0f
-            val half = 2.6f + flare
-            for (x in ceil(cx - half).toInt()..floor(cx + half).toInt()) {
-                if (x < 0 || x >= w) continue
-                val u = (x - cx) / half
-                px[y * w + x] = when {
-                    u < -0.55f -> TRUNK_DARK
-                    u > 0.45f -> TRUNK_LIGHT
-                    (x + y / 3) % 4 == 0 -> TRUNK_DARK
-                    else -> TRUNK
-                }
-            }
-        }
-        return px
-    }
-
-    fun hazed(source: IntArray, amount: Float): IntArray = IntArray(source.size) { i -> if (source[i] == 0) 0 else blend(source[i], HAZE, amount) }
-
-    fun charPixels(rows: Array<String>): IntArray {
-        val w = rows.maxOf { it.length }
-        val px = IntArray(w * rows.size)
-        for ((y, row) in rows.withIndex()) for ((x, ch) in row.withIndex()) px[y * w + x] = CHAR_COLORS[ch] ?: 0
-        return px
-    }
 
     fun blend(a: Int, b: Int, t: Float): Int {
         val ar = a shr 16 and 0xFF
@@ -222,8 +41,8 @@ private class TrailSprite(val near: Bitmap, val far: Bitmap, val meters: Float)
 /**
  * TRAIL RIDE: a first-person mountain-bike ride through an endless forest. Steer with small
  * horizontal head movements (Face tracking), keep pedaling to roll, and jump ditches by standing
- * until the upward-moving face leaves the camera view. Rendered into a 256x144 framebuffer scaled with
- * nearest-neighbour filtering. Never sends anything to the bike.
+ * until the upward-moving face leaves the camera view. The 256x144 world coordinates are
+ * composited into a 512x288 antialiased framebuffer. Never sends anything to the bike.
  */
 public class TrailRideView(context: Context) : View(context) {
     public var diagnosticsOverlay: Boolean = false
@@ -260,12 +79,22 @@ public class TrailRideView(context: Context) : View(context) {
     private var landedAt = -10f
 
     private val projection = TrailProjection(width = LOGICAL_W.toFloat(), horizonY = HORIZON.toFloat())
-    private val fb = Bitmap.createBitmap(LOGICAL_W, LOGICAL_H, Bitmap.Config.ARGB_8888)
+    private val fb = Bitmap.createBitmap(
+        TrailRideArtwork.PRESENTATION_WIDTH,
+        TrailRideArtwork.PRESENTATION_HEIGHT,
+        Bitmap.Config.ARGB_8888,
+    )
     private val fbCanvas = Canvas(fb)
+    private val terrain = Bitmap.createBitmap(LOGICAL_W, LOGICAL_H, Bitmap.Config.ARGB_8888)
+    private val terrainDst = RectF(0f, 0f, TrailRideArtwork.PRESENTATION_WIDTH.toFloat(), TrailRideArtwork.PRESENTATION_HEIGHT.toFloat())
     private val pixels = IntArray(LOGICAL_W * LOGICAL_H)
-    private val fbSrc = Rect(0, 0, LOGICAL_W, LOGICAL_H)
+    private val fbSrc = Rect(0, 0, TrailRideArtwork.PRESENTATION_WIDTH, TrailRideArtwork.PRESENTATION_HEIGHT)
     private val fbDst = Rect()
-    private val skyRows = IntArray(HORIZON + 1) { y -> TrailSprites.blend(SKY_TOP, SKY_HAZE, (y.toFloat() / HORIZON).let { it * it }) }
+    private val skyRows = IntArray(HORIZON + 1) { y ->
+        val t = y.toFloat() / HORIZON
+        if (t < 0.65f) TrailSprites.blend(SKY_TOP, SKY_MID, t / 0.65f)
+        else TrailSprites.blend(SKY_MID, SKY_HAZE, (t - 0.65f) / 0.35f)
+    }
     private val mountains = IntArray(BACKDROP) { i ->
         val a = 2.0 * PI * i / BACKDROP
         (15 + 6 * sin(3 * a) + 4 * sin(7 * a + 1.3) + 2 * sin(17 * a + 0.4)).toInt()
@@ -281,16 +110,16 @@ public class TrailRideView(context: Context) : View(context) {
         (3 + 2 * sin(9 * a + 2.0) + (3 - tri) * 1.4 + trailHash(13L, i / 7, 2) * 2).toInt()
     }
 
-    private val pine = sprite(TrailSprites.pine(14, 30, TrailSprites.PINE_DARK, TrailSprites.PINE_MID, TrailSprites.PINE_LIGHT, 5, 1), 14, 30, 8f)
-    private val fir = sprite(TrailSprites.pine(12, 30, TrailSprites.FIR_DARK, TrailSprites.FIR_MID, TrailSprites.FIR_LIGHT, 7, 2), 12, 30, 9f)
-    private val broad = sprite(TrailSprites.round(16, 20, 3), 16, 20, 6f)
-    private val hazardTree = sprite(TrailSprites.hazardTree(20, 48), 20, 48, 6.5f)
-    private val bush = charSprite(TrailSprites.BUSH, 0.7f)
-    private val grass = charSprite(TrailSprites.GRASS, 0.35f)
-    private val flowers = charSprite(TrailSprites.FLOWERS, 0.3f)
-    private val rock = charSprite(TrailSprites.ROCK, 0.6f)
-    private val stone = charSprite(TrailSprites.STONE, 0.1f)
-    private val flag = charSprite(TrailSprites.FLAG, 1.5f)
+    private val pine = sprite(TrailRideArtwork.Kind.Pine, 14, 30, 8f)
+    private val fir = sprite(TrailRideArtwork.Kind.Fir, 12, 30, 9f)
+    private val broad = sprite(TrailRideArtwork.Kind.Broad, 16, 20, 6f)
+    private val hazardTree = sprite(TrailRideArtwork.Kind.HazardTree, 20, 48, 6.5f)
+    private val bush = sprite(TrailRideArtwork.Kind.Bush, 12, 7, 0.7f)
+    private val grass = sprite(TrailRideArtwork.Kind.Grass, 7, 5, 0.35f)
+    private val flowers = sprite(TrailRideArtwork.Kind.Flowers, 7, 4, 0.3f)
+    private val rock = sprite(TrailRideArtwork.Kind.Rock, 12, 8, 0.6f)
+    private val stone = sprite(TrailRideArtwork.Kind.Stone, 4, 2, 0.1f)
+    private val flag = sprite(TrailRideArtwork.Kind.Flag, 6, 16, 1.5f)
     private val spriteTable = arrayOf(pine, fir, broad, hazardTree, bush, grass, flowers, rock, stone, flag)
 
     private val itemZ = FloatArray(MAX_ITEMS)
@@ -301,12 +130,13 @@ public class TrailRideView(context: Context) : View(context) {
     private var itemCount = 0
     private val itemRect = RectF()
 
-    private val px = Paint()
-    private val barPaint = Paint().apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.SQUARE
-    }
-    private val scaledPaint = Paint().apply { isFilterBitmap = false }
+    private val px = Paint(Paint.ANTI_ALIAS_FLAG).apply { isDither = true }
+    private val cockpit = TrailRideCockpit()
+    private val spritePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { isDither = true }
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(56, 30, 39, 31) }
+    private val cloudPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val itemShadow = RectF()
+    private val scaledPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { isDither = true }
     private val hudPaint = Paint().apply {
         color = WHITE
         typeface = Typeface.MONOSPACE
@@ -436,12 +266,9 @@ public class TrailRideView(context: Context) : View(context) {
 
     private fun nextSeed(): Long = SEEDS[seedIndex].takeIf { it != 0L } ?: (System.nanoTime() xor 0x2545F4914F6CDD1DL)
 
-    private fun sprite(source: IntArray, w: Int, h: Int, meters: Float): TrailSprite =
-        TrailSprite(TrailSprites.bitmap(source, w, h), TrailSprites.bitmap(TrailSprites.hazed(source, FAR_HAZE), w, h), meters)
-
-    private fun charSprite(rows: Array<String>, meters: Float): TrailSprite {
-        val w = rows.maxOf { it.length }
-        return sprite(TrailSprites.charPixels(rows), w, rows.size, meters)
+    private fun sprite(kind: TrailRideArtwork.Kind, w: Int, h: Int, meters: Float): TrailSprite {
+        val art = TrailRideArtwork.create(kind, w, h)
+        return TrailSprite(art, TrailRideArtwork.hazed(art, FAR_HAZE), meters)
     }
 
     // ---- world rendering -------------------------------------------------------------------
@@ -460,7 +287,11 @@ public class TrailRideView(context: Context) : View(context) {
         val yaw = world.slope(d)
         drawBackdrop(yaw, camX)
         drawGround(d, camX, yaw)
-        fb.setPixels(pixels, 0, LOGICAL_W, 0, 0, LOGICAL_W, LOGICAL_H)
+        terrain.setPixels(pixels, 0, LOGICAL_W, 0, 0, LOGICAL_W, LOGICAL_H)
+        fbCanvas.drawBitmap(terrain, null, terrainDst, scaledPaint)
+        val saved = fbCanvas.save()
+        fbCanvas.scale(TrailRideArtwork.PRESENTATION_SCALE.toFloat(), TrailRideArtwork.PRESENTATION_SCALE.toFloat())
+        drawSkyAtmosphere(yaw)
         collectItems(d)
         sortItems()
         drawItems(camX, yaw)
@@ -469,6 +300,19 @@ public class TrailRideView(context: Context) : View(context) {
         if (sinceCrash in 0f..CRASH_FLASH_SECONDS) {
             px.color = (((1f - sinceCrash / CRASH_FLASH_SECONDS) * 90f).toInt() shl 24) or 0x00B02010
             fbCanvas.drawRect(0f, 0f, LOGICAL_W.toFloat(), LOGICAL_H.toFloat(), px)
+        }
+        fbCanvas.restoreToCount(saved)
+    }
+
+    private fun drawSkyAtmosphere(yaw: Float) {
+        val shift = yaw * 15f
+        for (i in 0..4) {
+            val x = ((i * 73f + 21f - shift) % 340f + 340f) % 340f - 25f
+            val y = 9f + (i * 13) % 23
+            cloudPaint.color = Color.argb(34, 247, 243, 229)
+            fbCanvas.drawOval(x - 29f, y - 3.5f, x + 32f, y + 2.4f, cloudPaint)
+            cloudPaint.color = Color.argb(20, 240, 234, 222)
+            fbCanvas.drawOval(x - 19f, y - 5f, x + 23f, y + 1.5f, cloudPaint)
         }
     }
 
@@ -480,7 +324,11 @@ public class TrailRideView(context: Context) : View(context) {
         val fShift = (infinityShift - camX * p.pxPerMeter * p.scale(FAR_TREE_Z)).toInt()
         val nShift = (infinityShift - camX * p.pxPerMeter * p.scale(NEAR_TREE_Z)).toInt()
         for (x in 0 until LOGICAL_W) {
-            column(x, mountains[(x - mShift).mod(BACKDROP)], MOUNTAIN)
+            val mountainHeight = mountains[(x - mShift).mod(BACKDROP)]
+            column(x, mountainHeight, MOUNTAIN)
+            if (mountainHeight > 0 && HORIZON - mountainHeight in 0 until HORIZON) {
+                pixels[(HORIZON - mountainHeight) * LOGICAL_W + x] = MOUNTAIN_RIDGE
+            }
             column(x, farTrees[(x - fShift).mod(BACKDROP)] + 4, FAR_FOREST)
             column(x, nearTrees[(x - nShift).mod(BACKDROP)] + 1, NEAR_FOREST)
         }
@@ -519,6 +367,16 @@ public class TrailRideView(context: Context) : View(context) {
             pixels.fill(grassColor, row, row + LOGICAL_W)
             val dirtBand = (wd / 1.7f).toInt() and 1
             span(row, cx - hw, cx + hw, TrailSprites.blend(if (dirtBand == 0) DIRT_A else DIRT_B, FAR_GROUND, fog))
+            if (z < 45f && y % 2 == 0) {
+                val patch = (wd * 2f).toInt()
+                for (i in 0..4) {
+                    val noise = trailHash(79L, patch, i + 31)
+                    val tx = cx + (noise * 1.6f - 0.8f) * hw
+                    val shade = if (i % 2 == 0) DIRT_LIGHT else DIRT_SHADOW
+                    span(row, tx, tx + max(0.8f, ppm * 0.025f),
+                        TrailSprites.blend(shade, FAR_GROUND, fog))
+                }
+            }
             val edge = max(1f, 0.16f * ppm)
             val edgeColor = TrailSprites.blend(EDGE, FAR_GROUND, fog)
             val warnColor = if (blink) WARN_EDGE else edgeColor
@@ -656,83 +514,34 @@ public class TrailRideView(context: Context) : View(context) {
             if (sx + wpx / 2f < 0f || sx - wpx / 2f > LOGICAL_W) continue
             val base = p.groundY(z)
             itemRect.set(sx - wpx / 2f, base - h, sx + wpx / 2f, base + max(0.5f, h * 0.02f))
-            fbCanvas.drawBitmap(bmp, null, itemRect, null)
+            if (z < 32f && h > 5f) {
+                itemShadow.set(sx - wpx * 0.31f, base - h * 0.02f,
+                    sx + wpx * 0.37f, base + h * 0.055f)
+                fbCanvas.drawOval(itemShadow, shadowPaint)
+            }
+            fbCanvas.drawBitmap(bmp, null, itemRect, spritePaint)
             drawn += 1
         }
         itemsDrawn = drawn
     }
 
     private fun drawHandlebars(riding: Boolean) {
-        val c = fbCanvas
         val sinceCrash = game.elapsed - game.lastCrashAt
-        val shake = if (sinceCrash in 0f..SHAKE_SECONDS) sin(sinceCrash * 70f) * 3f * (1f - sinceCrash / SHAKE_SECONDS) else 0f
+        val shake = if (sinceCrash in 0f..SHAKE_SECONDS)
+            sin(sinceCrash * 70f) * 3f * (1f - sinceCrash / SHAKE_SECONDS) else 0f
         val sinceLanding = animSeconds - landedAt
-        val dip = if (sinceLanding in 0f..0.25f) sin(sinceLanding / 0.25f * PI.toFloat()) * 3f else 0f
+        val dip = if (sinceLanding in 0f..0.25f)
+            sin(sinceLanding / 0.25f * PI.toFloat()) * 3f else 0f
         val lift = -visualJumpHeight() * 15f
         val bob = if (riding && !game.airborne) sin(pedalPhase) * 0.8f else 0f
-        val rumble = if (riding && game.nearEdge && !game.airborne) (if ((animSeconds * 30f).toInt() % 2 == 0) 0.7f else -0.7f) else 0f
-        c.save()
-        c.translate(shake + rumble + barTilt * 3f, lift + dip + bob + (if (game.phase == TrailPhase.Crashed) 4f else 0f))
-        c.rotate(barTilt * 5f + shake * 0.6f, 128f, 150f)
-        px.color = TIRE
-        c.drawRect(121f, 137f, 135f, 144f, px)
-        px.color = TIRE_TREAD
-        for (ty in 138..143 step 2) c.drawRect(123f, ty.toFloat(), 133f, ty + 1f, px)
-        px.color = FRAME
-        c.drawRect(117f, 132f, 139f, 137f, px)
-        px.color = FRAME_LIGHT
-        c.drawRect(117f, 132f, 139f, 133f, px)
-        px.color = STEM
-        c.drawRect(123f, 123f, 133f, 133f, px)
-        px.color = STEM_LIGHT
-        c.drawRect(123f, 123f, 133f, 124f, px)
-        barPaint.color = BAR
-        barPaint.strokeWidth = 4f
-        c.drawLine(128f, 126f, 94f, 124f, barPaint)
-        c.drawLine(94f, 124f, 46f, 120f, barPaint)
-        c.drawLine(128f, 126f, 162f, 124f, barPaint)
-        c.drawLine(162f, 124f, 210f, 120f, barPaint)
-        barPaint.color = BAR_LIGHT
-        barPaint.strokeWidth = 1f
-        c.drawLine(126f, 124.5f, 94f, 122.5f, barPaint)
-        c.drawLine(94f, 122.5f, 48f, 118.5f, barPaint)
-        c.drawLine(130f, 124.5f, 162f, 122.5f, barPaint)
-        c.drawLine(162f, 122.5f, 208f, 118.5f, barPaint)
-        barPaint.color = LEVER
-        barPaint.strokeWidth = 2f
-        c.drawLine(58f, 121f, 84f, 129f, barPaint)
-        c.drawLine(198f, 121f, 172f, 129f, barPaint)
-        px.color = LEVER
-        c.drawRect(54f, 118f, 60f, 124f, px)
-        c.drawRect(196f, 118f, 202f, 124f, px)
-        px.color = GRIP
-        c.drawRect(24f, 115f, 52f, 125f, px)
-        c.drawRect(204f, 115f, 232f, 125f, px)
-        px.color = GRIP_RIDGE
-        for (gx in 26..50 step 3) {
-            c.drawRect(gx.toFloat(), 115f, gx + 1f, 125f, px)
-            c.drawRect((256 - gx - 1).toFloat(), 115f, (256 - gx).toFloat(), 125f, px)
-        }
-        px.color = GLOVE
-        c.drawOval(RECT_GLOVE_L, px)
-        c.drawOval(RECT_GLOVE_R, px)
-        c.drawOval(RECT_THUMB_L, px)
-        c.drawOval(RECT_THUMB_R, px)
-        px.color = GLOVE_DARK
-        for (k in 0..3) {
-            c.drawRect(31f + k * 4.5f, 119f, 32f + k * 4.5f, 126f, px)
-            c.drawRect(224f - k * 4.5f, 119f, 225f - k * 4.5f, 126f, px)
-        }
-        px.color = GLOVE_LIGHT
-        c.drawRect(31f, 114f, 47f, 115f, px)
-        c.drawRect(209f, 114f, 225f, 115f, px)
-        px.color = COMPUTER
-        c.drawRect(120f, 117f, 136f, 124f, px)
-        px.color = COMPUTER_SCREEN
-        c.drawRect(122f, 118f, 134f, 122f, px)
-        px.color = COMPUTER_DIGIT
-        c.drawRect(123f, 120f, 123f + 10f * (game.speed / game.config.maxSpeed).coerceIn(0f, 1f), 121f, px)
-        c.restore()
+        val rumble = if (riding && game.nearEdge && !game.airborne)
+            (if ((animSeconds * 30f).toInt() % 2 == 0) 0.7f else -0.7f) else 0f
+        val saved = fbCanvas.save()
+        fbCanvas.translate(shake + rumble + barTilt * 3f, lift + dip + bob +
+            (if (game.phase == TrailPhase.Crashed) 4f else 0f))
+        fbCanvas.rotate(barTilt * 5f + shake * 0.6f, 128f, 150f)
+        cockpit.draw(fbCanvas, game.speed / game.config.maxSpeed)
+        fbCanvas.restoreToCount(saved)
     }
 
     // ---- screen chrome ---------------------------------------------------------------------
@@ -995,45 +804,28 @@ public class TrailRideView(context: Context) : View(context) {
         val SENSITIVITIES = floatArrayOf(3f, 4f, 5.5f, 7f)
         val SENSITIVITY_LABELS = arrayOf("Low", "Medium", "High", "Very high")
         val SEEDS = longArrayOf(0L, 1001L, 2024L, 7777L)
-        val RECT_GLOVE_L = RectF(27f, 113f, 51f, 128f)
-        val RECT_GLOVE_R = RectF(205f, 113f, 229f, 128f)
-        val RECT_THUMB_L = RectF(45f, 111f, 56f, 119f)
-        val RECT_THUMB_R = RectF(200f, 111f, 211f, 119f)
         val WHITE = TrailSprites.rgb(252, 252, 252)
-        val SKY_TOP = TrailSprites.rgb(86, 140, 200)
-        val SKY_HAZE = TrailSprites.rgb(196, 218, 214)
-        val MOUNTAIN = TrailSprites.rgb(120, 146, 160)
-        val FAR_FOREST = TrailSprites.rgb(60, 98, 92)
-        val NEAR_FOREST = TrailSprites.rgb(30, 66, 52)
-        val FAR_GROUND = TrailSprites.rgb(56, 92, 64)
-        val GRASS_A = TrailSprites.rgb(74, 124, 50)
-        val GRASS_B = TrailSprites.rgb(64, 112, 44)
-        val DIRT_A = TrailSprites.rgb(156, 112, 68)
-        val DIRT_B = TrailSprites.rgb(146, 104, 62)
-        val RUT = TrailSprites.rgb(118, 82, 50)
-        val EDGE = TrailSprites.rgb(96, 70, 42)
+        val SKY_TOP = TrailSprites.rgb(57, 104, 143)
+        val SKY_MID = TrailSprites.rgb(127, 164, 174)
+        val SKY_HAZE = TrailSprites.rgb(206, 217, 197)
+        val MOUNTAIN = TrailSprites.rgb(145, 158, 153)
+        val MOUNTAIN_RIDGE = TrailSprites.rgb(187, 194, 180)
+        val FAR_FOREST = TrailSprites.rgb(93, 126, 114)
+        val NEAR_FOREST = TrailSprites.rgb(52, 90, 74)
+        val FAR_GROUND = TrailSprites.rgb(91, 122, 83)
+        val GRASS_A = TrailSprites.rgb(94, 139, 76)
+        val GRASS_B = TrailSprites.rgb(83, 127, 69)
+        val DIRT_A = TrailSprites.rgb(161, 124, 85)
+        val DIRT_B = TrailSprites.rgb(146, 108, 75)
+        val DIRT_LIGHT = TrailSprites.rgb(176, 145, 109)
+        val DIRT_SHADOW = TrailSprites.rgb(129, 99, 72)
+        val RUT = TrailSprites.rgb(103, 76, 56)
+        val EDGE = TrailSprites.rgb(109, 93, 71)
         val WARN_EDGE = TrailSprites.rgb(236, 92, 40)
-        val LIP = TrailSprites.rgb(186, 142, 92)
-        val DITCH_DARK = TrailSprites.rgb(30, 20, 14)
-        val DITCH_WALL = TrailSprites.rgb(92, 62, 38)
+        val LIP = TrailSprites.rgb(195, 151, 96)
+        val DITCH_DARK = TrailSprites.rgb(35, 27, 24)
+        val DITCH_WALL = TrailSprites.rgb(87, 66, 49)
         val TIMING = TrailSprites.rgb(80, 240, 120)
-        val TIRE = TrailSprites.rgb(28, 28, 30)
-        val TIRE_TREAD = TrailSprites.rgb(52, 52, 54)
-        val FRAME = TrailSprites.rgb(30, 110, 170)
-        val FRAME_LIGHT = TrailSprites.rgb(90, 170, 220)
-        val STEM = TrailSprites.rgb(44, 44, 50)
-        val STEM_LIGHT = TrailSprites.rgb(110, 110, 120)
-        val BAR = TrailSprites.rgb(46, 46, 52)
-        val BAR_LIGHT = TrailSprites.rgb(130, 130, 140)
-        val LEVER = TrailSprites.rgb(150, 150, 158)
-        val GRIP = TrailSprites.rgb(22, 22, 22)
-        val GRIP_RIDGE = TrailSprites.rgb(56, 56, 56)
-        val GLOVE = TrailSprites.rgb(200, 64, 40)
-        val GLOVE_DARK = TrailSprites.rgb(130, 36, 24)
-        val GLOVE_LIGHT = TrailSprites.rgb(236, 120, 84)
-        val COMPUTER = TrailSprites.rgb(20, 20, 24)
-        val COMPUTER_SCREEN = TrailSprites.rgb(110, 150, 100)
-        val COMPUTER_DIGIT = TrailSprites.rgb(20, 40, 20)
         val CRASH_TEXT = TrailSprites.rgb(236, 170, 150)
         val METER_BACK = TrailSprites.rgb(40, 40, 40)
         val METER_BOOST = TrailSprites.rgb(252, 160, 68)
