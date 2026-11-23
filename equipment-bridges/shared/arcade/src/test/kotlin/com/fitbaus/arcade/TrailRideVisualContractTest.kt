@@ -41,6 +41,18 @@ class TrailRideVisualContractTest {
     }
 
     @Test
+    fun cockpitHasNoHandsAndTurtleShellHasDistinctArtwork() {
+        assertFalse(art.contains("c.drawOval(27f, 112f, 55f, 131f"))
+        assertFalse(art.contains("c.drawOval(201f, 112f, 229f, 131f"))
+        assertFalse(art.contains("Color.rgb(155, 105, 79)"))
+        assertFalse(art.contains("Color.rgb(179, 130, 91)"))
+        assertTrue(art.contains("Kind.TurtleShell -> turtleShell("))
+        assertTrue(view.contains("ObstacleKind.TurtleShell -> KIND_TURTLE_SHELL"))
+        assertTrue(view.contains("private val turtleShell = sprite(TrailRideArtwork.Kind.TurtleShell"))
+        assertTrue(view.contains("spriteTable = arrayOf(pine, fir, broad, hazardTree, bush, grass, flowers, rock, stone, flag, turtleShell)"))
+    }
+
+    @Test
     fun visualChangesDoNotIntroduceSimulationOrEquipmentInputs() {
         val forbidden = listOf(
             "requestResistance", "setResistance", "requestIncline", "setIncline",
