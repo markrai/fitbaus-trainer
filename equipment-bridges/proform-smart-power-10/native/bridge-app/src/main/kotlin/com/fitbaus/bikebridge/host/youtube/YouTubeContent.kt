@@ -44,6 +44,7 @@ internal class YouTubeContent(
     private val brightness: BrightnessControl,
     private val onRestoreRequested: () -> Unit = {},
     private val onVoiceSearchRequested: () -> Unit = {},
+    private val onVoiceSearchCancelled: () -> Unit = {},
 ) : LinearLayout(context) {
     val hud: ExerciseHud = ExerciseHud(context)
     private val handler = Handler(Looper.getMainLooper())
@@ -85,6 +86,7 @@ internal class YouTubeContent(
     private val searchField = EditText(context)
     private val searchClear = label("×", 30f, PRIMARY)
     private val searchMic = ImageView(context)
+    private val voiceStatus = label("", 14f, PRIMARY)
     private val listTitle = label("", 14f, MUTE)
     private val channelBackButton = button("‹ BACK")
     private lateinit var browseToolbar: LinearLayout
@@ -235,6 +237,7 @@ internal class YouTubeContent(
         stopTicker()
         accountView.close()
         accountController.stop()
+        setVoiceSearchStatus(null)
         session.stop()
         loader.pause()
     }
@@ -305,6 +308,10 @@ internal class YouTubeContent(
         }
         bar.addView(myYouTube, spaced(LayoutParams(dp(170), dp(TOUCH_DP))))
         resultsScreen.addView(bar, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        voiceStatus.setPadding(dp(12), dp(7), dp(12), dp(7))
+        voiceStatus.setBackgroundColor(FIELD)
+        voiceStatus.visibility = GONE
+        resultsScreen.addView(voiceStatus, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
 
         listTitle.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
         listTitle.maxLines = 1
@@ -705,6 +712,12 @@ internal class YouTubeContent(
             .show()
     }
 
+    fun setVoiceSearchStatus(status: String?) {
+        voiceStatus.visibility = if (status.isNullOrBlank()) GONE else VISIBLE
+        voiceStatus.text = status.orEmpty()
+        searchMic.isActivated = !status.isNullOrBlank()
+    }
+
     fun acceptVoiceSearchResult(query: String) {
         val recognized = YouTubeVoiceSearch.bestMatch(listOf(query)) ?: return
         if (!session.state.active) return
@@ -723,6 +736,7 @@ internal class YouTubeContent(
     }
 
     private fun returnToHome() {
+        onVoiceSearchCancelled()
         hideKeyboard()
         val connected = accountController.hasAccount()
         val reload = YouTubeHomeNavigation.shouldReload(previousAccountState, connected, session.state.browse)
