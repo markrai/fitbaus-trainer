@@ -12,6 +12,10 @@
   <img src="https://img.shields.io/badge/Web-PWA-8A2BE2" alt="Web" />
 </p>
 
+<p align="center">
+  <img src="proform.png" alt="Showcase" width="120" />
+</p>
+
 **FitBaus Trainer is an open-source fitness and entertainment platform that transforms your workout into something you look forward to.**
 
 Train with structured, heart-rate-guided workouts, play interactive games using body movements or game controllers, watch YouTube, listen to audiobooks, and track your fitness progress.
