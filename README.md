@@ -1,8 +1,9 @@
-<p align="center"><strong>Train. Play. Watch. Listen. Learn.</strong></p>
+<p align="center">
+  <img src="github.png" alt="Showcase" width="720" />
+</p>
 <p align="center">
   <img src="hero.jpg" alt="Showcase" width="720" />
 </p>
-
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-orange.svg" alt="License: AGPL-3.0" /></a>
   <a href="https://github.com/markrai/fitbaus-trainer/releases"><img src="https://img.shields.io/github/v/release/markrai/fitbaus-trainer?label=latest&amp;color=blue" alt="Latest" /></a>
@@ -18,12 +19,6 @@ Train with structured, heart-rate-guided workouts, play interactive games using 
 Built for people who want more from their exercise equipment without mandatory subscriptions, proprietary ecosystems or surrendering ownership of their fitness data.
 
 [Download](#download--get-started) · [Features](#fitness--training) · [Supported Equipment](#supported-equipment--hardware) · [Documentation](#documentation)
-
-## See FitBaus in Action
-
-<!-- Replace this placeholder with the user-provided 3 x 3 screenshot collage: dashboard, YouTube, audiobooks, followed by six gameplay screenshots. -->
-
-*Screenshot collage coming soon.*
 
 ## Fitness & Training
 
