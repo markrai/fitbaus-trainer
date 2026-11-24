@@ -25,6 +25,16 @@ internal class BooksServer(address: String) {
         origin = (if (isCleartext) "http://" else "https://") + uri.rawAuthority + path
     }
 
+    fun playUrl(itemId: String): String = "$origin/api/items/${id(itemId)}/play"
+
+    fun sessionUrl(sessionId: String, close: Boolean): String = "$origin/api/session/${id(sessionId)}/${if (close) "close" else "sync"}"
+
+    fun audioUrl(itemId: String, path: String): String {
+        val prefix = "/api/items/${id(itemId)}/file/"
+        require(path.startsWith(prefix))
+        return origin + prefix + id(path.removePrefix(prefix))
+    }
+
     fun loginUrl(): String = "$origin/login"
 
     fun refreshUrl(): String = "$origin/auth/refresh"
@@ -51,6 +61,18 @@ internal class BooksServer(address: String) {
 
     companion object {
         const val PAGE_SIZE = 40
+
+        fun address(protocol: String, host: String, port: String, subpath: Boolean): String {
+            require(protocol == "http" || protocol == "https")
+            val name = host.trim()
+            require(name.isNotEmpty() && name.none { it.isWhitespace() || it in "/:@?#\\\\[]" })
+            val number = port.trim()
+            require(number.isEmpty() || (number.all { it in '0'..'9' } && number.toIntOrNull() in 1..65535))
+            val value = "$protocol://$name" + (if (number.isEmpty()) "" else ":$number") +
+                (if (subpath) "/audiobookshelf" else "")
+            BooksServer(value)
+            return value
+        }
 
         fun requireTransport(uri: URI) {
             val host = uri.host ?: throw IllegalArgumentException("Invalid server host")
