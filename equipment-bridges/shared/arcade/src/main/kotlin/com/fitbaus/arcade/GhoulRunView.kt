@@ -377,6 +377,31 @@ public class GhoulRunView(context: Context) : FrameLayout(context) {
         updateGlLifecycle()
     }
 
+    private var showcaseEncounterStaged = false
+
+    public fun restartShowcase() {
+        seed = 1203L
+        game.markLeanCheckPassed()
+        session.restart(seed)
+        session.pause()
+        rig.reset()
+        showcaseEncounterStaged = false
+        overlay.invalidate()
+    }
+
+    public fun showcaseEncounter() {
+        if (showcaseEncounterStaged || game.phase != GhoulPhase.Playing || game.progress > 0.55f || !game.world.isOpen(game.riderCell, game.heading)) return
+        val monster = game.ghoul
+        monster.cell = game.riderCell.moved(game.heading)
+        monster.heading = game.heading.opposite
+        monster.progress = 0f
+        monster.state = GhoulState.Hunting
+        monster.lastKnown = game.riderCell
+        monster.contactLostFor = 0f
+        monster.mouthOpen = 0f
+        showcaseEncounterStaged = true
+    }
+
     public fun restartGame() {
         seed += 1L
         session.restart(seed)

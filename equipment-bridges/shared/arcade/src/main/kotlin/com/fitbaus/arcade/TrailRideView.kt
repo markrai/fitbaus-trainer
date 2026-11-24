@@ -227,6 +227,17 @@ public class TrailRideView(context: Context) : View(context) {
         lastRenderNanos = Long.MIN_VALUE
     }
 
+    public fun restartShowcase() {
+        session.restart(1001L)
+        wasAirborne = false
+        invalidate()
+    }
+
+    public fun showcaseJumpIfReady() {
+        val ditch = game.nextDitch() ?: return
+        if (game.phase == TrailPhase.Riding && !game.airborne && game.timeTo(ditch) in game.config.jumpLateSeconds..game.config.jumpEarlySeconds) game.requestJump()
+    }
+
     public fun restartGame() {
         session.restart(nextSeed())
         wasAirborne = false

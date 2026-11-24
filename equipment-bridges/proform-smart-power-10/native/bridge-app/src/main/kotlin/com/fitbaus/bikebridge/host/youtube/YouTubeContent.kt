@@ -151,6 +151,8 @@ internal class YouTubeContent(
         render(session.state)
     }
 
+    fun showcasePlayed(): Boolean = session.state.playback.positionMs > 1000L && session.state.playback.phase != PlaybackPhase.Error
+
     fun showcaseSearch(title: String) { session.search(title) }
 
     fun showcaseOpen(title: String): Boolean {

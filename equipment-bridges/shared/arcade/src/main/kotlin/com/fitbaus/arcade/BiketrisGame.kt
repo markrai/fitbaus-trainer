@@ -259,6 +259,19 @@ internal class BiketrisGame(val config: BiketrisConfig = BiketrisConfig(), seed:
 
     fun clearedRow(index: Int): Int = clearedRows[index]
 
+    fun prepareShowcase() {
+        for (candidate in 1L..100L) {
+            restart(candidate)
+            if (piece == BlockPiece.I) break
+        }
+        check(piece == BlockPiece.I)
+        val row = rows - 1
+        val gap = (columns - 4) / 2
+        for (col in 0 until columns) {
+            if (col !in gap until gap + 4) board[row * columns + col] = 1 + col % BlockPiece.values().size
+        }
+    }
+
     fun restart(seed: Long) {
         this.seed = seed
         random = Random(seed)

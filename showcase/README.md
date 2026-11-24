@@ -10,6 +10,6 @@ The Math preview uses a low-resolution shaded synthetic figure by default. For a
 
 ## Capture
 
-From the repository root, run `powershell -ExecutionPolicy Bypass -File showcase/record.ps1 -Bike YOUR_ADB_SERIAL -VideoTitle "EXACT VIDEO TITLE" -BookTitle "EXACT BOOK TITLE"`. The script starts one 180-second screen recording and triggers a 170-second timeline. Verify the output visually before publication. Media search uses the real providers; title matches must be exact (case-insensitive). This initial pass has no physical-console qualification and does not guarantee a ghoul encounter or line clear. Tune scene seeds and inputs after the first capture. The screenrecord output is silent.
+From the repository root, run `powershell -ExecutionPolicy Bypass -File showcase/record.ps1 -Bike YOUR_ADB_SERIAL -VideoTitle "EXACT VIDEO TITLE" -BookTitle "EXACT BOOK TITLE"`. The script starts one 180-second screen recording and triggers a 170-second timeline. Verify the output visually before publication. Media search uses the real providers; title matches must be exact (case-insensitive). The branch stages a near-complete Biketris row, a ghoul in the rider's forward corridor, and triggers Trails jumps in the real timing window. These are simulated inputs and staged game states, not evidence of live play. The initial pass has no physical-console qualification; verify that each event is visible and tune if necessary. The screenrecord output is silent.
 
 Close this PR without merging, then delete the branch and uninstall only the showcase package.

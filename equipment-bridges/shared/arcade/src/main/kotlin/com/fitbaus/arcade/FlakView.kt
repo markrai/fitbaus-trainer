@@ -83,7 +83,7 @@ public class FlakView(context: Context) : View(context) {
     private val face = VerticalFaceControl()
     private val cadence = CadenceBoost()
     private val supervisor = FlakSupervisor()
-    private val game = FlakGame().also { g -> g.onEvent = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, it) } }
+    private val game = FlakGame(random = kotlin.random.Random(1203)).also { g -> g.onEvent = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, it) } }
     private val controllerSteering = FlakControllerSteering(game.config).apply { syncToJet(game.jetX, game.jetY) }
     private var selectedInput = prefs?.getString(FlakInputSelection.PREF_KEY, null)
 

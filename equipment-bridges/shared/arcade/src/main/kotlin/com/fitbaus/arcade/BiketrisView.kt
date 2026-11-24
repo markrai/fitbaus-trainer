@@ -255,6 +255,29 @@ public class BiketrisView(context: Context) : View(context) {
         waveRate.reset()
     }
 
+    private var showcaseRotation = -1
+
+    public fun restartShowcase() {
+        session.restart(1203L)
+        game.prepareShowcase()
+        difficultyLevel = 5
+        game.difficultyLevel = 5
+        gestures = WaveGestureInput()
+        showcaseRotation = -1
+        clearShownFor = -1f
+        invalidate()
+    }
+
+    public fun renderShowcase(position: HandPosition, rpm: Int, sample: String, seconds: Double) {
+        val input = if (game.lines == 0) position.copy(x = 0.5f) else position
+        render(input, CameraState.Ready, null, true, true, rpm, true, sample, "", null)
+        val rotation = (seconds / 2.5).toInt()
+        if (game.lines > 0 && rotation != showcaseRotation) {
+            showcaseRotation = rotation
+            gestures?.simulate(System.nanoTime())
+        }
+    }
+
     public fun restartGame() {
         session.restart(System.nanoTime())
         clearShownFor = -1f

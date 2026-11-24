@@ -73,8 +73,6 @@ class NativeBridgeActivity : Activity() {
     private val showcase = ShowcaseDirector()
     private var showcaseMediaRequested = false
     private var showcaseMediaOpened = false
-    private var showcaseJumped = false
-    private var showcaseRotated = -1
     private val showcaseStep = object : Runnable {
         override fun run() {
             advanceShowcase()
@@ -152,9 +150,12 @@ class NativeBridgeActivity : Activity() {
             trackerRate.reset()
             arcadeDiagnostics = ""
             bikeMotion.reset()
-            showcaseJumped = false
-            showcaseRotated = -1
-            if (game == ArcadeMode.TrailRide) arcadeContent.trail.selectDeveloperOption(3)
+            when (game) {
+                ArcadeMode.TrailRide -> arcadeContent.trail.restartShowcase()
+                ArcadeMode.GhoulRun -> arcadeContent.ghoul.restartShowcase()
+                ArcadeMode.Biketris -> arcadeContent.biketris.restartShowcase()
+                else -> Unit
+            }
             arcadeClock.start()
         }
 
@@ -249,7 +250,6 @@ class NativeBridgeActivity : Activity() {
         super.onResume()
         appliedBrightnessRevision = -1
         applyStoredBrightness()
-        bindHttpEndpoint(force = true)
         handler.removeCallbacks(refresh)
         handler.post(refresh)
         modeController.onHostResume()
@@ -415,8 +415,8 @@ class NativeBridgeActivity : Activity() {
         val scene = showcase.scene() ?: return
         if (modeController.mode != scene.mode) {
             if (modeController.mode == ArcadeMode.YouTube || modeController.mode == ArcadeMode.Books) {
-                if (!showcaseMediaOpened) {
-                    showcase.abort("media was not opened: ${modeController.mode}")
+                if (!showcaseMediaOpened || (modeController.mode == ArcadeMode.YouTube && !youtubeContent.showcasePlayed())) {
+                    showcase.abort("media playback not verified: ${modeController.mode}")
                     return
                 }
             }
@@ -438,7 +438,7 @@ class NativeBridgeActivity : Activity() {
             if (t >= 20.0 && showcaseMediaOpened) booksContent.showcaseFullscreen()
         }
         if (showcase.finished()) {
-            if (!showcaseMediaOpened) showcase.abort("audiobook was not opened") else showcase.complete()
+            if (!showcaseMediaOpened || !booksContent.showcasePlayed()) showcase.abort("audiobook playback not verified") else showcase.complete()
         }
     }
 
@@ -479,19 +479,14 @@ class NativeBridgeActivity : Activity() {
             ArcadeMode.Flak -> arcadeContent.flak.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
             ArcadeMode.TrailRide -> {
                 arcadeContent.trail.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
-                if (t > 10.0 && !showcaseJumped) {
-                    showcaseJumped = true
-                    arcadeContent.trail.selectDeveloperOption(5)
-                }
+                arcadeContent.trail.showcaseJumpIfReady()
             }
-            ArcadeMode.GhoulRun -> arcadeContent.ghoul.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
+            ArcadeMode.GhoulRun -> {
+                arcadeContent.ghoul.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
+                if (t > 8.0) arcadeContent.ghoul.showcaseEncounter()
+            }
             ArcadeMode.Biketris -> {
-                arcadeContent.biketris.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
-                val rotation = (t / 2.5).toInt()
-                if (rotation != showcaseRotated) {
-                    showcaseRotated = rotation
-                    arcadeContent.biketris.selectDeveloperOption(4)
-                }
+                arcadeContent.biketris.renderShowcase(position, s.rpm, sample, t)
             }
             else -> Unit
         }
@@ -590,7 +585,6 @@ class NativeBridgeActivity : Activity() {
         arcadeContent.flak.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.ghoul.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.playground.input = handInput
-        arcadeContent.biketris.gestures = com.fitbaus.arcade.WaveGestureInput()
         arcadeContent.playground.faceControl = savedTrackerSettings().mode == ArcadeTrackerMode.Face
         val overlay = getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getBoolean(ARCADE_OVERLAY_KEY, false)
         arcadeContent.playground.diagnosticsOverlay = overlay

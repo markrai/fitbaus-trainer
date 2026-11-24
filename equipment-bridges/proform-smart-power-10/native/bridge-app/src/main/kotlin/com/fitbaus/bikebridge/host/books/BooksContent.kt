@@ -148,6 +148,8 @@ internal class BooksContent(
         return true
     }
 
+    fun showcasePlayed(): Boolean = playerState.session != null && !playerState.failed && playerState.playing
+
     fun showcaseFullscreen() { setReadingFullscreen(true) }
 
     fun start() {
