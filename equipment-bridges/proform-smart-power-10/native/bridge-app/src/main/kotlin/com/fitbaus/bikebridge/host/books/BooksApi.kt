@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.URLEncoder
 
 internal class BooksServer(address: String) {
     private val origin: String
@@ -26,6 +27,12 @@ internal class BooksServer(address: String) {
     fun itemsUrl(libraryId: String, page: Int): String {
         require(page >= 0)
         return "$origin/api/libraries/${id(libraryId)}/items?limit=$PAGE_SIZE&page=$page&sort=media.metadata.title&minified=1"
+    }
+
+    fun searchUrl(libraryId: String, query: String): String {
+        val value = query.trim()
+        require(value.length in 1..200)
+        return "$origin/api/libraries/${id(libraryId)}/search?limit=20&q=${URLEncoder.encode(value, "UTF-8")}"
     }
 
     fun coverUrl(itemId: String): String = "$origin/api/items/${id(itemId)}/cover?width=256"
@@ -119,29 +126,37 @@ internal class BooksApi(
     fun items(libraryId: String, page: Int = 0): BooksPage {
         val json = get(server.itemsUrl(libraryId, page))
         val rows = json.getJSONArray("results")
-        val items = (0 until rows.length()).mapNotNull { index ->
-            val row = rows.getJSONObject(index)
-            if (row.optBoolean("isMissing") || row.optBoolean("isInvalid")) return@mapNotNull null
-            val media = row.optJSONObject("media") ?: return@mapNotNull null
-            val metadata = media.optJSONObject("metadata") ?: return@mapNotNull null
-            val title = metadata.optString("title").take(300)
-            if (title.isBlank()) return@mapNotNull null
-            val id = row.getString("id")
-            server.coverUrl(id)
-            val tracks = media.optInt("numTracks", media.optInt("numAudioTracks", -1)).takeIf { it >= 0 }
-            if (tracks == 0) return@mapNotNull null
-            BooksItem(
-                id,
-                title,
-                metadata.optString("authorName").take(200),
-                media.optDouble("duration", 0.0).takeIf { it.isFinite() && it >= 0 } ?: 0.0,
-                tracks,
-            )
-        }
+        val items = (0 until rows.length()).mapNotNull { parseItem(rows.getJSONObject(it)) }
         val consumed = page.toLong() * BooksServer.PAGE_SIZE + rows.length()
         val total = json.optLong("total", -1)
         val hasMore = rows.length() > 0 && if (total >= 0) consumed < total else rows.length() >= BooksServer.PAGE_SIZE
         return BooksPage(items, if (hasMore && page < Int.MAX_VALUE) page + 1 else null)
+    }
+
+    fun search(libraryId: String, query: String): List<BooksItem> {
+        val rows = get(server.searchUrl(libraryId, query)).getJSONArray("book")
+        return (0 until minOf(rows.length(), 20)).mapNotNull { index ->
+            rows.optJSONObject(index)?.optJSONObject("libraryItem")?.let { parseItem(it) }
+        }.distinctBy { it.id }
+    }
+
+    private fun parseItem(row: JSONObject): BooksItem? {
+        if (row.optBoolean("isMissing") || row.optBoolean("isInvalid")) return null
+        val media = row.optJSONObject("media") ?: return null
+        val metadata = media.optJSONObject("metadata") ?: return null
+        val title = metadata.optString("title").take(300)
+        if (title.isBlank()) return null
+        val id = row.getString("id")
+        server.coverUrl(id)
+        val tracks = media.optInt("numTracks", media.optInt("numAudioTracks", -1)).takeIf { it >= 0 }
+        if (tracks == 0) return null
+        return BooksItem(
+            id,
+            title,
+            metadata.optString("authorName").take(200),
+            media.optDouble("duration", 0.0).takeIf { it.isFinite() && it >= 0 } ?: 0.0,
+            tracks,
+        )
     }
 
     private fun get(url: String): JSONObject {
