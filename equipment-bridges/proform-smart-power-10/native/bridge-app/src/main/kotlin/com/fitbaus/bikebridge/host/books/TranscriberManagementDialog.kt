@@ -4,10 +4,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.text.InputFilter
-import android.text.InputType
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -22,6 +19,7 @@ internal class TranscriberManagementDialog(
     private val books: BooksConnection? = null,
     private val item: BooksItem? = null,
     private val playback: BooksPlaybackSession? = null,
+    private val onGrant: (TranscriberManagement, String) -> Unit = { _, _ -> },
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
@@ -181,7 +179,7 @@ internal class TranscriberManagementDialog(
             val existing = snapshot.jobs.any { it.model == selectedModel && it.currentRevision }
             button("PREPARE " + selectedModel.uppercase(Locale.US),
                 enabled && snapshot.canPrepare && model?.installed == true && model.qualified && !existing) {
-                authorize { api, credentials -> api.start(selectedModel, credentials) }
+                mutate { api -> api.start(selectedModel)?.let { onGrant(api, it) } }
             }
             if (existing) label("A job for this model already exists below. Resume it instead of starting over.", 14f)
             if (snapshot.jobs.isEmpty()) label("No prepared jobs yet.", 16f)
@@ -192,7 +190,7 @@ internal class TranscriberManagementDialog(
                 label("${duration(job.processed)} / ${duration(job.total)} · ${job.processed * 100 / job.total}%", 16f)
                 job.error?.let { label(it.replace('_', ' '), 14f) }
                 if (job.running) button("PAUSE", enabled) { mutate { it.action(job, "pause") } }
-                if (job.canResume) button("RESUME", enabled) { authorize { api, credentials -> api.action(job, "resume", credentials) } }
+                if (job.canResume) button("RESUME", enabled) { mutate { api -> api.action(job, "resume")?.let { onGrant(api, it) } } }
                 if (job.running || job.canResume) button("CANCEL JOB", enabled) {
                     confirm("Cancel this job? Completed windows remain available.") { mutate { it.action(job, "cancel") } }
                 }
@@ -202,62 +200,6 @@ internal class TranscriberManagementDialog(
             }
         }
         scroll.post { if (!closed) scroll.scrollTo(0, position) }
-    }
-
-    private fun authorize(action: (TranscriberManagement, BooksCredentials?) -> Unit) {
-        val current = books ?: return
-        if (current.session.credentials().refreshToken == null || last?.renewable != true) {
-            mutate { action(it, null) }
-            return
-        }
-        main.removeCallbacks(poll)
-        val form = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), dp(8))
-        }
-        form.addView(TextView(context).apply {
-            text = "Sign in once to authorize an independent background session. Your playback session remains separate. The password is not saved."
-        })
-        val username = EditText(context).apply {
-            hint = "Audiobookshelf username"
-            setSingleLine(true)
-            filters = arrayOf(InputFilter.LengthFilter(256))
-            isSaveEnabled = false
-        }
-        val password = EditText(context).apply {
-            hint = "Password"
-            setSingleLine(true)
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            filters = arrayOf(InputFilter.LengthFilter(4096))
-            isSaveEnabled = false
-        }
-        form.addView(username)
-        form.addView(password)
-        val prompt = AlertDialog.Builder(context).setTitle("Authorize preparation")
-            .setView(form).setNegativeButton("CANCEL", null).setPositiveButton("SIGN IN", null).create()
-        login = prompt
-        prompt.setOnDismissListener {
-            password.text.clear()
-            username.text.clear()
-            login = null
-            if (!closed && pending == null && shouldPoll()) main.postDelayed(poll, 5000)
-        }
-        prompt.show()
-        prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            val user = username.text.toString().trim()
-            if (user.isBlank()) {
-                username.error = "Enter your username"
-                return@setOnClickListener
-            }
-            val secret = password.text.toString()
-            password.text.clear()
-            prompt.dismiss()
-            mutate { api ->
-                val credential = BooksAuth(current.server).login(user, secret)
-                if (Thread.currentThread().isInterrupted) throw java.io.InterruptedIOException("Request cancelled")
-                action(api, credential)
-            }
-        }
     }
 
     private fun shouldPoll(): Boolean = last?.let { snapshot ->
