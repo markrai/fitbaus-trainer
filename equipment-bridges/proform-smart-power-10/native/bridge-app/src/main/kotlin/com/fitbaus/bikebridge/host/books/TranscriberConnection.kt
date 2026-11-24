@@ -3,6 +3,7 @@ package com.fitbaus.bikebridge.host.books
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URI
+import java.util.Locale
 
 internal class TranscriberConnection(val address: String, val token: String) {
     init {
@@ -29,6 +30,26 @@ internal class TranscriberConnection(val address: String, val token: String) {
     }
 
     companion object {
+        fun normalizeCode(value: String): String {
+            val code = value.trim().uppercase(Locale.US)
+            require(code.matches(Regex("[A-HJ-NP-Z2-9]{4}-?[A-HJ-NP-Z2-9]{4}")))
+            val raw = code.replace("-", "")
+            return raw.take(4) + "-" + raw.drop(4)
+        }
+
+        fun pair(address: String, code: String, http: BooksAuthHttp = BooksUrlConnectionHttp()): TranscriberConnection {
+            val uri = URI(address)
+            BooksServer.requireTransport(uri)
+            require(uri.rawPath.orEmpty().isEmpty() && uri.rawQuery == null)
+            val payload = JSONObject().put("code", normalizeCode(code)).toString()
+            val response = http.post("$address/v1/pairing/redeem", emptyMap(), payload)
+            if (response.status == 401) throw IOException("Invalid or expired pairing code")
+            if (response.status !in 200..299) throw IOException("Pairing HTTP ${response.status}")
+            val token = JSONObject(response.body).getString("token")
+            require(token.matches(Regex("[A-Za-z0-9_-]{43}")))
+            return TranscriberConnection(address, token)
+        }
+
         fun fromFields(protocol: String, host: String, port: String, token: String): TranscriberConnection {
             return TranscriberConnection(BooksServer.address(protocol, host, port, false), token.trim())
         }
