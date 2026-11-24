@@ -22,4 +22,12 @@ class BooksNarrationPresentationTest {
         assertEquals(BooksNarrationPresentation.NARRATION, BooksNarrationPresentation.resolve(true, true, false, false))
         assertEquals(BooksNarrationPresentation.NARRATION, BooksNarrationPresentation.resolve(true, true, true, false))
     }
+    @Test
+    fun floatingPlayerPrefersNarrationThenCoverThenMetadata() {
+        assertEquals(BooksFloatingPresentation.NARRATION, BooksFloatingPresentation.resolve(true, true, false))
+        assertEquals(BooksFloatingPresentation.NARRATION, BooksFloatingPresentation.resolve(true, false, false))
+        assertEquals(BooksFloatingPresentation.COVER, BooksFloatingPresentation.resolve(false, true, false))
+        assertEquals(BooksFloatingPresentation.FALLBACK, BooksFloatingPresentation.resolve(false, false, false))
+        assertEquals(BooksFloatingPresentation.ERROR, BooksFloatingPresentation.resolve(true, true, true))
+    }
 }
