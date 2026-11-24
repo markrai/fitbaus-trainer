@@ -34,7 +34,11 @@ internal sealed class GooglePollResult {
     data class Authorized(val grant: GoogleAccessGrant) : GooglePollResult()
 }
 
-internal data class GoogleEntry(val id: String, val title: String)
+internal data class GoogleEntry(
+    val id: String,
+    val title: String,
+    val thumbnailUrl: String? = null,
+)
 
 internal data class GoogleDatedVideo(val video: VideoSummary, val publishedAt: String)
 
@@ -175,9 +179,22 @@ internal class GoogleYouTubeApi(private val http: GoogleHttp) {
             val snippet = rows.optJSONObject(index)?.optJSONObject("snippet") ?: return@mapNotNull null
             val id = snippet.optJSONObject("resourceId")?.optString("channelId") ?: return@mapNotNull null
             if (!validId(id)) return@mapNotNull null
-            GoogleEntry(id, snippet.optString("title").take(160))
+            GoogleEntry(
+                id,
+                snippet.optString("title").take(160),
+                subscriptionThumbnail(snippet),
+            )
         }
         return GooglePage(entries, nextPage(json))
+    }
+
+    private fun subscriptionThumbnail(snippet: JSONObject): String? {
+        val thumbnails = snippet.optJSONObject("thumbnails") ?: return null
+        for (size in arrayOf("medium", "high", "default")) {
+            val url = thumbnails.optJSONObject(size)?.optString("url")?.take(1000).orEmpty()
+            if (url.startsWith("https://")) return url
+        }
+        return null
     }
 
     fun playlists(token: String, page: String? = null): GooglePage<GoogleEntry> {
