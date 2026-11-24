@@ -16,6 +16,9 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.BaseAdapter
+import android.widget.ArrayAdapter
+import android.widget.CheckBox
+import android.widget.Spinner
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -52,7 +55,10 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     private val adapter = BookAdapter()
     private val message = text("", 16f)
     private val setup = ScrollView(context)
+    private val protocol = Spinner(context)
     private val address = EditText(context)
+    private val port = EditText(context)
+    private val subpath = CheckBox(context)
     private val authMethod = RadioGroup(context)
     private val loginChoice = RadioButton(context)
     private val keyChoice = RadioButton(context)
@@ -128,7 +134,13 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         }
         form.addView(text("Audiobookshelf", 26f), LayoutParams(MATCH, WRAP))
         form.addView(text("Enter your Audiobookshelf server address and sign in.", 17f), LayoutParams(MATCH, WRAP))
-        address.hint = "https://books.example.net or http://192.168.1.10:13378"
+        protocol.adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, listOf("https", "http"))
+        address.hint = "Host or IP address"
+        port.hint = "Port (optional)"
+        port.inputType = InputType.TYPE_CLASS_NUMBER
+        port.setSingleLine(true)
+        port.filters = arrayOf(InputFilter.LengthFilter(5))
+        subpath.text = "Use Audiobookshelf subpath"
         address.setSingleLine(true)
         address.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         address.filters = arrayOf(InputFilter.LengthFilter(2048))
@@ -153,7 +165,15 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         apiKey.setSingleLine(true)
         apiKey.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         apiKey.filters = arrayOf(InputFilter.LengthFilter(8192))
-        form.addView(address, LayoutParams(MATCH, dp(56)))
+        val serverRow = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        serverRow.addView(protocol, LayoutParams(dp(116), dp(56)))
+        serverRow.addView(address, LayoutParams(0, dp(56), 1f))
+        serverRow.addView(port, LayoutParams(dp(150), dp(56)))
+        form.addView(serverRow, LayoutParams(MATCH, WRAP))
+        form.addView(subpath, LayoutParams(MATCH, dp(48)))
         form.addView(authMethod, LayoutParams(MATCH, WRAP))
         form.addView(username, LayoutParams(MATCH, dp(56)))
         form.addView(password, LayoutParams(MATCH, dp(56)))
@@ -244,13 +264,13 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
 
     private fun connect() {
         if (!active || busy) return
-        val serverAddress = address.text.toString().trim()
-        val server = try {
-            BooksServer(serverAddress)
+        val serverAddress = try {
+            BooksServer.address(protocol.selectedItem.toString(), address.text.toString(), port.text.toString(), subpath.isChecked)
         } catch (_: Exception) {
-            message.text = "Enter an HTTPS address or a private-network HTTP address."
+            message.text = "Check host, port and protocol. HTTP requires a private IPv4 address."
             return
         }
+        val server = BooksServer(serverAddress)
         val login = authMethod.checkedRadioButtonId == loginChoice.id
         val user = username.text.toString().trim()
         val secret = if (login) password.text.toString() else apiKey.text.toString().trim()
@@ -433,6 +453,9 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     private fun updateControls() {
         connect.isEnabled = !busy
         address.isEnabled = !busy
+        protocol.isEnabled = !busy
+        port.isEnabled = !busy
+        subpath.isEnabled = !busy
         apiKey.isEnabled = !busy
         username.isEnabled = !busy
         password.isEnabled = !busy
@@ -456,6 +479,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         val manager = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         manager?.hideSoftInputFromWindow(windowToken, 0)
         address.clearFocus()
+        port.clearFocus()
         apiKey.clearFocus()
         username.clearFocus()
         password.clearFocus()
