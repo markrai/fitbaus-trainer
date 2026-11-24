@@ -12,9 +12,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.GridView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ListView
 import android.widget.TextView
 
 internal class GoogleAccountView(
@@ -47,9 +48,10 @@ internal class GoogleAccountView(
     private val logout = button("SIGN OUT")
     private val back = button("BACK")
     private val more = button("MORE")
-    private val list = ListView(context)
+    private val list = GridView(context)
     private val rows = ArrayList<Row>()
     private val adapter = RowsAdapter()
+    private val loader = ThumbnailLoader(dp(SUBSCRIPTION_THUMBNAIL_DP))
     private var section = Section.Subscriptions
     private var selected: GoogleEntry? = null
     private var next: String? = null
@@ -88,7 +90,12 @@ internal class GoogleAccountView(
         buildAuthorizationPanel()
         list.adapter = adapter
         list.setBackgroundColor(Color.BLACK)
-        list.dividerHeight = dp(1)
+        list.numColumns = 1
+        list.stretchMode = GridView.STRETCH_COLUMN_WIDTH
+        list.horizontalSpacing = 0
+        list.verticalSpacing = 0
+        list.setPadding(dp(12), dp(8), dp(12), dp(8))
+        list.clipToPadding = false
         list.setOnItemClickListener { _, _, position, _ ->
             when (val row = rows.getOrNull(position)) {
                 is Row.Collection -> showCollection(row.entry)
@@ -123,6 +130,7 @@ internal class GoogleAccountView(
 
     fun close() {
         visibility = GONE
+        loader.pause()
         clearQr()
     }
 
@@ -161,6 +169,10 @@ internal class GoogleAccountView(
             else -> "CONNECT GOOGLE"
         }
         list.visibility = if (connected) VISIBLE else GONE
+        val subscriptionsGrid = connected && section == Section.Subscriptions
+        list.numColumns = if (subscriptionsGrid) SUBSCRIPTION_COLUMNS else 1
+        list.horizontalSpacing = if (subscriptionsGrid) dp(12) else 0
+        list.verticalSpacing = if (subscriptionsGrid) dp(18) else 0
         back.visibility = if (connected && (section == Section.Channel || section == Section.Playlist)) VISIBLE else GONE
         more.visibility = if (connected && next != null) VISIBLE else GONE
         more.isEnabled = !busy
@@ -410,17 +422,78 @@ internal class GoogleAccountView(
         override fun getCount(): Int = rows.size
         override fun getItem(position: Int): Any = rows[position]
         override fun getItemId(position: Int): Long = position.toLong()
+        override fun getViewTypeCount(): Int = 2
+        override fun getItemViewType(position: Int): Int =
+            if (section == Section.Subscriptions && rows[position] is Row.Collection) TYPE_SUBSCRIPTION else TYPE_ROW
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+            val row = rows[position]
+            if (getItemViewType(position) == TYPE_SUBSCRIPTION) {
+                val card = (convertView as? ChannelCard) ?: ChannelCard()
+                card.bind((row as Row.Collection).entry)
+                return card
+            }
             val view = (convertView as? TextView) ?: text("", 18f).apply {
                 setPadding(dp(20), dp(12), dp(20), dp(12))
                 minHeight = dp(64)
             }
-            view.text = when (val row = rows[position]) {
+            view.text = when (row) {
                 is Row.Collection -> row.entry.title
                 is Row.Video -> row.video.title + "\n" + (row.video.channel ?: "")
             }
             return view
         }
+    }
+
+    private inner class ChannelCard : LinearLayout(context) {
+        private val avatar = ImageView(context)
+        private val initial = text("", 34f)
+        private val name = text("", 16f)
+
+        init {
+            orientation = VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(6), dp(8), dp(6), dp(8))
+            val frame = FrameLayout(context).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(Color.rgb(36, 36, 36))
+                }
+                clipToOutline = true
+            }
+            initial.gravity = Gravity.CENTER
+            initial.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
+            frame.addView(initial, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
+            avatar.scaleType = ImageView.ScaleType.CENTER_CROP
+            frame.addView(avatar, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
+            addView(frame, LayoutParams(dp(SUBSCRIPTION_THUMBNAIL_DP), dp(SUBSCRIPTION_THUMBNAIL_DP)))
+            name.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            name.maxLines = 2
+            name.setTypeface(Typeface.DEFAULT_BOLD, Typeface.NORMAL)
+            val nameLayout = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52))
+            nameLayout.topMargin = dp(8)
+            addView(name, nameLayout)
+        }
+
+        fun bind(entry: GoogleEntry) {
+            name.text = entry.title
+            initial.text = entry.title.trim().take(1).uppercase().ifEmpty { "?" }
+            contentDescription = entry.title
+            val thumbnailUrl = entry.thumbnailUrl
+            if (thumbnailUrl == null) loader.clear(avatar) else loader.bind(avatar, thumbnailUrl)
+        }
+    }
+
+    private companion object {
+        const val TYPE_ROW = 0
+        const val TYPE_SUBSCRIPTION = 1
+        const val SUBSCRIPTION_COLUMNS = 5
+        const val SUBSCRIPTION_THUMBNAIL_DP = 120
     }
 }

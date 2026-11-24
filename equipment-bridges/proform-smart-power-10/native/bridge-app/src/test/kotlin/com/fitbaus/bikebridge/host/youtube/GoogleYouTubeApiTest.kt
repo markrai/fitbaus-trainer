@@ -185,13 +185,14 @@ class GoogleYouTubeApiTest {
         http.nextGet = GoogleHttpResponse(200, """{
             "nextPageToken":"page2",
             "items":[
-                {"snippet":{"title":"Channel One","resourceId":{"channelId":"UCabcdefghijklmnopqrstuv"}}},
+                {"snippet":{"title":"Channel One","resourceId":{"channelId":"UCabcdefghijklmnopqrstuv"},"thumbnails":{"default":{"url":"https://img.example/default.jpg"},"medium":{"url":"https://img.example/medium.jpg"}}}},
                 {"snippet":{"title":"Missing","resourceId":{}}}
             ]
         }""")
         val subscriptions = api.subscriptions("access-token")
         assertEquals(1, subscriptions.items.size)
         assertEquals("Channel One", subscriptions.items.single().title)
+        assertEquals("https://img.example/medium.jpg", subscriptions.items.single().thumbnailUrl)
         assertEquals("page2", subscriptions.next)
         assertTrue(http.url.contains("/subscriptions?"))
         assertTrue(http.url.contains("mine=true"))

@@ -59,6 +59,12 @@ internal class ThumbnailLoader(
         ticket.onCancel = { future.cancel(true) }
     }
 
+    fun clear(view: ImageView) {
+        requests.cancel(view)
+        view.tag = null
+        view.setImageDrawable(null)
+    }
+
     fun pause() {
         for (view in requests.cancelAll()) view.tag = null
         cache.evictAll()
