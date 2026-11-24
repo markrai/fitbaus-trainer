@@ -80,6 +80,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
     private val pageLabel = text("", 16f)
     private val playerPanel = LinearLayout(context)
     private val readAlongButton = button("READ ALONG")
+    private val prepareButton = button("PREPARE")
     private val playerTitle = text("", 26f)
     private val playerAuthor = text("", 18f)
     private val playerChapter = button("CHAPTERS")
@@ -317,6 +318,8 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         readAlongButton.setOnClickListener { openReadAlong() }
         top.addView(back, LayoutParams(0, dp(48), 1f))
         top.addView(readAlongButton, LayoutParams(0, dp(48), 1f))
+        prepareButton.setOnClickListener { openPreparation() }
+        top.addView(prepareButton, LayoutParams(0, dp(48), 1f))
         playerPanel.addView(top, LayoutParams(MATCH, WRAP))
         playerTitle.gravity = Gravity.CENTER
         playerTitle.maxLines = 2
@@ -395,6 +398,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         browse.visibility = GONE
         setup.visibility = GONE
         readAlongButton.isEnabled = state.session != null && !state.failed
+        prepareButton.isEnabled = readAlongButton.isEnabled
         if (readAlong.visibility == VISIBLE) readAlong.render(state)
         if (floatingPlayer.visibility == VISIBLE) floatingPlayer.render(state, readAlong.floatingNarration())
         playerTitle.text = state.item?.title.orEmpty()
@@ -419,6 +423,15 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
             progress.progress = if (session != null && session.durationMs > 0)
                 (state.positionMs * 10000 / session.durationMs).toInt().coerceIn(0, 10000) else 0
         }
+    }
+
+    private fun openPreparation() {
+        val current = connection ?: return
+        val item = playerState.item ?: return
+        val session = playerState.session ?: return
+        if (playerState.failed) return
+        dialog?.dismiss()
+        dialog = TranscriberManagementDialog(context, null, current, item, session).show()
     }
 
     private fun openReadAlong() {
