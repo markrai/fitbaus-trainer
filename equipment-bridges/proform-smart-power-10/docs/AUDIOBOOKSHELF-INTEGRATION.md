@@ -4,7 +4,7 @@ FitBaus Full will provide a native Books screen for a user's self-hosted Audiobo
 
 ## Implementation slices
 
-1. **Library API foundation (implemented).** HTTPS server URL, username/password authentication or an existing Audiobookshelf API key as a bearer credential, audiobook library enumeration, bounded paginated item metadata, and cover URL construction. The API layer is independent of Android UI and credential storage.
+1. **Library API foundation (implemented).** HTTPS or private-network HTTP server URL, username/password authentication or an existing Audiobookshelf API key as a bearer credential, audiobook library enumeration, bounded paginated item metadata, and cover URL construction. The API layer is independent of Android UI and credential storage.
 2. **Books screen (implemented).** Media tab, server setup, keystore-backed credential storage, connection validation, library selection, five-column cover grid, pagination and server-side title search. Authenticated covers are confined to the configured origin; stale requests and caches are discarded on tab exit or disconnect. Selecting a book displays metadata only until playback is implemented.
 3. **Playback.** Use the existing ExoPlayer dependency with a separate audiobook session controller. Verify direct playback, multi-file track offsets, chapter navigation, resume, playback speed, progress sync, audio focus and session close. Ensure only one media source is audible and preserve bridge USB operation across media transitions.
 4. **Read Along.** Parse bounded WebVTT/SRT input, synchronize against the book-relative playback clock, and provide large adjustable text and a minimal focus display. Seeking, speed changes and track changes must not cause timestamp drift.
@@ -12,14 +12,14 @@ FitBaus Full will provide a native Books screen for a user's self-hosted Audiobo
 
 ## Server connection
 
-Use an HTTPS endpoint with a certificate trusted by Android, either at the server root or under the supported `/audiobookshelf` reverse-proxy path. Do not send API keys in URL query strings, disable certificate verification, or follow redirects carrying credentials. Prefer a dedicated non-admin Audiobookshelf user with access only to the desired libraries.
+Use HTTPS with a certificate trusted by Android, or explicit HTTP to a private IPv4 address (10/8, 172.16/12, or 192.168/16) on a trusted network. Both support the server root and the `/audiobookshelf` reverse-proxy path. HTTP connections bypass system proxies. Public hosts require HTTPS. Do not send API keys in URL query strings, disable certificate verification, or follow redirects carrying credentials. Prefer a dedicated non-admin Audiobookshelf user with access only to the desired libraries.
 
 The API uses the current Audiobookshelf server routes for library enumeration and minified paginated items. See [upstream source](https://github.com/advplyr/audiobookshelf) and the [API reference](https://api.audiobookshelf.org/) (the latter is no longer actively maintained).
 
 ## Connect the bike
 
 1. Open **Books** on the console.
-2. Enter the HTTPS server URL (including the port or `/audiobookshelf` prefix if needed).
+2. Enter the server URL (including the port or `/audiobookshelf` prefix if needed), for example `http://192.168.1.193:13378`.
 3. Choose **Username / password** (the default) and enter your Audiobookshelf credentials, or choose **API key** and enter an existing key. Select **Connect**.
 4. Choose a library. Use Previous/Next to browse pages, Search for book-title matches, and Clear to return to the library. Search shows up to 20 direct book matches; author and series match navigation is not included in this slice.
 5. To change accounts or servers, select **Disconnect**. This forgets the locally saved credentials without revoking the server-side session or key.
