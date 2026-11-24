@@ -5,6 +5,7 @@ package com.fitbaus.bikebridge.host.books
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URLEncoder
@@ -82,6 +83,7 @@ internal class BooksUrlConnectionHttp : BooksHttp {
             connection.inputStream.use { input ->
                 val buffer = ByteArray(8192)
                 while (true) {
+                    if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Request cancelled")
                     val count = input.read(buffer)
                     if (count < 0) break
                     if (output.size() + count > MAX_RESPONSE_BYTES) {
