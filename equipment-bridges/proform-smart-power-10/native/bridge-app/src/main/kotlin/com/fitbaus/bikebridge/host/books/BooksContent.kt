@@ -392,7 +392,6 @@ internal class BooksContent(
         if (fullscreen && (!active || !readAlong.canEnterFullscreen())) return
         readingFullscreen = fullscreen
         val chrome = if (fullscreen) GONE else VISIBLE
-        hud.visibility = chrome
         message.visibility = chrome
         for (index in 0 until playerPanel.childCount) {
             val child = playerPanel.getChildAt(index)
