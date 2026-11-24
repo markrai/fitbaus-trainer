@@ -7,6 +7,7 @@ REM Usage:
 REM   deploy-bike.bat                  production build to the default console address
 REM   deploy-bike.bat 192.168.1.50     production build to another console (port 5555 assumed)
 REM   deploy-bike.bat staging          debug build (com.fitbaus.bikebridge.native) instead
+REM   deploy-bike.bat --preflight      opt in to full installed APK signing comparison
 REM
 REM The console address can also come from the FITBAUS_BIKE_ADB environment variable.
 REM Every adb call is qualified with -s: other Android devices may be attached.
@@ -17,11 +18,14 @@ cd /d "%~dp0"
 set "BIKE=%FITBAUS_BIKE_ADB%"
 if "%BIKE%"=="" set "BIKE=192.168.1.226:5555"
 set "FLAVOR=production"
+set "PREFLIGHT=off"
 for %%A in (%*) do (
     if /i "%%~A"=="staging" (
         set "FLAVOR=staging"
     ) else if /i "%%~A"=="production" (
         set "FLAVOR=production"
+    ) else if /i "%%~A"=="--preflight" (
+        set "PREFLIGHT=on"
     ) else (
         set "BIKE=%%~A"
     )
@@ -46,6 +50,7 @@ if /i "%FLAVOR%"=="production" (
 echo FitBaus Bike Bridge deploy
 echo   console : !BIKE!
 echo   build   : %FLAVOR% (%PACKAGE%)
+echo   preflight: %PREFLIGHT%
 echo.
 
 REM ---- tools ---------------------------------------------------------------------------
@@ -106,32 +111,24 @@ if errorlevel 1 (
     exit /b 1
 )
 echo.
-echo Install preflight ^(version + signing; never uninstalls^)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { . '%PREFLIGHT_PS1%'; Assert-BikeBridgeInstallPreflight -AdbPath '%ADB%' -Serial '!BIKE!' -ApkPath '%APK%' -ExpectedApplicationId '%PACKAGE%' | Out-Null; exit 0 } catch { Write-Host ('ERROR: ' + $_.Exception.Message); exit 1 }"
-if errorlevel 1 (
-    echo ERROR: install preflight failed. Not installing.
-    exit /b 1
+if /i "%PREFLIGHT%"=="on" (
+    echo Install preflight ^(version + signing; never uninstalls^)...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "try { . '%PREFLIGHT_PS1%'; Assert-BikeBridgeInstallPreflight -AdbPath '%ADB%' -Serial '!BIKE!' -ApkPath '%APK%' -ExpectedApplicationId '%PACKAGE%' | Out-Null; exit 0 } catch { Write-Host ('ERROR: ' + $_.Exception.Message); exit 1 }"
+    if errorlevel 1 (
+        echo ERROR: install preflight failed. Not installing.
+        exit /b 1
+    )
+) else (
+    echo Using Android package manager version and signing checks.
 )
 echo.
 
-REM ---- install -------------------------------------------------------------------------
 echo Installing on !BIKE! ^(keeps pairing data^)...
-set "INSTALL_LOG=%TEMP%\fitbaus-bike-install.log"
-"%ADB%" -s !BIKE! install -r "%APK%" > "%INSTALL_LOG%" 2>&1
-type "%INSTALL_LOG%"
-findstr /c:"Success" "%INSTALL_LOG%" >nul
+"%ADB%" -s !BIKE! install -r "%APK%"
 if errorlevel 1 (
     echo.
-    echo ERROR: install failed.
-    findstr /c:"INSTALL_FAILED_UPDATE_INCOMPATIBLE" "%INSTALL_LOG%" >nul && (
-        echo The APK signature does not match the app already on the console.
-        echo Production builds must be signed with the installed certificate ^(see native\local.properties^).
-        echo Do NOT uninstall the existing app: that would erase its pairing data.
-    )
-    findstr /c:"INSTALL_FAILED_VERSION_DOWNGRADE" "%INSTALL_LOG%" >nul && (
-        echo The APK versionCode is lower than the installed package.
-        echo Raise APP_VERSION in version.js, rebuild, and retry. Do NOT uninstall.
-    )
+    echo ERROR: install failed. See the Android package manager error above.
+    echo Check signing compatibility and versionCode. Do NOT uninstall the existing app.
     exit /b 1
 )
 echo.
