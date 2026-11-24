@@ -128,7 +128,7 @@ internal class BooksApi(
             if (title.isBlank()) return@mapNotNull null
             val id = row.getString("id")
             server.coverUrl(id)
-            val tracks = if (media.has("numAudioTracks")) media.optInt("numAudioTracks", -1).takeIf { it >= 0 } else null
+            val tracks = media.optInt("numTracks", media.optInt("numAudioTracks", -1)).takeIf { it >= 0 }
             if (tracks == 0) return@mapNotNull null
             BooksItem(
                 id,
