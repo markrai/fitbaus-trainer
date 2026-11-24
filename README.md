@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="github.png" alt="Showcase" width="720" />
+  <img src="github.png" alt="Showcase" width="320" />
 </p>
 <p align="center">
   <img src="hero.jpg" alt="Showcase" width="720" />
