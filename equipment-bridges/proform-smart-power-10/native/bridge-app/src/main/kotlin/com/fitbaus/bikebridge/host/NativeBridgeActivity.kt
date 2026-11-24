@@ -162,6 +162,7 @@ class NativeBridgeActivity : Activity() {
                 floatingPlayer.visibility = View.GONE
                 booksContent.start()
             } else {
+                if (booksContent.floatingPlayer.visibility == View.VISIBLE) booksContent.stop()
                 youtubeContent.start()
                 floatingPlayer.visibility = View.GONE
             }
@@ -169,7 +170,7 @@ class NativeBridgeActivity : Activity() {
 
         override fun stopMedia(reason: ArcadeStopReason) {
             if (modeController.mode == ArcadeMode.Books) {
-                booksContent.stop()
+                if (reason != ArcadeStopReason.ExitArcade || !booksContent.minimize()) booksContent.stop()
                 return
             }
             voiceSearch.cancel()
@@ -256,6 +257,7 @@ class NativeBridgeActivity : Activity() {
         modeController.onHostPause()
         youtubeContent.stop()
         floatingPlayer.visibility = View.GONE
+        if (booksContent.floatingPlayer.visibility == View.VISIBLE) booksContent.stop()
         handler.removeCallbacks(refresh)
         super.onPause()
     }
@@ -700,11 +702,12 @@ class NativeBridgeActivity : Activity() {
             youtubeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
-        booksContent = BooksContent(this)
+        booksContent = BooksContent(this) { modeController.select(ArcadeMode.Books) }
         contentHost.addView(
             booksContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
+        contentHost.addView(booksContent.floatingPlayer, FrameLayout.LayoutParams(dp(360), dp(220), Gravity.TOP or Gravity.END))
         floatingPlayer = buildFloatingPlayer()
         contentHost.addView(
             floatingPlayer,
