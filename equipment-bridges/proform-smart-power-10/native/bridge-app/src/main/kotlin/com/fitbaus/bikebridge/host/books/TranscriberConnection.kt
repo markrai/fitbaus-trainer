@@ -26,7 +26,8 @@ internal class TranscriberConnection(val address: String, val token: String) {
         val window = json.getInt("max_window_ms")
         require(window in 1..300_000)
         return TranscriberCapabilities(if (configured) source else null,
-            json.getBoolean("transcription") && json.getBoolean("engine_ready") && configured, window)
+            json.getBoolean("transcription") && json.getBoolean("engine_ready") && configured, window,
+            json.optString("source_url", "").takeIf { it.isNotBlank() && !json.isNull("source_url") })
     }
 
     companion object {
@@ -56,4 +57,4 @@ internal class TranscriberConnection(val address: String, val token: String) {
     }
 }
 
-internal data class TranscriberCapabilities(val sourceId: String?, val ready: Boolean, val maxWindowMs: Int)
+internal data class TranscriberCapabilities(val sourceId: String?, val ready: Boolean, val maxWindowMs: Int, val sourceUrl: String? = null)

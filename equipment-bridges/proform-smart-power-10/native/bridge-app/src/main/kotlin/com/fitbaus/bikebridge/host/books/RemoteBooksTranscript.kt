@@ -37,6 +37,7 @@ internal class RemoteBooksTranscript(
             http.request(url, mapOf("Authorization" to "Bearer $token"), null)
         })
         if (!capabilities.ready || capabilities.maxWindowMs < WINDOW_MS) throw IOException("Transcriber not ready or incompatible window size")
+        requireMatchingSource(capabilities.sourceUrl)
         val sourceId = requireNotNull(capabilities.sourceId)
         val manifest = request("/v1/items/$itemId/manifest")
         require(manifest.getString("source_id") == sourceId && manifest.getString("item_id") == itemId)
@@ -60,10 +61,10 @@ internal class RemoteBooksTranscript(
         val body = JSONObject().put("source_id", sourceId).put("item_id", itemId)
             .put("audio_revision", revision).put("start_ms", start).put("end_ms", end).put("retry", retry)
         val submitted = request("/v1/jobs", body.toString())
-        val jobId = submitted.getString("job_id")
+        var jobId = submitted.getString("job_id")
         require(jobId.matches(Regex("[0-9a-f]{64}")))
-        fun validateJob(job: JSONObject) {
-            require(job.getString("job_id") == jobId && job.getString("source_id") == sourceId &&
+        fun validateJob(job: JSONObject, expectedId: String = jobId) {
+            require(job.getString("job_id") == expectedId && job.getString("source_id") == sourceId &&
                 job.getString("item_id") == itemId && job.getString("audio_revision") == revision &&
                 integer(job, "start_ms") == start && integer(job, "end_ms") == end)
         }
@@ -82,7 +83,15 @@ internal class RemoteBooksTranscript(
             pause()
             job = if (!resubmitted && job.optString("dispatch") == "awaiting_credentials") {
                 resubmitted = true
-                request("/v1/jobs", body.toString())
+                val replacement = request("/v1/jobs", body.toString())
+                val replacementId = replacement.getString("job_id")
+                if (replacementId != jobId) {
+                    require(replacementId.matches(Regex("[0-9a-f]{64}")))
+                    require(replacement.getString("state") == "ready" && replacement.optBoolean("prepared"))
+                    validateJob(replacement, replacementId)
+                    jobId = replacementId
+                }
+                replacement
             } else request("/v1/jobs/$jobId")
         }
         val result = request("/v1/jobs/$jobId/transcript")
@@ -102,6 +111,12 @@ internal class RemoteBooksTranscript(
         return RemoteBooksWindow(start, end, revision, BooksTranscript(cues, allowEmpty = true))
     }
 
+    private fun requireMatchingSource(sourceUrl: String?) {
+        if (sourceUrl == null || sourceUrl.trimEnd('/') != books.address.trimEnd('/')) {
+            throw IOException("Transcriber Audiobookshelf source differs or is not advertised; check server version and Settings")
+        }
+    }
+
     private fun request(path: String, body: String? = null): JSONObject = books.session.authorized { sourceToken ->
         if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Transcript request cancelled")
         val headers = mapOf("Authorization" to "Bearer ${transcriber.token}", "X-Audiobookshelf-Token" to sourceToken)
@@ -110,6 +125,7 @@ internal class RemoteBooksTranscript(
             val check = http.request(transcriber.address + "/v1/capabilities",
                 mapOf("Authorization" to "Bearer ${transcriber.token}"), null)
             if (check.status != 200) throw IOException("Transcriber connection rejected; check Settings")
+            requireMatchingSource(JSONObject(check.body).optString("source_url", "").takeIf { it.isNotBlank() })
             throw BooksHttpFailure(401)
         }
         if (response.status !in 200..299) throw IOException("Transcriber request failed (HTTP ${response.status})")
