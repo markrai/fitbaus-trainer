@@ -9,9 +9,9 @@ import java.io.InterruptedIOException
 
 internal data class BooksCue(val startMs: Long, val endMs: Long, val text: String)
 
-internal class BooksTranscript(private val cues: List<BooksCue>) {
+internal class BooksTranscript(private val cues: List<BooksCue>, allowEmpty: Boolean = false) {
     init {
-        require(cues.isNotEmpty() && cues.size <= MAX_CUES)
+        require((allowEmpty || cues.isNotEmpty()) && cues.size <= MAX_CUES)
         require(cues.all { it.startMs >= 0 && it.endMs > it.startMs && it.endMs <= MAX_TIME_MS && it.text.isNotBlank() && it.text.length <= MAX_CUE_CHARS })
         require(cues.zipWithNext().all { (first, second) -> first.endMs <= second.startMs })
     }

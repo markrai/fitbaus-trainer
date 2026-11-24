@@ -137,6 +137,9 @@ internal class BooksUrlConnectionHttp : BooksHttp, BooksAuthHttp {
     override fun post(url: String, headers: Map<String, String>, body: String): BooksHttpResponse =
         request(url, "POST", headers, body.toByteArray(Charsets.UTF_8))
 
+    fun getWithHeaders(url: String, headers: Map<String, String>): BooksHttpResponse =
+        request(url, "GET", headers, null)
+
     private fun request(url: String, method: String, headers: Map<String, String>, body: ByteArray?): BooksHttpResponse {
         val connection = BooksServer.openConnection(url)
         try {
