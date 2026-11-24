@@ -23,6 +23,10 @@ internal class BooksServer(address: String) {
         origin = "https://" + uri.rawAuthority + path
     }
 
+    fun loginUrl(): String = "$origin/login"
+
+    fun refreshUrl(): String = "$origin/auth/refresh"
+
     fun librariesUrl(): String = "$origin/api/libraries"
 
     fun itemsUrl(libraryId: String, page: Int): String {
@@ -66,17 +70,33 @@ internal fun interface BooksHttp {
     fun get(url: String, token: String): BooksHttpResponse
 }
 
-internal class BooksUrlConnectionHttp : BooksHttp {
-    override fun get(url: String, token: String): BooksHttpResponse {
+internal fun interface BooksAuthHttp {
+    fun post(url: String, headers: Map<String, String>, body: String): BooksHttpResponse
+}
+
+internal class BooksUrlConnectionHttp : BooksHttp, BooksAuthHttp {
+    override fun get(url: String, token: String): BooksHttpResponse =
+        request(url, "GET", mapOf("Authorization" to "Bearer $token"), null)
+
+    override fun post(url: String, headers: Map<String, String>, body: String): BooksHttpResponse =
+        request(url, "POST", headers, body.toByteArray(Charsets.UTF_8))
+
+    private fun request(url: String, method: String, headers: Map<String, String>, body: ByteArray?): BooksHttpResponse {
         require(URI(url).scheme == "https")
         val connection = URI(url).toURL().openConnection() as HttpURLConnection
         try {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 10_000
             connection.readTimeout = 15_000
-            connection.requestMethod = "GET"
+            connection.requestMethod = method
             connection.setRequestProperty("Accept", "application/json")
-            connection.setRequestProperty("Authorization", "Bearer $token")
+            for ((name, value) in headers) connection.setRequestProperty(name, value)
+            if (body != null) {
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                connection.setFixedLengthStreamingMode(body.size)
+                connection.outputStream.use { it.write(body) }
+            }
             val status = connection.responseCode
             if (status !in 200..299) return BooksHttpResponse(status, "")
             val output = ByteArrayOutputStream()
@@ -107,12 +127,11 @@ internal class BooksHttpFailure(val status: Int) : IOException("Audiobookshelf H
 
 internal class BooksApi(
     private val server: BooksServer,
-    private val token: String,
+    private val session: BooksSession,
     private val http: BooksHttp = BooksUrlConnectionHttp(),
 ) {
-    init {
-        require(token.length in 1..8192 && token.all { it in '!'..'~' })
-    }
+    constructor(server: BooksServer, token: String, http: BooksHttp = BooksUrlConnectionHttp()) :
+        this(server, BooksSession(BooksCredentials(token), BooksAuth(server)), http)
 
     fun libraries(): List<BooksLibrary> {
         val rows = get(server.librariesUrl()).getJSONArray("libraries")
@@ -162,8 +181,10 @@ internal class BooksApi(
     }
 
     private fun get(url: String): JSONObject {
-        val response = http.get(url, token)
-        if (response.status !in 200..299) throw BooksHttpFailure(response.status)
-        return JSONObject(response.body)
+        return session.authorized { token ->
+            val response = http.get(url, token)
+            if (response.status !in 200..299) throw BooksHttpFailure(response.status)
+            JSONObject(response.body)
+        }
     }
 }
