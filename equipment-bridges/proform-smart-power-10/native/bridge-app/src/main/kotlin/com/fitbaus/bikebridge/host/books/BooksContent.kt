@@ -22,6 +22,8 @@ import android.widget.FrameLayout
 import android.widget.GridView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
 import android.widget.TextView
 import com.fitbaus.bikebridge.host.arcade.ExerciseHud
@@ -51,6 +53,11 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     private val message = text("", 16f)
     private val setup = ScrollView(context)
     private val address = EditText(context)
+    private val authMethod = RadioGroup(context)
+    private val loginChoice = RadioButton(context)
+    private val keyChoice = RadioButton(context)
+    private val username = EditText(context)
+    private val password = EditText(context)
     private val apiKey = EditText(context)
     private val connect = button("CONNECT")
     private val forget = button("FORGET SAVED CONNECTION")
@@ -100,6 +107,8 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         resetConnection()
         address.text.clear()
         apiKey.text.clear()
+        username.text.clear()
+        password.text.clear()
         searchField.text.clear()
         setup.visibility = GONE
         browse.visibility = GONE
@@ -118,17 +127,45 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
             setPadding(dp(18), dp(8), dp(18), dp(8))
         }
         form.addView(text("Audiobookshelf", 26f), LayoutParams(MATCH, WRAP))
-        form.addView(text("Enter the HTTPS address and API key of your Audiobookshelf server.", 17f), LayoutParams(MATCH, WRAP))
+        form.addView(text("Enter your Audiobookshelf server address and sign in.", 17f), LayoutParams(MATCH, WRAP))
         address.hint = "https://books.example.net"
         address.setSingleLine(true)
         address.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         address.filters = arrayOf(InputFilter.LengthFilter(2048))
+        loginChoice.id = View.generateViewId()
+        loginChoice.text = "Username / password"
+        keyChoice.id = View.generateViewId()
+        keyChoice.text = "API key"
+        authMethod.orientation = HORIZONTAL
+        authMethod.addView(loginChoice)
+        authMethod.addView(keyChoice)
+        username.hint = "Username"
+        username.setSingleLine(true)
+        username.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        username.filters = arrayOf(InputFilter.LengthFilter(256))
+        password.hint = "Password"
+        password.setSingleLine(true)
+        password.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        password.filters = arrayOf(InputFilter.LengthFilter(4096))
+        password.isSaveEnabled = false
+        apiKey.isSaveEnabled = false
         apiKey.hint = "Audiobookshelf API key"
         apiKey.setSingleLine(true)
         apiKey.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         apiKey.filters = arrayOf(InputFilter.LengthFilter(8192))
         form.addView(address, LayoutParams(MATCH, dp(56)))
+        form.addView(authMethod, LayoutParams(MATCH, WRAP))
+        form.addView(username, LayoutParams(MATCH, dp(56)))
+        form.addView(password, LayoutParams(MATCH, dp(56)))
         form.addView(apiKey, LayoutParams(MATCH, dp(56)))
+        authMethod.setOnCheckedChangeListener { _, checked ->
+            val login = checked == loginChoice.id
+            username.visibility = if (login) VISIBLE else GONE
+            password.visibility = if (login) VISIBLE else GONE
+            apiKey.visibility = if (login) GONE else VISIBLE
+            if (login) apiKey.text.clear() else password.text.clear()
+        }
+        authMethod.check(loginChoice.id)
         connect.setOnClickListener { connect() }
         forget.setOnClickListener { forgetConnection() }
         form.addView(connect, LayoutParams(MATCH, dp(52)))
@@ -163,7 +200,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         disconnect.setOnClickListener {
             dialog = AlertDialog.Builder(context)
                 .setTitle("Disconnect Audiobookshelf?")
-                .setMessage("Forget the saved server and API key on this bike.")
+                .setMessage("Forget the saved server and credentials on this bike.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Disconnect") { _, _ -> forgetConnection() }
                 .show()
@@ -207,19 +244,36 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
 
     private fun connect() {
         if (!active || busy) return
-        val candidate = try {
-            BooksConnection(address.text.toString().trim(), apiKey.text.toString().trim())
+        val serverAddress = address.text.toString().trim()
+        val server = try {
+            BooksServer(serverAddress)
         } catch (_: Exception) {
-            message.text = "Enter a valid HTTPS server address and API key."
+            message.text = "Enter a valid HTTPS server address."
+            return
+        }
+        val login = authMethod.checkedRadioButtonId == loginChoice.id
+        val user = username.text.toString().trim()
+        val secret = if (login) password.text.toString() else apiKey.text.toString().trim()
+        if (login && user.isBlank()) {
+            message.text = "Enter your Audiobookshelf username."
+            return
+        }
+        if (!login && secret.isBlank()) {
+            message.text = "Enter your Audiobookshelf API key."
             return
         }
         hideKeyboard()
+        password.text.clear()
         message.text = "Checking connection…"
         request(
-            { SavedConnection(candidate, candidate.api.libraries(), store.prepare(candidate)) },
+            {
+                val credentials = if (login) BooksAuth(server).login(user, secret) else BooksCredentials(secret)
+                val candidate = BooksConnection(serverAddress, credentials)
+                SavedConnection(candidate, candidate.api.libraries(), store.prepare(candidate))
+            },
             { saved ->
                 try {
-                    saved.envelope?.let { store.save(it) }
+                    saved.envelope?.let { store.save(saved.connection, it) }
                     apiKey.text.clear()
                     acceptConnection(saved)
                 } catch (_: Exception) {
@@ -307,6 +361,8 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
             resetConnection()
             address.text.clear()
             apiKey.text.clear()
+            username.text.clear()
+            password.text.clear()
             searchField.text.clear()
             showSetup("Audiobookshelf disconnected.")
         } catch (_: Exception) {
@@ -378,6 +434,10 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         connect.isEnabled = !busy
         address.isEnabled = !busy
         apiKey.isEnabled = !busy
+        username.isEnabled = !busy
+        password.isEnabled = !busy
+        loginChoice.isEnabled = !busy
+        keyChoice.isEnabled = !busy
         forget.isEnabled = !busy
         libraryButton.isEnabled = !busy && libraries.isNotEmpty()
         libraryButton.text = selected?.name ?: "LIBRARY"
@@ -397,12 +457,14 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         manager?.hideSoftInputFromWindow(windowToken, 0)
         address.clearFocus()
         apiKey.clearFocus()
+        username.clearFocus()
+        password.clearFocus()
         searchField.clearFocus()
     }
 
     private fun failureMessage(error: Exception): String = when (error) {
         is BooksHttpFailure -> when (error.status) {
-            401, 403 -> "API key rejected or access denied."
+            401, 403 -> "Sign-in rejected or session expired. Check your credentials or reconnect."
             else -> "Audiobookshelf returned HTTP " + error.status + "."
         }
         else -> "Could not contact Audiobookshelf or read its response."
