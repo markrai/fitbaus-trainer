@@ -15,7 +15,6 @@ require(bridgeIdentity == "staging" || bridgeIdentity == "production") {
     "bridgeIdentity must be staging or production, was $bridgeIdentity"
 }
 val isProduction = bridgeIdentity == "production"
-require(!isProduction) { "Temporary showcase branch cannot build production APKs" }
 
 val unlockQualification = (findProperty("unlockQualification") as String?) ?: "off"
 require(unlockQualification == "off" || unlockQualification == "auth" || unlockQualification == "lockout") {
@@ -26,6 +25,8 @@ require(!isProduction || unlockQualification == "off") {
         "Staging-only qualification flags cannot be combined with production; " +
         "production authenticates when DeviceInfo requires unlock."
 }
+
+require(!isProduction) { "Temporary showcase branch cannot build production APKs" }
 
 val localProperties = Properties().apply {
     val file = rootProject.file("local.properties")

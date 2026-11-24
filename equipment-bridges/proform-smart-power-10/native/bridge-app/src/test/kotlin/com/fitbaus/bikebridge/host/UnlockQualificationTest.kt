@@ -18,7 +18,7 @@ class UnlockQualificationTest {
             BuildConfig.QUALIFICATION_IDENTITY,
         )
         assertTrue(
-            BuildConfig.QUALIFICATION_IDENTITY.contains("fitbaus.applicationId=com.fitbaus.bikebridge.native"),
+            BuildConfig.QUALIFICATION_IDENTITY.contains("fitbaus.applicationId=com.fitbaus.bikebridge.showcase"),
             BuildConfig.QUALIFICATION_IDENTITY,
         )
     }

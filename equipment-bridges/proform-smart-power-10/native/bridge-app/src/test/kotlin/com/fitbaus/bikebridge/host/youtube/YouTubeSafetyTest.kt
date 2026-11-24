@@ -80,7 +80,7 @@ class YouTubeSafetyTest {
         )
         val build = File("build.gradle.kts").readText()
         assertTrue(build.contains("minSdk = 22"))
-        assertTrue(build.contains("applicationId = if (isProduction) \"com.fitbaus.bikebridge\" else \"com.fitbaus.bikebridge.native\""))
+        assertTrue(build.contains("applicationId = \"com.fitbaus.bikebridge.showcase\""))
     }
 
     @Test

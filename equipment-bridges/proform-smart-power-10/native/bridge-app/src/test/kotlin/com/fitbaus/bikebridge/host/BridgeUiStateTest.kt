@@ -176,7 +176,7 @@ class BridgeUiStateTest {
         for (caption in listOf(
             "\"RPM\"", "\"WATTS\"", "\"RESISTANCE\"", "\"HR\"", "\"DIAGNOSTICS\"", "\"STATUS\"", "\"USB\"",
             "\"INIT\"", "\"BIKE\"", "\"CONTROL\"", "\"REQUESTED\"", "\"OBSERVED\"", "\"MACHINE\"", "\"BRIDGE\"",
-            "\"HTTP\"", "\"FITBAUS\"",
+            "\"HTTP\"", "\"FITBAUS · DEMO\"",
         )) {
             assertTrue(source.contains(caption), caption)
         }
