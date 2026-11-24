@@ -19,6 +19,7 @@ import android.widget.BaseAdapter
 import android.widget.ArrayAdapter
 import android.widget.CheckBox
 import android.widget.Spinner
+import android.widget.SeekBar
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -77,6 +78,20 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     private val previous = button("PREVIOUS")
     private val more = button("NEXT")
     private val pageLabel = text("", 16f)
+    private val playerPanel = LinearLayout(context)
+    private val playerTitle = text("", 26f)
+    private val playerAuthor = text("", 18f)
+    private val playerChapter = button("CHAPTERS")
+    private val playerStatus = text("", 18f)
+    private val playerTime = text("", 20f)
+    private val progress = SeekBar(context)
+    private val playPause = button("PLAY")
+    private val rewind = button("−30s")
+    private val forward = button("+30s")
+    private val rate = button("1×")
+    private var scrubbing = false
+    private var playerState = BooksPlayerState()
+    private val playback = BooksPlayback(context, ::renderPlayer)
 
     init {
         orientation = VERTICAL
@@ -86,6 +101,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         addView(message, LayoutParams(MATCH, WRAP))
         buildSetup()
         buildBrowse()
+        buildPlayer()
         setup.visibility = GONE
         browse.visibility = GONE
     }
@@ -106,6 +122,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
 
     fun stop() {
         active = false
+        playback.stop()
         cancelRequest()
         dialog?.dismiss()
         dialog = null
@@ -123,6 +140,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
 
     fun destroy() {
         stop()
+        playback.destroy()
         worker.shutdownNow()
     }
 
@@ -239,12 +257,11 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         grid.clipToPadding = false
         grid.adapter = adapter
         grid.setOnItemClickListener { _, _, position, _ ->
-            items.getOrNull(position)?.let { item ->
-                dialog = AlertDialog.Builder(context)
-                    .setTitle(item.title)
-                    .setMessage(listOf(item.author, duration(item.durationSeconds), "Playback will be available in the next integration phase.").filter { it.isNotBlank() }.joinToString("\n\n"))
-                    .setPositiveButton("Close", null)
-                    .show()
+            val current = connection
+            val item = items.getOrNull(position)
+            if (active && !busy && current != null && item != null) {
+                hideKeyboard()
+                playback.open(current, item)
             }
         }
         browse.addView(grid, LayoutParams(MATCH, 0, 1f))
@@ -260,6 +277,122 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         footer.addView(more, LayoutParams(dp(132), dp(48)))
         browse.addView(footer, LayoutParams(MATCH, WRAP))
         addView(browse, LayoutParams(MATCH, 0, 1f))
+    }
+
+    private fun buildPlayer() {
+        playerPanel.orientation = VERTICAL
+        playerPanel.gravity = Gravity.CENTER_HORIZONTAL
+        playerPanel.setPadding(dp(20), dp(8), dp(20), dp(8))
+        val back = button("‹  LIBRARY")
+        back.setOnClickListener { playback.stop() }
+        playerPanel.addView(back, LayoutParams(MATCH, dp(48)))
+        playerTitle.gravity = Gravity.CENTER
+        playerTitle.maxLines = 2
+        playerTitle.ellipsize = TextUtils.TruncateAt.END
+        playerPanel.addView(playerTitle, LayoutParams(MATCH, WRAP))
+        playerAuthor.gravity = Gravity.CENTER
+        playerPanel.addView(playerAuthor, LayoutParams(MATCH, WRAP))
+        playerChapter.setOnClickListener { showChapters() }
+        playerPanel.addView(playerChapter, LayoutParams(MATCH, dp(48)))
+        playerStatus.gravity = Gravity.CENTER
+        playerPanel.addView(playerStatus, LayoutParams(MATCH, WRAP))
+        playerTime.gravity = Gravity.CENTER
+        playerPanel.addView(playerTime, LayoutParams(MATCH, WRAP))
+        progress.max = 10000
+        progress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onStartTrackingTouch(seekBar: SeekBar) {
+                scrubbing = true
+            }
+
+            override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {
+                if (fromUser) playerState.session?.let {
+                    playerTime.text = clock(it.durationMs * value / 10000) + " / " + clock(it.durationMs)
+                }
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                scrubbing = false
+                playerState.session?.let { playback.seek(it.durationMs * seekBar.progress / 10000) }
+            }
+        })
+        playerPanel.addView(progress, LayoutParams(MATCH, dp(48)))
+        val controls = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        rewind.setOnClickListener { playback.seek(playerState.positionMs - 30_000) }
+        forward.setOnClickListener { playback.seek(playerState.positionMs + 30_000) }
+        playPause.setOnClickListener {
+            if (playerState.failed) {
+                val current = connection
+                val item = playerState.item
+                if (current != null && item != null) playback.open(current, item)
+            } else playback.toggle()
+        }
+        rate.setOnClickListener {
+            val speeds = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+            dialog = AlertDialog.Builder(context).setTitle("Playback speed")
+                .setItems(speeds.map { "${it}×" }.toTypedArray()) { _, index -> playback.speed(speeds[index]) }
+                .show()
+        }
+        for (control in listOf(rewind, playPause, forward, rate)) {
+            controls.addView(control, LayoutParams(0, dp(58), 1f))
+        }
+        playerPanel.addView(controls, LayoutParams(MATCH, WRAP))
+        val scroll = ScrollView(context).apply {
+            isFillViewport = true
+            addView(playerPanel, FrameLayout.LayoutParams(MATCH, WRAP))
+        }
+        playerPanel.visibility = GONE
+        scroll.visibility = GONE
+        addView(scroll, LayoutParams(MATCH, 0, 1f))
+    }
+
+    private fun renderPlayer(state: BooksPlayerState) {
+        playerState = state
+        val show = active && state.item != null
+        playerPanel.visibility = if (show) VISIBLE else GONE
+        (playerPanel.parent as? View)?.visibility = playerPanel.visibility
+        if (!show) {
+            if (active && connection != null) browse.visibility = VISIBLE
+            scrubbing = false
+            return
+        }
+        browse.visibility = GONE
+        setup.visibility = GONE
+        playerTitle.text = state.item?.title.orEmpty()
+        playerAuthor.text = state.item?.author.orEmpty()
+        playerStatus.text = state.status
+        val session = state.session
+        val chapter = session?.let { it.chapters.getOrNull(it.chapterAt(state.positionMs)) }
+        playerChapter.text = chapter?.title ?: "CHAPTERS"
+        playerChapter.isEnabled = session?.chapters?.isNotEmpty() == true && !state.failed
+        val ready = session != null && !state.failed
+        progress.isEnabled = ready
+        rewind.isEnabled = ready
+        forward.isEnabled = ready
+        rate.isEnabled = ready
+        playPause.isEnabled = ready || state.failed
+        playPause.text = if (state.failed) "RETRY" else if (state.wantsPlay) "PAUSE" else "PLAY"
+        rate.text = "${state.speed}×"
+        if (!scrubbing) {
+            playerTime.text = clock(state.positionMs) + " / " + clock(session?.durationMs ?: 0)
+            progress.progress = if (session != null && session.durationMs > 0)
+                (state.positionMs * 10000 / session.durationMs).toInt().coerceIn(0, 10000) else 0
+        }
+    }
+
+    private fun showChapters() {
+        val chapters = playerState.session?.chapters ?: return
+        dialog = AlertDialog.Builder(context).setTitle("Chapters")
+            .setItems(chapters.map { it.title + "  ·  " + clock(it.startMs) }.toTypedArray()) { _, index ->
+                playback.seek(chapters[index].startMs)
+            }.show()
+    }
+
+    private fun clock(ms: Long): String {
+        val seconds = ms.coerceAtLeast(0) / 1000
+        return java.lang.String.format(java.util.Locale.US, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
     }
 
     private fun connect() {
@@ -492,11 +625,6 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
             else -> "Audiobookshelf returned HTTP " + error.status + "."
         }
         else -> "Could not contact Audiobookshelf or read its response."
-    }
-
-    private fun duration(seconds: Double): String {
-        val minutes = (seconds / 60).toLong()
-        return if (minutes > 0) "${minutes / 60}h ${minutes % 60}m" else ""
     }
 
     private fun button(label: String) = Button(context).apply { text = label }
