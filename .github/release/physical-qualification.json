@@ -23,6 +23,17 @@
       "evidenceRef": ".github/release/evidence/full-v2.1.0.md",
       "console": "ProForm Smart Power 10.0",
       "notes": "Physical console acceptance completed; see evidenceRef"
+    },
+    {
+      "versionName": "2.2.0",
+      "applicationId": "com.fitbaus.bikebridge",
+      "status": "qualified",
+      "certSha256": "5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C",
+      "apkSha256": "252d8c0f32f0ad185089f0c2a45f9085a7f1c32f68a6c3a1b4014372d3bed751",
+      "sourceCommit": "5b1dc8e78d5123fc5c9432cde6b53092eeb09b7d",
+      "evidenceRef": ".github/release/evidence/full-v2.2.0.md",
+      "console": "ProForm Smart Power 10.0",
+      "notes": "Physical console acceptance completed; see evidenceRef"
     }
   ]
 }
