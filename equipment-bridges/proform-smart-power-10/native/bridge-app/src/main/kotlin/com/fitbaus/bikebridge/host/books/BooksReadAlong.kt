@@ -120,6 +120,8 @@ internal class BooksReadAlong(
         visibility = GONE
     }
 
+    fun floatingNarration(): String? = if (visibility == VISIBLE) displayed ?: "Preparing narration…" else null
+
     fun open(next: BooksTranscriptRequest, state: BooksPlayerState, connection: BooksConnection) {
         if (destroyed) return
         close()
