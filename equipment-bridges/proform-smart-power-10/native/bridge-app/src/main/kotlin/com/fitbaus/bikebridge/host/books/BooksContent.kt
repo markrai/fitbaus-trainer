@@ -406,7 +406,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         prepareButton.isEnabled = state.session != null && !state.failed
         val current = connection
         val item = state.item
-        if (current != null && item != null) {
+        if (current != null) {
             val key = BooksTranscriptRequest(current.address, item.id)
             if (narrationKey != key) {
                 narrationKey = key
