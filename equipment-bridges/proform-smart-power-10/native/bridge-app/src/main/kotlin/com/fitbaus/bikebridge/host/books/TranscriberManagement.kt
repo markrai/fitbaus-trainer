@@ -12,9 +12,14 @@ internal data class PreparationModel(
     val total: Long,
     val qualification: String,
     val memoryAllowed: Boolean,
+    val automaticState: String = "idle",
+    val completedRuns: Int = 0,
+    val totalRuns: Int = 2,
+    val qualificationError: String? = null,
 ) {
     val downloading get() = state == "downloading" || state == "verifying"
     val qualified get() = id == "tiny" || qualification in setOf("live_candidate", "background_candidate")
+    val qualifying get() = automaticState in setOf("queued", "running", "waiting_resources")
 }
 
 internal data class PreparationJob(
@@ -38,6 +43,7 @@ internal data class PreparationSnapshot(
     val canPrepare: Boolean,
     val renewable: Boolean,
     val sourceMatches: Boolean,
+    val automaticQualification: Boolean = false,
 )
 
 internal class TranscriberManagement(
@@ -109,11 +115,16 @@ internal class TranscriberManagement(
                 ?: return@mapNotNull null
             val record = (0 until (qualified?.length() ?: 0)).mapNotNull { qualified?.optJSONObject(it) }
                 .firstOrNull { it.optString("id") == id }
+            val automatic = record?.optJSONObject("automatic")
+            val totalRuns = (automatic?.optInt("total_runs", 2) ?: 2).coerceIn(1, 10)
             PreparationModel(id, row.getBoolean("installed"), row.getString("state"),
                 row.optLong("received_bytes", 0).coerceAtLeast(0),
                 row.optLong("total_bytes", row.optLong("approximate_bytes", 0)).coerceAtLeast(0),
                 record?.optJSONObject("qualification")?.optString("state") ?: "unqualified",
-                record?.optJSONObject("admission")?.optBoolean("allowed") ?: false)
+                record?.optJSONObject("admission")?.optBoolean("allowed") ?: false,
+                automatic?.optString("state") ?: "idle",
+                (automatic?.optInt("completed_runs", 0) ?: 0).coerceIn(0, totalRuns), totalRuns,
+                automatic?.optString("error")?.takeIf { it.matches(Regex("[a-z_]{1,80}")) })
         }
         val jobs = if (prepare) requireNotNull(books).session.authorized { token ->
             val current = manifest(caps, token)
@@ -135,12 +146,18 @@ internal class TranscriberManagement(
                     row.optString("error").takeIf { !row.isNull("error") && it.matches(Regex("[a-z_]{1,80}")) })
             }
         } else emptyList()
-        return PreparationSnapshot(models, jobs, manage, prepare, caps.optBoolean("paired_background_refresh"), matches)
+        return PreparationSnapshot(models, jobs, manage, prepare, caps.optBoolean("paired_background_refresh"), matches,
+            caps.optBoolean("automatic_model_qualification"))
     }
 
     fun download(model: String, cancel: Boolean = false) {
         require(model in setOf("base", "small") && capabilities().optBoolean("paired_model_management"))
         call("/v1/models/$model/${if (cancel) "cancel" else "download"}", JSONObject())
+    }
+
+    fun retryQualification(model: String) {
+        require(model in setOf("base", "small") && capabilities().optBoolean("automatic_model_qualification"))
+        call("/v1/models/$model/qualify", JSONObject())
     }
 
     fun start(model: String, credentials: BooksCredentials? = null) {
