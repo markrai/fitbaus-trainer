@@ -12,13 +12,23 @@ internal class BooksCoverFetcher(private val connection: BooksConnection) {
     fun fetch(itemId: String): Bitmap? {
         if (Thread.currentThread().isInterrupted) return null
         return try {
-            val request = URI(connection.server.coverUrl(itemId)).toURL().openConnection() as HttpURLConnection
-            try {
+            connection.session.authorized { token -> fetchAuthorized(itemId, token) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun fetchAuthorized(itemId: String, token: String): Bitmap? {
+        if (Thread.currentThread().isInterrupted) return null
+        val request = URI(connection.server.coverUrl(itemId)).toURL().openConnection() as HttpURLConnection
+        return try {
                 request.instanceFollowRedirects = false
                 request.connectTimeout = 8_000
                 request.readTimeout = 10_000
-                request.setRequestProperty("Authorization", "Bearer " + connection.token)
-                if (request.responseCode != 200) return null
+                request.setRequestProperty("Authorization", "Bearer " + token)
+                val status = request.responseCode
+                if (status == 401) throw BooksHttpFailure(status)
+                if (status != 200) return null
                 val bytes = request.inputStream.use { input ->
                     val output = ByteArrayOutputStream()
                     val buffer = ByteArray(8192)
@@ -40,11 +50,8 @@ internal class BooksCoverFetcher(private val connection: BooksConnection) {
                     inSampleSize = sample
                     inPreferredConfig = Bitmap.Config.RGB_565
                 })
-            } finally {
-                request.disconnect()
-            }
-        } catch (_: Exception) {
-            null
+        } finally {
+            request.disconnect()
         }
     }
 }
