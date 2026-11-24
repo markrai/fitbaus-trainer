@@ -35,7 +35,7 @@ import com.fitbaus.bikebridge.host.youtube.ThumbnailLoader
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
-internal class BooksContent(context: Context) : LinearLayout(context) {
+internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {}) : LinearLayout(context) {
     val hud = ExerciseHud(context)
     private val store = BooksConnectionStore(context)
     private val main = Handler(Looper.getMainLooper())
@@ -97,6 +97,20 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         playback.seek(playerState.positionMs + delta)
     })
 
+    val floatingPlayer = BooksFloatingPlayer(context, onRestoreRequested, ::stop, playback::toggle) { delta ->
+        playback.seek(playerState.positionMs + delta)
+    }
+
+    fun minimize(): Boolean {
+        if (!active || !BooksFloatingPolicy.canFloat(playerState)) return false
+        dialog?.dismiss()
+        dialog = null
+        hideKeyboard()
+        floatingPlayer.render(playerState, readAlong.floatingNarration())
+        floatingPlayer.show()
+        return true
+    }
+
     init {
         orientation = VERTICAL
         setBackgroundColor(Color.BLACK)
@@ -112,7 +126,11 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     }
 
     fun start() {
-        if (active) return
+        floatingPlayer.visibility = GONE
+        if (active) {
+            renderPlayer(playerState)
+            return
+        }
         active = true
         showSetup("Connecting to Audiobookshelf…")
         request(
@@ -126,6 +144,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     }
 
     fun stop() {
+        floatingPlayer.visibility = GONE
         active = false
         playback.stop()
         cancelRequest()
@@ -368,6 +387,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         playerPanel.visibility = if (show && readAlong.visibility != VISIBLE) VISIBLE else GONE
         (playerPanel.parent as? View)?.visibility = playerPanel.visibility
         if (!show) {
+            floatingPlayer.visibility = GONE
             if (active && connection != null) browse.visibility = VISIBLE
             scrubbing = false
             return
@@ -376,6 +396,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         setup.visibility = GONE
         readAlongButton.isEnabled = state.session != null && !state.failed
         if (readAlong.visibility == VISIBLE) readAlong.render(state)
+        if (floatingPlayer.visibility == VISIBLE) floatingPlayer.render(state, readAlong.floatingNarration())
         playerTitle.text = state.item?.title.orEmpty()
         playerAuthor.text = state.item?.author.orEmpty()
         playerStatus.text = state.status
