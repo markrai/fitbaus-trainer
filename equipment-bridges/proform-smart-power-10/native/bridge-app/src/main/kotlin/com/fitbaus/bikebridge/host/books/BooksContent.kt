@@ -79,6 +79,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     private val more = button("NEXT")
     private val pageLabel = text("", 16f)
     private val playerPanel = LinearLayout(context)
+    private val readAlongButton = button("READ ALONG")
     private val playerTitle = text("", 26f)
     private val playerAuthor = text("", 18f)
     private val playerChapter = button("CHAPTERS")
@@ -92,6 +93,9 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     private var scrubbing = false
     private var playerState = BooksPlayerState()
     private val playback = BooksPlayback(context, ::renderPlayer)
+    private val readAlong = BooksReadAlong(context, ::closeReadAlong, playback::toggle, { delta ->
+        playback.seek(playerState.positionMs + delta)
+    })
 
     init {
         orientation = VERTICAL
@@ -102,6 +106,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         buildSetup()
         buildBrowse()
         buildPlayer()
+        addView(readAlong, LayoutParams(MATCH, 0, 1f))
         setup.visibility = GONE
         browse.visibility = GONE
     }
@@ -142,6 +147,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     fun destroy() {
         stop()
         playback.destroy()
+        readAlong.destroy()
         worker.shutdownNow()
     }
 
@@ -286,7 +292,13 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         playerPanel.setPadding(dp(20), dp(8), dp(20), dp(8))
         val back = button("‹  LIBRARY")
         back.setOnClickListener { playback.stop() }
-        playerPanel.addView(back, LayoutParams(MATCH, dp(48)))
+        val top = LinearLayout(context).apply {
+            orientation = HORIZONTAL
+        }
+        readAlongButton.setOnClickListener { openReadAlong() }
+        top.addView(back, LayoutParams(0, dp(48), 1f))
+        top.addView(readAlongButton, LayoutParams(0, dp(48), 1f))
+        playerPanel.addView(top, LayoutParams(MATCH, WRAP))
         playerTitle.gravity = Gravity.CENTER
         playerTitle.maxLines = 2
         playerTitle.ellipsize = TextUtils.TruncateAt.END
@@ -352,7 +364,8 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
     private fun renderPlayer(state: BooksPlayerState) {
         playerState = state
         val show = active && state.item != null
-        playerPanel.visibility = if (show) VISIBLE else GONE
+        if (!show && readAlong.visibility == VISIBLE) readAlong.close()
+        playerPanel.visibility = if (show && readAlong.visibility != VISIBLE) VISIBLE else GONE
         (playerPanel.parent as? View)?.visibility = playerPanel.visibility
         if (!show) {
             if (active && connection != null) browse.visibility = VISIBLE
@@ -361,6 +374,8 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         }
         browse.visibility = GONE
         setup.visibility = GONE
+        readAlongButton.isEnabled = state.session != null && !state.failed
+        if (readAlong.visibility == VISIBLE) readAlong.render(state)
         playerTitle.text = state.item?.title.orEmpty()
         playerAuthor.text = state.item?.author.orEmpty()
         playerStatus.text = state.status
@@ -383,6 +398,19 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
             progress.progress = if (session != null && session.durationMs > 0)
                 (state.positionMs * 10000 / session.durationMs).toInt().coerceIn(0, 10000) else 0
         }
+    }
+
+    private fun openReadAlong() {
+        val current = connection ?: return
+        val item = playerState.item ?: return
+        if (playerState.session == null || playerState.failed) return
+        readAlong.open(BooksTranscriptRequest(current.address, item.id), playerState)
+        renderPlayer(playerState)
+    }
+
+    private fun closeReadAlong() {
+        readAlong.close()
+        renderPlayer(playerState)
     }
 
     private fun showChapters() {
