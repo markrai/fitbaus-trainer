@@ -6,6 +6,8 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputFilter
 import android.text.InputType
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -24,7 +26,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
     private val protocol = Spinner(context)
     private val host = EditText(context)
     private val port = EditText(context)
-    private val token = EditText(context)
+    private val code = EditText(context)
     private val status = TextView(context)
     private val connect = Button(context)
     private val disconnect = Button(context)
@@ -64,16 +66,30 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         row.addView(host, LayoutParams(0, dp(56), 1f))
         row.addView(port, LayoutParams(dp(110), dp(56)))
         addView(row, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        token.hint = "Transcriber token"
-        token.setSingleLine(true)
-        token.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-        token.filters = arrayOf(InputFilter.LengthFilter(256))
-        token.isSaveEnabled = false
-        addView(token, LayoutParams(LayoutParams.MATCH_PARENT, dp(56)))
+        code.hint = "Pairing code (XXXX-XXXX)"
+        code.setSingleLine(true)
+        code.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        code.filters = arrayOf(InputFilter.AllCaps(), InputFilter.LengthFilter(9))
+        code.addTextChangedListener(object : TextWatcher {
+            private var formatting = false
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                if (formatting || s == null) return
+                val raw = s.toString().replace("-", "")
+                val formatted = if (raw.length > 4) raw.take(4) + "-" + raw.drop(4).take(4) else raw
+                if (s.toString() == formatted) return
+                formatting = true
+                s.replace(0, s.length, formatted)
+                formatting = false
+            }
+        })
+        code.isSaveEnabled = false
+        addView(code, LayoutParams(LayoutParams.MATCH_PARENT, dp(56)))
         status.textSize = 15f
         status.setTextColor(Color.WHITE)
         addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        connect.text = "TEST CONNECTION & SAVE"
+        connect.text = "CONNECT"
         connect.setOnClickListener { connect() }
         disconnect.text = "DISCONNECT"
         disconnect.setOnClickListener { disconnect() }
@@ -90,15 +106,15 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         request({ store.load() }, { connection ->
             saved = connection
             if (connection == null) {
-                status.text = "Not connected"
-                token.hint = "Transcriber token"
+                status.text = "Not connected. Run docker compose exec transcriber python -m transcriber pair on your server."
+                code.hint = "Pairing code (XXXX-XXXX)"
             } else {
                 val uri = URI(connection.address)
                 protocol.setSelection(if (uri.scheme == "http") 1 else 0)
                 host.setText(uri.host)
                 port.setText(if (uri.port == -1) "" else uri.port.toString())
-                token.hint = "Saved token (enter to replace)"
-                status.text = "Saved connection. Test to check readiness."
+                code.hint = "Paired (new code to replace)"
+                status.text = "Paired. Tap Connect to test readiness."
             }
         }, "Unable to load saved connection. Disconnect to reset.")
     }
@@ -108,7 +124,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         generation++
         pending?.cancel(true)
         pending = null
-        token.text.clear()
+        code.text.clear()
         saved = null
     }
 
@@ -118,38 +134,40 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
     }
 
     private fun connect() {
-        val candidate = try {
-            val entered = token.text.toString()
-            val existing = saved
-            val address = BooksServer.address(protocol.selectedItem.toString(), host.text.toString(), port.text.toString(), false)
-            val credential = entered.ifBlank {
-                if (existing != null && existing.address == address) existing.token else ""
-            }
-            TranscriberConnection(address, credential.trim())
+        val address: String
+        val pairingCode: String?
+        val existing = saved
+        try {
+            address = BooksServer.address(protocol.selectedItem.toString(), host.text.toString(), port.text.toString(), false)
+            val entered = code.text.toString()
+            pairingCode = if (entered.isBlank() && existing?.address == address) null
+                else TranscriberConnection.normalizeCode(entered)
         } catch (_: Exception) {
-            status.text = "Enter a valid host, port and transcriber token. HTTP requires a private IPv4 address."
+            status.text = "Enter a valid host, port and eight-character pairing code. HTTP requires a private IPv4 address."
             return
         }
-        status.text = "Testing connection…"
+        status.text = if (pairingCode == null) "Testing connection…" else "Pairing…"
         request({
+            val candidate = if (pairingCode == null) requireNotNull(existing)
+                else TranscriberConnection.pair(address, pairingCode)
             val capabilities = candidate.test()
             check(!Thread.currentThread().isInterrupted)
             store.save(candidate)
-            capabilities
-        }, { capabilities ->
+            candidate to capabilities
+        }, { (candidate, capabilities) ->
             saved = candidate
-            token.text.clear()
-            token.hint = "Saved token (enter to replace)"
+            code.text.clear()
+            code.hint = "Paired (new code to replace)"
             status.text = if (capabilities.ready) "Connected · Ready · Source: " + capabilities.sourceId
                 else "Connected · Service not ready. Check source and model setup."
-        }, "Connection failed. Check host, port, token and server version.")
+        }, "Connection failed. Check the address and service; generate a fresh pairing code if needed.")
     }
 
     private fun disconnect() {
         request({ store.clear() }, {
             saved = null
-            token.text.clear()
-            token.hint = "Transcriber token"
+            code.text.clear()
+            code.hint = "Pairing code (XXXX-XXXX)"
             status.text = "Disconnected"
         }, "Unable to clear saved connection.")
     }
@@ -158,7 +176,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         protocol.isEnabled = !busy
         host.isEnabled = !busy
         port.isEnabled = !busy
-        token.isEnabled = !busy
+        code.isEnabled = !busy
         connect.isEnabled = !busy
         disconnect.isEnabled = !busy
     }
