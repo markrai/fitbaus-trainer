@@ -2,7 +2,6 @@ package com.fitbaus.bikebridge.host.books
 
 import android.app.AlertDialog
 import android.content.Context
-import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
 import android.text.InputFilter
@@ -77,7 +76,7 @@ internal class TranscriberManagementDialog(
     }
 
     private fun request(action: () -> PreparationSnapshot) {
-        if (closed || pending != null) return
+        if (closed || pending != null || login != null) return
         main.removeCallbacks(poll)
         refresh.isEnabled = false
         enableRows(false)
@@ -228,7 +227,7 @@ internal class TranscriberManagementDialog(
             password.text.clear()
             username.text.clear()
             login = null
-            if (!closed && pending == null && last?.jobs?.any { it.running } == true) main.postDelayed(poll, 5000)
+            if (!closed && pending == null && shouldPoll()) main.postDelayed(poll, 5000)
         }
         prompt.show()
         prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -248,16 +247,24 @@ internal class TranscriberManagementDialog(
         }
     }
 
+    private fun shouldPoll(): Boolean = last?.let { snapshot ->
+        snapshot.models.any { it.downloading } || snapshot.jobs.any { it.running }
+    } == true
+
     private fun confirm(message: String, action: () -> Unit) {
         main.removeCallbacks(poll)
         val prompt = AlertDialog.Builder(context).setMessage(message).setNegativeButton("KEEP", null)
-            .setPositiveButton("CONFIRM") { _, _ -> action() }.create()
+            .setPositiveButton("CONFIRM", null).create()
         login = prompt
         prompt.setOnDismissListener {
             login = null
             if (!closed && pending == null && last?.jobs?.any { it.running } == true) main.postDelayed(poll, 5000)
         }
         prompt.show()
+        prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            prompt.dismiss()
+            action()
+        }
     }
 
     private fun label(value: String, size: Float) {
