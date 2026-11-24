@@ -10,6 +10,7 @@ import android.text.TextUtils
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -75,7 +76,7 @@ internal class BooksReadAlong(
         narration.setPadding(dp(12), dp(10), dp(12), dp(10))
         narration.setLineSpacing(dp(4).toFloat(), 1.12f)
         scroll.isFillViewport = true
-        scroll.addView(narration, ScrollView.LayoutParams(MATCH, WRAP))
+        scroll.addView(narration, FrameLayout.LayoutParams(MATCH, WRAP))
         addView(scroll, LayoutParams(MATCH, 0, 1f))
         details.setTextColor(Color.LTGRAY)
         details.setTextIsSelectable(true)
