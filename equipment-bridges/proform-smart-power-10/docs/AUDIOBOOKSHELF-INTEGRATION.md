@@ -72,3 +72,10 @@ This is synthetic qualification text, not a transcription of the audiobook. Seek
 - Verify uninterrupted bike telemetry and USB control.
 - For playback, verify single-file and multi-file books, interrupted networking, resume across devices, and correct progress accounting.
 - For Read Along, verify large-text layout, exact cue boundaries and gaps, backward/forward seeks, chapters and playback speeds. Confirm that opening and closing Read Along does not restart the audiobook and that missing/malformed files never stop playback.
+
+
+## Optional transcriber connection (Phase 3D.1)
+
+The separate [FitBaus Transcriber](https://github.com/markrai/fitbaus-transcriber) service can be configured in native Settings → Transcriber. Select HTTPS or HTTP, enter the host and port (initial default 8765), and enter the transcriber token. Test Connection & Save validates the authenticated v1 capability response before saving. A compatible service without a prepared model or configured source can be saved but is shown as not ready. Disconnect removes only the transcriber configuration. The token is masked and stored in a separate Android Keystore-wrapped encrypted record; it is not sent to Audiobookshelf. Changing the endpoint requires entering a token rather than forwarding the saved token automatically.
+
+HTTP uses the same private IPv4 restriction as Audiobookshelf; HTTPS uses normal certificate validation. For a local deployment, configure the companion's LAN binding and restrict access to the trusted LAN before connecting. This phase only establishes the connection; remote transcript requests, Audiobookshelf credential reuse, lookahead and synchronized rendering follow in Phase 3D.2/3D.3. Normal audio playback and local fixture Read Along remain unchanged.
