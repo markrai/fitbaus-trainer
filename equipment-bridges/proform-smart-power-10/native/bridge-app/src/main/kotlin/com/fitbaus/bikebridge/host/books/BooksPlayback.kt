@@ -35,7 +35,8 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
-    private val deviceId = app.getSharedPreferences("fitbaus_books_player", Context.MODE_PRIVATE).let { prefs ->
+    private val deviceId by lazy {
+        val prefs = app.getSharedPreferences("fitbaus_books_player", Context.MODE_PRIVATE)
         prefs.getString("device_id", null) ?: UUID.randomUUID().toString().also {
             check(prefs.edit().putString("device_id", it).commit())
         }
@@ -52,6 +53,7 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
     private var wasPlaying = false
     private var lastSync = 0L
     private var touched = false
+    private var dirty = false
     private var speed = 1f
     private var syncFailed = false
 
@@ -123,6 +125,7 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
                     if (playbackState == Player.STATE_ENDED) {
                         sample()
                         touched = true
+                        dirty = true
                         sync()
                     }
                     publish()
@@ -157,8 +160,10 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
         val engine = player ?: return
         if (state.failed) return
         sample()
-        if (engine.playbackState == Player.STATE_ENDED) seek(0)
-        if (engine.playWhenReady && engine.playbackState != Player.STATE_ENDED) engine.pause() else engine.play()
+        if (engine.playbackState == Player.STATE_ENDED) {
+            seek(0)
+            engine.play()
+        } else if (engine.playWhenReady) engine.pause() else engine.play()
         publish()
     }
 
@@ -170,6 +175,7 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
         val target = session.locate(positionMs)
         engine.seekTo(target.index, target.positionMs)
         touched = true
+        dirty = true
         publish()
         sync()
     }
@@ -200,6 +206,7 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
         syncInFlight = false
         syncFailed = false
         touched = false
+        dirty = false
         state = BooksPlayerState(speed = speed)
         if (session != null && client != null) {
             worker.submit { runCatching { client.update(session, position, delta, true, includeProgress) } }
@@ -223,6 +230,7 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
         if (wasPlaying && lastClock > 0) {
             listened += (now - lastClock).coerceIn(0, 2_000)
             touched = true
+            dirty = true
         }
         lastClock = now
         wasPlaying = engine.isPlaying
@@ -238,19 +246,21 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
     private fun sync() {
         val session = state.session ?: return
         val client = api ?: return
-        if (!touched || syncInFlight) return
+        if (!dirty || syncInFlight) return
         val ticket = generation
         val position = currentPosition()
         val delta = listened
         listened = 0
         lastSync = SystemClock.elapsedRealtime()
         syncInFlight = true
+        dirty = false
         worker.submit {
             val result = runCatching { client.update(session, position, delta, false) }
             main.post {
                 if (generation == ticket && !destroyed) {
                     syncInFlight = false
                     syncFailed = result.isFailure
+                    if (syncFailed) dirty = true
                     publish()
                 }
             }
