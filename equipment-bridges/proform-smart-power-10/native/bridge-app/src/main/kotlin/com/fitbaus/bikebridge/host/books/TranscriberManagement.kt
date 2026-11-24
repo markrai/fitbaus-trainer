@@ -68,7 +68,9 @@ internal class TranscriberManagement(
         token?.let { headers["X-Audiobookshelf-Token"] = it }
         val response = http.request(transcriber.address + path, headers, body?.toString())
         if (response.status == 401 && token != null) {
-            val current = capabilities()
+            val current = try { capabilities() } catch (error: BooksHttpFailure) {
+                throw java.io.IOException("Transcriber connection rejected", error)
+            }
             if (!sourceMatches(current)) throw IllegalArgumentException("Audiobookshelf source changed")
         }
         if (response.status !in 200..299) throw BooksHttpFailure(response.status)
