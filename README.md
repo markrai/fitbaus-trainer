@@ -4,7 +4,13 @@
 
 <p align="center"><strong>Train. Play. Watch. Listen. Learn.</strong></p>
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-orange.svg)](LICENSE) [![Latest](https://img.shields.io/github/v/release/markrai/fitbaus-trainer?label=latest&color=blue)](https://github.com/markrai/fitbaus-trainer/releases) ![Android](https://img.shields.io/badge/Android-supported-green) ![iOS](https://img.shields.io/badge/iOS-source-yellow) ![Web](https://img.shields.io/badge/Web-PWA-8A2BE2)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-orange.svg" alt="License: AGPL-3.0" /></a>
+  <a href="https://github.com/markrai/fitbaus-trainer/releases"><img src="https://img.shields.io/github/v/release/markrai/fitbaus-trainer?label=latest&amp;color=blue" alt="Latest" /></a>
+  <img src="https://img.shields.io/badge/Android-supported-green" alt="Android" />
+  <img src="https://img.shields.io/badge/iOS-source-yellow" alt="iOS" />
+  <img src="https://img.shields.io/badge/Web-PWA-8A2BE2" alt="Web" />
+</p>
 
 **FitBaus Trainer is an open-source fitness and entertainment platform that transforms your workout into something you look forward to.**
 
