@@ -660,7 +660,8 @@ class NativeBridgeActivity : Activity() {
         val pad = dp(16)
         root.setPadding(pad, dp(10), pad, dp(10))
 
-        root.addView(buildTitleRow())
+        val titleRow = buildTitleRow()
+        root.addView(titleRow)
 
         val contentHost = FrameLayout(this)
         dashboardContent = buildDashboard()
@@ -702,7 +703,15 @@ class NativeBridgeActivity : Activity() {
             youtubeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
-        booksContent = BooksContent(this) { modeController.select(ArcadeMode.Books) }
+        booksContent = BooksContent(
+            this,
+            onRestoreRequested = { modeController.select(ArcadeMode.Books) },
+            onReadingFullscreenChanged = { fullscreen ->
+                titleRow.visibility = if (fullscreen) View.GONE else View.VISIBLE
+                root.setPadding(if (fullscreen) 0 else pad, if (fullscreen) 0 else dp(10),
+                    if (fullscreen) 0 else pad, if (fullscreen) 0 else dp(10))
+            },
+        )
         contentHost.addView(
             booksContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),

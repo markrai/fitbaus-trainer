@@ -3,7 +3,9 @@
 package com.fitbaus.bikebridge.host.books
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
@@ -11,6 +13,7 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -22,6 +25,7 @@ import java.util.concurrent.Future
 internal class BooksReadAlong(
     context: Context,
     private val source: BooksTranscriptSource = LocalBooksTranscriptSource(context),
+    onFullscreenRequested: () -> Unit = {},
 ) : LinearLayout(context) {
     private val transcriberStore = TranscriberConnectionStore(context)
     private var books: BooksConnection? = null
@@ -37,6 +41,9 @@ internal class BooksReadAlong(
     private val reload = button("RETRY NARRATION")
     val cover = ImageView(context)
     private val readingControls = LinearLayout(context)
+    private val footer = LinearLayout(context)
+    private val fullscreenButton = NarrationFullscreenButton(context)
+    private var fullscreen = false
     private var hasNarration = false
     private val readingPrefs = context.applicationContext.getSharedPreferences("fitbaus_books_read_along", Context.MODE_PRIVATE)
     private var textSizeSp = readingPrefs.getInt("text_size_sp", 36).coerceIn(28, 52)
@@ -91,9 +98,13 @@ internal class BooksReadAlong(
         val stage = FrameLayout(context)
         stage.addView(cover, FrameLayout.LayoutParams(MATCH, MATCH))
         stage.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
+        fullscreenButton.visibility = GONE
+        fullscreenButton.contentDescription = "Enter fullscreen narration"
+        fullscreenButton.setOnClickListener { onFullscreenRequested() }
+        stage.addView(fullscreenButton, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.RIGHT))
         scroll.visibility = GONE
         addView(stage, LayoutParams(MATCH, 0, 1f))
-        val footer = LinearLayout(context).apply {
+        footer.apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
@@ -106,6 +117,28 @@ internal class BooksReadAlong(
         footer.addView(reload, LayoutParams(WRAP, dp(44)))
         addView(footer, LayoutParams(MATCH, WRAP))
         visibility = GONE
+    }
+
+    fun canEnterFullscreen(): Boolean = visibility == VISIBLE && hasNarration
+
+    fun setFullscreen(value: Boolean) {
+        if (fullscreen == value) return
+        fullscreen = value
+        fullscreenButton.expanded = value
+        fullscreenButton.contentDescription = if (value) "Exit fullscreen narration" else "Enter fullscreen narration"
+        fullscreenButton.invalidate()
+        setPadding(if (value) 0 else dp(16), if (value) 0 else dp(4),
+            if (value) 0 else dp(16), if (value) 0 else dp(8))
+        updateReadingChrome()
+    }
+
+    private fun updateReadingChrome() {
+        readingControls.visibility = if (hasNarration && !fullscreen) VISIBLE else GONE
+        footer.visibility = if (fullscreen) GONE else VISIBLE
+        val showButton = hasNarration || fullscreen
+        fullscreenButton.visibility = if (showButton) VISIBLE else GONE
+        val bottom = if (showButton) dp(48) else 0
+        if (scroll.paddingBottom != bottom) scroll.setPadding(0, 0, 0, bottom)
     }
 
     fun floatingNarration(): String? = if (visibility == VISIBLE && hasNarration) displayed else null
@@ -136,7 +169,8 @@ internal class BooksReadAlong(
         hasNarration = false
         cover.visibility = VISIBLE
         scroll.visibility = GONE
-        readingControls.visibility = GONE
+        setFullscreen(false)
+        updateReadingChrome()
         reload.visibility = GONE
         visibility = GONE
     }
@@ -162,7 +196,7 @@ internal class BooksReadAlong(
         hasNarration = presentation == BooksNarrationPresentation.NARRATION
         cover.visibility = if (hasNarration) GONE else VISIBLE
         scroll.visibility = if (hasNarration) VISIBLE else GONE
-        readingControls.visibility = if (hasNarration) VISIBLE else GONE
+        updateReadingChrome()
         details.text = when (presentation) {
             BooksNarrationPresentation.NARRATION -> ""
             BooksNarrationPresentation.LOADING -> "Preparing narration…"
@@ -241,6 +275,37 @@ internal class BooksReadAlong(
     private fun button(value: String) = Button(context).apply { text = value }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    private class NarrationFullscreenButton(context: Context) : ImageButton(context) {
+        var expanded = false
+        private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 2f * resources.displayMetrics.density
+            strokeCap = Paint.Cap.SQUARE
+        }
+
+        init {
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val radius = 10f * resources.displayMetrics.density
+            val arm = 6f * resources.displayMetrics.density
+            val cx = width / 2f
+            val cy = height / 2f
+            for (sx in listOf(-1f, 1f)) {
+                for (sy in listOf(-1f, 1f)) {
+                    val x = cx + sx * (if (expanded) radius - arm else radius)
+                    val y = cy + sy * (if (expanded) radius - arm else radius)
+                    val direction = if (expanded) 1f else -1f
+                    canvas.drawLine(x, y, x + sx * arm * direction, y, stroke)
+                    canvas.drawLine(x, y, x, y + sy * arm * direction, stroke)
+                }
+            }
+        }
+    }
 
     private companion object {
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
