@@ -1,7 +1,6 @@
 package com.fitbaus.bikebridge.host.books
 
 import org.json.JSONObject
-import java.io.IOException
 import java.io.InterruptedIOException
 import kotlin.math.abs
 
@@ -118,11 +117,12 @@ internal class TranscriberManagement(
         }
         val jobs = if (prepare) requireNotNull(books).session.authorized { token ->
             val current = manifest(caps, token)
-            val result = call("/v1/items/${requireNotNull(item).id}/background", token = token).getJSONArray("jobs")
+            val book = requireNotNull(item)
+            val result = call("/v1/items/${book.id}/background", token = token).getJSONArray("jobs")
             require(result.length() <= 32)
             (0 until result.length()).map { i ->
                 val row = result.getJSONObject(i)
-                require(row.getString("item_id") == item.id && row.getString("source_id") == current.getString("source_id"))
+                require(row.getString("item_id") == book.id && row.getString("source_id") == current.getString("source_id"))
                 val id = row.getString("job_id")
                 require(id.matches(Regex("[0-9a-f]{64}")))
                 val model = row.getString("model")
