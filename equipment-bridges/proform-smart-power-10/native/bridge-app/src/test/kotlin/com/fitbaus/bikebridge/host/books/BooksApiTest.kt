@@ -77,6 +77,21 @@ class BooksApiTest {
     }
 
     @Test
+    fun searchesServerBookMatchesWithEncodedQueryAndDeduplication() {
+        val http = Http(BooksHttpResponse(200, """{"book":[
+            {"libraryItem":{"id":"book-1","media":{"metadata":{"title":"A & B","authorName":"Author"},"numTracks":2,"duration":900}}},
+            {"libraryItem":{"id":"book-1","media":{"metadata":{"title":"A & B"},"numTracks":2}}},
+            {"libraryItem":{"id":"ebook","media":{"metadata":{"title":"Ebook"},"numTracks":0}}}
+        ],"authors":[]}"""))
+        val results = BooksApi(server, "key", http).search("books-1", "A & B")
+        assertEquals(listOf(BooksItem("book-1", "A & B", "Author", 900.0, 2)), results)
+        assertEquals("https://vega.example:9443/audiobookshelf/api/libraries/books-1/search?limit=20&q=A+%26+B", http.url)
+        assertEquals("key", http.token)
+        assertThrows(IllegalArgumentException::class.java) { server.searchUrl("books-1", " ") }
+        assertThrows(IllegalArgumentException::class.java) { server.searchUrl("books-1", "a".repeat(201)) }
+    }
+
+    @Test
     fun errorsDoNotExposeResponseBodyOrCredentials() {
         val http = Http(BooksHttpResponse(401, """{"error":"secret-key"}"""))
         val failure = assertThrows(BooksHttpFailure::class.java) {
