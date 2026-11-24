@@ -133,6 +133,23 @@ internal class BooksContent(
         browse.visibility = GONE
     }
 
+    fun showcaseSearch(title: String): Boolean {
+        if (!active || busy || selected == null) return false
+        searchField.setText(title)
+        search()
+        return true
+    }
+
+    fun showcaseOpen(title: String): Boolean {
+        val current = connection ?: return false
+        if (!active || busy) return false
+        val item = items.firstOrNull { it.title.equals(title, ignoreCase = true) } ?: return false
+        playback.open(current, item)
+        return true
+    }
+
+    fun showcaseFullscreen() { setReadingFullscreen(true) }
+
     fun start() {
         floatingPlayer.visibility = GONE
         if (active) {

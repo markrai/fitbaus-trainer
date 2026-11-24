@@ -32,6 +32,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.fitbaus.arcade.ArcadeCameraInfo
+import com.fitbaus.arcade.CameraState
+import com.fitbaus.arcade.ArcadeStatus
 import com.fitbaus.arcade.ArcadeCameraSession
 import com.fitbaus.arcade.ArcadeClock
 import com.fitbaus.arcade.ArcadeStatusResolver
@@ -68,6 +70,17 @@ import com.fitbaus.bikebridge.protocol.NativeTelemetrySnapshot
 
 class NativeBridgeActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
+    private val showcase = ShowcaseDirector()
+    private var showcaseMediaRequested = false
+    private var showcaseMediaOpened = false
+    private var showcaseJumped = false
+    private var showcaseRotated = -1
+    private val showcaseStep = object : Runnable {
+        override fun run() {
+            advanceShowcase()
+            if (showcase.running) handler.postDelayed(this, 100)
+        }
+    }
     private lateinit var rpmValue: TextView
     private lateinit var wattsValue: TextView
     private lateinit var resistanceValue: TextView
@@ -139,18 +152,15 @@ class NativeBridgeActivity : Activity() {
             trackerRate.reset()
             arcadeDiagnostics = ""
             bikeMotion.reset()
-            gameController.refresh()
-            gameController.resetTransient()
-            cameraSession.updateSettings(trackerSettingsFor(game))
-            cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)
-            cameraSession.start()
+            showcaseJumped = false
+            showcaseRotated = -1
+            if (game == ArcadeMode.TrailRide) arcadeContent.trail.selectDeveloperOption(3)
             arcadeClock.start()
         }
 
         override fun deactivateArcade(reason: ArcadeStopReason) {
             gameController.resetTransient()
             arcadeClock.stop()
-            cameraSession.stop(reason)
             arcadeContent.trail.pause()
             arcadeContent.ghoul.pause()
             arcadeContent.biketris.pause()
@@ -222,23 +232,21 @@ class NativeBridgeActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        UvcProcess.acquire(this, this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(buildUi())
         queueYouTubeImport(intent)
-        startBridgeService()
+        if (intent?.action == ShowcaseDirector.ACTION) handler.post { startShowcase(intent) }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         queueYouTubeImport(intent)
-        startBridgeService()
+        if (intent.action == ShowcaseDirector.ACTION) startShowcase(intent)
     }
 
     override fun onResume() {
         super.onResume()
-        controllerOwnership.onHostResume()
         appliedBrightnessRevision = -1
         applyStoredBrightness()
         bindHttpEndpoint(force = true)
@@ -250,8 +258,9 @@ class NativeBridgeActivity : Activity() {
     }
 
     override fun onPause() {
+        if (showcase.running) showcase.abort("activity paused")
+        handler.removeCallbacks(showcaseStep)
         voiceSearch.cancel()
-        controllerOwnership.onHostPause()
         gameController.resetTransient()
         resumed = false
         modeController.onHostPause()
@@ -292,12 +301,10 @@ class NativeBridgeActivity : Activity() {
 
     override fun onDestroy() {
         voiceSearch.cancel()
-        controllerOwnership.onHostPause()
         modeController.onHostDestroy()
         youtubeContent.destroy()
         booksContent.destroy()
         handler.removeCallbacks(refresh)
-        UvcProcess.release(this)
         super.onDestroy()
     }
 
@@ -394,192 +401,100 @@ class NativeBridgeActivity : Activity() {
         }
     }
 
-    private fun startBridgeService() {
-        val service = Intent(this, NativeBridgeService::class.java).setAction(HostConstants.ACTION_USB_RECHECK)
-        if (Build.VERSION.SDK_INT >= 26) {
-            startForegroundService(service)
-        } else {
-            startService(service)
+    private fun startShowcase(intent: Intent) {
+        if (showcase.running) return
+        if (!showcase.start(intent.getStringExtra("run"), intent.getStringExtra("video"), intent.getStringExtra("book"))) return
+        modeController.select(ArcadeMode.Dashboard)
+        showcaseMediaRequested = false
+        showcaseMediaOpened = false
+        handler.removeCallbacks(showcaseStep)
+        handler.post(showcaseStep)
+    }
+
+    private fun advanceShowcase() {
+        val scene = showcase.scene() ?: return
+        if (modeController.mode != scene.mode) {
+            if (modeController.mode == ArcadeMode.YouTube || modeController.mode == ArcadeMode.Books) {
+                if (!showcaseMediaOpened) {
+                    showcase.abort("media was not opened: ${modeController.mode}")
+                    return
+                }
+            }
+            modeController.select(scene.mode)
+            showcaseMediaRequested = false
+            showcaseMediaOpened = false
+        }
+        val t = showcase.sceneSeconds()
+        if (scene.mode == ArcadeMode.YouTube && t >= 3.0) {
+            if (!showcaseMediaRequested) {
+                youtubeContent.showcaseSearch(showcase.video)
+                showcaseMediaRequested = true
+            }
+            if (t >= 7.0 && !showcaseMediaOpened) showcaseMediaOpened = youtubeContent.showcaseOpen(showcase.video)
+        }
+        if (scene.mode == ArcadeMode.Books && t >= 3.0) {
+            if (!showcaseMediaRequested) showcaseMediaRequested = booksContent.showcaseSearch(showcase.book)
+            if (t >= 7.0 && showcaseMediaRequested && !showcaseMediaOpened) showcaseMediaOpened = booksContent.showcaseOpen(showcase.book)
+            if (t >= 20.0 && showcaseMediaOpened) booksContent.showcaseFullscreen()
+        }
+        if (showcase.finished()) {
+            if (!showcaseMediaOpened) showcase.abort("audiobook was not opened") else showcase.complete()
         }
     }
 
     private fun applyState() {
-        val service = NativeBridgeService.instance
-        val session = service?.session()
-        val telemetry: NativeTelemetrySnapshot? = session?.snapshot()
-        val state = if (session == null || telemetry == null) {
-            BridgeUiStateMapper.starting()
-        } else {
-            BridgeUiStateMapper.map(session.phase(), session.statusLine(), telemetry)
-        }
-        bindGridValue(rpmValue, BridgeUiStateMapper.currentValue(telemetry?.rpm), RPM_COLOR)
-        bindGridValue(wattsValue, BridgeUiStateMapper.currentValue(telemetry?.watts), WATTS_COLOR)
-        bindGridValue(resistanceValue, BridgeUiStateMapper.currentValue(telemetry?.resistance), RESISTANCE_COLOR)
-        val heartRate = BridgeProcess.heartRate().view()
-        bindGridValue(hrValue, heartRate?.bpm, if (heartRate?.fresh == true) HR_COLOR else MUTE)
-        setIfChanged(statusValue, BridgeUiStateMapper.statusRow(state))
-        setIfChanged(usbValue, state.usbText)
-        setIfChanged(initValue, state.initText)
-        setIfChanged(bikeValue, BridgeUiStateMapper.bikeRow(telemetry))
-        setIfChanged(controlValue, BridgeUiStateMapper.controlRow(telemetry))
-        setIfChanged(requestedValue, BridgeUiStateMapper.formatGrid(telemetry?.requestedResistance))
-        setIfChanged(observedValue, BridgeUiStateMapper.formatGrid(BridgeUiStateMapper.currentValue(telemetry?.resistance)))
-        setIfChanged(machineValue, state.machineText)
+        val s = showcase.telemetry()
+        bindGridValue(rpmValue, s.rpm, RPM_COLOR)
+        bindGridValue(wattsValue, s.watts, WATTS_COLOR)
+        bindGridValue(resistanceValue, s.resistance, RESISTANCE_COLOR)
+        bindGridValue(hrValue, s.hr, HR_COLOR)
+        setIfChanged(statusValue, "SHOWCASE - simulated data")
+        setIfChanged(usbValue, "Disabled")
+        setIfChanged(initValue, "Demo")
+        setIfChanged(bikeValue, "ProForm Smart Power 10.0")
+        setIfChanged(controlValue, "Disabled")
+        setIfChanged(requestedValue, "--")
+        setIfChanged(observedValue, "--")
+        setIfChanged(machineValue, "Showcase")
         setIfChanged(bridgeValue, BridgeHttpJson.VERSION)
-        val mediaHud = when (modeController.mode) {
-            ArcadeMode.YouTube -> youtubeContent.hud
-            ArcadeMode.Books -> booksContent.hud
-            else -> null
+        setIfChanged(httpValue, "Disabled")
+        when (modeController.mode) {
+            ArcadeMode.YouTube -> youtubeContent.hud.bind(s.rpm, s.watts, s.resistance, s.hr, true)
+            ArcadeMode.Books -> booksContent.hud.bind(s.rpm, s.watts, s.resistance, s.hr, true)
+            else -> Unit
         }
-        if (mediaHud != null) {
-            mediaHud.bind(
-                BridgeUiStateMapper.currentValue(telemetry?.rpm),
-                BridgeUiStateMapper.currentValue(telemetry?.watts),
-                BridgeUiStateMapper.currentValue(telemetry?.resistance),
-                heartRate?.bpm,
-                heartRate?.fresh == true,
-            )
-        }
-        bindHttpEndpoint(force = false)
         applyStoredBrightness()
     }
 
     private fun arcadeTick() {
         val now = System.nanoTime()
-        val telemetry = NativeBridgeService.instance?.session()?.snapshot()
-        val heartRate = BridgeProcess.heartRate().view()
-        arcadeContent.hud.bind(
-            BridgeUiStateMapper.currentValue(telemetry?.rpm),
-            BridgeUiStateMapper.currentValue(telemetry?.watts),
-            BridgeUiStateMapper.currentValue(telemetry?.resistance),
-            heartRate?.bpm,
-            heartRate?.fresh == true,
-        )
-        val info = cameraSession.info()
-        if (modeController.mode == ArcadeMode.Math) {
-            val motion = bikeMotion.update(
-                connected = telemetry?.connected == true,
-                initialized = telemetry?.initialized == true,
-                rpm = telemetry?.rpm?.value,
-                rpmCurrent = telemetry?.rpm?.current == true,
-                rpmObservedAt = telemetry?.rpm?.observedAt,
-                nowNanos = now,
-            )
-            arcadeContent.math.render(cameraSession.state(), cameraSession.failureReason(), motion, arcadeDiagnosticsText(now, info), info)
-            return
+        val s = showcase.telemetry()
+        val t = showcase.sceneSeconds()
+        val position = showcase.position(now, modeController.mode)
+        val sample = (now / 200_000_000L).toString()
+        arcadeContent.hud.bind(s.rpm, s.watts, s.resistance, s.hr, true)
+        when (modeController.mode) {
+            ArcadeMode.Math -> arcadeContent.math.renderShowcase()
+            ArcadeMode.Bricks -> arcadeContent.playground.renderShowcase(now)
+            ArcadeMode.Flak -> arcadeContent.flak.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
+            ArcadeMode.TrailRide -> {
+                arcadeContent.trail.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
+                if (t > 10.0 && !showcaseJumped) {
+                    showcaseJumped = true
+                    arcadeContent.trail.selectDeveloperOption(5)
+                }
+            }
+            ArcadeMode.GhoulRun -> arcadeContent.ghoul.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
+            ArcadeMode.Biketris -> {
+                arcadeContent.biketris.render(position, CameraState.Ready, null, true, true, s.rpm, true, sample, "", null)
+                val rotation = (t / 2.5).toInt()
+                if (rotation != showcaseRotated) {
+                    showcaseRotated = rotation
+                    arcadeContent.biketris.selectDeveloperOption(4)
+                }
+            }
+            else -> Unit
         }
-        if (modeController.mode == ArcadeMode.Flak) {
-            gameController.refresh()
-            arcadeContent.flak.controllerAvailable = gameController.hasController()
-            val controllerOnly = arcadeContent.flak.inputSource == FlakInputSource.Controller
-            arcadeContent.flak.render(
-                if (controllerOnly) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost) else handInput.latest(now),
-                cameraSession.state(),
-                cameraSession.failureReason(),
-                connected = telemetry?.connected == true,
-                initialized = telemetry?.initialized == true,
-                rpm = telemetry?.rpm?.value,
-                rpmCurrent = telemetry?.rpm?.current == true,
-                rpmObservedAt = telemetry?.rpm?.observedAt,
-                diagnostics = arcadeDiagnosticsText(now, info),
-                cameraInfo = if (controllerOnly) null else info,
-                controller = if (controllerOnly) gameController.takeFlakInput() else null,
-            )
-            return
-        }
-        if (modeController.mode == ArcadeMode.TrailRide) {
-            arcadeContent.trail.render(
-                handInput.latest(now),
-                cameraSession.state(),
-                cameraSession.failureReason(),
-                connected = telemetry?.connected == true,
-                initialized = telemetry?.initialized == true,
-                rpm = telemetry?.rpm?.value,
-                rpmCurrent = telemetry?.rpm?.current == true,
-                rpmObservedAt = telemetry?.rpm?.observedAt,
-                diagnostics = arcadeDiagnosticsText(now, info),
-                cameraInfo = info,
-            )
-            return
-        }
-        if (modeController.mode == ArcadeMode.GhoulRun) {
-            gameController.refresh()
-            arcadeContent.ghoul.controllerAvailable = gameController.hasController()
-            val source = arcadeContent.ghoul.inputSource
-            val controllerOnly = source == GhoulRunInputSource.Controller
-            val ghoulDescriptor = gameController.selectedDescriptor()
-            val reverseFromHat = ghoulDescriptor?.let { descriptor ->
-                gameBindings.action(ArcadeMode.GhoulRun, descriptor, KeyEvent.KEYCODE_DPAD_DOWN)?.id == "reverse"
-            } == true
-            val leftFromHat = ghoulDescriptor?.let { descriptor ->
-                gameBindings.action(ArcadeMode.GhoulRun, descriptor, KeyEvent.KEYCODE_DPAD_LEFT)?.id == "left"
-            } == true
-            val rightFromHat = ghoulDescriptor?.let { descriptor ->
-                gameBindings.action(ArcadeMode.GhoulRun, descriptor, KeyEvent.KEYCODE_DPAD_RIGHT)?.id == "right"
-            } == true
-            arcadeContent.ghoul.render(
-                if (controllerOnly) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost) else handInput.latest(now),
-                cameraSession.state(),
-                cameraSession.failureReason(),
-                connected = telemetry?.connected == true,
-                initialized = telemetry?.initialized == true,
-                rpm = telemetry?.rpm?.value,
-                rpmCurrent = telemetry?.rpm?.current == true,
-                rpmObservedAt = telemetry?.rpm?.observedAt,
-                diagnostics = arcadeDiagnosticsText(now, info),
-                cameraInfo = if (controllerOnly) null else info,
-                controller = if (source == GhoulRunInputSource.Webcam) null else gameController.takeGhoulRunInput(reverseFromHat, leftFromHat, rightFromHat),
-            )
-            return
-        }
-        if (modeController.mode == ArcadeMode.Biketris) {
-            if (exclusiveHid.isActive()) controllerOwnership.refreshNow()
-            gameController.refresh()
-            arcadeContent.biketris.controllerAvailable = gameController.hasController()
-            val source = arcadeContent.biketris.inputSource
-            val usingController = source != BiketrisInputSource.Webcam
-            val controllerOnly = source == BiketrisInputSource.Controller
-            val gamepadInput = if (usingController) gameController.takeBiketrisInput() else null
-            arcadeContent.biketris.render(
-                if (controllerOnly) HandPosition(0.5f, 0.5f, 0f, now, HandSource.Lost)
-                else handInput.latest(now),
-                cameraSession.state(),
-                cameraSession.failureReason(),
-                connected = telemetry?.connected == true,
-                initialized = telemetry?.initialized == true,
-                rpm = telemetry?.rpm?.value,
-                rpmCurrent = telemetry?.rpm?.current == true,
-                rpmObservedAt = telemetry?.rpm?.observedAt,
-                diagnostics = arcadeDiagnosticsText(now, info),
-                cameraInfo = if (controllerOnly) null else info,
-                controller = gamepadInput,
-            )
-            return
-        }
-        gameController.refresh()
-        arcadeContent.playground.controllerAvailable = gameController.hasController() || exclusiveHid.isActive()
-        val source = arcadeContent.playground.inputSource
-        val touch = if (handInput.isTouching()) handInput.latest(now) else null
-        val controllerPosition = if (source == BricksInputSource.Controller && touch == null) {
-            if (exclusiveHid.isActive()) exclusiveHid.sampleBricks(now) else gameController.sample(now)
-        } else null
-        val frame = BricksInputRouting.resolve(
-            source = source,
-            nowNanos = now,
-            touch = touch,
-            controller = controllerPosition,
-            camera = { handInput.latest(now) },
-            cameraStatus = {
-                ArcadeStatusResolver.resolve(
-                    cameraSession.state(),
-                    handInput.cameraTracking(now),
-                    handInput.hasEverTracked(),
-                )
-            },
-        )
-        arcadeContent.playground.render(frame.position, frame.status, arcadeDiagnosticsText(now, info),
-            if (source == BricksInputSource.Webcam) info else null,
-        )
     }
 
     private fun arcadeDiagnosticsText(now: Long, info: ArcadeCameraInfo?): String {
@@ -675,11 +590,8 @@ class NativeBridgeActivity : Activity() {
         arcadeContent.flak.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.ghoul.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.playground.input = handInput
-        arcadeContent.playground.preview = cameraSession.preview
+        arcadeContent.biketris.gestures = com.fitbaus.arcade.WaveGestureInput()
         arcadeContent.playground.faceControl = savedTrackerSettings().mode == ArcadeTrackerMode.Face
-        arcadeContent.math.fingers = cameraSession.fingers
-        arcadeContent.math.preview = cameraSession.preview
-        arcadeContent.biketris.gestures = cameraSession.gestures
         val overlay = getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getBoolean(ARCADE_OVERLAY_KEY, false)
         arcadeContent.playground.diagnosticsOverlay = overlay
         arcadeContent.math.diagnosticsOverlay = overlay
@@ -783,7 +695,7 @@ class NativeBridgeActivity : Activity() {
         brand.orientation = LinearLayout.HORIZONTAL
         brand.gravity = Gravity.CENTER_VERTICAL
 
-        val title = label("FITBAUS", 16f, PRIMARY)
+        val title = label("FITBAUS · DEMO", 16f, PRIMARY)
         title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
         title.letterSpacing = 0.18f
         title.includeFontPadding = false
@@ -859,6 +771,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     private fun openPairingSettings() {
+        if (showcase.running) return
         val intent = Intent(this, PairingActivity::class.java)
         if (modeController.mode.isGame) intent.putExtra(CONTROLLER_GAME_CONTEXT, modeController.mode.name)
         startActivity(intent)
@@ -883,8 +796,8 @@ class NativeBridgeActivity : Activity() {
         tab.gravity = Gravity.CENTER
         tab.setPadding(dp(16), dp(8), dp(16), dp(8))
         tab.isClickable = true
-        tab.setOnClickListener { modeController.select(mode) }
-        if (mode.isGame) {
+        tab.setOnClickListener { if (!showcase.running) modeController.select(mode) }
+        if (false && mode.isGame) {
             tab.setOnLongClickListener {
                 showTrackerPicker(mode)
                 true

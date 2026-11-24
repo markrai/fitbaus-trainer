@@ -151,6 +151,14 @@ internal class YouTubeContent(
         render(session.state)
     }
 
+    fun showcaseSearch(title: String) { session.search(title) }
+
+    fun showcaseOpen(title: String): Boolean {
+        val video = session.state.browse.items.firstOrNull { it.title.equals(title, ignoreCase = true) } ?: return false
+        session.open(video)
+        return true
+    }
+
     fun start() {
         if (floating) {
             restoreFullPlayer()

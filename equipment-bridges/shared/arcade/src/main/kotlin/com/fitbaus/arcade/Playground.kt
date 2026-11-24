@@ -268,6 +268,11 @@ public class PlaygroundView(context: Context) : View(context) {
         invalidate()
     }
 
+    public fun renderShowcase(now: Long) {
+        val target = (game.ballX / game.config.width + 0.015f * kotlin.math.sin(now / 350_000_000.0).toFloat()).coerceIn(0f, 1f)
+        render(HandPosition(target, 0.75f, 1f, now, HandSource.Camera), ArcadeStatus.Tracking, "", null)
+    }
+
     public fun restartGame() {
         game.restart()
     }

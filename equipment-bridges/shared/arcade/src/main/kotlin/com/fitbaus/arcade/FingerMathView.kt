@@ -115,8 +115,12 @@ public class FingerMathView(context: Context) : View(context) {
     public var preview: ArcadePreview? = null
     public var diagnosticsOverlay: Boolean = false
 
-    private val game = FingerMathGame().also { g -> g.events = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, it) } }
+    private val game = FingerMathGame(kotlin.random.Random(1203)).also { g -> g.events = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, it) } }
     private var reading = FingerCountReading.NONE
+    private var showcaseReading: FingerCountReading? = null
+    private var showcaseSince = 0L
+    private var showcaseQuestion: MathQuestion? = null
+    private val showcaseFigure by lazy { ShowcaseFingerPreview(context) }
     private var camera = CameraState.Off
     private var motion = BikeMotion.Unknown
     private var mirrored = true
@@ -202,7 +206,7 @@ public class FingerMathView(context: Context) : View(context) {
             frameWidth = cameraInfo.width.toFloat()
             frameHeight = cameraInfo.height.toFloat()
         }
-        reading = fingers?.read(now) ?: FingerCountReading.NONE
+        reading = showcaseReading ?: fingers?.read(now) ?: FingerCountReading.NONE
         game.update(now, reading, FingerMathText.inputReady(camera))
         statusText = FingerMathText.status(game, reading, camera)
         refreshHudText()
@@ -211,7 +215,10 @@ public class FingerMathView(context: Context) : View(context) {
             handsSequence = reading.sequence
             handsState = reading.state
             val ordered = FingerMathText.ordered(reading.hands, mirrored)
-            handTexts = arrayOf(
+            handTexts = if (showcaseReading != null && reading.total != null) {
+                val total = reading.total ?: 0
+                arrayOf(minOf(5, total).toString(), maxOf(0, total - 5).toString(), total.toString())
+            } else arrayOf(
                 FingerMathText.handValue(ordered.getOrNull(0)),
                 FingerMathText.handValue(ordered.getOrNull(1)),
                 reading.total?.toString() ?: "-",
@@ -222,7 +229,29 @@ public class FingerMathView(context: Context) : View(context) {
         invalidate()
     }
 
+    public fun renderShowcase() {
+        val now = System.nanoTime()
+        if (showcaseQuestion != game.question) {
+            showcaseQuestion = game.question
+            showcaseSince = now
+        }
+        val elapsed = (now - showcaseSince) / 1_000_000L
+        val count = game.question.answer
+        val shown = if (elapsed < 450L) -1 else count
+        val state = when {
+            shown < 0 -> FingerInputState.NoHands
+            elapsed < 1700L -> FingerInputState.Unstable
+            else -> FingerInputState.Stable
+        }
+        showcaseReading = FingerCountReading(state, emptyList(), if (shown < 0) null else count,
+            ((elapsed - 450L) / 1250f).coerceIn(0f, 1f), elapsed, 0L, null, now)
+        preview = showcaseFigure.preview(shown)
+        render(CameraState.Ready, null, BikeMotion.Moving, "", null)
+    }
+
     public fun restartGame() {
+        showcaseQuestion = null
+        showcaseReading = null
         game.restart()
         refreshHudText()
         invalidate()
@@ -379,7 +408,7 @@ public class FingerMathView(context: Context) : View(context) {
         val ph = pw * 3f / 4f
         val right = viewWidth - 12f * density
         previewRect.set(right - pw, top, right, top + ph)
-        canvas.drawText("CAMERA - HOLD BOTH HANDS INSIDE THIS VIEW", previewRect.left, top - 6f * density, panelCaptionPaint)
+        canvas.drawText(if (showcaseReading != null) "DEMO CAMERA - REPLAYED INPUT" else "CAMERA - HOLD BOTH HANDS INSIDE THIS VIEW", previewRect.left, top - 6f * density, panelCaptionPaint)
         if (!previewVisible || bitmap == null) {
             canvas.drawRect(previewRect, previewFramePaint)
             return

@@ -15,6 +15,7 @@ require(bridgeIdentity == "staging" || bridgeIdentity == "production") {
     "bridgeIdentity must be staging or production, was $bridgeIdentity"
 }
 val isProduction = bridgeIdentity == "production"
+require(!isProduction) { "Temporary showcase branch cannot build production APKs" }
 
 val unlockQualification = (findProperty("unlockQualification") as String?) ?: "off"
 require(unlockQualification == "off" || unlockQualification == "auth" || unlockQualification == "lockout") {
@@ -113,17 +114,17 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = if (isProduction) "com.fitbaus.bikebridge" else "com.fitbaus.bikebridge.native"
+        applicationId = "com.fitbaus.bikebridge.showcase"
         minSdk = 22
         targetSdk = 34
         ndk { abiFilters += setOf("x86") }
         versionCode = rootProject.extra["fitbausVersionCode"] as Int
         versionName = rootProject.extra["fitbausVersionName"] as String
-        resValue("string", "app_name", if (isProduction) "FitBaus Bike Bridge" else "FitBaus Bike Bridge Native")
+        resValue("string", "app_name", "FitBaus Showcase")
         buildConfigField("String", "UNLOCK_QUALIFICATION", "\"$unlockQualification\"")
         buildConfigField("boolean", "PRODUCTION_IDENTITY", "$isProduction")
         val qualificationApplicationId =
-            if (isProduction) "com.fitbaus.bikebridge" else "com.fitbaus.bikebridge.native"
+            "com.fitbaus.bikebridge.showcase"
         buildConfigField(
             "String",
             "QUALIFICATION_IDENTITY",
