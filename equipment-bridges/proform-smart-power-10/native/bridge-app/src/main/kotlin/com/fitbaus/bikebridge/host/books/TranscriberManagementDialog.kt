@@ -2,6 +2,13 @@ package com.fitbaus.bikebridge.host.books
 
 import android.app.AlertDialog
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
 import android.widget.Button
@@ -25,18 +32,29 @@ internal class TranscriberManagementDialog(
     private val worker = Executors.newSingleThreadExecutor()
     private val rows = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(16), dp(8), dp(16), dp(12))
+        setPadding(dp(16), dp(10), dp(16), dp(16))
     }
-    private val status = TextView(context).apply { textSize = 16f }
+    private val status = TextView(context).apply {
+        textSize = 15f
+        setTextColor(MUTED)
+        setPadding(dp(20), dp(8), dp(20), dp(8))
+    }
     private val scroll = ScrollView(context).apply { addView(rows) }
-    private val refresh = Button(context).apply { text = "REFRESH" }
+    private val refresh = Button(context).apply {
+        text = "REFRESH"
+        setTextColor(Color.WHITE)
+        background = surface(0xff263342.toInt(), 0xff425166.toInt())
+    }
     private val dialog = AlertDialog.Builder(context)
-        .setTitle(if (item == null) "Transcriber models" else "Prepare · " + item.title)
+        .setTitle("Transcription Models")
         .setView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xff101720.toInt())
             addView(status)
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-            addView(refresh, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(refresh, LinearLayout.LayoutParams(-1, dp(48)).apply {
+                setMargins(dp(16), dp(4), dp(16), dp(8))
+            })
         })
         .setNegativeButton("CLOSE", null)
         .create()
@@ -78,7 +96,7 @@ internal class TranscriberManagementDialog(
         main.removeCallbacks(poll)
         refresh.isEnabled = false
         enableRows(false)
-        status.text = "Loading…"
+        if (last == null) status.text = "Loading models…"
         pending = worker.submit {
             val result = runCatching(action)
             main.post {
@@ -108,7 +126,11 @@ internal class TranscriberManagementDialog(
     }
 
     private fun enableRows(enabled: Boolean) {
-        for (i in 0 until rows.childCount) rows.getChildAt(i).isEnabled = enabled
+        fun visit(view: View) {
+            view.isEnabled = enabled
+            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        visit(rows)
     }
 
     private fun mutate(action: (TranscriberManagement) -> Unit) {
@@ -124,7 +146,7 @@ internal class TranscriberManagementDialog(
             item != null && !snapshot.sourceMatches -> "Audiobookshelf address differs from the Transcriber's configured source. Check Settings."
             item != null && !snapshot.canPrepare -> "Update the Transcriber server to manage preparation."
             !snapshot.canManageModels -> "Update the Transcriber server to manage model downloads from the bike."
-            else -> "Tiny is the live fallback. Prepared Small and Base windows take priority."
+            else -> "Tiny generates narration on demand. Prepare a book with Base or Small for higher-quality narration."
         }
         renderRows(snapshot, true)
     }
@@ -132,69 +154,100 @@ internal class TranscriberManagementDialog(
     private fun renderRows(snapshot: PreparationSnapshot, enabled: Boolean) {
         val position = scroll.scrollY
         rows.removeAllViews()
-        label("Models", 20f)
+        heading("Choose a model")
+        val models = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        rows.addView(models, LinearLayout.LayoutParams(-1, -2))
         for (model in snapshot.models) {
             val title = model.id.replaceFirstChar { it.uppercase(Locale.US) }
+            val selected = item != null && selectedModel == model.id && model.installed && model.qualified
+            val card = panel(selected).apply { gravity = Gravity.TOP }
+            models.addView(card, LinearLayout.LayoutParams(0, -1, 1f).apply {
+                setMargins(dp(4), dp(4), dp(4), dp(8))
+            })
+            label(title, 25f, card, Color.WHITE, true)
+            label(when (model.id) {
+                "tiny" -> "FAST · DEFAULT"
+                "base" -> "BALANCED"
+                else -> "HIGHER QUALITY"
+            }, 13f, card, ACCENT, true)
+            label(when (model.id) {
+                "tiny" -> "Bundled. Lowest resource use."
+                "base" -> "More detail, moderate server load."
+                else -> "Best of these models, highest server load."
+            }, 15f, card)
             val description = when {
-                model.downloading -> "${model.state} · ${megabytes(model.received)} / ${megabytes(model.total)}"
+                model.downloading -> "${megabytes(model.received)} / ${megabytes(model.total)}"
                 !model.installed -> "Not installed · ${megabytes(model.total)}"
-                !model.qualified && model.automaticState == "queued" -> "Installed · waiting to test hardware"
-                !model.qualified && model.automaticState == "running" -> "Testing hardware · ${model.completedRuns} / ${model.totalRuns} checks complete"
-                !model.qualified && model.automaticState == "waiting_resources" -> "Installed · waiting for available memory"
-                !model.qualified && model.automaticState == "failed" -> "Hardware check did not pass"
-                !model.qualified && snapshot.automaticQualification -> "Installed · waiting for hardware check"
-                !model.qualified -> "Installed · server qualification required"
-                !model.memoryAllowed -> "Installed · waiting for available memory"
-                model.id == "tiny" -> "Installed · default"
-                else -> "Installed · qualified"
+                !model.qualified && model.automaticState == "queued" -> "Waiting for hardware check"
+                !model.qualified && model.automaticState == "running" -> "Hardware check ${model.completedRuns}/${model.totalRuns}"
+                !model.qualified && model.automaticState == "waiting_resources" -> "Waiting for memory"
+                !model.qualified && model.automaticState == "failed" -> "Hardware check failed"
+                !model.qualified -> "Hardware qualification required"
+                !model.memoryAllowed -> "Installed · waiting for memory"
+                else -> "Ready"
             }
-            label("$title · $description", 17f)
+            label(description, 15f, card, if (model.installed && model.qualified) ACCENT else MUTED, true)
+            card.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
             if (model.downloading) {
-                progress(model.received, model.total)
-                button("CANCEL $title DOWNLOAD", enabled && snapshot.canManageModels) { mutate { it.download(model.id, true) } }
+                progress(model.received, model.total, card)
+                button("CANCEL DOWNLOAD", enabled && snapshot.canManageModels, card) { mutate { it.download(model.id, true) } }
             } else if (!model.installed && model.id != "tiny") {
-                button("DOWNLOAD $title", enabled && snapshot.canManageModels && snapshot.models.none { it.downloading }) {
+                button("DOWNLOAD", enabled && snapshot.canManageModels && snapshot.models.none { it.downloading }, card, true) {
                     selectedModel = model.id
                     mutate { it.download(model.id) }
                 }
             } else if (model.installed && !model.qualified && model.qualifying) {
-                if (model.automaticState == "running") progress(model.completedRuns.toLong(), model.totalRuns.toLong())
-                label("Live Read Along takes priority. No audiobook audio is used for this check.", 14f)
+                if (model.automaticState == "running") progress(model.completedRuns.toLong(), model.totalRuns.toLong(), card)
             } else if (model.installed && !model.qualified && snapshot.automaticQualification) {
-                model.qualificationError?.let { label(it.replace('_', ' '), 14f) }
-                button("RETRY $title HARDWARE CHECK", enabled && snapshot.canManageModels) {
-                    mutate { it.retryQualification(model.id) }
-                }
+                model.qualificationError?.let { label(it.replace('_', ' '), 13f, card) }
+                button("RETRY CHECK", enabled && snapshot.canManageModels, card) { mutate { it.retryQualification(model.id) } }
             } else if (item != null && model.installed && model.qualified) {
-                button(if (selectedModel == model.id) "$title SELECTED" else "SELECT $title",
-                    enabled && snapshot.canPrepare) {
+                button(if (selected) "SELECTED" else "SELECT", enabled && snapshot.canPrepare && !selected, card, selected) {
                     selectedModel = model.id
                     renderRows(snapshot, true)
                 }
             }
         }
         if (item != null) {
-            label("Prepare this audiobook", 20f)
+            heading("Transcribe this audiobook")
+            label(item.title, 18f, rows, Color.WHITE, true)
             val model = snapshot.models.firstOrNull { it.id == selectedModel }
             val existing = snapshot.jobs.any { it.model == selectedModel && it.currentRevision }
-            button("PREPARE " + selectedModel.uppercase(Locale.US),
-                enabled && snapshot.canPrepare && model?.installed == true && model.qualified && !existing) {
-                mutate { api -> api.start(selectedModel)?.let { onGrant(api, it) } }
+            val actionPanel = panel(false)
+            rows.addView(actionPanel, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(4), dp(4), dp(4), dp(10)) })
+            label("Generate narration in advance. Audio playback continues while the server works.", 15f, actionPanel)
+            button("START ${selectedModel.uppercase(Locale.US)} TRANSCRIPTION",
+                enabled && snapshot.canPrepare && model?.installed == true && model.qualified && !existing, actionPanel, true) {
+                val chosen = selectedModel
+                mutate { api -> api.start(chosen)?.let { onGrant(api, it) } }
             }
-            if (existing) label("A job for this model already exists below. Resume it instead of starting over.", 14f)
-            if (snapshot.jobs.isEmpty()) label("No prepared jobs yet.", 16f)
+            if (existing) label("A transcription for this model already exists below.", 14f, actionPanel)
+            if (snapshot.jobs.isEmpty()) label("No transcription jobs yet.", 15f)
             for (job in snapshot.jobs) {
-                label(job.model.uppercase(Locale.US) + " · " + job.state.replace('_', ' ') +
-                    if (job.currentRevision) "" else " · audio changed", 18f)
-                progress(job.processed, job.total)
-                label("${duration(job.processed)} / ${duration(job.total)} · ${job.processed * 100 / job.total}%", 16f)
-                job.error?.let { label(it.replace('_', ' '), 14f) }
-                if (job.running) button("PAUSE", enabled) { mutate { it.action(job, "pause") } }
-                if (job.canResume) button("RESUME", enabled) { mutate { api -> api.action(job, "resume")?.let { onGrant(api, it) } } }
-                if (job.running || job.canResume) button("CANCEL JOB", enabled) {
+                val jobCard = panel(false)
+                rows.addView(jobCard, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(4), dp(4), dp(4), dp(8)) })
+                val header = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+                val modelLabel = TextView(context).apply {
+                    text = job.model.uppercase(Locale.US)
+                    textSize = 19f
+                    setTextColor(Color.WHITE)
+                    typeface = Typeface.DEFAULT_BOLD
+                }
+                header.addView(modelLabel, LinearLayout.LayoutParams(0, -2, 1f))
+                label(job.state.replace('_', ' ').uppercase(Locale.US) +
+                    if (job.currentRevision) "" else " · AUDIO CHANGED", 14f, header, ACCENT, true, false)
+                jobCard.addView(header)
+                progress(job.processed, job.total, jobCard)
+                label("${duration(job.processed)} / ${duration(job.total)} · ${job.processed * 100 / job.total}%", 16f, jobCard)
+                job.error?.let { label(it.replace('_', ' '), 14f, jobCard) }
+                val actions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+                jobCard.addView(actions)
+                if (job.running) button("PAUSE", enabled, actions) { mutate { it.action(job, "pause") } }
+                if (job.canResume) button("RESUME", enabled, actions, true) { mutate { api -> api.action(job, "resume")?.let { onGrant(api, it) } } }
+                if (job.running || job.canResume) button("CANCEL", enabled, actions) {
                     confirm("Cancel this job? Completed windows remain available.") { mutate { it.action(job, "cancel") } }
                 }
-                if (job.canDiscard) button("DISCARD TRANSCRIPTS", enabled) {
+                if (job.canDiscard) button("DISCARD", enabled, actions) {
                     confirm("Delete this job and all its prepared transcripts?") { mutate { it.action(job, "discard") } }
                 }
             }
@@ -222,28 +275,62 @@ internal class TranscriberManagementDialog(
         }
     }
 
-    private fun label(value: String, size: Float) {
-        rows.addView(TextView(context).apply {
+    private fun surface(fill: Int, stroke: Int) = GradientDrawable().apply {
+        setColor(fill)
+        cornerRadius = dp(10).toFloat()
+        setStroke(dp(1), stroke)
+    }
+
+    private fun panel(selected: Boolean) = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+        background = surface(if (selected) 0xff16372e.toInt() else 0xff1c2633.toInt(),
+            if (selected) ACCENT else 0xff344356.toInt())
+    }
+
+    private fun heading(value: String) = label(value, 21f, rows, Color.WHITE, true)
+
+    private fun label(value: String, size: Float, parent: LinearLayout = rows, color: Int = MUTED,
+                      bold: Boolean = false, fullWidth: Boolean = true) {
+        parent.addView(TextView(context).apply {
             text = value
             textSize = size
-            setPadding(0, dp(6), 0, dp(3))
-        }, LinearLayout.LayoutParams(-1, -2))
+            setTextColor(color)
+            if (bold) typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(5), 0, dp(3))
+        }, LinearLayout.LayoutParams(if (fullWidth) -1 else -2, -2))
     }
 
-    private fun button(value: String, enabled: Boolean, action: () -> Unit) {
-        rows.addView(Button(context).apply {
+    private fun button(value: String, enabled: Boolean, parent: LinearLayout = rows,
+                       primary: Boolean = false, action: () -> Unit) {
+        parent.addView(Button(context).apply {
             text = value
+            textSize = 15f
             isEnabled = enabled
+            setTextColor(if (primary) Color.BLACK else Color.WHITE)
+            alpha = if (enabled || value == "SELECTED") 1f else 0.45f
+            background = surface(if (primary) ACCENT else 0xff2c3b4d.toInt(),
+                if (primary) ACCENT else 0xff425166.toInt())
             setOnClickListener { if (!closed && pending == null) action() }
-        }, LinearLayout.LayoutParams(-1, dp(48)))
+        }, LinearLayout.LayoutParams(if (parent.orientation == LinearLayout.HORIZONTAL) 0 else -1, dp(48),
+            if (parent.orientation == LinearLayout.HORIZONTAL) 1f else 0f).apply {
+            setMargins(dp(3), dp(6), dp(3), 0)
+        })
     }
 
-    private fun progress(value: Long, max: Long) {
-        rows.addView(ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+    private fun progress(value: Long, max: Long, parent: LinearLayout = rows) {
+        parent.addView(ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = max <= 0
             this.max = 1000
+            progressTintList = ColorStateList.valueOf(ACCENT)
+            progressBackgroundTintList = ColorStateList.valueOf(0xff384659.toInt())
             progress = if (max > 0) (value.toDouble() / max * 1000).toInt().coerceIn(0, 1000) else 0
-        }, LinearLayout.LayoutParams(-1, dp(16)))
+        }, LinearLayout.LayoutParams(-1, dp(14)))
+    }
+
+    private companion object {
+        val ACCENT = 0xff58d5a5.toInt()
+        val MUTED = 0xffc1cbd7.toInt()
     }
 
     private fun megabytes(bytes: Long) = String.format(Locale.US, "%.0f MB", bytes / 1_000_000.0)

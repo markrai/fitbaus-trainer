@@ -11,19 +11,16 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
-import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
 internal class BooksReadAlong(
     context: Context,
-    onClose: () -> Unit,
-    onToggle: () -> Unit,
-    onSkip: (Long) -> Unit,
     private val source: BooksTranscriptSource = LocalBooksTranscriptSource(context),
 ) : LinearLayout(context) {
     private val transcriberStore = TranscriberConnectionStore(context)
@@ -34,15 +31,13 @@ internal class BooksReadAlong(
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
-    private val heading = label("", 18f)
-    private val status = label("", 15f)
     private val narration = label("", 36f)
     private val details = label("", 14f)
     private val scroll = ScrollView(context)
-    private val play = button("PAUSE")
-    private val rewind = button("−30s")
-    private val forward = button("+30s")
-    private val reload = button("RELOAD")
+    private val reload = button("RETRY NARRATION")
+    val cover = ImageView(context)
+    private val readingControls = LinearLayout(context)
+    private var hasNarration = false
     private val readingPrefs = context.applicationContext.getSharedPreferences("fitbaus_books_read_along", Context.MODE_PRIVATE)
     private var textSizeSp = readingPrefs.getInt("text_size_sp", 36).coerceIn(28, 52)
     private val fontSizeLabel = label("", 14f)
@@ -53,23 +48,17 @@ internal class BooksReadAlong(
     private var generation = 0L
     private var displayed: String? = null
     private var currentState = BooksPlayerState()
-    private var loadMessage = ""
     private var destroyed = false
 
     init {
         orientation = VERTICAL
         setPadding(dp(16), dp(4), dp(16), dp(8))
         setBackgroundColor(Color.BLACK)
-        val top = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val back = button("‹ PLAYER")
-        back.setOnClickListener { onClose() }
-        heading.maxLines = 1
-        heading.ellipsize = TextUtils.TruncateAt.END
-        top.addView(back, LayoutParams(WRAP, dp(48)))
-        top.addView(heading, LayoutParams(0, WRAP, 1f))
+        readingControls.orientation = HORIZONTAL
+        readingControls.gravity = Gravity.CENTER_VERTICAL
+        readingControls.visibility = GONE
+        val readingLabel = label("Read along", 16f)
+        readingControls.addView(readingLabel, LayoutParams(0, WRAP, 1f))
         fontSizeLabel.gravity = Gravity.CENTER
         fontSizeLabel.text = "Text: $textSizeSp"
         narration.textSize = textSizeSp.toFloat()
@@ -89,38 +78,37 @@ internal class BooksReadAlong(
             override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
             override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
         })
-        top.addView(fontSizeLabel, LayoutParams(dp(80), dp(48)))
-        top.addView(fontSlider, LayoutParams(dp(176), dp(48)))
-        addView(top, LayoutParams(MATCH, WRAP))
-        status.gravity = Gravity.CENTER
-        addView(status, LayoutParams(MATCH, WRAP))
+        readingControls.addView(fontSizeLabel, LayoutParams(dp(80), dp(40)))
+        readingControls.addView(fontSlider, LayoutParams(dp(176), dp(40)))
+        addView(readingControls, LayoutParams(MATCH, WRAP))
         narration.gravity = Gravity.CENTER
-        narration.setPadding(dp(12), dp(10), dp(12), dp(10))
+        narration.setPadding(dp(12), dp(6), dp(12), dp(6))
         narration.setLineSpacing(dp(4).toFloat(), 1.12f)
         scroll.isFillViewport = true
         scroll.addView(narration, FrameLayout.LayoutParams(MATCH, WRAP))
-        addView(scroll, LayoutParams(MATCH, 0, 1f))
-        details.setTextColor(Color.LTGRAY)
-        details.setTextIsSelectable(true)
-        details.maxLines = 3
-        details.ellipsize = TextUtils.TruncateAt.END
-        addView(details, LayoutParams(MATCH, WRAP))
-        val controls = LinearLayout(context).apply {
+        cover.scaleType = ImageView.ScaleType.FIT_CENTER
+        cover.contentDescription = "Audiobook cover"
+        val stage = FrameLayout(context)
+        stage.addView(cover, FrameLayout.LayoutParams(MATCH, MATCH))
+        stage.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
+        scroll.visibility = GONE
+        addView(stage, LayoutParams(MATCH, 0, 1f))
+        val footer = LinearLayout(context).apply {
             orientation = HORIZONTAL
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_VERTICAL
         }
-        play.setOnClickListener { onToggle() }
-        rewind.setOnClickListener { onSkip(-30_000) }
-        forward.setOnClickListener { onSkip(30_000) }
+        details.setTextColor(Color.LTGRAY)
+        details.maxLines = 2
+        details.ellipsize = TextUtils.TruncateAt.END
+        footer.addView(details, LayoutParams(0, WRAP, 1f))
         reload.setOnClickListener { reloadCurrent() }
-        for (control in listOf(rewind, play, forward, reload)) {
-            controls.addView(control, LayoutParams(0, dp(54), 1f))
-        }
-        addView(controls, LayoutParams(MATCH, WRAP))
+        reload.visibility = GONE
+        footer.addView(reload, LayoutParams(WRAP, dp(44)))
+        addView(footer, LayoutParams(MATCH, WRAP))
         visibility = GONE
     }
 
-    fun floatingNarration(): String? = if (visibility == VISIBLE) displayed ?: "Preparing narration…" else null
+    fun floatingNarration(): String? = if (visibility == VISIBLE && hasNarration) displayed else null
 
     fun open(next: BooksTranscriptRequest, state: BooksPlayerState, connection: BooksConnection) {
         if (destroyed) return
@@ -142,10 +130,14 @@ internal class BooksReadAlong(
         localMode = false
         transcript = null
         displayed = null
-        loadMessage = ""
         currentState = BooksPlayerState()
         narration.text = ""
         details.text = ""
+        hasNarration = false
+        cover.visibility = VISIBLE
+        scroll.visibility = GONE
+        readingControls.visibility = GONE
+        reload.visibility = GONE
         visibility = GONE
     }
 
@@ -158,14 +150,7 @@ internal class BooksReadAlong(
     fun render(state: BooksPlayerState) {
         if (visibility != VISIBLE) return
         currentState = state
-        heading.text = state.item?.title.orEmpty()
-        val seconds = state.positionMs.coerceAtLeast(0) / 1000
-        status.text = String.format(Locale.US, "%d:%02d:%02d · %s", seconds / 3600, seconds / 60 % 60, seconds % 60, state.status)
         val ready = state.session != null && !state.failed
-        play.isEnabled = ready
-        rewind.isEnabled = ready
-        forward.isEnabled = ready
-        play.text = if (state.wantsPlay) "PAUSE" else "PLAY"
         val session = state.session
         if (ready && !localMode) {
             windows.plan(state.positionMs, session.durationMs, state.wantsPlay)?.let(::load)
@@ -173,23 +158,23 @@ internal class BooksReadAlong(
         val window = session?.let { windows.current(state.positionMs, it.durationMs) }
         val document = if (localMode) transcript else window?.transcript
         val failed = session != null && windows.failed(state.positionMs, session.durationMs)
-        if (!localMode) {
-            details.text = when {
-                failed -> "Check Settings → Transcriber or tap Reload to retry."
-                window != null -> "Remote Read Along"
-                else -> ""
-            }
+        val presentation = BooksNarrationPresentation.resolve(document != null, ready, localMode, failed)
+        hasNarration = presentation == BooksNarrationPresentation.NARRATION
+        cover.visibility = if (hasNarration) GONE else VISIBLE
+        scroll.visibility = if (hasNarration) VISIBLE else GONE
+        readingControls.visibility = if (hasNarration) VISIBLE else GONE
+        details.text = when (presentation) {
+            BooksNarrationPresentation.NARRATION -> ""
+            BooksNarrationPresentation.LOADING -> "Preparing narration…"
+            BooksNarrationPresentation.UNAVAILABLE -> "Narration unavailable · audio continues"
+            BooksNarrationPresentation.COVER -> ""
         }
-        reload.isEnabled = ready && (localMode || window != null || failed || pending == null)
-        val text = when {
-            document != null -> document.cueAt(state.positionMs)?.text ?: "…"
-            localMode -> loadMessage
-            failed -> "Narration unavailable. Audio continues."
-            else -> "Preparing narration…"
-        }
+        reload.visibility = if (ready && presentation == BooksNarrationPresentation.UNAVAILABLE) VISIBLE else GONE
+        reload.isEnabled = pending == null
+        val text = if (hasNarration) document?.cueAt(state.positionMs)?.text ?: "…" else null
         if (text != displayed) {
             displayed = text
-            narration.text = text
+            narration.text = text.orEmpty()
             scroll.scrollTo(0, 0)
         }
     }
@@ -235,9 +220,6 @@ internal class BooksReadAlong(
                                 windows.clear()
                                 localMode = true
                                 transcript = loaded.local?.transcript
-                                loadMessage = "No transcript available for this book."
-                                details.text = if (transcript == null)
-                                    loaded.local?.localPath?.let { "Local transcript: $it" }.orEmpty() else ""
                             }
                         },
                         onFailure = {
