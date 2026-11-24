@@ -1,18 +1,21 @@
 # FitBaus Full 2.2.0 release checklist
 
-**Status: candidate preparation only.** No v2.2.0 tag, signed candidate, physical qualification, or public GitHub Release is asserted by this document.
+**Status: source preparation.** No `v2.2.0` tag, signed candidate, physical qualification, or public GitHub Release exists yet. This checklist tracks the remaining release gates.
 
 FitBaus Full 2.2.0 is a minor product version, not a separate edition. The canonical version is `2.2.0` in `version.js`, giving Android `versionCode 20200`. The latest published Full release is 2.1.0; the intervening 2.1.1–2.1.3 work is included without publishing those development versions.
 
 ## Merge and source gates
 
-- [ ] Merge [#75](https://github.com/markrai/fitbaus-trainer/pull/75), renaming the game-selection captions to MAVERICK, TRAILS and IT HEARS YOU.
-- [ ] Merge [#76](https://github.com/markrai/fitbaus-trainer/pull/76), removing the flashing orange proximity-edge markers in TRAILS.
-- [ ] Merge this release-preparation PR after both are in `main`, and ensure no required follow-up fixes remain open.
-- [ ] Check `CHANGELOG.md` for the #75 and #76 changes, add their release entries, and replace `Pending publication` with the actual release date before tagging.
-- [ ] Both CI jobs pass for the final `main` source commit: Trainer and Native Bike Bridge.
-- [ ] Verify `npm run build`, `npm run check:version`, `npm test`, and Android unit tests. The CI Trainer job additionally requires `git diff --exit-code` after the build.
-- [ ] Confirm console free storage is sufficient for the actual signed APK before installation.
+- [x] Merge [#77](https://github.com/markrai/fitbaus-trainer/pull/77), preparing the 2.2.0 product version and release checklist.
+- [x] Merge [#75](https://github.com/markrai/fitbaus-trainer/pull/75), renaming the game-selection captions to MAVERICK, TRAILS and IT HEARS YOU.
+- [x] Merge [#76](https://github.com/markrai/fitbaus-trainer/pull/76), removing the flashing orange proximity-edge markers in TRAILS.
+- [x] Merge [#79](https://github.com/markrai/fitbaus-trainer/pull/79), adding the YouTube search microphone.
+- [x] Merge [#81](https://github.com/markrai/fitbaus-trainer/pull/81), replacing the external recognizer with bundled offline speech, adding publication-age labels, and showing a red recording circle.
+- [x] Reconcile the 2.2.0 changelog with all merged game, YouTube and voice-search changes. Use an undated `[2.2.0]` entry until GitHub publishes the release; the public Release page supplies its actual publication date.
+- [ ] Merge documentation/release preparation [#80](https://github.com/markrai/fitbaus-trainer/pull/80), confirm no required fixes remain open, and freeze the exact `main` commit for the release.
+- [ ] Both CI jobs pass on that final `main` commit: Trainer and Native Bike Bridge.
+- [ ] Verify `npm run build`, `npm run check:version`, `npm test`, and Android unit tests. The CI Trainer job also requires `git diff --exit-code` after building.
+- [ ] Confirm available storage on the console accommodates the signed APK, the bundled compressed speech model, and its first-run extraction without impairing existing workouts or apps.
 
 ## Tag the exact source
 
@@ -48,6 +51,7 @@ Open **Actions → Release → Run workflow**, choose the `main` branch, and ent
 The inspect workflow must build, sign and verify both APKs, including the production Bike Bridge package `com.fitbaus.bikebridge` (Android 5.1.1/API 22, x86, v1 signature). It also emits the Trainer APK, web bundle, `SHA256SUMS.txt`, `ARTIFACTS.md`, and `release-candidate.json` in the `fitbaus-release-candidate` artifact.
 
 - [ ] Inspect run succeeded; record its GitHub Actions run ID.
+- [ ] Confirm the APK contains the pinned 40 MB offline speech model and only the expected x86 native libraries, with production signing intact.
 - [ ] Extract the artifact and verify every published-file SHA-256, APK identity, `versionName 2.2.0`, `versionCode 20200`, and both signing certificates against `.github/release/signing-policy.json`.
 - [ ] Preserve the exact candidate's `artifacts.bridgeApk.sha256`, `sourceCommit`, and `workflowRunId`. Do not substitute a locally rebuilt/debug APK.
 
@@ -64,11 +68,16 @@ Use the signed `fitbaus-bikebridge-full-2.2.0.apk` from that inspect run. Back u
 - [ ] Bricks and Biketris controller inputs, mappings, auto-restart or pedal-to-slow mode behave as intended.
 - [ ] External USB webcam is available and camera-game switching operates correctly.
 - [ ] YouTube: open videos directly from Discover and Search. Verify **the entire frame renders without a black left half**, across multiple videos and resolutions, and after repeated switch-to-floating-preview/restore transitions.
-- [ ] YouTube voice search mic launches the installed speech recognizer when available, submits recognized text and leaves canceled searches untouched; on consoles without a recognizer it reports that limitation without crashing.
+- [ ] YouTube search: verify the included Vosk x86/JNA libraries and checksum-verified English model are in the signed APK; install/update requires no Google services, separate speech app, account, model download, or Android settings changes.
+- [ ] Voice search first run: measure private model extraction size/time, initial recognition startup, microphone input at 16 kHz and clear English transcriptions. Compare repeated searches after startup and ensure the bike remains responsive.
+- [ ] While preparing, the normal microphone remains. When audio capture begins, the icon changes to a red circle. Tapping it cancels, restores the microphone and preserves typed text. Verify blank speech, errors and tab exits also clean up without an unexpected search.
+- [ ] Verify the `:speech` process stops after completion/cancellation and does not affect ongoing Bike Bridge cadence, resistance, or camera state. Measure peak memory (PSS/RSS), CPU, temperature and low-memory process kills while repeatedly searching, entering games and returning from video playback. Do not qualify the release if the recognizer destabilizes the console.
+- [ ] Verify tapping the search microphone never starts recognition while an active video player is using resources.
+- [ ] Video previews: channel, views and relative age appear for available valid publication dates (minutes/hours/days/months/years); narrow cards can wrap metadata. Confirm missing/future dates and live videos omit age; Google playlist insertion dates are not mistaken for video publication dates.
 - [ ] YouTube channel avatar navigation, captions, video seeking, volume, brightness, and account sign-in remain functional.
 - [ ] Sustained playback for at least 10 minutes, with telemetry healthy, acceptable frame rate, memory and console temperature.
 
-Record the actual tests, date, results, inspect run ID, source commit, signer fingerprint and APK SHA-256 in `docs/release-evidence/full-v2.2.0.md`. Do not copy historical qualification data or claim a pass without performing the test.
+Record the actual tests, date, results, inspect run ID, source commit, signer fingerprint and APK SHA-256 in `.github/release/evidence/full-v2.2.0.md`. Do not copy historical qualification data or claim a pass without performing the test.
 
 ## Register qualification and publish
 

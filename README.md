@@ -29,10 +29,11 @@ git clone https://github.com/markrai/fitbaus-trainer.git
 cd fitbaus-trainer
 npm ci
 npm run build
-npm run serve
+node scripts/package-web-deploy.cjs
+npx serve deploy
 ```
 
-Open the local URL shown by the server. For access from another device, serve the web app over HTTPS using your preferred static web server. Web Bluetooth requires a compatible browser and secure context.
+Open the local URL shown by the server. For a production HTTPS deployment using an existing reverse proxy, see the [self-hosting guide](docs/SELF-HOSTING.md). Web Bluetooth requires a compatible browser and secure context.
 
 **A web-hosted Trainer is not the same as a bike controller:** the current ProForm bridge uses trusted-LAN HTTP, which the hosted browser app cannot access directly because of CORS restrictions. Use the native mobile app for the supported bridge integration.
 
@@ -94,10 +95,7 @@ npm test
 Edit TypeScript in `src/`, then commit the matching generated `dist/` output. Do not hand-edit `dist/`. Treat persisted schemas and version identifiers as compatibility contracts.
 
 Product versioning is centralized in `version.js`. See [VERSIONING.md](VERSIONING.md)
-for how Android, iOS, Bike Bridge, and the PWA cache stay aligned. Maintainer release
-signing, Lite versus Full tracks, and automated publication are documented in
-[docs/RELEASE.md](docs/RELEASE.md). Physical-device qualification remains a separate
-gate from CI packaging.
+for how Android, iOS, Bike Bridge, and the PWA cache stay aligned.
 
 See [Native Development](docs/NATIVE-DEVELOPMENT.MD) for platform toolchains and device testing, and [Personalization Architecture](docs/personalization-architecture.md) for the distinction between live control and experimental research.
 

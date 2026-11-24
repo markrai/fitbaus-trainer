@@ -9,7 +9,7 @@
       "certSha256": "5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C",
       "apkSha256": "f9ec401394d11a27cda3cb88417769734263a4a551e1d9c9fab7fd469f600a61",
       "sourceCommit": "cf91c7d32fe54315cb5e1ec5488e8f477abe9a50",
-      "evidenceRef": "docs/release-evidence/lite-v1.0.1.md",
+      "evidenceRef": ".github/release/evidence/lite-v1.0.1.md",
       "console": "ProForm Smart Power 10.0",
       "notes": "Physical console acceptance completed; see evidenceRef"
     },
@@ -20,7 +20,7 @@
       "certSha256": "5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C",
       "apkSha256": "7b065bd91736adabc56b753dbc8301a9e54bb3a8c3f262d23fd990b1c906a7a7",
       "sourceCommit": "76bfbd482d7c3043c39a3e20e72ed074a6db4dd3",
-      "evidenceRef": "docs/release-evidence/full-v2.1.0.md",
+      "evidenceRef": ".github/release/evidence/full-v2.1.0.md",
       "console": "ProForm Smart Power 10.0",
       "notes": "Physical console acceptance completed; see evidenceRef"
     }

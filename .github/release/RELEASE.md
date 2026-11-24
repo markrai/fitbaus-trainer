@@ -14,7 +14,7 @@ title, and a Bike Bridge filename.
 | **Lite** | `1.x.x` | `lite/1.x` | `FitBaus Lite X.Y.Z` | `fitbaus-bikebridge-lite-X.Y.Z.apk` | Compact maintenance edition for storage-constrained consoles; no external UVC webcam |
 | **Full** | `2.x.x` | `main` | `FitBaus Full X.Y.Z` | `fitbaus-bikebridge-full-X.Y.Z.apk` | Ongoing feature edition: external USB (UVC) webcam, native YouTube playback |
 
-`versionCode = major * 10000 + minor * 100 + patch` (see [VERSIONING.md](../VERSIONING.md)).
+`versionCode = major * 10000 + minor * 100 + patch` (see [VERSIONING.md](../../VERSIONING.md)).
 Full 2.1.0 is `versionName 2.1.0`, `versionCode 20100`, tag `v2.1.0`.
 
 The rules live in one place, `scripts/release/edition.cjs`:
@@ -143,7 +143,7 @@ Unsigned, staging and debug APKs appear only in the separate inspection dump.
    Power 10.0 over the existing installation (`adb install -r`), confirm pairing
    survives, and run the console acceptance checks (USB connection and
    telemetry, resistance control, games, webcam, YouTube playback, sustained
-   use). Write the evidence to `docs/release-evidence/full-v2.1.0.md`.
+   use). Write the evidence to `.github/release/evidence/full-v2.1.0.md`.
 5. **Record qualification.** Add a record for that exact binary to
    `.github/release/physical-qualification.json` and merge it to `main`:
 
@@ -155,7 +155,7 @@ Unsigned, staging and debug APKs appear only in the separate inspection dump.
      "certSha256": "5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C",
      "apkSha256": "<artifacts.bridgeApk.sha256 from the inspect candidate>",
      "sourceCommit": "<peeled v2.1.0 commit>",
-     "evidenceRef": "docs/release-evidence/full-v2.1.0.md",
+     "evidenceRef": ".github/release/evidence/full-v2.1.0.md",
      "console": "ProForm Smart Power 10.0",
      "notes": "<date and acceptance summary>"
    }
@@ -179,7 +179,7 @@ Bridge binary works on the console. Publish refuses to run until step 5 exists.
 Lite releases follow the same sequence from `lite/1.x` with `edition=lite` and a
 `v1.x.y` tag. Lite 1.0.1 was published this way: `tag=v1.0.1`,
 `expected_commit=cf91c7d32fe54315cb5e1ec5488e8f477abe9a50`, evidence in
-`docs/release-evidence/lite-v1.0.1.md`. Its asset names and `ARTIFACTS.md`
+`.github/release/evidence/lite-v1.0.1.md`. Its asset names and `ARTIFACTS.md`
 wording are unchanged by Full support.
 
 ## Rollback and upgrades

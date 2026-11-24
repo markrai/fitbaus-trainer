@@ -10,14 +10,19 @@ support, is maintained on `lite/1.x`.
 
 ## [Unreleased]
 
-## [2.2.0] - Pending publication
+## [2.2.0]
 
-Full 2.2.0 (`versionCode 20200`) collects the unreleased Full 2.1.1–2.1.3
-development work since the published Full 2.1.0 release. The exact signed
-console APK still requires physical qualification before GitHub publication.
-See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
+Full 2.2.0 (`versionCode 20200`) brings together the Full 2.1.1–2.1.3
+development changes since 2.1.0: richer arcade graphics and controls,
+integrated offline YouTube voice search, publication ages on video previews,
+and improved YouTube playback and navigation.
 
 ### Changed
+
+- **Arcade game selection names.** Rename the three game-selection tabs from
+  FLAK RUN to **MAVERICK**, TRAIL RIDE to **TRAILS**, and GHOUL RUN to
+  **IT HEARS YOU**. Existing game identifiers, controller mappings, saved
+  preferences, and gameplay behavior are unchanged.
 
 - **Trail Ride HUD refinement.** Remove the flashing “STEER LEFT” and
   “STEER RIGHT” guidance banners. Existing trail-edge visuals, off-trail
@@ -36,6 +41,11 @@ See [Full 2.2.0 release plan](docs/release-plans/full-v2.2.0.md).
   warning and timing indicators.
 
 ### Fixed
+
+- **TRAILS edge flashing.** Remove the orange warning blink on the left or
+  right path edge when riding near the boundary. Both edges retain their
+  ordinary terrain-blended colors. Off-trail detection, speed reduction,
+  steering, and collision handling are unchanged.
 
 - **Android 5.1 YouTube video-surface rendering.** Route video through a
   `TextureView` on Android versions below 7.0 instead of relying on a separately
@@ -565,7 +575,7 @@ player, BIKETRIS, and external USB webcam support on the bike console.
   FITBAUS title. Also released in Lite 1.0.1.
 - **Release workflow.** Signed Trainer and production Bike Bridge artifacts
   are built from an existing tag, verified, and published with SHA-256
-  checksums. See [docs/RELEASE.md](docs/RELEASE.md).
+  checksums. See the [release engineering guide](.github/release/RELEASE.md).
 
 ### Changed
 
@@ -1217,6 +1227,6 @@ records and are not renumbered.
   workout logic, and basic controls.
 
 [Unreleased]: https://github.com/markrai/fitbaus-trainer/commits/main/
-[2.2.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.1.0...main
+[2.2.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.1.0...v2.2.0
 [1.0.1]: https://github.com/markrai/fitbaus-trainer/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/markrai/fitbaus-trainer/tree/v1.0.0
