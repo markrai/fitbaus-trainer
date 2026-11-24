@@ -5,8 +5,6 @@ package com.fitbaus.bikebridge.host.books
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
-import java.net.HttpURLConnection
-import java.net.URI
 
 internal class BooksCoverFetcher(private val connection: BooksConnection) {
     fun fetch(itemId: String): Bitmap? {
@@ -20,7 +18,7 @@ internal class BooksCoverFetcher(private val connection: BooksConnection) {
 
     private fun fetchAuthorized(itemId: String, token: String): Bitmap? {
         if (Thread.currentThread().isInterrupted) return null
-        val request = URI(connection.server.coverUrl(itemId)).toURL().openConnection() as HttpURLConnection
+        val request = BooksServer.openConnection(connection.server.coverUrl(itemId))
         return try {
                 request.instanceFollowRedirects = false
                 request.connectTimeout = 8_000
