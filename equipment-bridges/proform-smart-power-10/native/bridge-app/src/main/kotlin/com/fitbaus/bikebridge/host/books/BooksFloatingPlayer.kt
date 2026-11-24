@@ -107,7 +107,9 @@ internal class BooksFloatingPlayer(
 
     fun render(state: BooksPlayerState, narration: String?) {
         title.text = state.item?.title.orEmpty()
-        body.text = narration ?: state.item?.author.orEmpty().ifBlank { "Audiobook" }
+        val content = narration ?: state.item?.author.orEmpty().ifBlank { "Audiobook" }
+        val display = if (state.failed) "Playback failed. Tap to restore." else content
+        if (body.text.toString() != display) body.text = display
         val duration = state.session?.durationMs ?: 0
         timing.text = clock(state.positionMs) + " / " + clock(duration)
         progress.progress = if (duration > 0) (state.positionMs.coerceIn(0, duration) * 10000 / duration).toInt() else 0
@@ -116,7 +118,6 @@ internal class BooksFloatingPlayer(
         rewind.isEnabled = ready
         forward.isEnabled = ready
         play.text = if (state.wantsPlay && state.positionMs < duration) "PAUSE" else "PLAY"
-        if (state.failed) body.text = "Playback failed. Tap to restore."
     }
 
     private fun fit() {
@@ -164,10 +165,9 @@ internal class BooksFloatingPlayer(
                     val dy = (event.rawY - downY).toInt()
                     if (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop) dragged = true
                     if (dragged) {
-                        val container = host ?: return true
                         val target = if (resize) initial.copy(
-                            width = (initial.width + dx).coerceIn(minOf(dp(260), container.width - initial.x), container.width - initial.x),
-                            height = (initial.height + dy).coerceIn(minOf(dp(170), container.height - initial.y), container.height - initial.y),
+                            width = initial.width + dx,
+                            height = initial.height + dy,
                         ) else initial.copy(x = initial.x + dx, y = initial.y + dy)
                         applyBounds(target)
                     }
