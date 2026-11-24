@@ -13,6 +13,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -43,9 +44,10 @@ internal class BooksReadAlong(
     private val rewind = button("−30s")
     private val forward = button("+30s")
     private val reload = button("RELOAD")
-    private val font = button("TEXT: 36")
-    private val sizes = listOf(28f, 36f, 44f, 52f)
-    private var sizeIndex = 1
+    private val readingPrefs = context.applicationContext.getSharedPreferences("fitbaus_books_read_along", Context.MODE_PRIVATE)
+    private var textSizeSp = readingPrefs.getInt("text_size_sp", 36).coerceIn(28, 52)
+    private val fontSizeLabel = label("", 14f)
+    private val fontSlider = SeekBar(context)
     private var request: BooksTranscriptRequest? = null
     private var transcript: BooksTranscript? = null
     private var pending: Future<*>? = null
@@ -69,13 +71,27 @@ internal class BooksReadAlong(
         heading.ellipsize = TextUtils.TruncateAt.END
         top.addView(back, LayoutParams(WRAP, dp(48)))
         top.addView(heading, LayoutParams(0, WRAP, 1f))
-        top.addView(font, LayoutParams(WRAP, dp(48)))
-        font.setOnClickListener {
-            sizeIndex = (sizeIndex + 1) % sizes.size
-            narration.textSize = sizes[sizeIndex]
-            font.text = "TEXT: ${sizes[sizeIndex].toInt()}"
-            scroll.scrollTo(0, 0)
-        }
+        fontSizeLabel.gravity = Gravity.CENTER
+        fontSizeLabel.text = "Text: $textSizeSp"
+        narration.textSize = textSizeSp.toFloat()
+        fontSlider.max = 24
+        fontSlider.progress = textSizeSp - 28
+        fontSlider.contentDescription = "Narration text size"
+        fontSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                textSizeSp = progress + 28
+                narration.textSize = textSizeSp.toFloat()
+                fontSizeLabel.text = "Text: $textSizeSp"
+                scroll.scrollTo(0, 0)
+                readingPrefs.edit().putInt("text_size_sp", textSizeSp).apply()
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+        top.addView(fontSizeLabel, LayoutParams(dp(80), dp(48)))
+        top.addView(fontSlider, LayoutParams(dp(176), dp(48)))
         addView(top, LayoutParams(MATCH, WRAP))
         status.gravity = Gravity.CENTER
         addView(status, LayoutParams(MATCH, WRAP))
