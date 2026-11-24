@@ -32,7 +32,7 @@ Tap a book to start at its Audiobookshelf resume position. Use Play/Pause, the s
 
 ## Read Along (local qualification)
 
-Open an audiobook. The default player automatically displays synchronized narration when a transcript is available, or the book cover while opening, waiting or unavailable. Use the text-size slider (28–52 sp); playback controls, chapter navigation and seeking stay in the same view. Missing or invalid transcripts are isolated from audio playback.
+Open an audiobook. The default player automatically displays synchronized narration when a transcript is available, or the book cover while opening, waiting or unavailable. Use the text-size slider (28–52 sp); playback controls, chapter navigation and seeking stay in the same view. Missing or invalid transcripts are isolated from audio playback. Tap the fullscreen icon at the lower-right of the narration to hide the app header and player controls, retaining only the live exercise HUD at the very top above the narration. Tap the same corner to restore the regular player. The existing audio session and text size are retained; leaving the book or minimizing returns to regular mode.
 
 For now, the local source looks for a UTF-8 transcript under the app-specific external files directory:
 

@@ -36,7 +36,11 @@ import com.fitbaus.bikebridge.host.youtube.ThumbnailLoader
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
-internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {}) : LinearLayout(context) {
+internal class BooksContent(
+    context: Context,
+    onRestoreRequested: () -> Unit = {},
+    private val onReadingFullscreenChanged: (Boolean) -> Unit = {},
+) : LinearLayout(context) {
     val hud = ExerciseHud(context)
     private val store = BooksConnectionStore(context)
     private val preparationAuthorization = PreparationAuthorization { api ->
@@ -97,7 +101,8 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
     private var scrubbing = false
     private var playerState = BooksPlayerState()
     private val playback = BooksPlayback(context, ::renderPlayer)
-    private val readAlong = BooksReadAlong(context)
+    private var readingFullscreen = false
+    private val readAlong = BooksReadAlong(context, onFullscreenRequested = { setReadingFullscreen(!readingFullscreen) })
     private var narrationKey: BooksTranscriptRequest? = null
 
     val floatingPlayer = BooksFloatingPlayer(context, onRestoreRequested, ::stop, playback::toggle) { delta ->
@@ -106,6 +111,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
 
     fun minimize(): Boolean {
         if (!active || !BooksFloatingPolicy.canFloat(playerState)) return false
+        setReadingFullscreen(false)
         dialog?.dismiss()
         dialog = null
         hideKeyboard()
@@ -381,11 +387,28 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         addView(playerPanel, LayoutParams(MATCH, 0, 1f))
     }
 
+    private fun setReadingFullscreen(fullscreen: Boolean) {
+        if (readingFullscreen == fullscreen) return
+        if (fullscreen && (!active || !readAlong.canEnterFullscreen())) return
+        readingFullscreen = fullscreen
+        val chrome = if (fullscreen) GONE else VISIBLE
+        message.visibility = chrome
+        for (index in 0 until playerPanel.childCount) {
+            val child = playerPanel.getChildAt(index)
+            if (child !== readAlong) child.visibility = chrome
+        }
+        playerPanel.setPadding(if (fullscreen) 0 else dp(20), if (fullscreen) 0 else dp(8),
+            if (fullscreen) 0 else dp(20), if (fullscreen) 0 else dp(8))
+        readAlong.setFullscreen(fullscreen)
+        onReadingFullscreenChanged(fullscreen)
+    }
+
     private fun currentCover() = (readAlong.cover.drawable as? BitmapDrawable)?.bitmap
 
     private fun renderPlayer(state: BooksPlayerState) {
         playerState = state
         val show = active && state.item != null
+        if (!show || state.failed) setReadingFullscreen(false)
         if (!show) {
             if (narrationKey != null) {
                 readAlong.close()
@@ -409,6 +432,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         if (current != null) {
             val key = BooksTranscriptRequest(current.address, item.id)
             if (narrationKey != key) {
+                setReadingFullscreen(false)
                 narrationKey = key
                 readAlong.open(key, state, current)
                 loader?.bind(readAlong.cover, item.id)
@@ -596,6 +620,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
     }
 
     private fun resetConnection() {
+        setReadingFullscreen(false)
         floatingPlayer.clearCover()
         readAlong.close()
         loader?.clear(readAlong.cover)
