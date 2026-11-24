@@ -8,6 +8,16 @@ FitBaus Full is developed on `main`. FitBaus Lite, a compact edition for
 storage-constrained ProForm Smart Power 10.0 consoles without external webcam
 support, is maintained on `lite/1.x`.
 
+## [Unreleased]
+
+### Fixed
+
+- **IT HEARS YOU webcam steering.** Use the same 3% horizontal dead zone,
+  180 ms camera-X smoothing and 2.4 steering gain as TRAILS' Medium preset.
+  Small head movements no longer select a turn as readily; sustained leans
+  still select junction directions. Controller thresholds and button behavior
+  are unchanged.
+
 ## [2.2.0]
 
 Full 2.2.0 (`versionCode 20200`) brings together the Full 2.1.1–2.1.3

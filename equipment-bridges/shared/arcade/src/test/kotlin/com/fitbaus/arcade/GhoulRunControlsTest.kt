@@ -276,7 +276,7 @@ class GhoulRunControlsTest {
                     controller = if (useStick) GhoulRunControllerInput(stickX = if (leaning) -1f else 0f) else null,
                 )
                 if (leaning && session.live) {
-                    if (!useStick) assertEquals(GhoulLane.Left, session.lane)
+                    if (!useStick && index > 65) assertEquals(GhoulLane.Left, session.lane)
                     else assertTrue(session.lane == GhoulLane.Left || session.lane == GhoulLane.Center)
                     if (session.lane == GhoulLane.Left) sawLeft = true
                 }
@@ -287,7 +287,7 @@ class GhoulRunControlsTest {
                 previousTurning = game.turningLeft
             }
             assertTrue(sawLeft)
-            assertTrue(game.lean <= -0.99f, "full lean reaches the game (stick=$useStick)")
+            assertTrue(game.lean <= if (useStick) -0.99f else -0.75f, "sustained lean reaches the game (stick=$useStick)")
         }
     }
 
@@ -339,6 +339,37 @@ class GhoulRunControlsTest {
     }
 
     @Test
+    fun webcamIgnoresSmallMovementsAndBriefSpikesButRespondsToDeliberateLeans() {
+        val rig = liveRig(seed = 9L)
+        repeat(60) { rig.tick() }
+        assertTrue(rig.session.live)
+        val config = rig.session.steering.config
+        assertEquals(0.03f, config.deadZone, 1e-6f)
+        assertEquals(2.4f, config.gain, 1e-6f)
+        assertEquals(0.18f, config.smoothingSeconds, 1e-6f)
+        repeat(60) { index ->
+            rig.tick(faceX = if (index % 2 == 0) 0.54f else 0.46f)
+            assertEquals(GhoulLane.Center, rig.session.lane)
+        }
+        for (x in listOf(0.39f, 0.61f)) {
+            repeat(30) {
+                rig.tick(faceX = x)
+                assertEquals(GhoulLane.Center, rig.session.lane)
+            }
+        }
+        repeat(18) { rig.tick() }
+        rig.tick(faceX = 0.15f)
+        assertEquals(GhoulLane.Center, rig.session.lane)
+        repeat(18) { rig.tick() }
+        for ((x, expected) in listOf(0.25f to GhoulLane.Left, 0.75f to GhoulLane.Right)) {
+            repeat(18) { rig.tick(faceX = x) }
+            assertEquals(expected, rig.session.lane)
+            repeat(18) { rig.tick() }
+            assertEquals(GhoulLane.Center, rig.session.lane)
+        }
+    }
+
+    @Test
     fun continuousWebcamLeanRemainsActiveThroughTurns() {
         val rig = liveRig(seed = 9L)
         repeat(60) { rig.tick() }
@@ -352,9 +383,9 @@ class GhoulRunControlsTest {
             rig.tick(faceX = 0.15f)
             assertEquals(GhoulLane.Left, rig.session.lane, "a lean held through the turn stays available for the next junction")
         }
-        rig.tick(faceX = 0.5f)
+        repeat(18) { rig.tick(faceX = 0.5f) }
         assertEquals(GhoulLane.Center, rig.session.lane)
-        rig.tick(faceX = 0.15f)
+        repeat(18) { rig.tick(faceX = 0.15f) }
         assertEquals(GhoulLane.Left, rig.session.lane, "leaning again after centering selects left")
     }
 

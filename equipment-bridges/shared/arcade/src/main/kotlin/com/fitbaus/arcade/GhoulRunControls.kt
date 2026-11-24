@@ -307,7 +307,9 @@ internal class GhoulTurnIntentBuffer(private val capacity: Int = 2) {
 /** Pure input/session bridge: fresh absolute cadence and selected steering gate the game clock. */
 internal class GhoulRunSession(
     val game: GhoulRunGame,
-    val steering: HorizontalFaceSteering = HorizontalFaceSteering(),
+    val steering: HorizontalFaceSteering = HorizontalFaceSteering(
+        SteerConfig(deadZone = 0.03f, gain = 2.4f, smoothingSeconds = 0.18f),
+    ),
     val pace: GhoulPace = GhoulPace(game.config),
     private val supervisor: GhoulRunSupervisor = GhoulRunSupervisor(),
     private val readySeconds: Float = 3f,

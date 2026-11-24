@@ -68,7 +68,7 @@ class TrailRideControlsTest {
     }
 
     @Test
-    fun ghoulRunRetainsItsOriginalSharedSteeringDefaults() {
+    fun sharedSteeringRetainsItsOriginalDefaults() {
         val shared = HorizontalFaceSteering()
         assertEquals(0.012f, shared.config.deadZone, 1e-6f)
         assertEquals(4f, shared.config.gain, 1e-6f)
