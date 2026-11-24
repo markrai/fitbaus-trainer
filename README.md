@@ -2,8 +2,6 @@
   <img src="github.png" alt="FitBaus Trainer" width="720" />
 </p>
 
-# FitBaus Trainer
-
 **Train. Play. Watch. Listen. Learn.**
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/markrai/fitbaus-trainer)](https://github.com/markrai/fitbaus-trainer/releases) ![Android](https://img.shields.io/badge/Android-supported-green) ![iOS](https://img.shields.io/badge/iOS-source-blue) ![Web](https://img.shields.io/badge/Web-PWA-blue)
