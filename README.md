@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="github.png" alt="FitBaus Trainer" width="720" />
+  <img src="hero.jpg" alt="Showcase" width="720" />
 </p>
 
 <p align="center"><strong>Train. Play. Watch. Listen. Learn.</strong></p>
