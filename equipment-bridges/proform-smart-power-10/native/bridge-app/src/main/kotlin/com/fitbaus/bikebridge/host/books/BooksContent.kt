@@ -5,6 +5,7 @@ package com.fitbaus.bikebridge.host.books
 import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Color
+import android.graphics.drawable.BitmapDrawable
 import android.os.Handler
 import android.os.Looper
 import android.text.InputFilter
@@ -108,7 +109,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         dialog?.dismiss()
         dialog = null
         hideKeyboard()
-        floatingPlayer.render(playerState, readAlong.floatingNarration())
+        floatingPlayer.render(playerState, readAlong.floatingNarration(), currentCover())
         floatingPlayer.show()
         return true
     }
@@ -380,6 +381,8 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         addView(playerPanel, LayoutParams(MATCH, 0, 1f))
     }
 
+    private fun currentCover() = (readAlong.cover.drawable as? BitmapDrawable)?.bitmap
+
     private fun renderPlayer(state: BooksPlayerState) {
         playerState = state
         val show = active && state.item != null
@@ -393,6 +396,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         playerPanel.visibility = if (show) VISIBLE else GONE
         if (!show) {
             floatingPlayer.visibility = GONE
+            floatingPlayer.clearCover()
             if (active && connection != null) browse.visibility = VISIBLE
             scrubbing = false
             return
@@ -410,7 +414,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
                 loader?.bind(readAlong.cover, item.id)
             } else readAlong.render(state)
         }
-        if (floatingPlayer.visibility == VISIBLE) floatingPlayer.render(state, readAlong.floatingNarration())
+        if (floatingPlayer.visibility == VISIBLE) floatingPlayer.render(state, readAlong.floatingNarration(), currentCover())
         playerTitle.text = state.item?.title.orEmpty()
         playerAuthor.text = state.item?.author.orEmpty()
         playerStatus.text = state.status
@@ -592,6 +596,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
     }
 
     private fun resetConnection() {
+        floatingPlayer.clearCover()
         readAlong.close()
         loader?.clear(readAlong.cover)
         narrationKey = null
