@@ -13,6 +13,25 @@ class TranscriberConnectionTest {
     private val response = """{"api_version":1,"transcript_schema":"fitbaus.transcript/v1","job_api":true,"source_configured":true,"source_id":"home-library","transcription":true,"engine_ready":true,"max_window_ms":300000}"""
 
     @Test
+    fun pairingNormalizesCodeAndExchangesWithoutOperatorToken() {
+        val deviceToken = "Z".repeat(43)
+        val paired = TranscriberConnection.pair("http://192.168.1.193:8765", "a5gc5gbx", BooksAuthHttp { url, headers, body ->
+            assertEquals("http://192.168.1.193:8765/v1/pairing/redeem", url)
+            assertTrue(headers.isEmpty())
+            assertEquals("A5GC-5GBX", org.json.JSONObject(body).getString("code"))
+            BooksHttpResponse(200, org.json.JSONObject().put("token", deviceToken).toString())
+        })
+        assertEquals(deviceToken, paired.token)
+        assertThrows(IllegalArgumentException::class.java) { TranscriberConnection.normalizeCode("ABCD-0123") }
+        assertThrows(IOException::class.java) {
+            TranscriberConnection.pair("https://host", "A5GC-5GBX", BooksAuthHttp { _, _, _ -> BooksHttpResponse(401, "") })
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TranscriberConnection.pair("http://public.example", "A5GC-5GBX", BooksAuthHttp { _, _, _ -> error("Unsafe request") })
+        }
+    }
+
+    @Test
     fun capabilityDiscoveryUsesOnlyTranscriberCredential() {
         val capabilities = connection.test(BooksHttp { url, sent ->
             assertEquals("http://192.168.1.193:8765/v1/capabilities", url)
