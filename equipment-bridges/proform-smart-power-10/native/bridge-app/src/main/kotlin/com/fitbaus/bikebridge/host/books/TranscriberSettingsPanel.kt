@@ -102,6 +102,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
     fun start() {
         if (active) return
         active = true
+        status.setTextColor(Color.WHITE)
         status.text = "Loading connection…"
         request({ store.load() }, { connection ->
             saved = connection
@@ -143,9 +144,11 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
             pairingCode = if (entered.isBlank() && existing?.address == address) null
                 else TranscriberConnection.normalizeCode(entered)
         } catch (_: Exception) {
+            status.setTextColor(Color.WHITE)
             status.text = "Enter a valid host, port and eight-character pairing code. HTTP requires a private IPv4 address."
             return
         }
+        status.setTextColor(Color.WHITE)
         status.text = if (pairingCode == null) "Testing connection…" else "Pairing…"
         request({
             val candidate = if (pairingCode == null) requireNotNull(existing)
@@ -158,12 +161,14 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
             saved = candidate
             code.text.clear()
             code.hint = "Paired (new code to replace)"
+            status.setTextColor(if (capabilities.ready) Color.rgb(76, 175, 80) else Color.WHITE)
             status.text = if (capabilities.ready) "Connected · Ready · Source: " + capabilities.sourceId
                 else "Connected · Service not ready. Check source and model setup."
         }, "Connection failed. Check the address and service; generate a fresh pairing code if needed.")
     }
 
     private fun disconnect() {
+        status.setTextColor(Color.WHITE)
         request({ store.clear() }, {
             saved = null
             code.text.clear()
