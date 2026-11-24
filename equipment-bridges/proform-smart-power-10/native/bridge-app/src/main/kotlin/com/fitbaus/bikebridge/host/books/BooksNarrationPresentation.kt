@@ -13,3 +13,17 @@ internal enum class BooksNarrationPresentation {
             }
     }
 }
+
+internal enum class BooksFloatingPresentation {
+    NARRATION, COVER, FALLBACK, ERROR;
+
+    companion object {
+        fun resolve(hasNarration: Boolean, hasCover: Boolean, playbackFailed: Boolean): BooksFloatingPresentation =
+            when {
+                playbackFailed -> ERROR
+                hasNarration -> NARRATION
+                hasCover -> COVER
+                else -> FALLBACK
+            }
+    }
+}
