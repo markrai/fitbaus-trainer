@@ -16,7 +16,7 @@ class RemoteBooksTranscriptTest {
     private val playback = BooksPlaybackSession("session", listOf(
         BooksAudioTrack("http://192.168.1.193:13378/api/items/book/file/123", 0, 650000)
     ), emptyList(), 0)
-    private val capabilities = """{"api_version":1,"transcript_schema":"fitbaus.transcript/v1","job_api":true,"source_configured":true,"source_id":"home","transcription":true,"engine_ready":true,"max_window_ms":300000}"""
+    private val capabilities = """{"api_version":1,"transcript_schema":"fitbaus.transcript/v1","job_api":true,"source_configured":true,"source_id":"home","source_url":"http://192.168.1.193:13378","transcription":true,"engine_ready":true,"max_window_ms":300000}"""
     private val identity = JSONObject().put("source_id", "home").put("item_id", "book").put("audio_revision", revision)
     private val manifest = JSONObject(identity.toString()).put("duration_ms", 650000)
         .put("tracks", org.json.JSONArray().put(JSONObject().put("file_id", "123").put("offset_ms", 0).put("duration_ms", 650000)))
@@ -81,6 +81,61 @@ class RemoteBooksTranscriptTest {
         }
         assertThrows(IOException::class.java) {
             client(failed = true).load("book", playback, 301500, null, false)
+        }
+    }
+
+    @Test
+    fun missingOrMismatchedSourceNeverReceivesSourceCredential() {
+        for (caps in listOf(
+            JSONObject(capabilities).apply { remove("source_url") },
+            JSONObject(capabilities).put("source_url", "http://192.168.1.55:13378")
+        )) {
+            var calls = 0
+            val client = RemoteBooksTranscript(paired, books, TranscriberHttp { url, headers, _ ->
+                calls++
+                assertEquals(paired.address + "/v1/capabilities", url)
+                assertNull(headers["X-Audiobookshelf-Token"])
+                BooksHttpResponse(200, caps.toString())
+            }, pause = {})
+            assertThrows(IOException::class.java) { client.load("book", playback, 301500, null, false) }
+            assertEquals(1, calls)
+        }
+    }
+
+    @Test
+    fun recoveryAcceptsOnlyMatchingReadyPreparedReplacement() {
+        val preparedId = "d".repeat(64)
+        val prepared = JSONObject(job.toString()).put("job_id", preparedId).put("state", "ready").put("prepared", true)
+        fun recovering(replacement: JSONObject): RemoteBooksTranscript {
+            var submitted = false
+            return RemoteBooksTranscript(paired, books, TranscriberHttp { url, _, _ ->
+                when {
+                    url.endsWith("/v1/capabilities") -> BooksHttpResponse(200, capabilities)
+                    url.endsWith("/manifest") -> BooksHttpResponse(200, manifest.toString())
+                    url.endsWith("/v1/jobs") -> {
+                        if (submitted) BooksHttpResponse(200, replacement.toString())
+                        else {
+                            submitted = true
+                            BooksHttpResponse(202, JSONObject(job.toString()).put("state", "queued").put("dispatch", "awaiting_credentials").toString())
+                        }
+                    }
+                    url == paired.address + "/v1/jobs/$preparedId/transcript" -> BooksHttpResponse(200, result.toString())
+                    else -> error("Unexpected recovery URL: $url")
+                }
+            }, pause = {})
+        }
+        assertEquals("Narration", recovering(prepared).load("book", playback, 301500, null, false).transcript.cueAt(301500)?.text)
+        for (invalid in listOf(
+            JSONObject(prepared.toString()).put("prepared", false),
+            JSONObject(prepared.toString()).put("state", "queued"),
+            JSONObject(prepared.toString()).put("item_id", "other"),
+            JSONObject(prepared.toString()).put("audio_revision", "f".repeat(64)),
+            JSONObject(prepared.toString()).put("end_ms", 599999),
+            JSONObject(prepared.toString()).put("job_id", "not-an-id")
+        )) {
+            assertThrows(IllegalArgumentException::class.java) {
+                recovering(invalid).load("book", playback, 301500, null, false)
+            }
         }
     }
 
