@@ -96,6 +96,26 @@ class TranscriberManagementTest {
     }
 
     @Test
+    fun automaticQualificationProgressAndRetry() {
+        val modern = JSONObject(caps.toString()).put("automatic_model_qualification", true)
+        qualification.getJSONArray("models").getJSONObject(1)
+            .put("qualification", JSONObject().put("state", "unqualified"))
+            .put("automatic", JSONObject().put("state", "running").put("completed_runs", 1).put("total_runs", 2))
+        val api = client(modern)
+        val snapshot = api.snapshot()
+        assertTrue(snapshot.automaticQualification)
+        val model = snapshot.models.last()
+        assertTrue(model.qualifying)
+        assertFalse(model.qualified)
+        assertEquals(1, model.completedRuns)
+        assertEquals(2, model.totalRuns)
+        api.retryQualification("small")
+        assertEquals("/v1/models/small/qualify", requests.last().first)
+        assertNull(requests.last().second["X-Audiobookshelf-Token"])
+        assertThrows(IllegalArgumentException::class.java) { client().retryQualification("small") }
+    }
+
+    @Test
     fun oldServerDoesNotPermitModelMutations() {
         val old = JSONObject(caps.toString()).put("paired_model_management", false)
             .put("background_job_lifetime_authorization", false)

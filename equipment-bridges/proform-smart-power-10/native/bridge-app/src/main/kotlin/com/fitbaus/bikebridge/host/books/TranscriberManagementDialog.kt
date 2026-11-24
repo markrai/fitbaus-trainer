@@ -90,7 +90,7 @@ internal class TranscriberManagementDialog(
                 result.fold({ snapshot ->
                     last = snapshot
                     render(snapshot)
-                    if (snapshot.models.any { it.downloading } || snapshot.jobs.any { it.running }) {
+                    if (shouldPoll()) {
                         main.postDelayed(poll, 5000)
                     }
                 }, { error ->
@@ -140,6 +140,11 @@ internal class TranscriberManagementDialog(
             val description = when {
                 model.downloading -> "${model.state} · ${megabytes(model.received)} / ${megabytes(model.total)}"
                 !model.installed -> "Not installed · ${megabytes(model.total)}"
+                !model.qualified && model.automaticState == "queued" -> "Installed · waiting to test hardware"
+                !model.qualified && model.automaticState == "running" -> "Testing hardware · ${model.completedRuns} / ${model.totalRuns} checks complete"
+                !model.qualified && model.automaticState == "waiting_resources" -> "Installed · waiting for available memory"
+                !model.qualified && model.automaticState == "failed" -> "Hardware check did not pass"
+                !model.qualified && snapshot.automaticQualification -> "Installed · waiting for hardware check"
                 !model.qualified -> "Installed · server qualification required"
                 !model.memoryAllowed -> "Installed · waiting for available memory"
                 model.id == "tiny" -> "Installed · default"
@@ -153,6 +158,14 @@ internal class TranscriberManagementDialog(
                 button("DOWNLOAD $title", enabled && snapshot.canManageModels && snapshot.models.none { it.downloading }) {
                     selectedModel = model.id
                     mutate { it.download(model.id) }
+                }
+            } else if (model.installed && !model.qualified && model.qualifying) {
+                if (model.automaticState == "running") progress(model.completedRuns.toLong(), model.totalRuns.toLong())
+                label("Live Read Along takes priority. No audiobook audio is used for this check.", 14f)
+            } else if (model.installed && !model.qualified && snapshot.automaticQualification) {
+                model.qualificationError?.let { label(it.replace('_', ' '), 14f) }
+                button("RETRY $title HARDWARE CHECK", enabled && snapshot.canManageModels) {
+                    mutate { it.retryQualification(model.id) }
                 }
             } else if (item != null && model.installed && model.qualified) {
                 button(if (selectedModel == model.id) "$title SELECTED" else "SELECT $title",
@@ -248,7 +261,7 @@ internal class TranscriberManagementDialog(
     }
 
     private fun shouldPoll(): Boolean = last?.let { snapshot ->
-        snapshot.models.any { it.downloading } || snapshot.jobs.any { it.running }
+        snapshot.models.any { it.downloading || it.qualifying } || snapshot.jobs.any { it.running }
     } == true
 
     private fun confirm(message: String, action: () -> Unit) {
@@ -258,7 +271,7 @@ internal class TranscriberManagementDialog(
         login = prompt
         prompt.setOnDismissListener {
             login = null
-            if (!closed && pending == null && last?.jobs?.any { it.running } == true) main.postDelayed(poll, 5000)
+            if (!closed && pending == null && shouldPoll()) main.postDelayed(poll, 5000)
         }
         prompt.show()
         prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
