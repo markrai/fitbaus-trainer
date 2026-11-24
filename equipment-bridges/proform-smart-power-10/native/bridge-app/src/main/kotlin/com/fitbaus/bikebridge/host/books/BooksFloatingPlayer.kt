@@ -1,6 +1,7 @@
 package com.fitbaus.bikebridge.host.books
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
@@ -9,6 +10,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -31,6 +33,8 @@ internal class BooksFloatingPlayer(
 ) : LinearLayout(context) {
     private val title = text("", 14f)
     private val body = text("", 22f)
+    private val cover = ImageView(context)
+    private var displayedCover: Bitmap? = null
     private val timing = text("", 12f)
     private val progress = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal)
     private val play = text("PLAY", 16f)
@@ -69,7 +73,14 @@ internal class BooksFloatingPlayer(
         body.gravity = Gravity.CENTER
         body.ellipsize = TextUtils.TruncateAt.END
         body.setOnClickListener { restore() }
-        addView(body, LayoutParams(MATCH, 0, 1f))
+        cover.scaleType = ImageView.ScaleType.FIT_CENTER
+        cover.contentDescription = "Audiobook cover. Tap to restore Books."
+        cover.setOnClickListener { restore() }
+        cover.visibility = GONE
+        val stage = FrameLayout(context)
+        stage.addView(cover, FrameLayout.LayoutParams(MATCH, MATCH))
+        stage.addView(body, FrameLayout.LayoutParams(MATCH, MATCH))
+        addView(stage, LayoutParams(MATCH, 0, 1f))
         timing.setTextColor(Color.LTGRAY)
         addView(timing, LayoutParams(MATCH, dp(18)))
         progress.max = 10000
@@ -105,10 +116,28 @@ internal class BooksFloatingPlayer(
         fit()
     }
 
-    fun render(state: BooksPlayerState, narration: String?) {
+    fun clearCover() {
+        displayedCover = null
+        cover.setImageDrawable(null)
+        cover.visibility = GONE
+    }
+
+    fun render(state: BooksPlayerState, narration: String?, thumbnail: Bitmap?) {
         title.text = state.item?.title.orEmpty()
-        val content = narration ?: state.item?.author.orEmpty().ifBlank { "Audiobook" }
-        val display = if (state.failed) "Playback failed. Tap to restore." else content
+        val presentation = BooksFloatingPresentation.resolve(narration != null, thumbnail != null, state.failed)
+        if (displayedCover !== thumbnail) {
+            displayedCover = thumbnail
+            cover.setImageBitmap(thumbnail)
+        }
+        val showCover = presentation == BooksFloatingPresentation.COVER
+        cover.visibility = if (showCover) VISIBLE else GONE
+        body.visibility = if (showCover) GONE else VISIBLE
+        val display = when (presentation) {
+            BooksFloatingPresentation.NARRATION -> narration.orEmpty()
+            BooksFloatingPresentation.ERROR -> "Playback failed. Tap to restore."
+            BooksFloatingPresentation.COVER -> ""
+            BooksFloatingPresentation.FALLBACK -> state.item?.author.orEmpty().ifBlank { "Audiobook" }
+        }
         if (body.text.toString() != display) body.text = display
         val duration = state.session?.durationMs ?: 0
         timing.text = clock(state.positionMs) + " / " + clock(duration)
