@@ -62,12 +62,15 @@ internal class TranscriberManagement(
         require(item == null || item.id.matches(Regex("[A-Za-z0-9_-]{1,128}")))
     }
 
-    private fun call(path: String, body: JSONObject? = null, token: String? = null, refresh: String? = null): JSONObject {
+    private fun call(path: String, body: JSONObject? = null, token: String? = null): JSONObject {
         if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Request cancelled")
         val headers = mutableMapOf("Authorization" to "Bearer ${transcriber.token}")
         token?.let { headers["X-Audiobookshelf-Token"] = it }
-        refresh?.let { headers["X-FitBaus-Background-Refresh"] = it }
         val response = http.request(transcriber.address + path, headers, body?.toString())
+        if (response.status == 401 && token != null) {
+            val current = capabilities()
+            if (!sourceMatches(current)) throw IllegalArgumentException("Audiobookshelf source changed")
+        }
         if (response.status !in 200..299) throw BooksHttpFailure(response.status)
         return JSONObject(response.body)
     }
@@ -160,33 +163,60 @@ internal class TranscriberManagement(
         call("/v1/models/$model/qualify", JSONObject())
     }
 
-    fun start(model: String, credentials: BooksCredentials? = null) {
+    fun matches(currentBooks: BooksConnection?, currentTranscriber: TranscriberConnection?): Boolean =
+        books === currentBooks && currentTranscriber?.address == transcriber.address &&
+            currentTranscriber?.token == transcriber.token
+
+    private fun granted(caps: JSONObject, result: JSONObject): String? {
+        if (!caps.optBoolean("background_reauthorize") ||
+            books?.session?.credentials()?.refreshToken == null) return null
+        if (result.optString("state") !in setOf("queued", "processing", "waiting_resources", "waiting_credentials")) return null
+        return result.getString("job_id").also { require(it.matches(Regex("[0-9a-f]{64}"))) }
+    }
+
+    fun start(model: String): String? {
         require(model in setOf("tiny", "base", "small"))
         val caps = capabilities()
         require(caps.optBoolean("background_job_lifetime_authorization") && sourceMatches(caps))
-        val action: (String, String?) -> Unit = { token, refresh ->
+        return requireNotNull(books).session.authorized { token ->
             val current = manifest(caps, token)
             val body = JSONObject().put("source_id", current.getString("source_id"))
                 .put("item_id", current.getString("item_id")).put("audio_revision", current.getString("audio_revision"))
                 .put("model", model).put("start_ms", 0)
-            require(refresh == null || caps.optBoolean("paired_background_refresh"))
-            call("/v1/background", body, token, refresh)
+            granted(caps, call("/v1/background", body, token))
         }
-        if (credentials != null) action(credentials.accessToken, credentials.refreshToken)
-        else requireNotNull(books).session.authorized { token -> action(token, null) }
     }
 
-    fun action(job: PreparationJob, operation: String, credentials: BooksCredentials? = null) {
+    fun action(job: PreparationJob, operation: String): String? {
         require(job.id.matches(Regex("[0-9a-f]{64}")) && operation in setOf("resume", "pause", "cancel", "discard"))
         val caps = capabilities()
         require(caps.optBoolean("background_job_lifetime_authorization") && sourceMatches(caps))
-        require(credentials == null || operation == "resume")
-        val perform: (String, String?) -> Unit = { token, refresh ->
+        return requireNotNull(books).session.authorized { token ->
             manifest(caps, token)
-            require(refresh == null || caps.optBoolean("paired_background_refresh"))
-            call("/v1/background/${job.id}/$operation", JSONObject(), token, refresh)
+            val result = call("/v1/background/${job.id}/$operation", JSONObject(), token)
+            if (operation == "resume") granted(caps, result) else null
         }
-        if (credentials != null) perform(credentials.accessToken, credentials.refreshToken)
-        else requireNotNull(books).session.authorized { token -> perform(token, null) }
+    }
+
+    fun maintain(jobId: String, stillCurrent: () -> Boolean): Boolean {
+        require(jobId.matches(Regex("[0-9a-f]{64}")))
+        if (!stillCurrent()) return false
+        val caps = capabilities()
+        if (!caps.optBoolean("background_reauthorize") || !sourceMatches(caps)) return false
+        val book = requireNotNull(item)
+        return requireNotNull(books).session.authorized { token ->
+            if (!stillCurrent()) return@authorized false
+            val path = "/v1/background/$jobId"
+            val status = call(path, token = token)
+            fun validate(value: JSONObject) {
+                require(value.getString("job_id") == jobId && value.getString("item_id") == book.id &&
+                    value.getString("source_id") == caps.getString("source_id"))
+            }
+            validate(status)
+            val updated = if (status.getString("state") == "waiting_credentials" && stillCurrent()) {
+                call("$path/reauthorize", JSONObject(), token).also(::validate)
+            } else status
+            updated.getString("state") in setOf("queued", "processing", "waiting_resources", "waiting_credentials")
+        }
     }
 }
