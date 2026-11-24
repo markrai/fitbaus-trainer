@@ -165,7 +165,7 @@ internal class BooksReadAlong(
         forward.isEnabled = ready
         play.text = if (state.wantsPlay) "PAUSE" else "PLAY"
         val session = state.session
-        if (ready && !localMode && session != null) {
+        if (ready && !localMode) {
             windows.plan(state.positionMs, session.durationMs, state.wantsPlay)?.let(::load)
         }
         val window = session?.let { windows.current(state.positionMs, it.durationMs) }
