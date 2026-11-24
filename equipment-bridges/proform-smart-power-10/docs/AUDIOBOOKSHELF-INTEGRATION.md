@@ -7,8 +7,8 @@ FitBaus Full will provide a native Books screen for a user's self-hosted Audiobo
 1. **Library API foundation (implemented).** HTTPS or private-network HTTP server URL, username/password authentication or an existing Audiobookshelf API key as a bearer credential, audiobook library enumeration, bounded paginated item metadata, and cover URL construction. The API layer is independent of Android UI and credential storage.
 2. **Books screen (implemented).** Media tab, server setup, keystore-backed credential storage, connection validation, library selection, five-column cover grid, pagination and server-side title search. Authenticated covers are confined to the configured origin; stale requests and caches are discarded on tab exit or disconnect. Selecting a book opens the native player.
 3. **Playback (implemented; console qualification pending).** Dedicated ExoPlayer audio player with direct-play sessions, multi-file book-relative timeline, server resume, chapter navigation, seek and 30-second skips, playback speed, audio focus, periodic progress sync and session close. Leaving Books or pausing the activity releases playback. Server transcoding, background playback across tabs and offline progress recovery are not included in this slice.
-4. **Read Along.** Parse bounded WebVTT/SRT input, synchronize against the book-relative playback clock, and provide large adjustable text and a minimal focus display. Seeking, speed changes and track changes must not cause timestamp drift.
-5. **Optional transcription worker.** Run local speech recognition outside the console, using authorized audio only. Cache timestamped transcript segments by book identity and audio revision. Playback must work without a worker.
+4. **Read Along (Phase 3A implemented; qualification pending).** Parse bounded WebVTT/SRT input, synchronize against the book-relative playback clock, and provide an optional large-print focus display with text size controls. The audio player remains the sole clock. Local transcript files are a qualification source, not a transcription engine.
+5. **Optional transcription companion (Phase 3B onward).** A separate headless open-source repository, `fitbaus-transcriber`, will provide a containerized engine, authenticated and versioned API, job queue, persistent cache, CPU baseline and optional GPU acceleration. No web UI, cloud account, server modification or additional installation is required for ordinary audiobook listening. The companion must respect library permissions and cache by server, item and audio revision. FitBaus will implement the optional remote transcript source separately.
 
 ## Server connection
 
@@ -30,10 +30,45 @@ A verified connection is automatically restored when Books is reopened. Modern A
 
 Tap a book to start at its Audiobookshelf resume position. Use Play/Pause, the seek bar, 30-second skips, Chapters and playback speed. Return to Library to stop playback and close the server session. Progress is sent during playback and on exit; network failures are best-effort and offline recovery is not implemented. Audio requests are restricted to the selected book's file endpoints on the configured server and do not follow redirects.
 
+## Read Along (local qualification)
+
+Play an audiobook, then tap **Read Along**. This switches the presentation without creating a new audio session. Use the text-size button to cycle through 28, 36, 44 and 52 sp; play/pause and ±30-second skips remain available. **Player** restores the regular playback controls. Missing or invalid transcripts are isolated from audio playback.
+
+For now, the local source looks for a UTF-8 transcript under the app-specific external files directory:
+
+```text
+read-along/<SHA-256 of saved server address>/<library item ID>.vtt
+```
+
+A file with the same base name and `.srt` extension is also supported. To test, open Read Along for a book without a transcript; the screen displays its expected absolute file path and creates the parent directory. Push a small test file there using ADB, then select **Reload**. A sample fixture:
+
+```vtt
+WEBVTT
+
+00:00:00.000 --> 00:00:05.000
+First test sentence.
+
+00:00:05.000 --> 00:00:10.000
+Second test sentence.
+
+00:00:12.000 --> 00:00:20.000
+Third test sentence, following a gap.
+```
+
+This is synthetic qualification text, not a transcription of the audiobook. Seek to the beginning for the test. No storage permissions or external document picker are required. The app-specific directory can be removed by uninstalling; it is not a production transcript cache.
+
+### Transcript contract
+
+- Timing is absolute within the complete audiobook, in milliseconds from its start, not wall-clock time or per-file offsets.
+- Cues are ordered, non-overlapping, half-open intervals: start inclusive and end exclusive. Gaps are permitted.
+- UTF-8, plain-text narration, WebVTT or SRT; VTT presentation settings and tags are not rendered. Limits: 4 MiB input, 30,000 cues, 1,200 characters per cue.
+- Lookup is independent of the source and uses the actual book playback position, including after backward seeks and speed changes. The renderer does not extrapolate time.
+- The optional source must return data only for the requested book. A future remote adapter will additionally verify audio revision and coverage before displaying text. This local fixture adapter does not verify audio revision.
+
 ## Qualification
 
 - Unit tests for URL and credential validation, library and item parsing, pagination, HTTP errors, modern and legacy login responses, and bounded token renewal.
 - Physical Android 5.1.1 x86 console: username/password and library/cover browsing over private HTTP confirmed. HTTPS, playback and progress synchronization still require console testing.
 - Verify uninterrupted bike telemetry and USB control.
 - For playback, verify single-file and multi-file books, interrupted networking, resume across devices, and correct progress accounting.
-- For Read Along, verify large-text layout, seeks across chapters and playback speeds.
+- For Read Along, verify large-text layout, exact cue boundaries and gaps, backward/forward seeks, chapters and playback speeds. Confirm that opening and closing Read Along does not restart the audiobook and that missing/malformed files never stop playback.
