@@ -23,7 +23,7 @@ class TranscriberManagementTest {
     private val caps = JSONObject().put("api_version", 1).put("job_api", true)
         .put("source_id", "home").put("source_url", books.address)
         .put("paired_model_management", true).put("background_job_api", true)
-        .put("background_job_lifetime_authorization", true).put("paired_background_refresh", true)
+        .put("background_job_lifetime_authorization", true).put("background_reauthorize", true)
         .put("model_qualification_api", true).put("models", JSONArray()
             .put(JSONObject().put("id", "tiny").put("installed", true).put("state", "installed"))
             .put(JSONObject().put("id", "base").put("installed", false).put("state", "not_installed").put("approximate_bytes", 148000000))
@@ -47,7 +47,9 @@ class TranscriberManagementTest {
                 path == "/v1/qualification" -> qualification
                 path.endsWith("/manifest") -> manifest
                 path == "/v1/items/book/background" -> JSONObject().put("jobs", JSONArray().put(job))
-                path.startsWith("/v1/models/") || path.startsWith("/v1/background") -> JSONObject()
+                path == "/v1/background" || path.endsWith("/resume") -> JSONObject(job.toString()).put("state", "queued")
+                path.startsWith("/v1/background/") -> job
+                path.startsWith("/v1/models/") -> JSONObject()
                 else -> error("Unexpected path")
             }
             BooksHttpResponse(200, response.toString())
@@ -66,19 +68,21 @@ class TranscriberManagementTest {
     }
 
     @Test
-    fun downloadAndIndependentSessionNeverSharePlaybackRefresh() {
+    fun startAndResumeUseExistingSessionWithoutSharingRefresh() {
         val api = client()
         api.download("base")
         assertEquals("/v1/models/base/download", requests.last().first)
         assertNull(requests.last().second["X-Audiobookshelf-Token"])
-        api.start("small", BooksCredentials("background-access", "background-refresh"))
+        assertEquals(job.getString("job_id"), api.start("small"))
         val submitted = requests.last()
         assertEquals("/v1/background", submitted.first)
-        assertEquals("background-access", submitted.second["X-Audiobookshelf-Token"])
-        assertEquals("background-refresh", submitted.second["X-FitBaus-Background-Refresh"])
+        assertEquals("playback-access", submitted.second["X-Audiobookshelf-Token"])
+        assertNull(submitted.second["X-FitBaus-Background-Refresh"])
         assertEquals(revision, JSONObject(requireNotNull(submitted.third)).getString("audio_revision"))
         assertEquals("small", JSONObject(requireNotNull(submitted.third)).getString("model"))
-        api.start("tiny")
+        val paused = api.snapshot().jobs.single()
+        assertEquals(job.getString("job_id"), api.action(paused, "resume"))
+        assertEquals("/v1/background/" + paused.id + "/resume", requests.last().first)
         assertEquals("playback-access", requests.last().second["X-Audiobookshelf-Token"])
         assertNull(requests.last().second["X-FitBaus-Background-Refresh"])
         assertEquals("playback-refresh", books.session.credentials().refreshToken)
@@ -90,9 +94,34 @@ class TranscriberManagementTest {
         val api = client(wrong)
         assertFalse(api.snapshot().canPrepare)
         assertThrows(IllegalArgumentException::class.java) {
-            api.start("small", BooksCredentials("background-access", "background-refresh"))
+            api.start("small")
         }
         assertTrue(requests.all { it.second["X-Audiobookshelf-Token"] == null })
+    }
+
+    @Test
+    fun maintenanceOnlyReauthorizesWaitingJobsAndStopsOnPause() {
+        val api = client()
+        val id = job.getString("job_id")
+        job.put("state", "waiting_credentials")
+        assertTrue(api.maintain(id) { true })
+        assertEquals("/v1/background/$id/reauthorize", requests.last().first)
+        assertEquals("playback-access", requests.last().second["X-Audiobookshelf-Token"])
+        assertNull(requests.last().second["X-FitBaus-Background-Refresh"])
+        job.put("state", "paused")
+        assertFalse(api.maintain(id) { true })
+        assertEquals("/v1/background/$id", requests.last().first)
+        val count = requests.size
+        assertFalse(api.maintain(id) { false })
+        assertEquals(count, requests.size)
+    }
+
+    @Test
+    fun olderServerStillAcceptsExistingAccessTokenWithoutRenewal() {
+        val oldCaps = JSONObject(caps.toString()).apply { remove("background_reauthorize") }
+        assertNull(client(oldCaps).start("small"))
+        assertEquals("playback-access", requests.last().second["X-Audiobookshelf-Token"])
+        assertNull(requests.last().second["X-FitBaus-Background-Refresh"])
     }
 
     @Test
