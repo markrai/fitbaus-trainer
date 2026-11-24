@@ -8,15 +8,6 @@ FitBaus Full is developed on `main`. FitBaus Lite, a compact edition for
 storage-constrained ProForm Smart Power 10.0 consoles without external webcam
 support, is maintained on `lite/1.x`.
 
-## [Unreleased]
-
-### Changed
-
-- **YouTube subscriptions grid.** Display subscribed channels in a five-column
-  grid with channel thumbnails and names, with initials as a fallback when
-  artwork is unavailable. Reuse subscription response data without additional
-  YouTube API calls.
-
 ## [2.2.0]
 
 Full 2.2.0 (`versionCode 20200`) brings together the Full 2.1.1–2.1.3
