@@ -67,7 +67,7 @@ internal class BooksServer(address: String) {
             val name = host.trim()
             require(name.isNotEmpty() && name.none { it.isWhitespace() || it in "/:@?#\\\\[]" })
             val number = port.trim()
-            require(number.isEmpty() || (number.all { it in '0'..'9' } && number.toIntOrNull() in 1..65535))
+            require(number.isEmpty() || (number.all { it in '0'..'9' } && (number.toIntOrNull() ?: 0) in 1..65535))
             val value = "$protocol://$name" + (if (number.isEmpty()) "" else ":$number") +
                 (if (subpath) "/audiobookshelf" else "")
             BooksServer(value)
