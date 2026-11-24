@@ -4,101 +4,179 @@
 
 # FitBaus Trainer
 
-**Smarter rides. Open-source software. Your fitness data, under your control.**
+**Train. Play. Watch. Listen. Learn.**
 
-FitBaus Trainer is a heart-rate-guided fitness coach for people who want more from their workouts without being tied to a subscription or cloud platform. Train with structured sessions, see how your body responds, and track your cardiovascular progress. Use it in a browser, install the mobile app, or connect supported exercise equipment for a more hands-off ride. Also includes interactive games that use face and hand tracking to turn your movements into part of the action, making exercise more engaging and fun!
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/markrai/fitbaus-trainer)](https://github.com/markrai/fitbaus-trainer/releases) ![Android](https://img.shields.io/badge/Android-supported-green) ![iOS](https://img.shields.io/badge/iOS-source-blue) ![Web](https://img.shields.io/badge/Web-PWA-blue)
 
-## What you can do
+**FitBaus Trainer is an open-source fitness and entertainment platform that transforms your workout into something you look forward to.**
 
-- **Train by heart rate.** Follow structured workouts with live intensity guidance instead of guessing how hard to push.
-- **Measure your progress.** Record workout history and use a formal bike VO₂ assessment to estimate cardiovascular fitness.
-- **Connect a chest strap.** Read Bluetooth heart rate through Web Bluetooth in supported browsers or native BLE on Android and iOS.
-- **Let a supported bike adjust itself.** FitBaus can use measured power, cadence, and resistance to guide automatic resistance changes during authorized structured workouts.
-- **Play while you pedal.** On supported console hardware, arcade games use face and hand tracking to bring movement into the game. A floating YouTube video can continue playing over the Dashboard or a game until you close it.
+Train with structured, heart-rate-guided workouts, play interactive games using body movements or game controllers, watch YouTube, listen to audiobooks, and track your fitness progress.
 
-The core Trainer works without an equipment bridge. More advanced athlete-relative watt personalization is being evaluated, but does **not** currently control the bike.
+Built for people who want more from their exercise equipment without mandatory subscriptions, proprietary ecosystems or surrendering ownership of their fitness data.
 
-## Self-host it
+[Download](#download--get-started) · [Features](#fitness--training) · [Supported Equipment](#supported-equipment--hardware) · [Documentation](#documentation)
 
-FitBaus is a static web application. You don't need to run an application server, database, or authentication service to use the core Trainer. It stores workout history, heart-rate samples, and athlete profile data on the device.
+## See FitBaus in Action
 
-With **Node.js 22+** and npm:
+<!-- Replace this placeholder with the user-provided 3 x 3 screenshot collage: dashboard, YouTube, audiobooks, followed by six gameplay screenshots. -->
 
-```bash
-git clone https://github.com/markrai/fitbaus-trainer.git
-cd fitbaus-trainer
-npm ci
-npm run build
-node scripts/package-web-deploy.cjs
-npx serve deploy
-```
+*Screenshot collage coming soon.*
 
-Open the local URL shown by the server. For a production HTTPS deployment using an existing reverse proxy, see the [self-hosting guide](docs/SELF-HOSTING.md). Web Bluetooth requires a compatible browser and secure context.
+## Fitness & Training
 
-**A web-hosted Trainer is not the same as a bike controller:** the current ProForm bridge uses trusted-LAN HTTP, which the hosted browser app cannot access directly because of CORS restrictions. Use the native mobile app for the supported bridge integration.
+The FitBaus Trainer app for Android, iOS and web supports structured cardio workouts and freestyle cycling, with live Bluetooth heart-rate monitoring, heart-rate variability (HRV), heart-rate zone tracking and spoken workout guidance. It also supports resting heart-rate measurements, VO₂ max estimation and automatic resistance adjustment on compatible exercise equipment through the native mobile app.
 
-## Bike integration
+## Interactive Games
 
-FitBaus can communicate with model-specific equipment bridges on a trusted local network. **Currently, the only supported bike is the ProForm Smart Power 10.0.** This is not a claim of general ProForm or iFIT compatibility.
+Turn your cardio sessions into interactive gaming experiences. FitBaus features six built-in games that incorporate webcam-based motion tracking, pedaling cadence and game controller support, depending on the game.
 
-Its native Kotlin bridge runs on the bike's Android console and provides:
+| Game | Experience |
+|---|---|
+| **Trails** | Ride through a forest, navigate winding trails, dodge obstacles and physically stand to jump over ditches. |
+| **Maverick** | Pilot a fighter jet through an action-packed aerial arcade experience. |
+| **It Hears You** | Navigate a dark industrial maze while avoiding creatures that respond to your activity. |
+| **Bricks** | Break bricks by steering a paddle, with optional cadence-based difficulty. |
+| **Biketris** | Arrange falling blocks while pedaling to influence the pace of the game. |
+| **Math** | Exercise your brain alongside your body with arithmetic challenges. |
 
-- Live bike measurements: watts, cadence, and resistance
-- Automatic resistance commands during authorized structured workouts
-- Chest-strap heart-rate forwarding for display on the console
-- Console brightness control
-- Console-based arcade games
+Webcam-based controls allow hands-free gameplay, while supported games also offer configurable gamepad controls.
 
-Pairing is required for protected commands. Once configured, an authorized structured workout automatically sends resistance guidance; there is no separate automatic-control toggle. The console does not connect to the chest strap itself.
+## Entertainment & Learning
 
-See the [ProForm bridge setup and safety notes](equipment-bridges/proform-smart-power-10/README.md) or the [equipment bridge overview](equipment-bridges/README.md). Equipment-control endpoints must stay on a trusted LAN, not the public internet.
+Make your workout time entertaining, educational, or both.
 
-### YouTube account on the bike
+- **YouTube:** Browse trending videos, search using text or voice, access your subscriptions and playlists, discover related content, and enjoy picture-in-picture playback while exercising or gaming.
+- **Audiobooks:** Connect to your self-hosted Audiobookshelf server to browse your library, listen to books, navigate chapters and synchronize listening progress.
+- **Read Along:** Pair with the optional [FitBaus Transcriber](https://github.com/markrai/fitbaus-transcriber) to read synchronized audiobook transcriptions as you listen, with adjustable text size and a distraction-free fullscreen reading mode.
 
-FitBaus Full Bike Bridge can use Google's TV-device sign-in to browse your
-own YouTube subscriptions and playlists. Signed-in users get a thumbnail
-feed that combines recent uploads from their subscribed channels, with more
-channels fetched as they scroll. DISCOVER on the same screen loads related
-videos from rotating subscription-upload seeds through NewPipe, fetching more
-suggestions as you scroll rather than using Google's proprietary personalized
-Home algorithm. Search still
-covers all of YouTube.
-**You provide your own Google Cloud OAuth client**; no Google password is
-entered on the console. See the [step-by-step YouTube Google OAuth setup guide](docs/YOUTUBE-GOOGLE-OAUTH-SETUP.md)
-for current Cloud Console navigation, Windows ADB import, manual entry and
-troubleshooting. Once a TV OAuth client is stored on the bike, opening
-MY YOUTUBE automatically prepares a new Google device code when needed;
-the JSON does not need to be imported again.
+## Workout Analytics & Progress Tracking
 
-Google's official API does not expose personalized Home recommendations,
-Watch History or Watch Later to FitBaus.
+Track your fitness journey with locally stored workout history and detailed exercise metrics.
 
-Interested in adding support for another bike? Contributions and hardware research are welcome.
+- **Bike console:** Weekly charts showing cycling duration and average cadence, alongside cumulative riding time, pedal revolutions and active days.
+- **Trainer app:** Workout summaries, heart-rate samples, time spent in each heart-rate zone, cycling performance data and cardiovascular fitness assessments.
+- **Data portability:** Export workout summaries in JSON format for external analysis or integration with other applications.
 
-## Your data stays yours
+## Supported Equipment & Hardware
 
-Workout history and athlete data live in local browser or app storage, not in a mandatory cloud account. Optional SISU synchronization is available; it excludes personalization and local research fields from uploads.
+| Hardware | Support |
+|---|---|
+| **ProForm Smart Power 10.0** | Native console integration, live bike telemetry, resistance control, games and entertainment. |
+| **Bluetooth heart-rate monitors** | Live heart-rate monitoring and HRV with compatible sensors. |
+| **USB webcams** | Motion-controlled gameplay using face and hand tracking. |
+| **Game controllers** | Configurable controls for supported games. |
+| **Android & iOS devices** | Standalone fitness training and supported bike integration. |
+| **Compatible web browsers** | Standalone fitness training through the web app. |
 
-Browser and native app storage are separate, and local storage is not a backup. Export or preserve your data before clearing browser storage or uninstalling an app.
+The Trainer app does not require a connected exercise bike. Native equipment integration is currently limited to the ProForm Smart Power 10.0.
 
-## Build and contribute
+Contributions to expand support to other exercise equipment are welcome.
 
-FitBaus includes a TypeScript PWA and Capacitor Android/iOS projects. The current product version is defined in `version.js`. For development:
+See the [Equipment Bridge documentation](equipment-bridges/README.md) for compatibility, installation and safety information.
 
-```bash
-npm run build
-npm run check
-npm run check:version
-npm test
-```
+## FitBaus Lite vs. Full
 
-Edit TypeScript in `src/`, then commit the matching generated `dist/` output. Do not hand-edit `dist/`. Treat persisted schemas and version identifiers as compatibility contracts.
+FitBaus is available in two free, open-source editions.
 
-Product versioning is centralized in `version.js`. See [VERSIONING.md](VERSIONING.md)
-for how Android, iOS, Bike Bridge, and the PWA cache stay aligned.
+| | Lite (1.x) | Full (2.x) |
+|---|:---:|:---:|
+| Bike dashboard & telemetry | ✓ | ✓ |
+| Trainer app integration | ✓ | ✓ |
+| Automatic resistance control | ✓ | ✓ |
+| Built-in arcade games | ✓ | ✓ |
+| External USB webcam support | — | ✓ |
+| Extended game library | — | ✓ |
+| Configurable gamepad support | — | ✓ |
+| YouTube integration | — | ✓ |
+| Audiobooks & Read Along | — | ✓ |
+| Weekly bike analytics | — | ✓ |
+| Active feature development | — | ✓ |
 
-See [Native Development](docs/NATIVE-DEVELOPMENT.MD) for platform toolchains and device testing, and [Personalization Architecture](docs/personalization-architecture.md) for the distinction between live control and experimental research.
+**Lite** is designed for older consoles with limited available storage.
+
+**Full** delivers the complete FitBaus experience and is the recommended edition for users with sufficient storage.
+
+Both editions are free. There is no premium subscription or paid feature unlock.
+
+## Download & Get Started
+
+Download FitBaus from the [GitHub Releases](https://github.com/markrai/fitbaus-trainer/releases) page.
+
+| Platform | Installation |
+|---|---|
+| **Android phone or tablet** | Download and install the Trainer APK. |
+| **ProForm Smart Power 10.0** | Download the Lite or Full Bike Bridge APK and follow the [console setup guide](equipment-bridges/proform-smart-power-10/README.md). |
+| **iOS** | Build from source using Xcode. See the [native development guide](docs/NATIVE-DEVELOPMENT.MD). |
+| **Web / PWA** | Download the web deployment package or build from source. |
+
+No FitBaus account or subscription is required.
+
+See the [Changelog](CHANGELOG.md) for the latest features and improvements.
+
+## Self-Hosting
+
+FitBaus Trainer can be self-hosted as a lightweight static web application. No backend, database, authentication server or cloud service is required.
+
+Download the web deployment package from [GitHub Releases](https://github.com/markrai/fitbaus-trainer/releases) and serve it using your preferred web server over HTTPS.
+
+### Optional Companion Services
+
+- **[Audiobookshelf](https://github.com/advplyr/audiobookshelf):** Host your own audiobook library and stream books directly to FitBaus.
+- **[FitBaus Transcriber](https://github.com/markrai/fitbaus-transcriber):** A self-hosted, Docker-based companion service that uses local speech recognition models to generate synchronized audiobook transcriptions, enabling Read Along without relying on cloud AI services.
+
+Neither service is required for the core FitBaus experience. Audiobook playback does not require the Transcriber.
+
+For deployment instructions, see the [Self-Hosting Guide](docs/SELF-HOSTING.md).
+
+## Privacy & Data Ownership
+
+Your fitness data belongs to you. FitBaus stores workout history, athlete profiles and exercise metrics locally, without requiring a cloud account.
+
+Webcam-based motion tracking is processed on the device, and optional audiobook transcription runs on your own server.
+
+External services, such as YouTube and optional SISU synchronization, are entirely optional. You decide which services to connect and where your data goes.
+
+### Disclaimer
+
+FitBaus is provided "as is", without warranty of any kind. It is not a medical device and is not intended to provide medical advice, diagnosis or treatment.
+
+Use of this software, including its exercise equipment integration, automatic resistance control and interactive games, is entirely at your own risk.
+
+To the fullest extent permitted by applicable law, the developers, maintainers and contributors accept no liability for personal injury, equipment damage, data loss or any other direct, indirect, incidental or consequential damages arising from the use or misuse of this software.
+
+Always exercise within your physical capabilities and follow your equipment manufacturer's safety guidelines.
+
+## Documentation
+
+| Guide | Description |
+|---|---|
+| [Equipment Bridges](equipment-bridges/README.md) | Supported exercise equipment and hardware integration |
+| [ProForm Setup](equipment-bridges/proform-smart-power-10/README.md) | Bike console configuration and safety |
+| [Self-Hosting](docs/SELF-HOSTING.md) | Web deployment and Docker configuration |
+| [YouTube Setup](docs/YOUTUBE-GOOGLE-OAUTH-SETUP.md) | Connecting your YouTube account |
+| [FitBaus Transcriber](https://github.com/markrai/fitbaus-transcriber) | Audiobook transcription and Read Along setup |
+| [Native Development](docs/NATIVE-DEVELOPMENT.MD) | Android and iOS development |
+| [Versioning](VERSIONING.md) | Version management and release procedures |
+| [Changelog](CHANGELOG.md) | Release history and improvements |
+
+## Contributing
+
+FitBaus welcomes contributions from developers, fitness enthusiasts and hardware tinkerers.
+
+Areas where contributions are particularly welcome:
+
+- Support for additional exercise equipment
+- New interactive games
+- Workout protocols and exercise science
+- Performance and accessibility improvements
+- Bug fixes, documentation and translations
+
+Have an idea, feature request or bug report? Open an [issue](https://github.com/markrai/fitbaus-trainer/issues) or submit a [pull request](https://github.com/markrai/fitbaus-trainer/pulls).
+
+For larger changes, please open an issue for discussion before beginning implementation.
 
 ## License
 
-FitBaus Trainer is licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). The npm package is private and is not published to npm.
+FitBaus Trainer is free and open-source software licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
+
+You are free to use, study, modify and redistribute the software in accordance with the terms of the license.
