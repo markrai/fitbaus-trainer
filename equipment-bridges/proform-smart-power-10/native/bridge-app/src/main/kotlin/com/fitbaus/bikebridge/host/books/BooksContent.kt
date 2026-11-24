@@ -404,7 +404,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         val current = connection ?: return
         val item = playerState.item ?: return
         if (playerState.session == null || playerState.failed) return
-        readAlong.open(BooksTranscriptRequest(current.address, item.id), playerState)
+        readAlong.open(BooksTranscriptRequest(current.address, item.id), playerState, current)
         renderPlayer(playerState)
     }
 
