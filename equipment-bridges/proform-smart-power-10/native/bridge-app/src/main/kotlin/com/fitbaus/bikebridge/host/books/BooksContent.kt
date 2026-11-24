@@ -324,8 +324,9 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         page = 0
         next = null
         searching = false
+        grid.adapter = null
         items.clear()
-        adapter.notifyDataSetChanged()
+        grid.adapter = adapter
     }
 
     private fun showSetup(status: String) {
@@ -435,7 +436,6 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
             card.title.text = item.title
             card.author.text = item.author
             card.contentDescription = item.title + ", " + item.author
-            loader?.clear(card.cover)
             loader?.bind(card.cover, item.id)
             return card
         }
