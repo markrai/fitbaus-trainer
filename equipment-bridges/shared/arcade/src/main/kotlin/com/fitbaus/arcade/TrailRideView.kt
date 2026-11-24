@@ -52,8 +52,9 @@ public class TrailRideView(context: Context) : View(context) {
     private var sensitivityIndex = (prefs?.getInt(SENSITIVITY_KEY, DEFAULT_SENSITIVITY) ?: DEFAULT_SENSITIVITY).coerceIn(0, SENSITIVITIES.size - 1)
     private var seedIndex = (prefs?.getInt(SEED_KEY, 0) ?: 0).coerceIn(0, SEEDS.size - 1)
     private var ditchTiming = prefs?.getBoolean(TIMING_KEY, false) ?: false
-    private val game = TrailRideGame(seed = nextSeed()).also { g -> g.onEvent = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, it) } }
+    private val game = TrailRideGame(config = TrailShowcasePilot.config, seed = nextSeed()).also { g -> g.onEvent = { android.util.Log.i(LandmarkFrameSink.LOG_TAG, it) } }
     private val session = TrailRideSession(game)
+    private var showcasePilot = false
     private var simulatedCadence = false
     private var simulatedPress = false
     private var simulatedSample = 0L
@@ -205,7 +206,8 @@ public class TrailRideView(context: Context) : View(context) {
             val simRpm = if (simulatedPress) SIM_RPM + 30 else SIM_RPM
             session.update(position, camera, true, true, simRpm, true, "sim-$simulatedSample", now, simulated = true)
         } else {
-            session.update(position, camera, connected, initialized, rpm, rpmCurrent, rpmObservedAt, now)
+            session.update(position, camera, connected, initialized, rpm, rpmCurrent, rpmObservedAt, now,
+                showcaseSteer = if (showcasePilot) TrailShowcasePilot.steer(game) else null)
         }
         val live = session.live
         if (live && game.phase == TrailPhase.Riding) pedalPhase += frameSeconds * (cadenceReading.rpm ?: 0) / 60f * 2f * PI.toFloat()
@@ -228,17 +230,18 @@ public class TrailRideView(context: Context) : View(context) {
     }
 
     public fun restartShowcase() {
+        showcasePilot = true
         session.restart(1001L)
         wasAirborne = false
         invalidate()
     }
 
     public fun showcaseJumpIfReady() {
-        val ditch = game.nextDitch() ?: return
-        if (game.phase == TrailPhase.Riding && !game.airborne && game.timeTo(ditch) in game.config.jumpLateSeconds..game.config.jumpEarlySeconds) game.requestJump()
+        TrailShowcasePilot.jumpIfReady(game)
     }
 
     public fun restartGame() {
+        showcasePilot = false
         session.restart(nextSeed())
         wasAirborne = false
         invalidate()

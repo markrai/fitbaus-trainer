@@ -265,6 +265,7 @@ internal class TrailRideSession(
         rpmObservedAt: String?,
         nowNanos: Long,
         simulated: Boolean = false,
+        showcaseSteer: Float? = null,
     ): TrailHold {
         steer = steering.update(position, nowNanos)
         if (steer.state == FaceControlState.Tracking) lastSteer = steer.steer
@@ -279,7 +280,7 @@ internal class TrailRideSession(
             game.requestJump()
         }
         if (live) {
-            lastSteps = game.advance(nowNanos, lastSteer, (cadenceReading.rpm ?: 0).toFloat())
+            lastSteps = game.advance(nowNanos, showcaseSteer ?: lastSteer, (cadenceReading.rpm ?: 0).toFloat())
         } else {
             game.resetClock()
             lastSteps = 0

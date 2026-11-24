@@ -17,3 +17,7 @@ Close this PR without merging, then delete the branch and uninstall only the sho
 ## CI scope
 
 The temporary branch disables 19 production-only source-contract tests whose assertions require the physical USB service, webcam/controller routing or production package identity. Three other checks retain their original assertions with the showcase label/package substituted. ShowcaseIsolationTest checks the replacement isolation and input routing contracts. The remaining unit tests and normal Gradle version/qualification gates are retained. Do not merge these test changes into main.
+
+## Second capture pass
+
+The title bar uses the regular FITBAUS branding. Trails now follows the course and steers around upcoming hazards, with a short seeded course to demonstrate a ditch jump in the available 17 seconds. The recording script rejects placeholder titles, pulls footage even if recording or media playback fails, uses a unique output filename, and keeps the remote file on failure. Optional `-MathPhotos C:\path\to\poses` uploads the 12 real-photo fixtures before recording. The original procedural fallback is still available but not intended for publication.

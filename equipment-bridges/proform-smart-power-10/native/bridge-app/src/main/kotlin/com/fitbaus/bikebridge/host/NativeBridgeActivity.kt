@@ -689,7 +689,7 @@ class NativeBridgeActivity : Activity() {
         brand.orientation = LinearLayout.HORIZONTAL
         brand.gravity = Gravity.CENTER_VERTICAL
 
-        val title = label("FITBAUS · DEMO", 16f, PRIMARY)
+        val title = label("FITBAUS", 16f, PRIMARY)
         title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD)
         title.letterSpacing = 0.18f
         title.includeFontPadding = false
