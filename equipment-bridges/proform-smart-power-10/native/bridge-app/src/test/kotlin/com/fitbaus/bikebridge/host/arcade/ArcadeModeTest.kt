@@ -249,18 +249,43 @@ class ArcadeModeTest {
         assertTrue(ArcadeMode.GhoulRun.isGame)
         assertTrue(ArcadeMode.Biketris.isGame)
         assertFalse(ArcadeMode.YouTube.isGame)
-        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "MAVERICK", "TRAILS", "IT HEARS YOU", "BIKETRIS", "YouTube"), ArcadeMode.values().map { it.caption })
+        assertEquals(listOf("DASHBOARD", "BRICKS", "MATH", "MAVERICK", "TRAILS", "IT HEARS YOU", "BIKETRIS", "YouTube", "Books"), ArcadeMode.values().map { it.caption })
     }
 
     @Test
-    fun youTubeIsAMediaModeAndEveryOtherNonDashboardModeIsAGame() {
+    fun youTubeAndBooksAreMediaModes() {
         assertEquals(ModeKind.Media, ArcadeMode.YouTube.kind)
         assertTrue(ArcadeMode.YouTube.isMedia)
+        assertTrue(ArcadeMode.Books.isMedia)
+        assertFalse(ArcadeMode.Books.isGame)
         assertEquals(ModeKind.Dashboard, ArcadeMode.Dashboard.kind)
         assertFalse(ArcadeMode.Dashboard.isMedia)
         val games = ArcadeMode.values().filter { it.isGame }
         assertEquals(listOf(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris), games)
         for (game in games) assertFalse(game.isMedia, game.name)
+    }
+
+    @Test
+    fun booksAndYouTubeSwitchMediaWithoutStartingCameraAndStopOnPause() {
+        val hooks = RecordingHooks()
+        val controller = ArcadeModeController(hooks)
+        controller.onHostResume()
+        controller.select(ArcadeMode.YouTube)
+        controller.select(ArcadeMode.Books)
+        controller.onHostPause()
+        controller.onHostResume()
+        controller.select(ArcadeMode.YouTube)
+        controller.onHostDestroy()
+        assertEquals(
+            listOf(
+                "show:YouTube", "media:YouTube", "media-stop:ExitArcade",
+                "show:Books", "media:Books", "media-stop:HostPaused", "media:Books",
+                "media-stop:ExitArcade", "show:YouTube", "media:YouTube", "media-stop:HostDestroyed",
+            ),
+            hooks.events(),
+        )
+        assertFalse(controller.isActive)
+        assertFalse(controller.isMediaActive)
     }
 
     @Test
@@ -371,9 +396,9 @@ class ArcadeModeTest {
             assertFalse(start.contains(forbidden), forbidden)
             assertFalse(stop.contains(forbidden), forbidden)
         }
-        assertTrue(source.contains("tabGroup(ArcadeMode.YouTube)"))
+        assertTrue(source.contains("tabGroup(ArcadeMode.YouTube, ArcadeMode.Books)"))
         assertTrue(
-            source.indexOf("tabGroup(ArcadeMode.YouTube)") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"),
+            source.indexOf("tabGroup(ArcadeMode.YouTube, ArcadeMode.Books)") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"),
             "YouTube follows the game tabs",
         )
         assertTrue(source.contains("dashboardContent.visibility = if (mode == ArcadeMode.Dashboard) View.VISIBLE else View.GONE"))

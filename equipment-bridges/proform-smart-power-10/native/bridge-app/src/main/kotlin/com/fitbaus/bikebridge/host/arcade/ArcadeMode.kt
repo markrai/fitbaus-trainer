@@ -15,6 +15,7 @@ internal enum class ArcadeMode(val caption: String, val kind: ModeKind) {
     GhoulRun("IT HEARS YOU", ModeKind.Game),
     Biketris("BIKETRIS", ModeKind.Game),
     YouTube("YouTube", ModeKind.Media),
+    Books("Books", ModeKind.Media),
     ;
 
     val isGame: Boolean

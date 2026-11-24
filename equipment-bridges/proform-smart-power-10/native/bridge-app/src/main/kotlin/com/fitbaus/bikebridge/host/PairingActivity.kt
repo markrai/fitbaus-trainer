@@ -31,6 +31,7 @@ import com.fitbaus.bikebridge.host.controller.ControllerDevices
 import com.fitbaus.bikebridge.host.controller.GameControlCatalog
 import com.fitbaus.bikebridge.host.controller.GameControlBindings
 import com.fitbaus.bikebridge.host.arcade.ArcadeMode
+import com.fitbaus.bikebridge.host.books.TranscriberSettingsPanel
 import com.fitbaus.bikebridge.host.controller.ExclusiveHid
 import com.fitbaus.bikebridge.host.controller.AutoControllerOwnership
 import com.fitbaus.bikebridge.host.controller.ExclusiveHidPolicy
@@ -49,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger
 internal const val CONTROLLER_GAME_CONTEXT = "com.fitbaus.bikebridge.CONTROLLER_GAME"
 
 class PairingActivity : Activity() {
-    private enum class SettingsTab { Pairing, Webcams, Controllers, Analytics }
+    private enum class SettingsTab { Pairing, Webcams, Controllers, Analytics, Transcriber }
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private lateinit var endpointValue: TextView
@@ -62,6 +63,8 @@ class PairingActivity : Activity() {
     private lateinit var webcamTab: TextView
     private lateinit var controllerTab: TextView
     private lateinit var analyticsTab: TextView
+    private lateinit var transcriberPanel: TranscriberSettingsPanel
+    private lateinit var transcriberTab: TextView
     private lateinit var controllerList: TextView
     private lateinit var controllerSelection: TextView
     private lateinit var controllerEvents: TextView
@@ -145,9 +148,11 @@ class PairingActivity : Activity() {
         if (activeTab == SettingsTab.Webcams) refreshWebcams(startPreview = true)
         if (activeTab == SettingsTab.Controllers) startControllerPolling()
         if (activeTab == SettingsTab.Analytics) refreshAnalytics()
+        if (activeTab == SettingsTab.Transcriber) transcriberPanel.start()
     }
 
     override fun onPause() {
+        transcriberPanel.stop()
         controllerOwnership.onHostPause()
         uiHandler.removeCallbacks(controllerPoll)
         stopPreview()
@@ -155,6 +160,7 @@ class PairingActivity : Activity() {
     }
 
     override fun onDestroy() {
+        transcriberPanel.destroy()
         controllerOwnership.onHostPause()
         destroyed = true
         uiHandler.removeCallbacks(controllerPoll)
@@ -200,10 +206,13 @@ class PairingActivity : Activity() {
         webcamPanel.visibility = if (tab == SettingsTab.Webcams) View.VISIBLE else View.GONE
         controllerPanel.visibility = if (tab == SettingsTab.Controllers) View.VISIBLE else View.GONE
         analyticsPanel.visibility = if (tab == SettingsTab.Analytics) View.VISIBLE else View.GONE
+        transcriberPanel.visibility = if (tab == SettingsTab.Transcriber) View.VISIBLE else View.GONE
+        if (tab == SettingsTab.Transcriber) transcriberPanel.start() else transcriberPanel.stop()
         styleTab(pairingTab, tab == SettingsTab.Pairing)
         styleTab(webcamTab, tab == SettingsTab.Webcams)
         styleTab(controllerTab, tab == SettingsTab.Controllers)
         styleTab(analyticsTab, tab == SettingsTab.Analytics)
+        styleTab(transcriberTab, tab == SettingsTab.Transcriber)
         uiHandler.removeCallbacks(controllerPoll)
         if (tab != SettingsTab.Controllers) {
             awaitingGameButton = null
@@ -728,10 +737,12 @@ class PairingActivity : Activity() {
         webcamPanel = buildWebcamPanel()
         controllerPanel = buildControllerPanel()
         analyticsPanel = CyclingAnalyticsPanel(this)
+        transcriberPanel = TranscriberSettingsPanel(this)
         body.addView(pairingPanel)
         body.addView(webcamPanel)
         body.addView(controllerPanel)
         body.addView(analyticsPanel)
+        body.addView(transcriberPanel)
         val scroll = ScrollView(this)
         scroll.isFillViewport = true
         scroll.addView(body)
@@ -769,10 +780,12 @@ class PairingActivity : Activity() {
         analyticsTab = tabLabel(getString(R.string.settings_tab_analytics)) {
             showTab(SettingsTab.Analytics)
         }
+        transcriberTab = tabLabel("Transcriber") { showTab(SettingsTab.Transcriber) }
         row.addView(pairingTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(webcamTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(controllerTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         row.addView(analyticsTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(transcriberTab, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         return row
     }
 

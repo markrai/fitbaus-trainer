@@ -51,6 +51,7 @@ import com.fitbaus.bikebridge.host.arcade.ArcadeContent
 import com.fitbaus.bikebridge.host.arcade.ArcadeMode
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeController
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
+import com.fitbaus.bikebridge.host.books.BooksContent
 import com.fitbaus.bikebridge.host.controller.ControllerDevices
 import com.fitbaus.bikebridge.host.controller.GameControllerInput
 import com.fitbaus.bikebridge.host.controller.GameControlBindings
@@ -87,6 +88,7 @@ class NativeBridgeActivity : Activity() {
     private lateinit var dashboardContent: View
     private lateinit var arcadeContent: ArcadeContent
     private lateinit var youtubeContent: YouTubeContent
+    private lateinit var booksContent: BooksContent
     private lateinit var floatingPlayer: FrameLayout
     private lateinit var floatingVideoSlot: FrameLayout
     private var resumed = false
@@ -155,11 +157,21 @@ class NativeBridgeActivity : Activity() {
         }
 
         override fun startMedia(mode: ArcadeMode) {
-            youtubeContent.start()
-            floatingPlayer.visibility = View.GONE
+            if (mode == ArcadeMode.Books) {
+                if (floatingPlayer.visibility == View.VISIBLE) youtubeContent.stop()
+                floatingPlayer.visibility = View.GONE
+                booksContent.start()
+            } else {
+                youtubeContent.start()
+                floatingPlayer.visibility = View.GONE
+            }
         }
 
         override fun stopMedia(reason: ArcadeStopReason) {
+            if (modeController.mode == ArcadeMode.Books) {
+                booksContent.stop()
+                return
+            }
             voiceSearch.cancel()
             if (reason == ArcadeStopReason.ExitArcade && youtubeContent.minimizeInto(floatingVideoSlot)) {
                 floatingPlayer.visibility = View.VISIBLE
@@ -281,6 +293,7 @@ class NativeBridgeActivity : Activity() {
         controllerOwnership.onHostPause()
         modeController.onHostDestroy()
         youtubeContent.destroy()
+        booksContent.destroy()
         handler.removeCallbacks(refresh)
         UvcProcess.release(this)
         super.onDestroy()
@@ -411,8 +424,13 @@ class NativeBridgeActivity : Activity() {
         setIfChanged(observedValue, BridgeUiStateMapper.formatGrid(BridgeUiStateMapper.currentValue(telemetry?.resistance)))
         setIfChanged(machineValue, state.machineText)
         setIfChanged(bridgeValue, BridgeHttpJson.VERSION)
-        if (modeController.mode == ArcadeMode.YouTube) {
-            youtubeContent.hud.bind(
+        val mediaHud = when (modeController.mode) {
+            ArcadeMode.YouTube -> youtubeContent.hud
+            ArcadeMode.Books -> booksContent.hud
+            else -> null
+        }
+        if (mediaHud != null) {
+            mediaHud.bind(
                 BridgeUiStateMapper.currentValue(telemetry?.rpm),
                 BridgeUiStateMapper.currentValue(telemetry?.watts),
                 BridgeUiStateMapper.currentValue(telemetry?.resistance),
@@ -578,6 +596,7 @@ class NativeBridgeActivity : Activity() {
         dashboardContent.visibility = if (mode == ArcadeMode.Dashboard) View.VISIBLE else View.GONE
         arcadeContent.visibility = if (mode.isGame) View.VISIBLE else View.GONE
         youtubeContent.visibility = if (mode == ArcadeMode.YouTube) View.VISIBLE else View.GONE
+        booksContent.visibility = if (mode == ArcadeMode.Books) View.VISIBLE else View.GONE
         arcadeContent.show(mode)
         for ((tabMode, tab) in modeTabs) styleTab(tab, tabMode == mode)
     }
@@ -681,6 +700,11 @@ class NativeBridgeActivity : Activity() {
             youtubeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
+        booksContent = BooksContent(this)
+        contentHost.addView(
+            booksContent,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+        )
         floatingPlayer = buildFloatingPlayer()
         contentHost.addView(
             floatingPlayer,
@@ -779,7 +803,7 @@ class NativeBridgeActivity : Activity() {
         tabs.addView(tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris), gamesLp)
         val mediaLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         mediaLp.leftMargin = dp(GAME_TAB_GAP_DP)
-        tabs.addView(tabGroup(ArcadeMode.YouTube), mediaLp)
+        tabs.addView(tabGroup(ArcadeMode.YouTube, ArcadeMode.Books), mediaLp)
         val tabScroller = HorizontalScrollView(this)
         tabScroller.isFillViewport = true
         tabScroller.isHorizontalScrollBarEnabled = false
