@@ -82,8 +82,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
     private val more = button("NEXT")
     private val pageLabel = text("", 16f)
     private val playerPanel = LinearLayout(context)
-    private val readAlongButton = button("READ ALONG")
-    private val prepareButton = button("PREPARE")
+    private val prepareButton = button("TRANSCRIPTION MODELS")
     private val playerTitle = text("", 26f)
     private val playerAuthor = text("", 18f)
     private val playerChapter = button("CHAPTERS")
@@ -97,9 +96,8 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
     private var scrubbing = false
     private var playerState = BooksPlayerState()
     private val playback = BooksPlayback(context, ::renderPlayer)
-    private val readAlong = BooksReadAlong(context, ::closeReadAlong, playback::toggle, { delta ->
-        playback.seek(playerState.positionMs + delta)
-    })
+    private val readAlong = BooksReadAlong(context)
+    private var narrationKey: BooksTranscriptRequest? = null
 
     val floatingPlayer = BooksFloatingPlayer(context, onRestoreRequested, ::stop, playback::toggle) { delta ->
         playback.seek(playerState.positionMs + delta)
@@ -124,7 +122,6 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         buildSetup()
         buildBrowse()
         buildPlayer()
-        addView(readAlong, LayoutParams(MATCH, 0, 1f))
         setup.visibility = GONE
         browse.visibility = GONE
     }
@@ -319,9 +316,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         val top = LinearLayout(context).apply {
             orientation = HORIZONTAL
         }
-        readAlongButton.setOnClickListener { openReadAlong() }
         top.addView(back, LayoutParams(0, dp(48), 1f))
-        top.addView(readAlongButton, LayoutParams(0, dp(48), 1f))
         prepareButton.setOnClickListener { openPreparation() }
         top.addView(prepareButton, LayoutParams(0, dp(48), 1f))
         playerPanel.addView(top, LayoutParams(MATCH, WRAP))
@@ -331,12 +326,15 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         playerPanel.addView(playerTitle, LayoutParams(MATCH, WRAP))
         playerAuthor.gravity = Gravity.CENTER
         playerPanel.addView(playerAuthor, LayoutParams(MATCH, WRAP))
+        playerPanel.addView(readAlong, LayoutParams(MATCH, 0, 1f))
         playerChapter.setOnClickListener { showChapters() }
-        playerPanel.addView(playerChapter, LayoutParams(MATCH, dp(48)))
+        val timeline = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+        timeline.addView(playerChapter, LayoutParams(0, dp(44), 1f))
         playerStatus.gravity = Gravity.CENTER
         playerPanel.addView(playerStatus, LayoutParams(MATCH, WRAP))
         playerTime.gravity = Gravity.CENTER
-        playerPanel.addView(playerTime, LayoutParams(MATCH, WRAP))
+        timeline.addView(playerTime, LayoutParams(WRAP, WRAP))
+        playerPanel.addView(timeline, LayoutParams(MATCH, WRAP))
         progress.max = 10000
         progress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(seekBar: SeekBar) {
@@ -354,7 +352,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
                 playerState.session?.let { playback.seek(it.durationMs * seekBar.progress / 10000) }
             }
         })
-        playerPanel.addView(progress, LayoutParams(MATCH, dp(48)))
+        playerPanel.addView(progress, LayoutParams(MATCH, dp(40)))
         val controls = LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER
@@ -378,21 +376,21 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
             controls.addView(control, LayoutParams(0, dp(58), 1f))
         }
         playerPanel.addView(controls, LayoutParams(MATCH, WRAP))
-        val scroll = ScrollView(context).apply {
-            isFillViewport = true
-            addView(playerPanel, FrameLayout.LayoutParams(MATCH, WRAP))
-        }
         playerPanel.visibility = GONE
-        scroll.visibility = GONE
-        addView(scroll, LayoutParams(MATCH, 0, 1f))
+        addView(playerPanel, LayoutParams(MATCH, 0, 1f))
     }
 
     private fun renderPlayer(state: BooksPlayerState) {
         playerState = state
         val show = active && state.item != null
-        if (!show && readAlong.visibility == VISIBLE) readAlong.close()
-        playerPanel.visibility = if (show && readAlong.visibility != VISIBLE) VISIBLE else GONE
-        (playerPanel.parent as? View)?.visibility = playerPanel.visibility
+        if (!show) {
+            if (narrationKey != null) {
+                readAlong.close()
+                loader?.clear(readAlong.cover)
+                narrationKey = null
+            }
+        }
+        playerPanel.visibility = if (show) VISIBLE else GONE
         if (!show) {
             floatingPlayer.visibility = GONE
             if (active && connection != null) browse.visibility = VISIBLE
@@ -401,9 +399,17 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         }
         browse.visibility = GONE
         setup.visibility = GONE
-        readAlongButton.isEnabled = state.session != null && !state.failed
-        prepareButton.isEnabled = readAlongButton.isEnabled
-        if (readAlong.visibility == VISIBLE) readAlong.render(state)
+        prepareButton.isEnabled = state.session != null && !state.failed
+        val current = connection
+        val item = state.item
+        if (current != null && item != null) {
+            val key = BooksTranscriptRequest(current.address, item.id)
+            if (narrationKey != key) {
+                narrationKey = key
+                readAlong.open(key, state, current)
+                loader?.bind(readAlong.cover, item.id)
+            } else readAlong.render(state)
+        }
         if (floatingPlayer.visibility == VISIBLE) floatingPlayer.render(state, readAlong.floatingNarration())
         playerTitle.text = state.item?.title.orEmpty()
         playerAuthor.text = state.item?.author.orEmpty()
@@ -437,19 +443,6 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         dialog?.dismiss()
         dialog = TranscriberManagementDialog(context, null, current, item, session,
             preparationAuthorization::track).show()
-    }
-
-    private fun openReadAlong() {
-        val current = connection ?: return
-        val item = playerState.item ?: return
-        if (playerState.session == null || playerState.failed) return
-        readAlong.open(BooksTranscriptRequest(current.address, item.id), playerState, current)
-        renderPlayer(playerState)
-    }
-
-    private fun closeReadAlong() {
-        readAlong.close()
-        renderPlayer(playerState)
     }
 
     private fun showChapters() {
@@ -599,6 +592,9 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
     }
 
     private fun resetConnection() {
+        readAlong.close()
+        loader?.clear(readAlong.cover)
+        narrationKey = null
         loader?.shutdown()
         loader = null
         connection = null
