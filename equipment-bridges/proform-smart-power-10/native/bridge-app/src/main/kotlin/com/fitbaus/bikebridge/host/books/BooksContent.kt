@@ -128,7 +128,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         }
         form.addView(text("Audiobookshelf", 26f), LayoutParams(MATCH, WRAP))
         form.addView(text("Enter your Audiobookshelf server address and sign in.", 17f), LayoutParams(MATCH, WRAP))
-        address.hint = "https://books.example.net"
+        address.hint = "https://books.example.net or http://192.168.1.10:13378"
         address.setSingleLine(true)
         address.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         address.filters = arrayOf(InputFilter.LengthFilter(2048))
@@ -248,7 +248,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         val server = try {
             BooksServer(serverAddress)
         } catch (_: Exception) {
-            message.text = "Enter a valid HTTPS server address."
+            message.text = "Enter an HTTPS address or a private-network HTTP address."
             return
         }
         val login = authMethod.checkedRadioButtonId == loginChoice.id
