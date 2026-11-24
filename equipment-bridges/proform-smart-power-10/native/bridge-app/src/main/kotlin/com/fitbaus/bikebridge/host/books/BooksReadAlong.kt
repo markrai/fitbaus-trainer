@@ -13,6 +13,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -27,8 +28,7 @@ internal class BooksReadAlong(
 ) : LinearLayout(context) {
     private val transcriberStore = TranscriberConnectionStore(context)
     private var books: BooksConnection? = null
-    private var expectedRevision: String? = null
-    private var requestedStart: Long? = null
+    private val windows = ReadAlongWindowBuffer()
     private var localMode = false
     private data class Loaded(val local: BooksTranscriptLoad?, val remote: RemoteBooksWindow?)
 
@@ -43,9 +43,10 @@ internal class BooksReadAlong(
     private val rewind = button("−30s")
     private val forward = button("+30s")
     private val reload = button("RELOAD")
-    private val font = button("TEXT: 36")
-    private val sizes = listOf(28f, 36f, 44f, 52f)
-    private var sizeIndex = 1
+    private val readingPrefs = context.applicationContext.getSharedPreferences("fitbaus_books_read_along", Context.MODE_PRIVATE)
+    private var textSizeSp = readingPrefs.getInt("text_size_sp", 36).coerceIn(28, 52)
+    private val fontSizeLabel = label("", 14f)
+    private val fontSlider = SeekBar(context)
     private var request: BooksTranscriptRequest? = null
     private var transcript: BooksTranscript? = null
     private var pending: Future<*>? = null
@@ -69,13 +70,27 @@ internal class BooksReadAlong(
         heading.ellipsize = TextUtils.TruncateAt.END
         top.addView(back, LayoutParams(WRAP, dp(48)))
         top.addView(heading, LayoutParams(0, WRAP, 1f))
-        top.addView(font, LayoutParams(WRAP, dp(48)))
-        font.setOnClickListener {
-            sizeIndex = (sizeIndex + 1) % sizes.size
-            narration.textSize = sizes[sizeIndex]
-            font.text = "TEXT: ${sizes[sizeIndex].toInt()}"
-            scroll.scrollTo(0, 0)
-        }
+        fontSizeLabel.gravity = Gravity.CENTER
+        fontSizeLabel.text = "Text: $textSizeSp"
+        narration.textSize = textSizeSp.toFloat()
+        fontSlider.max = 24
+        fontSlider.progress = textSizeSp - 28
+        fontSlider.contentDescription = "Narration text size"
+        fontSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                textSizeSp = progress + 28
+                narration.textSize = textSizeSp.toFloat()
+                fontSizeLabel.text = "Text: $textSizeSp"
+                scroll.scrollTo(0, 0)
+                readingPrefs.edit().putInt("text_size_sp", textSizeSp).apply()
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+        top.addView(fontSizeLabel, LayoutParams(dp(80), dp(48)))
+        top.addView(fontSlider, LayoutParams(dp(176), dp(48)))
         addView(top, LayoutParams(MATCH, WRAP))
         status.gravity = Gravity.CENTER
         addView(status, LayoutParams(MATCH, WRAP))
@@ -97,7 +112,7 @@ internal class BooksReadAlong(
         play.setOnClickListener { onToggle() }
         rewind.setOnClickListener { onSkip(-30_000) }
         forward.setOnClickListener { onSkip(30_000) }
-        reload.setOnClickListener { load(retry = true) }
+        reload.setOnClickListener { reloadCurrent() }
         for (control in listOf(rewind, play, forward, reload)) {
             controls.addView(control, LayoutParams(0, dp(54), 1f))
         }
@@ -112,7 +127,6 @@ internal class BooksReadAlong(
         books = connection
         currentState = state
         visibility = VISIBLE
-        load()
         render(state)
     }
 
@@ -122,8 +136,7 @@ internal class BooksReadAlong(
         pending = null
         request = null
         books = null
-        expectedRevision = null
-        requestedStart = null
+        windows.clear()
         localMode = false
         transcript = null
         displayed = null
@@ -151,12 +164,27 @@ internal class BooksReadAlong(
         rewind.isEnabled = ready
         forward.isEnabled = ready
         play.text = if (state.wantsPlay) "PAUSE" else "PLAY"
+        val session = state.session
         if (ready && !localMode) {
-            val start = RemoteBooksTranscript.windowStart(state.positionMs, requireNotNull(state.session).durationMs)
-            if (requestedStart != start) load()
+            windows.plan(state.positionMs, session.durationMs, state.wantsPlay)?.let(::load)
         }
-        val document = transcript
-        val text = if (document == null) loadMessage else document.cueAt(state.positionMs)?.text ?: "…"
+        val window = session?.let { windows.current(state.positionMs, it.durationMs) }
+        val document = if (localMode) transcript else window?.transcript
+        val failed = session != null && windows.failed(state.positionMs, session.durationMs)
+        if (!localMode) {
+            details.text = when {
+                failed -> "Check Settings → Transcriber or tap Reload to retry."
+                window != null -> "Remote Read Along"
+                else -> ""
+            }
+        }
+        reload.isEnabled = ready && (localMode || window != null || failed || pending == null)
+        val text = when {
+            document != null -> document.cueAt(state.positionMs)?.text ?: "…"
+            localMode -> loadMessage
+            failed -> "Narration unavailable. Audio continues."
+            else -> "Preparing narration…"
+        }
         if (text != displayed) {
             displayed = text
             narration.text = text
@@ -164,48 +192,54 @@ internal class BooksReadAlong(
         }
     }
 
-    private fun load(retry: Boolean = false) {
+    private fun reloadCurrent() {
+        val session = currentState.session ?: return
+        if (destroyed || currentState.failed) return
+        localMode = false
+        transcript = null
+        load(windows.reload(currentState.positionMs, session.durationMs))
+        render(currentState)
+    }
+
+    private fun load(target: ReadAlongWindowRequest) {
         val key = request ?: return
         val connection = books ?: return
         val session = currentState.session ?: return
         if (destroyed || currentState.failed) return
-        val position = currentState.positionMs
-        val start = RemoteBooksTranscript.windowStart(position, session.durationMs)
-        val revision = expectedRevision
+        val revision = windows.revision
         pending?.cancel(true)
         val ticket = ++generation
-        requestedStart = start
-        transcript = null
-        details.text = ""
-        loadMessage = "Preparing narration…"
-        reload.isEnabled = false
-        render(currentState)
+        windows.begin(target)
         pending = worker.submit {
             val result = runCatching {
                 val paired = transcriberStore.load()
-                if (paired == null) Loaded(source.load(key), null)
-                else Loaded(null, RemoteBooksTranscript(paired, connection).load(key.itemId, session, position, revision, retry))
+                if (paired == null) {
+                    check(revision == null)
+                    Loaded(source.load(key), null)
+                } else {
+                    Loaded(null, RemoteBooksTranscript(paired, connection).load(
+                        key.itemId, session, target.startMs, revision, target.retry))
+                }
             }
             main.post {
                 if (ticket == generation && request == key && !destroyed) {
                     pending = null
-                    reload.isEnabled = true
                     result.fold(
                         onSuccess = { loaded ->
-                            localMode = loaded.local != null
-                            expectedRevision = loaded.remote?.revision
-                            transcript = loaded.remote?.transcript ?: loaded.local?.transcript
-                            loadMessage = "No transcript available for this book."
-                            details.text = when {
-                                loaded.remote != null -> "Remote Read Along"
-                                loaded.local?.transcript == null && loaded.local?.localPath != null ->
-                                    "Local transcript: " + loaded.local.localPath
-                                else -> ""
+                            val remote = loaded.remote
+                            if (remote != null) {
+                                windows.complete(remote, currentState.positionMs, session.durationMs)
+                            } else {
+                                windows.clear()
+                                localMode = true
+                                transcript = loaded.local?.transcript
+                                loadMessage = "No transcript available for this book."
+                                details.text = if (transcript == null)
+                                    loaded.local?.localPath?.let { "Local transcript: $it" }.orEmpty() else ""
                             }
                         },
                         onFailure = {
-                            loadMessage = "Narration unavailable. Audio continues."
-                            details.text = "Check Settings → Transcriber or tap Reload to retry."
+                            windows.fail(currentState.positionMs, session.durationMs)
                         },
                     )
                     render(currentState)
