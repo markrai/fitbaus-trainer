@@ -106,7 +106,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         request({ store.load() }, { connection ->
             saved = connection
             if (connection == null) {
-                status.text = "Not connected. Run docker compose exec transcriber pair on your server."
+                status.text = "Not connected. Run docker compose exec transcriber python -m transcriber pair on your server."
                 code.hint = "Pairing code (XXXX-XXXX)"
             } else {
                 val uri = URI(connection.address)
