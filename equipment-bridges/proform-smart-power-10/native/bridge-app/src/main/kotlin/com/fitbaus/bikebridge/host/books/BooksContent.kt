@@ -38,6 +38,9 @@ import java.util.concurrent.Future
 internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {}) : LinearLayout(context) {
     val hud = ExerciseHud(context)
     private val store = BooksConnectionStore(context)
+    private val preparationAuthorization = PreparationAuthorization { api ->
+        api.matches(store.load(), TranscriberConnectionStore(context).load())
+    }
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private var pending: Future<*>? = null
@@ -166,6 +169,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
 
     fun destroy() {
         stop()
+        preparationAuthorization.close()
         playback.destroy()
         readAlong.destroy()
         worker.shutdownNow()
@@ -431,7 +435,8 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         val session = playerState.session ?: return
         if (playerState.failed) return
         dialog?.dismiss()
-        dialog = TranscriberManagementDialog(context, null, current, item, session).show()
+        dialog = TranscriberManagementDialog(context, null, current, item, session,
+            preparationAuthorization::track).show()
     }
 
     private fun openReadAlong() {
@@ -576,6 +581,7 @@ internal class BooksContent(context: Context, onRestoreRequested: () -> Unit = {
         cancelRequest()
         try {
             store.clear()
+            preparationAuthorization.clear()
             resetConnection()
             address.text.clear()
             port.text.clear()
