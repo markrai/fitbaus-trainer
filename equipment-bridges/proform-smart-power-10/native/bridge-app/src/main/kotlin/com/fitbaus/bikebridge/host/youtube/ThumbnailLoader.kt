@@ -17,6 +17,7 @@ import java.util.concurrent.RejectedExecutionException
 internal class ThumbnailLoader(
     private val targetWidth: Int,
     maxCacheBytes: Int = MAX_CACHE_BYTES,
+    private val fetchBitmap: ((String) -> Bitmap?)? = null,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(THREADS) { runnable ->
@@ -48,7 +49,7 @@ internal class ThumbnailLoader(
         val ticket = requests.begin(view, url)
         val future = try {
             executor.submit {
-                val bitmap = fetch(url)
+                val bitmap = if (fetchBitmap == null) fetch(url) else fetchBitmap.invoke(url)
                 main.post { complete(view, ticket, bitmap) }
             }
         } catch (_: RejectedExecutionException) {
