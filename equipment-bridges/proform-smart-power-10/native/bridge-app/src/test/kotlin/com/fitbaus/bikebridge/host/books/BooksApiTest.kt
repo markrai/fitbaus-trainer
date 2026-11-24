@@ -4,6 +4,8 @@ package com.fitbaus.bikebridge.host.books
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import java.net.URI
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
@@ -74,6 +76,32 @@ class BooksApiTest {
         assertThrows(IllegalArgumentException::class.java) { server.coverUrl("x?token=y") }
         assertThrows(IllegalArgumentException::class.java) { server.itemsUrl("books", -1) }
         assertThrows(IllegalArgumentException::class.java) { BooksApi(server, "key\r\nInjected: value") }
+    }
+
+    @Test
+    fun privateIpv4ServersSupportHttpAcrossAllEndpoints() {
+        for (host in listOf("10.0.0.1", "172.16.0.1", "172.31.255.254", "192.168.1.193")) {
+            val base = "http://$host:13378/audiobookshelf"
+            val local = BooksServer(base)
+            assertTrue(local.isCleartext)
+            assertEquals("$base/login", local.loginUrl())
+            assertEquals("$base/auth/refresh", local.refreshUrl())
+            assertEquals("$base/api/libraries", local.librariesUrl())
+            assertEquals("$base/api/items/book-1/cover?width=256", local.coverUrl("book-1"))
+            BooksServer.requireTransport(URI(local.itemsUrl("library", 0)))
+            BooksServer.requireTransport(URI(local.searchUrl("library", "title")))
+        }
+        assertFalse(server.isCleartext)
+    }
+
+    @Test
+    fun cleartextPublicAndAmbiguousHostsAreRejected() {
+        for (host in listOf("example.com", "8.8.8.8", "172.15.0.1", "172.32.0.1", "192.169.1.1", "192.168.01.1", "192.168.1.1.example.com", "127.0.0.1", "169.254.1.1", "100.64.1.1")) {
+            assertThrows(IllegalArgumentException::class.java) { BooksServer("http://$host") }
+            assertThrows(IllegalArgumentException::class.java) { BooksServer.requireTransport(URI("http://$host/api/libraries")) }
+        }
+        assertThrows(IllegalArgumentException::class.java) { BooksServer("http://192.168.1.193@8.8.8.8") }
+        assertThrows(IllegalArgumentException::class.java) { BooksServer("http://192.168.1.193?token=x") }
     }
 
     @Test
