@@ -8,19 +8,21 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.HttpURLConnection
 import java.net.URI
+import java.net.Proxy
 import java.net.URLEncoder
 
 internal class BooksServer(address: String) {
     private val origin: String
+    val isCleartext: Boolean
 
     init {
         val uri = URI(address.trim())
-        require(uri.scheme.equals("https", ignoreCase = true) && uri.host != null)
-        require(uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null)
-        require(uri.port == -1 || uri.port in 1..65535)
+        requireTransport(uri)
+        require(uri.rawQuery == null)
+        isCleartext = uri.scheme.equals("http", ignoreCase = true)
         val path = uri.rawPath.orEmpty().trimEnd('/')
         require(path.isEmpty() || path == "/audiobookshelf")
-        origin = "https://" + uri.rawAuthority + path
+        origin = (if (isCleartext) "http://" else "https://") + uri.rawAuthority + path
     }
 
     fun loginUrl(): String = "$origin/login"
@@ -49,6 +51,38 @@ internal class BooksServer(address: String) {
 
     companion object {
         const val PAGE_SIZE = 40
+
+        fun requireTransport(uri: URI) {
+            val host = uri.host ?: throw IllegalArgumentException("Invalid server host")
+            require(uri.rawUserInfo == null && uri.rawFragment == null)
+            require(uri.port == -1 || uri.port in 1..65535)
+            require(uri.scheme.equals("https", ignoreCase = true) ||
+                (uri.scheme.equals("http", ignoreCase = true) && isPrivateIpv4(host)))
+        }
+
+        private fun isPrivateIpv4(host: String): Boolean {
+            val parts = host.split('.')
+            if (parts.size != 4) return false
+            val octets = parts.map { part ->
+                val value = part.toIntOrNull() ?: return false
+                if (value !in 0..255 || part != value.toString()) return false
+                value
+            }
+            return octets[0] == 10 ||
+                (octets[0] == 172 && octets[1] in 16..31) ||
+                (octets[0] == 192 && octets[1] == 168)
+        }
+
+        fun openConnection(url: String): HttpURLConnection {
+            val uri = URI(url)
+            requireTransport(uri)
+            val connection = if (uri.scheme.equals("http", ignoreCase = true)) {
+                uri.toURL().openConnection(Proxy.NO_PROXY)
+            } else {
+                uri.toURL().openConnection()
+            }
+            return (connection as HttpURLConnection).apply { instanceFollowRedirects = false }
+        }
     }
 }
 
@@ -82,8 +116,7 @@ internal class BooksUrlConnectionHttp : BooksHttp, BooksAuthHttp {
         request(url, "POST", headers, body.toByteArray(Charsets.UTF_8))
 
     private fun request(url: String, method: String, headers: Map<String, String>, body: ByteArray?): BooksHttpResponse {
-        require(URI(url).scheme == "https")
-        val connection = URI(url).toURL().openConnection() as HttpURLConnection
+        val connection = BooksServer.openConnection(url)
         try {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 10_000
