@@ -129,6 +129,7 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         hideKeyboard()
         resetConnection()
         address.text.clear()
+        port.text.clear()
         apiKey.text.clear()
         username.text.clear()
         password.text.clear()
@@ -365,7 +366,9 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
         playerStatus.text = state.status
         val session = state.session
         val chapter = session?.let { it.chapters.getOrNull(it.chapterAt(state.positionMs)) }
-        playerChapter.text = chapter?.title ?: "CHAPTERS"
+        playerChapter.text = chapter?.let { "Chapters · " + it.title } ?: "CHAPTERS"
+        playerChapter.maxLines = 1
+        playerChapter.ellipsize = TextUtils.TruncateAt.END
         playerChapter.isEnabled = session?.chapters?.isNotEmpty() == true && !state.failed
         val ready = session != null && !state.failed
         progress.isEnabled = ready
@@ -513,6 +516,9 @@ internal class BooksContent(context: Context) : LinearLayout(context) {
             store.clear()
             resetConnection()
             address.text.clear()
+            port.text.clear()
+            subpath.isChecked = false
+            protocol.setSelection(0)
             apiKey.text.clear()
             username.text.clear()
             password.text.clear()
