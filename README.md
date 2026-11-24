@@ -1,8 +1,7 @@
+<p align="center"><strong>Train. Play. Watch. Listen. Learn.</strong></p>
 <p align="center">
   <img src="hero.jpg" alt="Showcase" width="720" />
 </p>
-
-<p align="center"><strong>Train. Play. Watch. Listen. Learn.</strong></p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-orange.svg" alt="License: AGPL-3.0" /></a>
