@@ -2,6 +2,7 @@
 
 package com.fitbaus.bikebridge.host.books
 
+import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
@@ -53,24 +54,26 @@ internal class BooksReadAlong(
     val cover = ImageView(context)
     private val readingControls = LinearLayout(context)
     private val footer = LinearLayout(context)
+    private val actions = LinearLayout(context)
+    private var summaryHelp: AlertDialog? = null
     private val fullscreenButton = NarrationFullscreenButton(context)
     private val summaryToggle = button("Summary").apply {
         setAllCaps(false)
         setTextColor(Color.WHITE)
-        setBackgroundColor(Color.BLACK)
+        setBackgroundColor(Color.TRANSPARENT)
         textSize = 16f
     }
     private val recapToggle = button("Recap").apply {
         setAllCaps(false)
         setTextColor(Color.WHITE)
-        setBackgroundColor(Color.BLACK)
+        setBackgroundColor(Color.TRANSPARENT)
         textSize = 16f
         contentDescription = "Recap up to ten minutes before the current playback position"
     }
     private val bookRecapToggle = button("Book recap").apply {
         setAllCaps(false)
         setTextColor(Color.WHITE)
-        setBackgroundColor(Color.BLACK)
+        setBackgroundColor(Color.TRANSPARENT)
         textSize = 16f
         contentDescription = "Recap from the beginning of the book to the current playback position"
     }
@@ -105,8 +108,7 @@ internal class BooksReadAlong(
         readingControls.orientation = HORIZONTAL
         readingControls.gravity = Gravity.CENTER_VERTICAL
         readingControls.visibility = GONE
-        val readingLabel = label("Read along", 16f)
-        readingControls.addView(readingLabel, LayoutParams(0, WRAP, 1f))
+        readingControls.gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
         fontSizeLabel.gravity = Gravity.CENTER
         fontSizeLabel.text = "Text: $textSizeSp"
         narration.textSize = textSizeSp.toFloat()
@@ -144,25 +146,30 @@ internal class BooksReadAlong(
         summaryToggle.visibility = GONE
         summaryToggle.contentDescription = "Show current section summary; may reveal upcoming narration"
         summaryToggle.setOnClickListener {
-            if (summarySection != null || recapSelection != null) dismissSummary() else showSummary(false)
+            if (summarySection != null || recapSelection != null) dismissSummary()
+            else if (canShowSummary()) showSummary(false)
+            else showSummaryHelp()
         }
-        stage.addView(summaryToggle, FrameLayout.LayoutParams(dp(128), dp(48), Gravity.BOTTOM or Gravity.LEFT))
         recapToggle.visibility = GONE
         recapToggle.setOnClickListener { showRecap(false) }
-        val recapParams = FrameLayout.LayoutParams(dp(104), dp(48), Gravity.BOTTOM or Gravity.LEFT)
-        recapParams.leftMargin = dp(128)
-        stage.addView(recapToggle, recapParams)
         bookRecapToggle.visibility = GONE
         bookRecapToggle.setOnClickListener { showRecap(false, cumulative = true) }
-        val bookRecapParams = FrameLayout.LayoutParams(dp(128), dp(48), Gravity.BOTTOM or Gravity.LEFT)
-        bookRecapParams.leftMargin = dp(232)
-        stage.addView(bookRecapToggle, bookRecapParams)
         fullscreenButton.visibility = GONE
         fullscreenButton.contentDescription = "Enter fullscreen narration"
         fullscreenButton.setOnClickListener { onFullscreenRequested() }
-        stage.addView(fullscreenButton, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.BOTTOM or Gravity.RIGHT))
         scroll.visibility = GONE
         addView(stage, LayoutParams(MATCH, 0, 1f))
+        actions.orientation = HORIZONTAL
+        actions.gravity = Gravity.CENTER_VERTICAL
+        for (action in listOf(summaryToggle, recapToggle, bookRecapToggle)) {
+            action.minWidth = 0
+            action.minimumWidth = 0
+            action.setPadding(dp(6), 0, dp(6), 0)
+            actions.addView(action, LayoutParams(WRAP, dp(44)))
+        }
+        actions.addView(android.view.View(context), LayoutParams(0, 1, 1f))
+        actions.addView(fullscreenButton, LayoutParams(dp(48), dp(44)))
+        addView(actions, LayoutParams(MATCH, WRAP))
         footer.apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -194,18 +201,16 @@ internal class BooksReadAlong(
 
     private fun updateReadingChrome() {
         readingControls.visibility = if (hasNarration && !fullscreen) VISIBLE else GONE
-        footer.visibility = if (fullscreen) GONE else VISIBLE
+        footer.visibility = if (!fullscreen && (details.text.isNotEmpty() || reload.visibility == VISIBLE)) VISIBLE else GONE
         val showButton = hasNarration || fullscreen
         fullscreenButton.visibility = if (showButton) VISIBLE else GONE
-        val bottom = if (showButton) dp(48) else 0
-        if (scroll.paddingBottom != bottom) scroll.setPadding(0, 0, 0, bottom)
         updateSummaryChrome()
     }
 
     private fun buildSummaryPanel() {
         summaryPanel.orientation = VERTICAL
         summaryPanel.setBackgroundColor(Color.BLACK)
-        summaryPanel.setPadding(dp(24), dp(12), dp(24), dp(56))
+        summaryPanel.setPadding(dp(24), dp(12), dp(24), dp(8))
         summaryPanel.visibility = GONE
         summaryTitle.setTextColor(0xFFFFCE1B.toInt())
         summaryTitle.gravity = Gravity.CENTER
@@ -245,12 +250,20 @@ internal class BooksReadAlong(
         summaryPanel.addView(summaryRetry, retryParams)
     }
 
-    private fun canShowSummary(): Boolean = fullscreen && !localMode && windows.summaryAvailable &&
+    private fun canShowSummary(): Boolean = !localMode && windows.summaryAvailable &&
         summarySelection() != null
+
+    private fun showSummaryHelp() {
+        summaryHelp?.dismiss()
+        val reason = BooksPlayerPresentation.summaryUnavailable(
+            transcriberStore.load() != null, localMode, windows.revision != null, windows.summaryAvailable)
+        summaryHelp = AlertDialog.Builder(context).setTitle("Summary unavailable")
+            .setMessage(reason).setPositiveButton("OK", null).show()
+    }
 
     private fun livePosition(): Long = playbackPosition?.invoke() ?: currentState.positionMs
 
-    private fun recapContextAvailable(): Boolean = fullscreen && visibility == VISIBLE && !destroyed &&
+    private fun recapContextAvailable(): Boolean = visibility == VISIBLE && !destroyed &&
         !currentState.failed && currentState.session != null && request != null &&
         !localMode && windows.revision != null
 
@@ -265,19 +278,18 @@ internal class BooksReadAlong(
                 currentState.seekGeneration, livePosition())
 
     private fun updateSummaryChrome() {
-        val showing = fullscreen && (summarySection != null || recapSelection != null)
+        val showing = summarySection != null || recapSelection != null
+        val discoverable = visibility == VISIBLE && request != null && !destroyed && !currentState.failed
         summaryPanel.visibility = if (showing) VISIBLE else GONE
-        summaryToggle.visibility = if (showing || canShowSummary()) VISIBLE else GONE
+        summaryToggle.visibility = if (showing || discoverable) VISIBLE else GONE
         val recentAvailable = canShowRecap()
         recapToggle.visibility = if (!showing && recentAvailable) VISIBLE else GONE
         bookRecapToggle.visibility = if (!showing && canShowBookRecap()) VISIBLE else GONE
-        val recapMargin = if (canShowSummary()) dp(128) else 0
-        updateActionMargin(recapToggle, recapMargin)
-        updateActionMargin(bookRecapToggle, recapMargin + if (recentAvailable) dp(104) else 0)
+        actions.visibility = if (showing || discoverable || fullscreenButton.visibility == VISIBLE) VISIBLE else GONE
         if (summaryState is BooksSummaryState.MissingCoverage) {
             summaryRetry.visibility = if (recentAvailable) VISIBLE else GONE
         }
-        val toggleText = if (showing) "Read along" else "Summary"
+        val toggleText = if (showing) "Narration" else "Summary"
         if (summaryToggle.text != toggleText) {
             summaryToggle.text = toggleText
             summaryToggle.contentDescription = if (showing) "Return to live narration" else
@@ -285,14 +297,6 @@ internal class BooksReadAlong(
         }
         cover.visibility = if (!showing && !hasNarration) VISIBLE else GONE
         scroll.visibility = if (!showing && hasNarration) VISIBLE else GONE
-    }
-
-    private fun updateActionMargin(action: Button, margin: Int) {
-        val params = action.layoutParams as? FrameLayout.LayoutParams ?: return
-        if (params.leftMargin != margin) {
-            params.leftMargin = margin
-            action.layoutParams = params
-        }
     }
 
     private fun showSummary(retryTranscript: Boolean) {
@@ -414,7 +418,7 @@ internal class BooksReadAlong(
             clearSummaryPanel()
             return
         }
-        if (!fullscreen || (summarySection == null && recapSelection == null)) return
+        if (summarySection == null && recapSelection == null) return
         summaryState = state
         val presentation = BooksSummaryPresentation.resolve(state, recap = recapSelection != null,
             cumulative = recapSelection?.cumulative == true)
@@ -519,6 +523,8 @@ internal class BooksReadAlong(
     }
 
     fun close() {
+        summaryHelp?.dismiss()
+        summaryHelp = null
         dismissSummary()
         generation++
         pending?.cancel(true)
@@ -568,7 +574,6 @@ internal class BooksReadAlong(
         val failed = session != null && windows.failed(state.positionMs, session.durationMs)
         val presentation = BooksNarrationPresentation.resolve(document != null, ready, localMode, failed)
         hasNarration = presentation == BooksNarrationPresentation.NARRATION
-        updateReadingChrome()
         details.text = when (presentation) {
             BooksNarrationPresentation.NARRATION -> ""
             BooksNarrationPresentation.LOADING -> "Preparing narration…"
@@ -577,6 +582,7 @@ internal class BooksReadAlong(
         }
         reload.visibility = if (ready && presentation == BooksNarrationPresentation.UNAVAILABLE) VISIBLE else GONE
         reload.isEnabled = pending == null
+        updateReadingChrome()
         val text = if (hasNarration) document?.cueAt(state.positionMs)?.text ?: "…" else null
         if (text != displayed) {
             displayed = text
