@@ -95,14 +95,19 @@ internal class SummaryProviderDialog(
             worker.shutdownNow()
         }
         dialog.show()
+        configureInputWindow()
+        load()
+        return dialog
+    }
+
+    @Suppress("DEPRECATION")
+    private fun configureInputWindow() {
         dialog.window?.apply {
             setLayout(-1, -1)
             clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
                 WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
         }
-        load()
-        return dialog
     }
 
     private fun load() {
