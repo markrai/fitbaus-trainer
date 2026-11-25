@@ -32,6 +32,8 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
     private val connect = Button(context)
     private val disconnect = Button(context)
     private val manageModels = Button(context)
+    private val manageSummary = Button(context)
+    private var summaryDialog: AlertDialog? = null
     private var modelsDialog: AlertDialog? = null
     private var saved: TranscriberConnection? = null
     private var generation = 0L
@@ -108,6 +110,14 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
             modelsDialog = TranscriberManagementDialog(context, connection).show()
         }
         addView(manageModels, LayoutParams(LayoutParams.MATCH_PARENT, dp(52)))
+        manageSummary.text = "SUMMARIZATION PROVIDER"
+        manageSummary.isEnabled = false
+        manageSummary.setOnClickListener {
+            val connection = saved ?: return@setOnClickListener
+            summaryDialog?.dismiss()
+            summaryDialog = SummaryProviderDialog(context, connection).show()
+        }
+        addView(manageSummary, LayoutParams(LayoutParams.MATCH_PARENT, dp(52)))
     }
 
     fun start() {
@@ -118,6 +128,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         request({ store.load() }, { connection ->
             saved = connection
             manageModels.isEnabled = connection != null
+            manageSummary.isEnabled = connection != null
             if (connection == null) {
                 status.text = "Not connected. Run docker compose exec transcriber python -m transcriber pair on your server."
                 code.hint = "Pairing code (XXXX-XXXX)"
@@ -136,7 +147,10 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         active = false
         modelsDialog?.dismiss()
         modelsDialog = null
+        summaryDialog?.dismiss()
+        summaryDialog = null
         manageModels.isEnabled = false
+        manageSummary.isEnabled = false
         generation++
         pending?.cancel(true)
         pending = null
@@ -175,6 +189,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         }, { (candidate, capabilities) ->
             saved = candidate
             manageModels.isEnabled = true
+            manageSummary.isEnabled = true
             code.text.clear()
             code.hint = "Paired (new code to replace)"
             status.setTextColor(if (capabilities.ready) Color.rgb(76, 175, 80) else Color.WHITE)
@@ -187,7 +202,10 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         status.setTextColor(Color.WHITE)
         request({ store.clear() }, {
             saved = null
+            summaryDialog?.dismiss()
+            summaryDialog = null
             manageModels.isEnabled = false
+            manageSummary.isEnabled = false
             code.text.clear()
             code.hint = "Pairing code (XXXX-XXXX)"
             status.text = "Disconnected"
@@ -202,6 +220,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         connect.isEnabled = !busy
         disconnect.isEnabled = !busy
         manageModels.isEnabled = !busy && saved != null
+        manageSummary.isEnabled = !busy && saved != null
     }
 
     private fun <T> request(action: () -> T, success: (T) -> Unit, failure: String) {
