@@ -143,6 +143,13 @@ internal class BooksReadAlong(
 
     fun floatingNarration(): String? = if (visibility == VISIBLE && hasNarration) displayed else null
 
+    fun currentSection(): BooksSectionTranscript? {
+        if (visibility != VISIBLE || destroyed || currentState.failed) return null
+        val session = currentState.session ?: return null
+        val section = BooksSectionResolver.at(session, currentState.positionMs) ?: return null
+        return if (localMode) BooksSectionResolver.local(section, transcript) else windows.sectionTranscript(section)
+    }
+
     fun open(next: BooksTranscriptRequest, state: BooksPlayerState, connection: BooksConnection) {
         if (destroyed) return
         close()

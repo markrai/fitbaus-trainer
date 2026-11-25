@@ -13,6 +13,9 @@ internal class ReadAlongWindowBuffer {
     fun current(positionMs: Long, durationMs: Long): RemoteBooksWindow? =
         windows[RemoteBooksTranscript.windowStart(positionMs, durationMs)]
 
+    fun sectionTranscript(section: BooksSection): BooksSectionTranscript =
+        BooksSectionResolver.remote(section, windows, revision)
+
     fun failed(positionMs: Long, durationMs: Long): Boolean =
         failures[RemoteBooksTranscript.windowStart(positionMs, durationMs)] == true
 
