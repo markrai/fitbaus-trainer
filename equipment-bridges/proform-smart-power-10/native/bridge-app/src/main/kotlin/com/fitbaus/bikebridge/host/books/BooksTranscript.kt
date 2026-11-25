@@ -31,6 +31,22 @@ internal class BooksTranscript(private val cues: List<BooksCue>, allowEmpty: Boo
         return null
     }
 
+    fun overlappingCues(startMs: Long, endMs: Long): List<BooksCue> {
+        require(startMs >= 0 && endMs > startMs)
+        var low = 0
+        var high = cues.size
+        while (low < high) {
+            val middle = low + (high - low) / 2
+            if (cues[middle].endMs <= startMs) low = middle + 1 else high = middle
+        }
+        val result = ArrayList<BooksCue>()
+        while (low < cues.size && cues[low].startMs < endMs) {
+            result.add(cues[low])
+            low++
+        }
+        return result
+    }
+
     companion object {
         const val MAX_CUES = 30_000
         const val MAX_CUE_CHARS = 1200
