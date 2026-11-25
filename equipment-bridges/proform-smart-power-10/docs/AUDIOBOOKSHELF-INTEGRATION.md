@@ -30,6 +30,12 @@ A verified connection is automatically restored when Books is reopened. Modern A
 
 Tap a book to start at its Audiobookshelf resume position. Use Play/Pause, the seek bar, 30-second skips, Chapters and playback speed. Return to Library to stop playback and close the server session. Progress is sent during playback and on exit; network failures are best-effort and offline recovery is not implemented. Audio requests are restricted to the selected book's file endpoints on the configured server and do not follow redirects.
 
+### Chapter timeline (summarization Phase 1)
+
+The direct-play session already provides Audiobookshelf chapters, independently of physical audio tracks. FitBaus retains their source ID when present, title and book-relative start/end in milliseconds. Ranges are sorted, deduplicated by start (first valid row wins), and half-open. Explicit ends are preserved unless they exceed the next chapter start or book duration; absent ends are inferred from the next valid chapter or the book duration. Invalid or zero-length rows are ignored, blank titles receive a fallback label, and genuine gaps remain unmapped. Chapter metadata is optional and bounded to 2,000 input rows; playback does not depend on it.
+
+No extra metadata request is needed, and tracks are not synthesized into chapters when the server provides none. The live playback clock is the lookup source for both single-file and multi-file books. These chapter ranges are structural anchors only: they do not define summarization sections, request transcripts or invoke an inference provider.
+
 ## Read Along (local qualification)
 
 Open an audiobook. The default player automatically displays synchronized narration when a transcript is available, or the book cover while opening, waiting or unavailable. Use the text-size slider (28–52 sp); playback controls, chapter navigation and seeking stay in the same view. Missing or invalid transcripts are isolated from audio playback. Tap the fullscreen icon at the lower-right of the narration to hide the app header and player controls, retaining only the live exercise HUD at the very top above the narration. Tap the same corner to restore the regular player. The existing audio session and text size are retained; leaving the book or minimizing returns to regular mode.
