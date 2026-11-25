@@ -20,6 +20,23 @@ Train with structured, heart-rate-guided workouts, play interactive games using 
 Built for people who want more from their exercise equipment without mandatory subscriptions, proprietary ecosystems or surrendering privacy.
 
 
+## Table of Contents
+
+- [Fitness & Training](#fitness--training)
+- [Interactive Games](#interactive-games)
+- [Entertainment & Learning](#entertainment--learning)
+- [Workout Analytics & Progress Tracking](#workout-analytics--progress-tracking)
+- [Supported Equipment & Hardware](#supported-equipment--hardware)
+- [FitBaus Lite vs. Full](#fitbaus-lite-vs-full)
+- [Download & Get Started](#download--get-started)
+- [Self-Hosting](#self-hosting)
+  - [Optional Companion Services](#optional-companion-services)
+- [Privacy & Data Ownership](#privacy--data-ownership)
+  - [Disclaimer](#disclaimer)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Fitness & Training
 
 The FitBaus Trainer app for Android, iOS and web supports structured cardio workouts and freestyle cycling, with live Bluetooth heart-rate monitoring, heart-rate variability (HRV), heart-rate zone tracking and spoken workout guidance. It also supports resting heart-rate measurements, VO₂ max estimation and automatic resistance adjustment on compatible exercise equipment through the native mobile app.
