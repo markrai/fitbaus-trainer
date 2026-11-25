@@ -29,6 +29,7 @@ internal data class BooksPlayerState(
     val speed: Float = 1f,
     val status: String = "",
     val failed: Boolean = false,
+    val seekGeneration: Long = 0,
 )
 
 internal class BooksPlayback(context: Context, private val render: (BooksPlayerState) -> Unit) {
@@ -173,6 +174,7 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
         if (state.failed) return
         sample()
         val target = session.locate(positionMs)
+        state = state.copy(seekGeneration = state.seekGeneration + 1)
         engine.seekTo(target.index, target.positionMs)
         touched = true
         dirty = true
@@ -236,7 +238,7 @@ internal class BooksPlayback(context: Context, private val render: (BooksPlayerS
         wasPlaying = engine.isPlaying
     }
 
-    private fun currentPosition(): Long {
+    fun currentPosition(): Long {
         val engine = player ?: return state.positionMs
         val session = state.session ?: return 0
         if (engine.playbackState == Player.STATE_ENDED) return session.durationMs

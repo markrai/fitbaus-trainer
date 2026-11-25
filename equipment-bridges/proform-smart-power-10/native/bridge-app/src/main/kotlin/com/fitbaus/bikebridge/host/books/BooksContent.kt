@@ -102,7 +102,8 @@ internal class BooksContent(
     private var playerState = BooksPlayerState()
     private val playback = BooksPlayback(context, ::renderPlayer)
     private var readingFullscreen = false
-    private val readAlong = BooksReadAlong(context, onFullscreenRequested = { setReadingFullscreen(!readingFullscreen) })
+    private val readAlong = BooksReadAlong(context, onFullscreenRequested = { setReadingFullscreen(!readingFullscreen) },
+        playbackPosition = playback::currentPosition)
     private var narrationKey: BooksTranscriptRequest? = null
 
     val floatingPlayer = BooksFloatingPlayer(context, onRestoreRequested, ::stop, playback::toggle) { delta ->

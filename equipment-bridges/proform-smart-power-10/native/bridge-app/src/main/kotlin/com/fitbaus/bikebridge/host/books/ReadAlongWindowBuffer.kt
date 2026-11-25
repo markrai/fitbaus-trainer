@@ -13,6 +13,8 @@ internal class ReadAlongWindowBuffer {
         private set
     var sectionPlanAvailable = false
         private set
+    var recapAvailable = false
+        private set
 
     fun current(positionMs: Long, durationMs: Long): RemoteBooksWindow? =
         windows[RemoteBooksTranscript.windowStart(positionMs, durationMs)]
@@ -46,6 +48,7 @@ internal class ReadAlongWindowBuffer {
         revision = window.revision
         summaryAvailable = window.summaryAvailable
         sectionPlanAvailable = window.sectionPlanAvailable
+        recapAvailable = window.recapAvailable
         pendingStart = null
         windows[window.startMs] = window
         failures.remove(window.startMs)
@@ -76,6 +79,7 @@ internal class ReadAlongWindowBuffer {
         revision = null
         summaryAvailable = false
         sectionPlanAvailable = false
+        recapAvailable = false
     }
 
     private fun retain(current: Long) {
