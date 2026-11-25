@@ -129,9 +129,22 @@ internal class RemoteBooksSummary(
         }
 
     fun loadRecap(selection: BooksRecapSelection, retryTranscript: Boolean = false,
-                  onPending: (BooksSummaryState) -> Unit = {}): BooksSummaryState =
-        loadInterval(selection.itemId, selection.session, selection.expectedRevision,
-            selection.startMs, selection.positionMs, true, selection.cumulative, retryTranscript, onPending)
+                  onPending: (BooksSummaryState.Pending) -> Unit = {}): BooksSummaryState {
+        require(!selection.cumulative)
+        return loadInterval(selection.itemId, selection.session, selection.expectedRevision,
+            selection.startMs, selection.positionMs, true, false, retryTranscript) {
+            onPending(it as BooksSummaryState.Pending)
+        }
+    }
+
+    fun loadBookRecap(selection: BooksRecapSelection,
+                      onProgress: (BooksSummaryState.Reducing) -> Unit = {}): BooksSummaryState {
+        require(selection.cumulative)
+        return loadInterval(selection.itemId, selection.session, selection.expectedRevision,
+            0L, selection.positionMs, true, true, false) {
+            onProgress(it as BooksSummaryState.Reducing)
+        }
+    }
 
     private fun loadInterval(itemId: String, session: BooksPlaybackSession, expectedRevision: String?,
                              startMs: Long, endMs: Long, recap: Boolean, cumulative: Boolean, retryTranscript: Boolean,
@@ -194,6 +207,7 @@ internal class RemoteBooksSummary(
             if (cumulative) {
                 require(result.opt("algorithm") == "cumulative-v1")
                 if (response.status == 409) {
+                    require(!result.has("summary"))
                     val count = integer(result, "missing_window_count")
                     require(count in 1L..required.size.toLong())
                     val rows = result.getJSONArray("missing_windows")
@@ -206,9 +220,9 @@ internal class RemoteBooksSummary(
                 require(DIGEST.matches(result.opt("transcript_digest") as? String ?: ""))
                 val total = integer(result, "total_nodes")
                 val completed = integer(result, "completed_nodes")
-                require(total == cumulativeNodeCount(endMs).toLong() && completed in 0..total)
+                require(total == cumulativeNodeCount(endMs).toLong() && completed in 0L..total)
                 if (result.opt("state") == "pending_summary") {
-                    require(response.status == 202 && completed in 1 until total && !result.has("summary"))
+                    require(response.status == 202 && completed in 1L until total && !result.has("summary"))
                     onPending(BooksSummaryState.Reducing(revision, completed.toInt(), total.toInt()))
                     if (attempt == attempts - 1 || clock() - deadline >= 0) throw BooksSummaryException(BooksSummaryFailure.TIMEOUT)
                     pause()
@@ -241,6 +255,7 @@ internal class RemoteBooksSummary(
                     val summary = result.opt("summary") as? String ?: error("Invalid summary")
                     require(summary.isNotBlank() && summary.codePointCount(0, summary.length) <= 8000)
                     if (cumulative) require(summary.toByteArray(Charsets.UTF_8).size <= 12 * 1024)
+                    if (cumulative) require(result.opt("cache_hit") is Boolean)
                     val cacheHit = if (result.has("cache_hit")) {
                         require(result.opt("cache_hit") is Boolean)
                         result.getBoolean("cache_hit")

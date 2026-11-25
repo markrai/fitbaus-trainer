@@ -377,7 +377,9 @@ internal class BooksReadAlong(
         summaryFuture = summaryWorker.submit {
             try {
                 val paired = transcriberStore.load() ?: throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
-                val result = RemoteBooksSummary(paired, connection).loadRecap(selection, retryTranscript) { deliver(it) }
+                val remote = RemoteBooksSummary(paired, connection)
+                val result = if (selection.cumulative) remote.loadBookRecap(selection) { deliver(it) }
+                    else remote.loadRecap(selection, retryTranscript) { deliver(it) }
                 deliver(result)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
