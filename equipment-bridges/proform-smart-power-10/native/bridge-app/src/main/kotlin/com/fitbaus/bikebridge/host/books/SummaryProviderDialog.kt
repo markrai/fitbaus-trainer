@@ -35,6 +35,7 @@ internal class SummaryProviderDialog(
     private val connection: TranscriberConnection,
 ) {
     private val api = SummaryProviderManagement(connection)
+    private val loboDiscovery = LoboLanDiscovery(context)
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val rows = LinearLayout(context).apply {
@@ -88,6 +89,7 @@ internal class SummaryProviderDialog(
     fun show(): AlertDialog {
         dialog.setOnDismissListener {
             closed = true
+            loboDiscovery.stop()
             hideKeyboard()
             clearSecrets()
             api.forgetGrant()
@@ -156,7 +158,31 @@ internal class SummaryProviderDialog(
         var discovery: SummaryProviderDiscovery? = null
         var model: String? = null
 
-        label("Provider address", 15f, MUTED, form)
+        val loboPanel = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        form.addView(loboPanel, LinearLayout.LayoutParams(-1, -2))
+        val discoveryHeader = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        loboPanel.addView(discoveryHeader, LinearLayout.LayoutParams(-1, -2))
+        val lanStatus = TextView(context).apply {
+            textSize = 15f
+            setTextColor(MUTED)
+        }
+        discoveryHeader.addView(lanStatus, LinearLayout.LayoutParams(0, -2, 1f))
+        val refreshLan = Button(context).apply {
+            text = "SCAN"
+            setTextColor(Color.WHITE)
+            background = surface(FIELD, BORDER)
+        }
+        discoveryHeader.addView(refreshLan, LinearLayout.LayoutParams(dp(100), dp(44)))
+        val lanDevices = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        loboPanel.addView(lanDevices, LinearLayout.LayoutParams(-1, -2))
+        val manualAddress = button("ENTER ADDRESS MANUALLY", parent = loboPanel) {}
+        val endpointLabel = label("Provider address", 15f, MUTED, form)
         val endpoint = field("Provider base URL ending in /v1", 2048, parent = form)
         endpoint.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         val authLabel = label("LOBO AUTH code", 15f, MUTED, form)
@@ -216,6 +242,11 @@ internal class SummaryProviderDialog(
             alpha = 0.4f
         }
         var suppressChanges = false
+        var manualLobo = false
+        var lanSelection: LoboLanDevice? = null
+        var lastLanDevices = emptyList<LoboLanDevice>()
+        var scanningLan = false
+        var failedLan = false
         var reuseButton: Button? = null
         val authorizationLabel = TextView(context).apply {
             textSize = 14f
@@ -257,8 +288,68 @@ internal class SummaryProviderDialog(
             }
         }
 
+        fun renderLanDevices() {
+            lanDevices.removeAllViews()
+            lanStatus.text = when {
+                scanningLan -> "Finding LOBO devices…"
+                failedLan -> "Discovery unavailable"
+                lastLanDevices.isEmpty() -> "No LOBO devices found"
+                else -> "${lastLanDevices.size} LOBO device(s) found · Unverified"
+            }
+            lastLanDevices.forEach { device ->
+                val chosen = lanSelection == device
+                button("${device.name}   ·   ${device.address}", parent = lanDevices) {
+                    if (lanSelection != device || manualLobo) {
+                        manualLobo = false
+                        lanSelection = device
+                        endpoint.setText(device.endpoint)
+                        auth.text.clear()
+                        endpoint.visibility = View.GONE
+                        endpointLabel.visibility = View.GONE
+                        manualAddress.text = "ENTER ADDRESS MANUALLY"
+                        renderLanDevices()
+                    }
+                }.apply {
+                    isAllCaps = false
+                    isEnabled = pending == null
+                    setTextColor(if (chosen) ACCENT else Color.WHITE)
+                    background = surface(if (chosen) 0xff342f1c.toInt() else FIELD,
+                        if (chosen) ACCENT else BORDER, if (chosen) 2 else 1)
+                }
+            }
+            refreshLan.isEnabled = pending == null && !scanningLan
+        }
+
+        fun scanLan() {
+            if (closed || pending != null || selected != 1 || usingCurrent) return
+            if (!manualLobo && lanSelection != null) {
+                lanSelection = null
+                endpoint.text.clear()
+                auth.text.clear()
+            }
+            loboDiscovery.start { devices, scanning, failed ->
+                if (!closed && selected == 1 && !usingCurrent) {
+                    lastLanDevices = devices
+                    scanningLan = scanning
+                    failedLan = failed
+                    if (pending == null && lanSelection != null && lanSelection !in devices) {
+                        lanSelection = null
+                        endpoint.text.clear()
+                        auth.text.clear()
+                    }
+                    renderLanDevices()
+                }
+            }
+        }
+
         fun configure(position: Int, reuse: Boolean = false) {
             suppressChanges = true
+            loboDiscovery.stop()
+            lastLanDevices = emptyList()
+            scanningLan = false
+            failedLan = false
+            lanSelection = null
+            manualLobo = false
             selected = position
             usingCurrent = reuse
             invalidateDiscovery()
@@ -272,6 +363,10 @@ internal class SummaryProviderDialog(
                 else -> "https://server.example/v1"
             }
             val showAuth = !reuse && position == 1
+            loboPanel.visibility = if (showAuth) View.VISIBLE else View.GONE
+            endpointLabel.visibility = if (showAuth) View.GONE else View.VISIBLE
+            endpoint.visibility = endpointLabel.visibility
+            manualAddress.text = "ENTER ADDRESS MANUALLY"
             authLabel.visibility = if (showAuth) View.VISIBLE else View.GONE
             auth.visibility = authLabel.visibility
             val showKey = !reuse && position != 1 && connection.address.startsWith("https://")
@@ -282,12 +377,13 @@ internal class SummaryProviderDialog(
             hint.text = when {
                 reuse -> "Reuse the active endpoint, credentials and certificate trust."
                 position == 0 -> "Address must be reachable from Transcriber."
-                position == 1 -> "Enter the private IPv4 HTTPS address and the AUTH code on the Pixel."
+                position == 1 -> "Select a phone, then enter the AUTH code shown on that phone. Discovery does not verify identity."
                 else -> "Custom private CAs can be configured on the server and reused here."
             }
             discoverButton.text = if (reuse) "DISCOVER CURRENT MODELS" else "DISCOVER MODELS"
             renderChoices()
             suppressChanges = false
+            if (showAuth) scanLan()
         }
 
         fun showDiscovered(value: SummaryProviderDiscovery) {
@@ -350,7 +446,9 @@ internal class SummaryProviderDialog(
         updateSave = {
             val idle = pending == null
             endpoint.isEnabled = idle && !usingCurrent
-            discoverButton.isEnabled = idle && current != null
+            refreshLan.isEnabled = idle && !scanningLan
+            discoverButton.isEnabled = idle && current != null &&
+                (selected != 1 || usingCurrent || endpoint.text.isNotBlank())
             discoverButton.alpha = if (discoverButton.isEnabled) 1f else 0.4f
             reuseButton?.isEnabled = idle && current?.configured == true
             authorizeButton.isEnabled = idle && current == null
@@ -388,10 +486,23 @@ internal class SummaryProviderDialog(
         currentChoice = button("USE CURRENT PROVIDER", parent = form, index = 2) { configure(-1, true) }
         reuseButton = currentChoice
         currentChoice?.visibility = if (current?.configured == true) View.VISIBLE else View.GONE
+        refreshLan.setOnClickListener { scanLan() }
+        manualAddress.setOnClickListener {
+            if (closed || pending != null) return@setOnClickListener
+            manualLobo = !manualLobo
+            lanSelection = null
+            endpoint.text.clear()
+            auth.text.clear()
+            endpoint.visibility = if (manualLobo) View.VISIBLE else View.GONE
+            endpointLabel.visibility = endpoint.visibility
+            manualAddress.text = if (manualLobo) "CHOOSE DISCOVERED DEVICE" else "ENTER ADDRESS MANUALLY"
+            renderLanDevices()
+        }
         listOf(endpoint, auth, key).forEach { edit -> watch(edit) { if (!suppressChanges) invalidateDiscovery() } }
         allowHttp.setOnCheckedChangeListener { _, _ -> if (!suppressChanges) invalidateDiscovery() }
         discoverButton.setOnClickListener {
             if (closed || pending != null || current == null) return@setOnClickListener
+            if (selected == 1 && !usingCurrent && endpoint.text.isBlank()) return@setOnClickListener
             val reuse = usingCurrent
             val url = endpoint.text.toString()
             val http = allowHttp.isChecked
@@ -432,7 +543,7 @@ internal class SummaryProviderDialog(
                 activeModel = value.model
                 adminCode.text.clear()
                 status.text = activeStatus()
-                if (endpoint.text.isBlank() && value.configured) configure(-1, true)
+                if (selected != 1 && endpoint.text.isBlank() && value.configured) configure(-1, true)
                 refreshAuthorization()
             }
         }
@@ -538,6 +649,7 @@ internal class SummaryProviderDialog(
     private fun clearSecrets() { secretFields.forEach { it.text.clear() } }
 
     private fun resetRows() {
+        loboDiscovery.stop()
         updateSave = null
         clearSecrets()
         secretFields.clear()
