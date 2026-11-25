@@ -2,27 +2,23 @@
   <img src="github.png" alt="Showcase" width="320" />
 </p>
 <p align="center">
-  <img src="hero.jpg" alt="Showcase" width="720" />
-</p>
-<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-orange.svg" alt="License: AGPL-3.0" /></a>
   <a href="https://github.com/markrai/fitbaus-trainer/releases"><img src="https://img.shields.io/github/v/release/markrai/fitbaus-trainer?label=latest&amp;color=blue" alt="Latest" /></a>
   <img src="https://img.shields.io/badge/Android-supported-green" alt="Android" />
   <img src="https://img.shields.io/badge/iOS-source-yellow" alt="iOS" />
   <img src="https://img.shields.io/badge/Web-PWA-8A2BE2" alt="Web" />
 </p>
-
 <p align="center">
-  <img src="proform.png" alt="Showcase" width="120" />
+  <img src="hero.jpg" alt="Showcase" width="720" />
 </p>
+
 
 **FitBaus Trainer is an open-source fitness and entertainment platform that transforms your workout into something you look forward to.**
 
 Train with structured, heart-rate-guided workouts, play interactive games using body movements or game controllers, watch YouTube, listen to audiobooks, and track your fitness progress.
 
-Built for people who want more from their exercise equipment without mandatory subscriptions, proprietary ecosystems or surrendering ownership of their fitness data.
+Built for people who want more from their exercise equipment without mandatory subscriptions, proprietary ecosystems or surrendering privacy.
 
-[Download](#download--get-started) · [Features](#fitness--training) · [Supported Equipment](#supported-equipment--hardware) · [Documentation](#documentation)
 
 ## Fitness & Training
 
