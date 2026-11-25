@@ -2,6 +2,15 @@
 
 package com.fitbaus.bikebridge.host.books
 
+import java.io.BufferedInputStream
+import java.io.EOFException
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ServerSocket
+import java.util.concurrent.atomic.AtomicReference
+import java.net.URI
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -106,6 +115,95 @@ class RemoteBooksCumulativeRecapTest {
             assertThrows(BooksSummaryException::class.java) {
                 client { BooksHttpResponse(409, """{"error":"stale_revision"}""") }.loadBookRecap(selection)
             }.failure)
+    }
+
+    private fun readHttpLine(input: BufferedInputStream): String {
+        val line = StringBuilder()
+        while (line.length < 8192) {
+            val value = input.read()
+            if (value == -1) throw EOFException("Incomplete HTTP request")
+            if (value == 10) return line.toString().trimEnd('\r')
+            line.append(value.toChar())
+        }
+        throw IOException("HTTP request line exceeds limit")
+    }
+
+    @Test
+    fun actualHttpTransportPreservesCumulativeConflictBodyOnly() {
+        val server = ServerSocket().apply { bind(InetSocketAddress("127.0.0.1", 0)) }
+        val conflict = AtomicReference(missing().toString())
+        val failure = AtomicReference<Throwable?>()
+        val worker = Thread {
+            try {
+                while (!server.isClosed) {
+                    server.accept().use { socket ->
+                        socket.soTimeout = 5000
+                        val input = BufferedInputStream(socket.getInputStream())
+                        val path = readHttpLine(input).split(' ')[1]
+                        var length = 0
+                        while (true) {
+                            val line = readHttpLine(input)
+                            if (line.isEmpty()) break
+                            if (line.substringBefore(':').equals("Content-Length", ignoreCase = true)) {
+                                length = line.substringAfter(':').trim().toInt()
+                            }
+                        }
+                        require(length in 0..4096)
+                        repeat(length) {
+                            if (input.read() == -1) throw EOFException("Incomplete HTTP body")
+                        }
+                        val (status, body) = when (path) {
+                            "/v1/capabilities" -> 200 to caps.toString()
+                            "/v1/items/book/manifest" -> 200 to manifest.toString()
+                            "/v1/cumulative-recaps", "/v1/recaps" -> 409 to conflict.get()
+                            else -> 403 to "not authorized"
+                        }
+                        val reason = when (status) {
+                            200 -> "OK"
+                            409 -> "Conflict"
+                            else -> "Forbidden"
+                        }
+                        val bytes = body.toByteArray(Charsets.UTF_8)
+                        val headers = "HTTP/1.1 $status $reason\r\nContent-Type: application/json\r\n" +
+                            "Content-Length: ${bytes.size}\r\nConnection: close\r\n\r\n"
+                        socket.getOutputStream().apply {
+                            write(headers.toByteArray(Charsets.US_ASCII))
+                            write(bytes)
+                            flush()
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                if (!server.isClosed) {
+                    failure.set(error)
+                    server.close()
+                }
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+        try {
+            val transport = booksSummaryHttp { url ->
+                val path = URI(url).rawPath
+                URI("http://127.0.0.1:${server.localPort}$path").toURL()
+                    .openConnection(Proxy.NO_PROXY) as HttpURLConnection
+            }
+            val remote = RemoteBooksSummary(paired, books, transport, pause = {}, clock = { 0L })
+            assertEquals(BooksSummaryState.MissingCoverage(revision, 2), remote.loadBookRecap(selection))
+            assertEquals(BooksHttpResponse(409, ""), transport.request(paired.address + "/v1/recaps", emptyMap(), "{}"))
+            assertEquals(BooksHttpResponse(403, ""), transport.request(paired.address + "/other", emptyMap(), "{}"))
+            conflict.set("""{"error":"stale_revision"}""")
+            assertEquals(BooksSummaryFailure.BOOK_CHANGED_OR_TRANSCRIPT_FAILED,
+                assertThrows(BooksSummaryException::class.java) { remote.loadBookRecap(selection) }.failure)
+            conflict.set("x".repeat(16 * 1024 + 1))
+            assertThrows(IOException::class.java) { remote.loadBookRecap(selection) }
+        } finally {
+            server.close()
+            worker.join(5000)
+            assertFalse(worker.isAlive)
+            assertNull(failure.get())
+        }
     }
 
     @Test

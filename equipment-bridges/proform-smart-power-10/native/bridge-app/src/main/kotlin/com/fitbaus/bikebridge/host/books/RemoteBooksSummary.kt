@@ -5,6 +5,7 @@ package com.fitbaus.bikebridge.host.books
 import org.json.JSONObject
 import java.io.IOException
 import java.io.InterruptedIOException
+import java.net.HttpURLConnection
 import java.net.SocketTimeoutException
 import kotlin.math.abs
 
@@ -107,13 +108,20 @@ internal sealed class BooksSummaryState {
     object Cancelled : BooksSummaryState()
 }
 
+internal fun booksSummaryHttp(
+    openConnection: (String) -> HttpURLConnection = { BooksServer.openConnection(it) },
+): TranscriberHttp = TranscriberHttp { url, headers, body ->
+    val cumulative = body != null && url.endsWith("/v1/cumulative-recaps")
+    val longRequest = cumulative || url.endsWith("/v1/summaries") || url.endsWith("/v1/recaps")
+    val client = BooksUrlConnectionHttp(if (longRequest) 240_000 else 15_000,
+        readConflictBody = cumulative, openConnection = openConnection)
+    if (body == null) client.getWithHeaders(url, headers) else client.post(url, headers, body)
+}
+
 internal class RemoteBooksSummary(
     private val transcriber: TranscriberConnection,
     private val books: BooksConnection,
-    private val http: TranscriberHttp = TranscriberHttp { url, headers, body ->
-        val client = BooksUrlConnectionHttp(if (url.endsWith("/v1/summaries") || url.endsWith("/v1/recaps") || url.endsWith("/v1/cumulative-recaps")) 240_000 else 15_000)
-        if (body == null) client.getWithHeaders(url, headers) else client.post(url, headers, body)
-    },
+    private val http: TranscriberHttp = booksSummaryHttp(),
     private val pause: () -> Unit = { Thread.sleep(4000) },
     private val clock: () -> Long = System::nanoTime,
 ) {
