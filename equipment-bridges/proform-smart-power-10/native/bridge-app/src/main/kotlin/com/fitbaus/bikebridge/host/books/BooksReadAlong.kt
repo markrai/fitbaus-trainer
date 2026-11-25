@@ -249,10 +249,11 @@ internal class BooksReadAlong(
         summaryPanel.addView(summaryRetry, retryParams)
     }
 
-    private fun canShowSummary(): Boolean = !localMode && windows.summaryAvailable &&
+    private fun canShowSummary(): Boolean = fullscreen && !localMode && windows.summaryAvailable &&
         summarySelection() != null
 
     private fun showSummaryHelp() {
+        if (!fullscreen) return
         summaryHelp?.dismiss()
         val paired = runCatching { transcriberStore.load() }
         val reason = if (paired.isFailure) "The saved Transcriber connection could not be read. Pair it again in Transcription Models."
@@ -264,7 +265,7 @@ internal class BooksReadAlong(
 
     private fun livePosition(): Long = playbackPosition?.invoke() ?: currentState.positionMs
 
-    private fun recapContextAvailable(): Boolean = visibility == VISIBLE && !destroyed &&
+    private fun recapContextAvailable(): Boolean = fullscreen && visibility == VISIBLE && !destroyed &&
         !currentState.failed && currentState.session != null && request != null &&
         !localMode && windows.revision != null
 
@@ -279,14 +280,17 @@ internal class BooksReadAlong(
                 currentState.seekGeneration, livePosition())
 
     private fun updateSummaryChrome() {
-        val showing = summarySection != null || recapSelection != null
-        val discoverable = visibility == VISIBLE && request != null && !destroyed && !currentState.failed
-        summaryPanel.visibility = if (showing) VISIBLE else GONE
-        summaryToggle.visibility = if (showing || discoverable) VISIBLE else GONE
         val recentAvailable = canShowRecap()
-        recapToggle.visibility = if (!showing && recentAvailable) VISIBLE else GONE
-        bookRecapToggle.visibility = if (!showing && canShowBookRecap()) VISIBLE else GONE
-        actions.visibility = if (showing || discoverable || fullscreenButton.visibility == VISIBLE) VISIBLE else GONE
+        val chrome = BooksPlayerPresentation.summaryChrome(
+            fullscreen, visibility == VISIBLE && request != null && !destroyed && !currentState.failed,
+            summarySection != null || recapSelection != null, recentAvailable, canShowBookRecap())
+        val showing = chrome.panel
+        summaryPanel.visibility = if (showing) VISIBLE else GONE
+        summaryToggle.visibility = if (chrome.summary) VISIBLE else GONE
+        recapToggle.visibility = if (chrome.recap) VISIBLE else GONE
+        bookRecapToggle.visibility = if (chrome.bookRecap) VISIBLE else GONE
+        actions.visibility = if (chrome.summary || chrome.recap || chrome.bookRecap ||
+            fullscreenButton.visibility == VISIBLE) VISIBLE else GONE
         if (summaryState is BooksSummaryState.MissingCoverage) {
             summaryRetry.visibility = if (recentAvailable) VISIBLE else GONE
         }
@@ -419,7 +423,7 @@ internal class BooksReadAlong(
             clearSummaryPanel()
             return
         }
-        if (summarySection == null && recapSelection == null) return
+        if (!fullscreen || (summarySection == null && recapSelection == null)) return
         summaryState = state
         val presentation = BooksSummaryPresentation.resolve(state, recap = recapSelection != null,
             cumulative = recapSelection?.cumulative == true)
@@ -469,6 +473,7 @@ internal class BooksReadAlong(
     }
 
     fun requestCurrentSummary(retryTranscript: Boolean = false, onState: (BooksSummaryState) -> Unit): Boolean {
+        if (!canShowSummary()) return false
         val selection = summarySelection() ?: return false
         val connection = books ?: return false
         cancelSummary()

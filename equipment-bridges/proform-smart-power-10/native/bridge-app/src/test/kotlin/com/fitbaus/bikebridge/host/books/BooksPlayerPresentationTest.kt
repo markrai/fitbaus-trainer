@@ -24,6 +24,32 @@ class BooksPlayerPresentationTest {
     }
 
     @Test
+    fun allSummaryActionsAndPanelAreHiddenOutsideFullscreen() {
+        for (discoverable in listOf(false, true)) {
+            for (showing in listOf(false, true)) {
+                for (recent in listOf(false, true)) {
+                    for (book in listOf(false, true)) {
+                        assertEquals(BooksSummaryChrome(false, false, false, false),
+                            BooksPlayerPresentation.summaryChrome(false, discoverable, showing, recent, book))
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun fullscreenPreservesDiscoveryCapabilitiesAndReturnToNarration() {
+        assertEquals(BooksSummaryChrome(false, true, false, false),
+            BooksPlayerPresentation.summaryChrome(true, true, false, false, false))
+        assertEquals(BooksSummaryChrome(false, true, true, true),
+            BooksPlayerPresentation.summaryChrome(true, true, false, true, true))
+        assertEquals(BooksSummaryChrome(true, true, false, false),
+            BooksPlayerPresentation.summaryChrome(true, true, true, true, true))
+        assertEquals(BooksSummaryChrome(false, false, false, false),
+            BooksPlayerPresentation.summaryChrome(true, false, false, false, false))
+    }
+
+    @Test
     fun summaryHelpExplainsUnavailablePrerequisites() {
         assertTrue(BooksPlayerPresentation.summaryUnavailable(false, false, false, false).contains("Pair"))
         assertTrue(BooksPlayerPresentation.summaryUnavailable(true, true, false, false).contains("local"))
