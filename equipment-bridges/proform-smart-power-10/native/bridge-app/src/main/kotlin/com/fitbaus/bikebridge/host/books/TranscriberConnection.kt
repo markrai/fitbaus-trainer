@@ -29,10 +29,20 @@ internal class TranscriberConnection(val address: String, val token: String) {
             json.getBoolean("transcription") && json.getBoolean("engine_ready") && configured, window,
             json.optString("source_url", "").takeIf { it.isNotBlank() && !json.isNull("source_url") },
             SummaryProviderCapability.parse(json.optJSONObject("summary_provider")), json.opt("summary_api") == true,
-            json.opt("section_plan_api") == true, json.opt("recap_api") == true)
+            json.opt("section_plan_api") == true, json.opt("recap_api") == true,
+            cumulativeRecapLimit(json))
     }
 
     companion object {
+        const val MAX_CUMULATIVE_RECAP_MS = 86_400_000L
+
+        private fun cumulativeRecapLimit(json: JSONObject): Long? {
+            if (json.opt("cumulative_recap_api") != true) return null
+            val limit = json.opt("cumulative_recap_max_position_ms")
+            if (limit !is Int && limit !is Long) return null
+            return (limit as Number).toLong().takeIf { it in 1..MAX_CUMULATIVE_RECAP_MS }
+        }
+
         fun normalizeCode(value: String): String {
             val code = value.trim().uppercase(Locale.US)
             require(code.matches(Regex("[A-HJ-NP-Z2-9]{4}-?[A-HJ-NP-Z2-9]{4}")))
@@ -68,6 +78,7 @@ internal data class TranscriberCapabilities(
     val summaryApi: Boolean = false,
     val sectionPlanApi: Boolean = false,
     val recapApi: Boolean = false,
+    val cumulativeRecapMaxPositionMs: Long? = null,
 )
 
 internal data class SummaryProviderCapability(val model: String) {

@@ -27,14 +27,16 @@ internal data class BooksRecapSelection(
     val positionMs: Long,
     val expectedRevision: String,
     val seekGeneration: Long,
+    val cumulative: Boolean = false,
 ) {
     init {
         require(itemId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
         require(positionMs in 0..session.durationMs)
+        require(!cumulative || positionMs <= TranscriberConnection.MAX_CUMULATIVE_RECAP_MS)
         require(expectedRevision.matches(Regex("[0-9a-f]{64}")))
     }
 
-    val startMs: Long get() = maxOf(0L, positionMs - BooksSectionResolver.MAX_SECTION_MS)
+    val startMs: Long get() = if (cumulative) 0L else maxOf(0L, positionMs - BooksSectionResolver.MAX_SECTION_MS)
 
     fun matches(item: String?, playback: BooksPlaybackSession?, revision: String?, seek: Long, position: Long): Boolean =
         itemId == item && session === playback && expectedRevision == revision &&
@@ -90,6 +92,8 @@ internal sealed class BooksSummaryState {
     open val revision: String? get() = null
     object Preparing : BooksSummaryState()
     data class Pending(override val revision: String, val windowStarts: List<Long>) : BooksSummaryState()
+    data class Reducing(override val revision: String, val completedNodes: Int, val totalNodes: Int) : BooksSummaryState()
+    data class MissingCoverage(override val revision: String, val missingWindowCount: Int) : BooksSummaryState()
     data class Ready(
         override val revision: String,
         val summary: String,
@@ -107,7 +111,7 @@ internal class RemoteBooksSummary(
     private val transcriber: TranscriberConnection,
     private val books: BooksConnection,
     private val http: TranscriberHttp = TranscriberHttp { url, headers, body ->
-        val client = BooksUrlConnectionHttp(if (url.endsWith("/v1/summaries") || url.endsWith("/v1/recaps")) 240_000 else 15_000)
+        val client = BooksUrlConnectionHttp(if (url.endsWith("/v1/summaries") || url.endsWith("/v1/recaps") || url.endsWith("/v1/cumulative-recaps")) 240_000 else 15_000)
         if (body == null) client.getWithHeaders(url, headers) else client.post(url, headers, body)
     },
     private val pause: () -> Unit = { Thread.sleep(4000) },
@@ -120,22 +124,41 @@ internal class RemoteBooksSummary(
     fun load(selection: BooksSummarySelection, retryTranscript: Boolean = false,
              onPending: (BooksSummaryState.Pending) -> Unit = {}): BooksSummaryState =
         loadInterval(selection.itemId, selection.session, selection.expectedRevision,
-            selection.section.startMs, selection.section.endMs, false, retryTranscript, onPending)
+            selection.section.startMs, selection.section.endMs, false, false, retryTranscript) {
+            onPending(it as BooksSummaryState.Pending)
+        }
 
     fun loadRecap(selection: BooksRecapSelection, retryTranscript: Boolean = false,
-                  onPending: (BooksSummaryState.Pending) -> Unit = {}): BooksSummaryState =
-        loadInterval(selection.itemId, selection.session, selection.expectedRevision,
-            selection.startMs, selection.positionMs, true, retryTranscript, onPending)
+                  onPending: (BooksSummaryState.Pending) -> Unit = {}): BooksSummaryState {
+        require(!selection.cumulative)
+        return loadInterval(selection.itemId, selection.session, selection.expectedRevision,
+            selection.startMs, selection.positionMs, true, false, retryTranscript) {
+            onPending(it as BooksSummaryState.Pending)
+        }
+    }
+
+    fun loadBookRecap(selection: BooksRecapSelection,
+                      onProgress: (BooksSummaryState.Reducing) -> Unit = {}): BooksSummaryState {
+        require(selection.cumulative)
+        return loadInterval(selection.itemId, selection.session, selection.expectedRevision,
+            0L, selection.positionMs, true, true, false) {
+            onProgress(it as BooksSummaryState.Reducing)
+        }
+    }
 
     private fun loadInterval(itemId: String, session: BooksPlaybackSession, expectedRevision: String?,
-                             startMs: Long, endMs: Long, recap: Boolean, retryTranscript: Boolean,
-                             onPending: (BooksSummaryState.Pending) -> Unit): BooksSummaryState {
-        val deadline = clock() + 300_000_000_000L
+                             startMs: Long, endMs: Long, recap: Boolean, cumulative: Boolean, retryTranscript: Boolean,
+                             onPending: (BooksSummaryState) -> Unit): BooksSummaryState {
+        val deadline = clock() + if (cumulative) 1_800_000_000_000L else 300_000_000_000L
+        val attempts = if (cumulative) 300 else 76
         checkCancelled()
-        val caps = capabilities(recap)
+        val caps = capabilities(recap, cumulative)
+        if (cumulative && endMs > (caps.cumulativeRecapMaxPositionMs ?: 0L)) {
+            throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
+        }
         val sourceId = caps.sourceId ?: throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
         val model = caps.summaryProvider?.model ?: throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
-        val manifest = json(request("/v1/items/$itemId/manifest", null, sourceId, recap), 200)
+        val manifest = json(request("/v1/items/$itemId/manifest", null, sourceId, recap, cumulative), 200)
         require(manifest.getString("source_id") == sourceId && manifest.getString("item_id") == itemId)
         val revision = manifest.getString("audio_revision")
         require(DIGEST.matches(revision))
@@ -157,8 +180,8 @@ internal class RemoteBooksSummary(
             require(abs(offset - local.offsetMs) <= 1000)
             require(abs(trackDuration - local.durationMs) <= 1000)
         }
-        val path = if (recap) "/v1/recaps" else "/v1/summaries"
-        val schema = if (recap) "fitbaus.recap/v1" else "fitbaus.summary/v1"
+        val path = if (cumulative) "/v1/cumulative-recaps" else if (recap) "/v1/recaps" else "/v1/summaries"
+        val schema = if (cumulative) "fitbaus.cumulative-recap/v1" else if (recap) "fitbaus.recap/v1" else "fitbaus.summary/v1"
         val body = JSONObject().put("source_id", sourceId).put("item_id", itemId).put("audio_revision", revision)
         if (recap) body.put("position_ms", endMs) else body.put("start_ms", startMs).put("end_ms", endMs)
         val required = if (startMs == endMs) emptyList() else {
@@ -166,26 +189,56 @@ internal class RemoteBooksSummary(
             (startMs / window * window..(endMs - 1) / window * window step window).toList()
         }
         var retry = retryTranscript
-        repeat(76) { attempt ->
+        repeat(attempts) { attempt ->
             checkCancelled()
             if (clock() - deadline >= 0) throw BooksSummaryException(BooksSummaryFailure.TIMEOUT)
-            val response = request(path, body.put("retry", retry).toString(), sourceId, recap)
+            if (!cumulative) body.put("retry", retry)
+            val response = request(path, body.toString(), sourceId, recap, cumulative)
             retry = false
             checkCancelled()
-            val result = json(response, 200, 202)
+            val result = if (cumulative && response.status == 409 &&
+                runCatching { JSONObject(response.body).opt("state") == "missing_transcript" }.getOrDefault(false)) {
+                JSONObject(response.body)
+            } else json(response, 200, 202)
             require(result.opt("schema") == schema && result.opt("source_id") == sourceId &&
                 result.opt("item_id") == itemId && result.opt("audio_revision") == revision &&
                 integer(result, "start_ms") == startMs && integer(result, "end_ms") == endMs)
             if (recap) require(integer(result, "position_ms") == endMs)
+            if (cumulative) {
+                require(result.opt("algorithm") == "cumulative-v1")
+                if (response.status == 409) {
+                    require(!result.has("summary"))
+                    val count = integer(result, "missing_window_count")
+                    require(count in 1L..required.size.toLong())
+                    val rows = result.getJSONArray("missing_windows")
+                    require(rows.length() == minOf(16L, count).toInt())
+                    val starts = (0 until rows.length()).map { strictInteger(rows.get(it)) }
+                    require(starts == starts.distinct().sorted() && starts.all { it in required })
+                    return BooksSummaryState.MissingCoverage(revision, count.toInt())
+                }
+                require(result.opt("model") == model && result.opt("prompt_version") == "cumulative-v1")
+                require(DIGEST.matches(result.opt("transcript_digest") as? String ?: ""))
+                val total = integer(result, "total_nodes")
+                val completed = integer(result, "completed_nodes")
+                require(total == cumulativeNodeCount(endMs).toLong() && completed in 0L..total)
+                if (result.opt("state") == "pending_summary") {
+                    require(response.status == 202 && completed in 1L until total && !result.has("summary"))
+                    onPending(BooksSummaryState.Reducing(revision, completed.toInt(), total.toInt()))
+                    if (attempt == attempts - 1 || clock() - deadline >= 0) throw BooksSummaryException(BooksSummaryFailure.TIMEOUT)
+                    pause()
+                    return@repeat
+                }
+                require(response.status == 200 && completed == total)
+            }
             when (result.opt("state")) {
                 "pending_transcript" -> {
-                    require(response.status == 202)
+                    require(!cumulative && response.status == 202)
                     val rows = result.getJSONArray("pending_windows")
                     require(rows.length() in 1..required.size)
                     val starts = (0 until rows.length()).map { index -> strictInteger(rows.get(index)) }
                     require(starts == starts.distinct().sorted() && starts.all { it in required })
                     onPending(BooksSummaryState.Pending(revision, starts))
-                    if (attempt == 75 || clock() - deadline >= 0) throw BooksSummaryException(BooksSummaryFailure.TIMEOUT)
+                    if (attempt == attempts - 1 || clock() - deadline >= 0) throw BooksSummaryException(BooksSummaryFailure.TIMEOUT)
                     pause()
                 }
                 "ready", "empty" -> {
@@ -193,7 +246,7 @@ internal class RemoteBooksSummary(
                     val prompt = result.opt("prompt_version") as? String ?: error("Invalid prompt version")
                     val digest = result.opt("transcript_digest") as? String ?: error("Invalid transcript digest")
                     require(PROMPT.matches(prompt) && DIGEST.matches(digest))
-                    if (recap) require(prompt == "recap-v1")
+                    if (recap && !cumulative) require(prompt == "recap-v1")
                     if (result.opt("state") == "empty") {
                         require(result.has("summary") && result.isNull("summary"))
                         return BooksSummaryState.Empty(revision)
@@ -201,6 +254,8 @@ internal class RemoteBooksSummary(
                     require(startMs < endMs)
                     val summary = result.opt("summary") as? String ?: error("Invalid summary")
                     require(summary.isNotBlank() && summary.codePointCount(0, summary.length) <= 8000)
+                    if (cumulative) require(summary.toByteArray(Charsets.UTF_8).size <= 12 * 1024)
+                    if (cumulative) require(result.opt("cache_hit") is Boolean)
                     val cacheHit = if (result.has("cache_hit")) {
                         require(result.opt("cache_hit") is Boolean)
                         result.getBoolean("cache_hit")
@@ -213,7 +268,17 @@ internal class RemoteBooksSummary(
         throw BooksSummaryException(BooksSummaryFailure.TIMEOUT)
     }
 
-    private fun capabilities(recap: Boolean): TranscriberCapabilities {
+    private fun cumulativeNodeCount(positionMs: Long): Int {
+        var level = ((positionMs + BooksSectionResolver.MAX_SECTION_MS - 1) / BooksSectionResolver.MAX_SECTION_MS).toInt()
+        var total = level
+        while (level > 1) {
+            total += level / 4 + if (level % 4 >= 2) 1 else 0
+            level = (level + 3) / 4
+        }
+        return total
+    }
+
+    private fun capabilities(recap: Boolean, cumulative: Boolean): TranscriberCapabilities {
         checkCancelled()
         val caps = transcriber.test(BooksHttp { url, token ->
             val response = try {
@@ -224,13 +289,14 @@ internal class RemoteBooksSummary(
             if (response.status == 401) throw BooksSummaryException(BooksSummaryFailure.AUTHORIZATION)
             response
         })
-        if (caps.sourceUrl?.trimEnd('/') != books.address.trimEnd('/') || !(if (recap) caps.recapApi else caps.summaryApi) || caps.summaryProvider == null) {
+        val available = if (cumulative) caps.cumulativeRecapMaxPositionMs != null else if (recap) caps.recapApi else caps.summaryApi
+        if (caps.sourceUrl?.trimEnd('/') != books.address.trimEnd('/') || !available || caps.summaryProvider == null) {
             throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
         }
         return caps
     }
 
-    private fun request(path: String, body: String?, sourceId: String, recap: Boolean): BooksHttpResponse {
+    private fun request(path: String, body: String?, sourceId: String, recap: Boolean, cumulative: Boolean): BooksHttpResponse {
         try {
             return books.session.authorized { sourceToken ->
                 checkCancelled()
@@ -238,7 +304,7 @@ internal class RemoteBooksSummary(
                     mapOf("Authorization" to "Bearer ${transcriber.token}", "X-Audiobookshelf-Token" to sourceToken), body)
                 checkCancelled()
                 if (response.status == 401) {
-                    val caps = capabilities(recap)
+                    val caps = capabilities(recap, cumulative)
                     if (caps.sourceId != sourceId) throw BooksSummaryException(BooksSummaryFailure.AUTHORIZATION)
                     throw BooksHttpFailure(401)
                 }
