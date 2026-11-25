@@ -13,6 +13,7 @@ internal data class RemoteBooksWindow(
     val summaryAvailable: Boolean = false,
     val sectionPlanAvailable: Boolean = false,
     val recapAvailable: Boolean = false,
+    val cumulativeRecapMaxPositionMs: Long? = null,
 )
 
 internal fun interface TranscriberHttp {
@@ -113,7 +114,8 @@ internal class RemoteBooksTranscript(
         }
         return RemoteBooksWindow(start, end, revision, BooksTranscript(cues, allowEmpty = true),
             capabilities.summaryApi && capabilities.summaryProvider != null, capabilities.sectionPlanApi,
-            capabilities.recapApi && capabilities.summaryProvider != null)
+            capabilities.recapApi && capabilities.summaryProvider != null,
+            capabilities.cumulativeRecapMaxPositionMs.takeIf { capabilities.summaryProvider != null })
     }
 
     private fun requireMatchingSource(sourceUrl: String?) {
