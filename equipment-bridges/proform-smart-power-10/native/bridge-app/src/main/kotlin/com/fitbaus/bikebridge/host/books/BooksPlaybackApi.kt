@@ -2,12 +2,18 @@
 
 package com.fitbaus.bikebridge.host.books
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import kotlin.math.roundToLong
 
 internal data class BooksAudioTrack(val url: String, val offsetMs: Long, val durationMs: Long)
-internal data class BooksChapter(val title: String, val startMs: Long)
+internal data class BooksChapter(
+    val title: String,
+    val startMs: Long,
+    val endMs: Long,
+    val sourceId: Int?,
+)
 internal data class BooksTrackPosition(val index: Int, val positionMs: Long)
 
 internal class BooksPlaybackSession(
@@ -30,7 +36,10 @@ internal class BooksPlaybackSession(
         return track.offsetMs + localMs.coerceIn(0, track.durationMs)
     }
 
-    fun chapterAt(positionMs: Long): Int = chapters.indexOfLast { it.startMs <= positionMs }
+    fun chapterAt(positionMs: Long): Int {
+        val index = chapters.indexOfLast { it.startMs <= positionMs }
+        return if (index >= 0 && positionMs < chapters[index].endMs) index else -1
+    }
 }
 
 internal class BooksPlaybackApi(
@@ -85,14 +94,43 @@ internal class BooksPlaybackApi(
                 b.offsetMs > a.offsetMs && kotlin.math.abs(b.offsetMs - a.offsetMs - a.durationMs) <= 1000
             })
             val duration = tracks.last().offsetMs + tracks.last().durationMs
-            val chapterRows = json.optJSONArray("chapters")
-            val chapters = if (chapterRows == null) emptyList() else (0 until minOf(chapterRows.length(), 2000)).mapNotNull { index ->
-                val row = chapterRows.optJSONObject(index) ?: return@mapNotNull null
-                val start = row.optDouble("start", -1.0)
-                if (!start.isFinite() || start < 0 || start > duration / 1000.0) return@mapNotNull null
-                BooksChapter(row.optString("title", "Chapter ${index + 1}").take(200), ms(start))
-            }.sortedBy { it.startMs }.distinctBy { it.startMs }
+            val chapters = normalizeChapters(json.optJSONArray("chapters"), duration)
             return BooksPlaybackSession(id, tracks, chapters, ms(json.optDouble("currentTime", 0.0)).coerceAtMost(duration))
+        }
+
+        private data class ChapterCandidate(
+            val title: String,
+            val startMs: Long,
+            val endMs: Long?,
+            val sourceId: Int?,
+        )
+
+        private fun normalizeChapters(rows: JSONArray?, durationMs: Long): List<BooksChapter> {
+            if (rows == null) return emptyList()
+            val durationSeconds = durationMs / 1000.0
+            val candidates = (0 until minOf(rows.length(), 2000)).mapNotNull { index ->
+                val row = rows.optJSONObject(index) ?: return@mapNotNull null
+                val start = row.optDouble("start", -1.0)
+                if (!start.isFinite() || start < 0 || start >= durationSeconds) return@mapNotNull null
+                val startMs = (start * 1000).roundToLong()
+                if (startMs >= durationMs) return@mapNotNull null
+                val endMs = if (row.isNull("end")) null else {
+                    val end = row.optDouble("end", -1.0)
+                    if (!end.isFinite() || end <= start) return@mapNotNull null
+                    val bounded = (minOf(end, durationSeconds) * 1000).roundToLong()
+                    if (bounded <= startMs) return@mapNotNull null
+                    bounded
+                }
+                val title = (row.opt("title") as? String)?.trim()?.take(200)?.takeIf { it.isNotBlank() }
+                    ?: "Chapter ${index + 1}"
+                val sourceId = row.optInt("id", -1).takeIf { it >= 0 }
+                ChapterCandidate(title, startMs, endMs, sourceId)
+            }.sortedBy { it.startMs }.distinctBy { it.startMs }
+
+            return candidates.mapIndexed { index, chapter ->
+                val nextStart = candidates.getOrNull(index + 1)?.startMs ?: durationMs
+                BooksChapter(chapter.title, chapter.startMs, minOf(chapter.endMs ?: nextStart, nextStart), chapter.sourceId)
+            }
         }
 
         private fun ms(seconds: Double): Long {
