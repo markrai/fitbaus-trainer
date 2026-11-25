@@ -2,6 +2,8 @@ package com.fitbaus.bikebridge.host.books
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
+import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -41,6 +43,52 @@ class TranscriberConnectionTest {
         assertTrue(capabilities.ready)
         assertEquals("home-library", capabilities.sourceId)
         assertEquals(300000, capabilities.maxWindowMs)
+    }
+
+    @Test
+    fun summaryProviderCapabilityIsOptionalAndUsesExistingCredential() {
+        val provider = JSONObject().put("configured", true).put("protocol", "openai-chat/v1").put("model", "qwen3:14b")
+        val configured = connection.test(BooksHttp { url, sent ->
+            assertEquals("http://192.168.1.193:8765/v1/capabilities", url)
+            assertEquals(token, sent)
+            BooksHttpResponse(200, JSONObject(response).put("summary_provider", provider).toString())
+        })
+        assertEquals(SummaryProviderCapability("qwen3:14b"), configured.summaryProvider)
+        assertTrue(configured.ready)
+        val legacy = connection.test(BooksHttp { _, _ -> BooksHttpResponse(200, response) })
+        assertNull(legacy.summaryProvider)
+        assertTrue(legacy.ready)
+    }
+
+    @Test
+    fun disabledMalformedAndUnknownSummaryProvidersDoNotBreakTranscription() {
+        val valid = """{"configured":true,"protocol":"openai-chat/v1","model":"model"}"""
+        val values = listOf(
+            JSONObject.NULL,
+            true,
+            JSONObject().put("configured", false),
+            JSONObject(valid).put("configured", "true"),
+            JSONObject(valid).put("protocol", "future/v2"),
+            JSONObject(valid).put("model", "bad model"),
+            JSONObject(valid).put("model", 123),
+            JSONObject(valid).put("model", "m".repeat(161)),
+        )
+        for (value in values) {
+            val result = connection.test(BooksHttp { _, _ ->
+                BooksHttpResponse(200, JSONObject(response).put("summary_provider", value).toString())
+            })
+            assertNull(result.summaryProvider)
+            assertTrue(result.ready)
+        }
+    }
+
+    @Test
+    fun configuredSummaryProviderDoesNotImplyEngineReadiness() {
+        val body = JSONObject(response).put("engine_ready", false).put("summary_provider",
+            JSONObject().put("configured", true).put("protocol", "openai-chat/v1").put("model", "model"))
+        val result = connection.test(BooksHttp { _, _ -> BooksHttpResponse(200, body.toString()) })
+        assertFalse(result.ready)
+        assertEquals(SummaryProviderCapability("model"), result.summaryProvider)
     }
 
     @Test
