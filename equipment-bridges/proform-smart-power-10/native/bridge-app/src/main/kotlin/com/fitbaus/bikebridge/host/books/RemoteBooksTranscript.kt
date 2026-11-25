@@ -10,6 +10,7 @@ internal data class RemoteBooksWindow(
     val endMs: Long,
     val revision: String,
     val transcript: BooksTranscript,
+    val summaryAvailable: Boolean = false,
 )
 
 internal fun interface TranscriberHttp {
@@ -108,7 +109,8 @@ internal class RemoteBooksTranscript(
             require(cue.startMs >= start && cue.endMs <= end)
             cue
         }
-        return RemoteBooksWindow(start, end, revision, BooksTranscript(cues, allowEmpty = true))
+        return RemoteBooksWindow(start, end, revision, BooksTranscript(cues, allowEmpty = true),
+            capabilities.summaryApi && capabilities.summaryProvider != null)
     }
 
     private fun requireMatchingSource(sourceUrl: String?) {
