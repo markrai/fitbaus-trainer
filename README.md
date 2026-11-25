@@ -153,6 +153,8 @@ External services, such as YouTube and optional SISU synchronization, are entire
 
 ### Disclaimer
 
+FitBaus Trainer is an independent open-source project and is not affiliated with, sponsored by, or endorsed by iFIT, ProForm, Google LLC, Apple Inc., the Audiobookshelf project, or any other third-party organization. References to iFIT, ProForm, Android, Google, YouTube, Apple, iOS, Audiobookshelf, and other third-party products, platforms, or services are made solely for identification, compatibility, and interoperability purposes. All third-party trademarks remain the property of their respective owners.
+
 FitBaus is provided "as is", without warranty of any kind. It is not a medical device and is not intended to provide medical advice, diagnosis or treatment.
 
 Use of this software, including its exercise equipment integration, automatic resistance control and interactive games, is entirely at your own risk.
