@@ -130,7 +130,7 @@ internal fun interface BooksAuthHttp {
     fun post(url: String, headers: Map<String, String>, body: String): BooksHttpResponse
 }
 
-internal class BooksUrlConnectionHttp : BooksHttp, BooksAuthHttp {
+internal class BooksUrlConnectionHttp(private val readTimeoutMs: Int = 15_000) : BooksHttp, BooksAuthHttp {
     override fun get(url: String, token: String): BooksHttpResponse =
         request(url, "GET", mapOf("Authorization" to "Bearer $token"), null)
 
@@ -145,7 +145,7 @@ internal class BooksUrlConnectionHttp : BooksHttp, BooksAuthHttp {
         try {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 10_000
-            connection.readTimeout = 15_000
+            connection.readTimeout = readTimeoutMs
             connection.requestMethod = method
             connection.setRequestProperty("Accept", "application/json")
             for ((name, value) in headers) connection.setRequestProperty(name, value)

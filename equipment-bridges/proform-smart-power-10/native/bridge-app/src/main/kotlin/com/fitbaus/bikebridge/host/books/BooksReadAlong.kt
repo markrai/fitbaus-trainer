@@ -21,6 +21,9 @@ import android.widget.SeekBar
 import android.widget.TextView
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 internal class BooksReadAlong(
     context: Context,
@@ -35,6 +38,10 @@ internal class BooksReadAlong(
 
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
+    private val summaryWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1))
+    private val summaryScope = BooksSummaryScope()
+    private var summaryFuture: Future<*>? = null
+    private var summaryCallback: ((BooksSummaryState) -> Unit)? = null
     private val narration = label("", 36f)
     private val details = label("", 14f)
     private val scroll = ScrollView(context)
@@ -124,6 +131,7 @@ internal class BooksReadAlong(
     fun setFullscreen(value: Boolean) {
         if (fullscreen == value) return
         fullscreen = value
+        if (!value) cancelSummary()
         fullscreenButton.expanded = value
         fullscreenButton.contentDescription = if (value) "Exit fullscreen narration" else "Enter fullscreen narration"
         fullscreenButton.invalidate()
@@ -150,6 +158,54 @@ internal class BooksReadAlong(
         return if (localMode) BooksSectionResolver.local(section, transcript) else windows.sectionTranscript(section)
     }
 
+    private fun summarySelection(): BooksSummarySelection? {
+        if (visibility != VISIBLE || destroyed || currentState.failed) return null
+        val key = request ?: return null
+        val session = currentState.session ?: return null
+        val section = BooksSectionResolver.at(session, currentState.positionMs) ?: return null
+        return BooksSummarySelection(key.itemId, session, section, windows.revision)
+    }
+
+    fun requestCurrentSummary(retryTranscript: Boolean = false, onState: (BooksSummaryState) -> Unit): Boolean {
+        val selection = summarySelection() ?: return false
+        val connection = books ?: return false
+        cancelSummary()
+        val ticket = summaryScope.begin(selection)
+        summaryCallback = onState
+        onState(BooksSummaryState.Preparing)
+        if (!summaryScope.accepts(ticket, summarySelection())) return false
+        fun deliver(state: BooksSummaryState) {
+            main.post {
+                if (!summaryScope.accepts(ticket, summarySelection(), state.revision)) return@post
+                summaryCallback?.invoke(state)
+            }
+        }
+        summaryFuture = summaryWorker.submit {
+            try {
+                val paired = transcriberStore.load() ?: throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
+                val result = RemoteBooksSummary(paired, connection).load(selection, retryTranscript) { deliver(it) }
+                deliver(result)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (error: BooksSummaryException) {
+                deliver(BooksSummaryState.Failed(error.failure))
+            } catch (_: Exception) {
+                if (!Thread.currentThread().isInterrupted) deliver(BooksSummaryState.Failed(BooksSummaryFailure.NETWORK_OR_RESPONSE))
+            }
+        }
+        return true
+    }
+
+    fun cancelSummary() {
+        summaryScope.cancel()
+        summaryFuture?.cancel(true)
+        summaryFuture = null
+        summaryWorker.purge()
+        val callback = summaryCallback
+        summaryCallback = null
+        callback?.invoke(BooksSummaryState.Cancelled)
+    }
+
     fun open(next: BooksTranscriptRequest, state: BooksPlayerState, connection: BooksConnection) {
         if (destroyed) return
         close()
@@ -161,6 +217,7 @@ internal class BooksReadAlong(
     }
 
     fun close() {
+        cancelSummary()
         generation++
         pending?.cancel(true)
         pending = null
@@ -186,11 +243,13 @@ internal class BooksReadAlong(
         close()
         destroyed = true
         worker.shutdownNow()
+        summaryWorker.shutdownNow()
     }
 
     fun render(state: BooksPlayerState) {
         if (visibility != VISIBLE) return
         currentState = state
+        if (summaryScope.active && !summaryScope.matches(summarySelection())) cancelSummary()
         val ready = state.session != null && !state.failed
         val session = state.session
         if (ready && !localMode) {
