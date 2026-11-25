@@ -87,6 +87,25 @@ class ReadAlongWindowBufferTest {
     }
 
     @Test
+    fun latestRemoteCapabilityIsRetainedAcrossMissingWindowsAndClearedOnClose() {
+        val buffer = ReadAlongWindowBuffer()
+        assertFalse(buffer.summaryAvailable)
+        buffer.begin(ReadAlongWindowRequest(0, false))
+        buffer.complete(window(0).copy(summaryAvailable = true), 0, duration)
+        assertTrue(buffer.summaryAvailable)
+        buffer.plan(600_001, duration, true)
+        assertTrue(buffer.summaryAvailable)
+        buffer.begin(ReadAlongWindowRequest(600_000, false))
+        buffer.complete(window(600_000), 600_001, duration)
+        assertFalse(buffer.summaryAvailable)
+        buffer.begin(ReadAlongWindowRequest(900_000, false))
+        buffer.complete(window(900_000).copy(summaryAvailable = true), 900_001, duration)
+        assertTrue(buffer.summaryAvailable)
+        buffer.clear()
+        assertFalse(buffer.summaryAvailable)
+    }
+
+    @Test
     fun pausedAndFinalWindowsDoNotPrefetchAndClearResetsIdentity() {
         val buffer = ReadAlongWindowBuffer()
         ready(buffer, 0)
