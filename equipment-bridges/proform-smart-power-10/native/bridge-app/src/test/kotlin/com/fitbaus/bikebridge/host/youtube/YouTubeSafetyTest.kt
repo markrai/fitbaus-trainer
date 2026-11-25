@@ -64,6 +64,8 @@ class YouTubeSafetyTest {
         assertEquals(
             listOf(
                 "android.permission.INTERNET",
+                "android.permission.CHANGE_WIFI_MULTICAST_STATE",
+                "android.permission.ACCESS_WIFI_STATE",
                 "android.permission.RECORD_AUDIO",
                 "android.permission.RECEIVE_BOOT_COMPLETED",
                 "android.permission.FOREGROUND_SERVICE",
