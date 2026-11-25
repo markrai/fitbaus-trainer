@@ -16,7 +16,7 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
@@ -37,6 +37,7 @@
         <activity-alias
             android:name="crc64c9475ad0263b7bf7.MainActivity"
             android:exported="true"
+            android:icon="@mipmap/ic_launcher"
             android:label="@string/app_name"
             android:targetActivity=".NativeBridgeActivity">
             <intent-filter>
