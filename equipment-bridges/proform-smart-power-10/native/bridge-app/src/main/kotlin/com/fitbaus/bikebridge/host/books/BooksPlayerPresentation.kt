@@ -1,6 +1,22 @@
 package com.fitbaus.bikebridge.host.books
 
+internal data class BooksSummaryChrome(
+    val panel: Boolean,
+    val summary: Boolean,
+    val recap: Boolean,
+    val bookRecap: Boolean,
+)
+
 internal object BooksPlayerPresentation {
+    fun summaryChrome(fullscreen: Boolean, discoverable: Boolean, showing: Boolean,
+                      recentAvailable: Boolean, bookAvailable: Boolean): BooksSummaryChrome =
+        BooksSummaryChrome(
+            panel = fullscreen && showing,
+            summary = fullscreen && (showing || discoverable),
+            recap = fullscreen && !showing && recentAvailable,
+            bookRecap = fullscreen && !showing && bookAvailable,
+        )
+
     fun status(value: String): String {
         if (value == "Playing" || value == "Paused" || value == "Finished") return ""
         if (value.startsWith("Playing · ") || value.startsWith("Paused · ") || value.startsWith("Finished · ")) {
