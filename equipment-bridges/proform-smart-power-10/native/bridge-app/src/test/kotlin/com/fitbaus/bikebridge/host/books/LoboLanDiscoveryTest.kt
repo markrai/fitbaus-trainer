@@ -16,6 +16,15 @@ class LoboLanDiscoveryTest {
     }
 
     @Test
+    fun acceptsLegacyAndroidResolvedServiceTypes() {
+        for (type in listOf("._lobo._tcp", "._lobo._tcp.", "_lobo._tcp.local.", "._LOBO._TCP.LOCAL.")) {
+            val device = LoboLanDevice.fromRecord("LOBO-17AE84", type, "192.168.1.200", 7869, "1", "/v1")
+            assertEquals("https://192.168.1.200:7869/v1", device?.endpoint, type)
+        }
+        assertNull(LoboLanDevice.fromRecord("LOBO-17AE84", "._lobo._udp", "192.168.1.200", 7869, "1", "/v1"))
+    }
+
+    @Test
     fun rejectsWrongServiceAndIncompatibleEndpoints() {
         fun record(name: String = "LOBO-AFA1AE", type: String = "_lobo._tcp.", ip: String = "172.16.0.2",
                    port: Int = 7869, proto: String? = "1", path: String? = "/v1") =

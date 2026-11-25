@@ -163,22 +163,7 @@ internal class SummaryProviderDialog(
             visibility = View.GONE
         }
         form.addView(loboPanel, LinearLayout.LayoutParams(-1, -2))
-        val discoveryHeader = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        loboPanel.addView(discoveryHeader, LinearLayout.LayoutParams(-1, -2))
-        val lanStatus = TextView(context).apply {
-            textSize = 15f
-            setTextColor(MUTED)
-        }
-        discoveryHeader.addView(lanStatus, LinearLayout.LayoutParams(0, -2, 1f))
-        val refreshLan = Button(context).apply {
-            text = "SCAN"
-            setTextColor(Color.WHITE)
-            background = surface(FIELD, BORDER)
-        }
-        discoveryHeader.addView(refreshLan, LinearLayout.LayoutParams(dp(100), dp(44)))
+        val lanStatus = label("Finding LOBO devices…", 15f, MUTED, loboPanel)
         val lanDevices = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         loboPanel.addView(lanDevices, LinearLayout.LayoutParams(-1, -2))
         val manualAddress = button("ENTER ADDRESS MANUALLY", parent = loboPanel) {}
@@ -293,7 +278,7 @@ internal class SummaryProviderDialog(
             lanStatus.text = when {
                 scanningLan -> "Finding LOBO devices…"
                 failedLan -> "Discovery unavailable"
-                lastLanDevices.isEmpty() -> "No LOBO devices found"
+                lastLanDevices.isEmpty() -> "No LOBO devices found. Check the LAN or enter the address manually."
                 else -> "${lastLanDevices.size} LOBO device(s) found · Unverified"
             }
             lastLanDevices.forEach { device ->
@@ -317,7 +302,6 @@ internal class SummaryProviderDialog(
                         if (chosen) ACCENT else BORDER, if (chosen) 2 else 1)
                 }
             }
-            refreshLan.isEnabled = pending == null && !scanningLan
         }
 
         fun scanLan() {
@@ -446,7 +430,6 @@ internal class SummaryProviderDialog(
         updateSave = {
             val idle = pending == null
             endpoint.isEnabled = idle && !usingCurrent
-            refreshLan.isEnabled = idle && !scanningLan
             discoverButton.isEnabled = idle && current != null &&
                 (selected != 1 || usingCurrent || endpoint.text.isNotBlank())
             discoverButton.alpha = if (discoverButton.isEnabled) 1f else 0.4f
@@ -486,7 +469,6 @@ internal class SummaryProviderDialog(
         currentChoice = button("USE CURRENT PROVIDER", parent = form, index = 2) { configure(-1, true) }
         reuseButton = currentChoice
         currentChoice?.visibility = if (current?.configured == true) View.VISIBLE else View.GONE
-        refreshLan.setOnClickListener { scanLan() }
         manualAddress.setOnClickListener {
             if (closed || pending != null) return@setOnClickListener
             manualLobo = !manualLobo
