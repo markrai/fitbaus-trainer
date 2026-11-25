@@ -15,6 +15,8 @@ import android.text.TextWatcher
 import android.view.View
 import android.view.Gravity
 import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
@@ -86,13 +88,19 @@ internal class SummaryProviderDialog(
     fun show(): AlertDialog {
         dialog.setOnDismissListener {
             closed = true
+            hideKeyboard()
             clearSecrets()
             api.forgetGrant()
             pending?.cancel(true)
             worker.shutdownNow()
         }
         dialog.show()
-        dialog.window?.setLayout(-1, -1)
+        dialog.window?.apply {
+            setLayout(-1, -1)
+            clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN)
+        }
         load()
         return dialog
     }
@@ -457,6 +465,7 @@ internal class SummaryProviderDialog(
     private fun <T> request(message: String, action: () -> T, onFailure: () -> Unit = {}, success: (T) -> Unit) {
         if (closed || pending != null) return
         status.text = message
+        hideKeyboard()
         enableRows(false)
         pending = worker.submit {
             val result = runCatching(action)
@@ -500,6 +509,27 @@ internal class SummaryProviderDialog(
         else -> "Request failed. Check Transcriber connection. If Save was attempted, reopen to check the active model."
     }
 
+    private fun inputMethod(): InputMethodManager? =
+        context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+
+    private fun hideKeyboard() {
+        val focused = dialog.currentFocus as? EditText ?: return
+        focused.windowToken?.let { inputMethod()?.hideSoftInputFromWindow(it, 0) }
+        focused.clearFocus()
+    }
+
+    private fun showKeyboard(editor: EditText) {
+        if (closed || !editor.isEnabled || !editor.isShown) return
+        dialog.window?.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        if (!editor.requestFocus()) return
+        editor.post {
+            if (!closed && editor.isEnabled && editor.isShown && editor.hasFocus() && editor.hasWindowFocus()) {
+                inputMethod()?.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+    }
+
     private fun clearSecrets() { secretFields.forEach { it.text.clear() } }
 
     private fun resetRows() {
@@ -534,6 +564,9 @@ internal class SummaryProviderDialog(
         EditText(context).apply {
             hint = hintText
             setSingleLine(true)
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnClickListener { showKeyboard(this) }
             setTextColor(Color.WHITE)
             setHintTextColor(MUTED)
             textSize = 16f
