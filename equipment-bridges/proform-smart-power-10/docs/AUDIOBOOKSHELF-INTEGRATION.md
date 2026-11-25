@@ -44,6 +44,12 @@ Section boundaries are deterministic even when narration is not yet available, a
 
 The read-along component exposes the current section on demand. The existing three-window buffer, audio playback, prefetch schedule and UI are unchanged. Resolution does not submit jobs or start inference; later summary orchestration will need to obtain missing windows, enforce text budgets and establish transcript/model identity for caching. Semantic and sentence-aware boundary refinement is deferred to a later phase.
 
+### Summary provider discovery (Phase 3)
+
+The optional LLM provider is configured and accessed exclusively by [FitBaus Transcriber](https://github.com/markrai/fitbaus-transcriber). Trainer reads the optional `summary_provider` capability from its existing authenticated `GET /v1/capabilities` request. A configured OpenAI-compatible provider advertises its protocol and model name only. Missing, disabled, malformed or unsupported provider capabilities are treated as unavailable without affecting transcription or playback. Configured does not mean the provider is reachable or qualified.
+
+No provider credentials, URLs, extra network requests, summary controls or generation requests are introduced on the bike in this phase. Future summary requests will go through the existing paired transcriber connection, with source/item/revision authorization and section boundaries; summary execution and caching belong on the companion server.
+
 ## Read Along (local qualification)
 
 Open an audiobook. The default player automatically displays synchronized narration when a transcript is available, or the book cover while opening, waiting or unavailable. Use the text-size slider (28–52 sp); playback controls, chapter navigation and seeking stay in the same view. Missing or invalid transcripts are isolated from audio playback. Tap the fullscreen icon at the lower-right of the narration to hide the app header and player controls, retaining only the live exercise HUD at the very top above the narration. Tap the same corner to restore the regular player. The existing audio session and text size are retained; leaving the book or minimizing returns to regular mode.

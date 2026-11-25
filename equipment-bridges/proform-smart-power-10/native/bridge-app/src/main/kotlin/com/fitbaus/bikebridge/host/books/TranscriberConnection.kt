@@ -27,7 +27,8 @@ internal class TranscriberConnection(val address: String, val token: String) {
         require(window in 1..300_000)
         return TranscriberCapabilities(if (configured) source else null,
             json.getBoolean("transcription") && json.getBoolean("engine_ready") && configured, window,
-            json.optString("source_url", "").takeIf { it.isNotBlank() && !json.isNull("source_url") })
+            json.optString("source_url", "").takeIf { it.isNotBlank() && !json.isNull("source_url") },
+            SummaryProviderCapability.parse(json.optJSONObject("summary_provider")))
     }
 
     companion object {
@@ -57,4 +58,23 @@ internal class TranscriberConnection(val address: String, val token: String) {
     }
 }
 
-internal data class TranscriberCapabilities(val sourceId: String?, val ready: Boolean, val maxWindowMs: Int, val sourceUrl: String? = null)
+internal data class TranscriberCapabilities(
+    val sourceId: String?,
+    val ready: Boolean,
+    val maxWindowMs: Int,
+    val sourceUrl: String? = null,
+    val summaryProvider: SummaryProviderCapability? = null,
+)
+
+internal data class SummaryProviderCapability(val model: String) {
+    companion object {
+        private val modelPattern = Regex("[A-Za-z0-9][A-Za-z0-9._:/@-]{0,159}")
+
+        fun parse(json: JSONObject?): SummaryProviderCapability? {
+            if (json == null || json.opt("configured") != true || json.opt("protocol") != "openai-chat/v1") return null
+            val model = json.opt("model") as? String ?: return null
+            if (!modelPattern.matches(model)) return null
+            return SummaryProviderCapability(model)
+        }
+    }
+}
