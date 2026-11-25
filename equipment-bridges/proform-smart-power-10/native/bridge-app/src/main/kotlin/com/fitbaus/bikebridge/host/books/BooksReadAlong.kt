@@ -50,6 +50,21 @@ internal class BooksReadAlong(
     private val readingControls = LinearLayout(context)
     private val footer = LinearLayout(context)
     private val fullscreenButton = NarrationFullscreenButton(context)
+    private val summaryToggle = button("Summary").apply {
+        setAllCaps(false)
+        setTextColor(Color.WHITE)
+        setBackgroundColor(Color.BLACK)
+        textSize = 16f
+    }
+    private val summaryPanel = LinearLayout(context)
+    private val summaryTitle = label("Section summary", 26f)
+    private val summaryRange = label("", 16f)
+    private val summaryNotice = label("AI-generated · May reveal upcoming narration", 14f)
+    private val summaryText = label("", 26f)
+    private val summaryScroll = ScrollView(context)
+    private val summaryRetry = button("Retry summary")
+    private var summarySection: BooksSection? = null
+    private var summaryState: BooksSummaryState? = null
     private var fullscreen = false
     private var hasNarration = false
     private val readingPrefs = context.applicationContext.getSharedPreferences("fitbaus_books_read_along", Context.MODE_PRIVATE)
@@ -105,6 +120,14 @@ internal class BooksReadAlong(
         val stage = FrameLayout(context)
         stage.addView(cover, FrameLayout.LayoutParams(MATCH, MATCH))
         stage.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
+        buildSummaryPanel()
+        stage.addView(summaryPanel, FrameLayout.LayoutParams(MATCH, MATCH))
+        summaryToggle.visibility = GONE
+        summaryToggle.contentDescription = "Show current section summary; may reveal upcoming narration"
+        summaryToggle.setOnClickListener {
+            if (summarySection != null) dismissSummary() else showSummary(false)
+        }
+        stage.addView(summaryToggle, FrameLayout.LayoutParams(dp(128), dp(48), Gravity.BOTTOM or Gravity.LEFT))
         fullscreenButton.visibility = GONE
         fullscreenButton.contentDescription = "Enter fullscreen narration"
         fullscreenButton.setOnClickListener { onFullscreenRequested() }
@@ -131,7 +154,7 @@ internal class BooksReadAlong(
     fun setFullscreen(value: Boolean) {
         if (fullscreen == value) return
         fullscreen = value
-        if (!value) cancelSummary()
+        if (!value) dismissSummary()
         fullscreenButton.expanded = value
         fullscreenButton.contentDescription = if (value) "Exit fullscreen narration" else "Enter fullscreen narration"
         fullscreenButton.invalidate()
@@ -147,6 +170,97 @@ internal class BooksReadAlong(
         fullscreenButton.visibility = if (showButton) VISIBLE else GONE
         val bottom = if (showButton) dp(48) else 0
         if (scroll.paddingBottom != bottom) scroll.setPadding(0, 0, 0, bottom)
+        updateSummaryChrome()
+    }
+
+    private fun buildSummaryPanel() {
+        summaryPanel.orientation = VERTICAL
+        summaryPanel.setBackgroundColor(Color.BLACK)
+        summaryPanel.setPadding(dp(24), dp(12), dp(24), dp(56))
+        summaryPanel.visibility = GONE
+        summaryTitle.setTextColor(0xFFFFCE1B.toInt())
+        summaryTitle.gravity = Gravity.CENTER
+        summaryPanel.addView(summaryTitle, LayoutParams(MATCH, WRAP))
+        summaryRange.gravity = Gravity.CENTER
+        summaryRange.setTextColor(Color.LTGRAY)
+        summaryPanel.addView(summaryRange, LayoutParams(MATCH, WRAP))
+        summaryNotice.gravity = Gravity.CENTER
+        summaryNotice.setTextColor(Color.LTGRAY)
+        summaryNotice.setPadding(0, dp(4), 0, dp(8))
+        summaryPanel.addView(summaryNotice, LayoutParams(MATCH, WRAP))
+        summaryScroll.isFillViewport = true
+        summaryText.gravity = Gravity.CENTER_VERTICAL
+        summaryText.setPadding(dp(8), dp(8), dp(8), dp(8))
+        summaryText.setLineSpacing(dp(4).toFloat(), 1.12f)
+        summaryScroll.addView(summaryText, FrameLayout.LayoutParams(MATCH, WRAP))
+        summaryPanel.addView(summaryScroll, LayoutParams(MATCH, 0, 1f))
+        summaryRetry.setAllCaps(false)
+        summaryRetry.visibility = GONE
+        summaryRetry.setOnClickListener {
+            val failed = summaryState as? BooksSummaryState.Failed ?: return@setOnClickListener
+            if (BooksSummaryPresentation.retryable(failed.failure)) {
+                showSummary(failed.failure == BooksSummaryFailure.BOOK_CHANGED_OR_TRANSCRIPT_FAILED)
+            }
+        }
+        val retryParams = LayoutParams(WRAP, dp(48))
+        retryParams.gravity = Gravity.CENTER_HORIZONTAL
+        summaryPanel.addView(summaryRetry, retryParams)
+    }
+
+    private fun canShowSummary(): Boolean = fullscreen && !localMode && windows.summaryAvailable &&
+        summarySelection() != null
+
+    private fun updateSummaryChrome() {
+        val showing = fullscreen && summarySection != null
+        summaryPanel.visibility = if (showing) VISIBLE else GONE
+        summaryToggle.visibility = if (showing || canShowSummary()) VISIBLE else GONE
+        val toggleText = if (showing) "Read along" else "Summary"
+        if (summaryToggle.text != toggleText) {
+            summaryToggle.text = toggleText
+            summaryToggle.contentDescription = if (showing) "Return to live narration" else
+                "Show current section summary; may reveal upcoming narration"
+        }
+        cover.visibility = if (!showing && !hasNarration) VISIBLE else GONE
+        scroll.visibility = if (!showing && hasNarration) VISIBLE else GONE
+    }
+
+    private fun showSummary(retryTranscript: Boolean) {
+        if (!canShowSummary()) return
+        val section = summarySelection()?.section ?: return
+        dismissSummary()
+        summarySection = section
+        summaryRange.text = BooksSummaryPresentation.range(section)
+        presentSummary(BooksSummaryState.Preparing)
+        if (!requestCurrentSummary(retryTranscript, ::presentSummary)) dismissSummary()
+    }
+
+    private fun presentSummary(state: BooksSummaryState) {
+        if (state == BooksSummaryState.Cancelled) {
+            clearSummaryPanel()
+            return
+        }
+        if (!fullscreen || summarySection == null) return
+        summaryState = state
+        val presentation = BooksSummaryPresentation.resolve(state)
+        summaryText.text = presentation.text
+        summaryRetry.visibility = if (presentation.retry) VISIBLE else GONE
+        summaryScroll.scrollTo(0, 0)
+        updateSummaryChrome()
+    }
+
+    private fun clearSummaryPanel() {
+        summarySection = null
+        summaryState = null
+        summaryText.text = ""
+        summaryRange.text = ""
+        summaryRetry.visibility = GONE
+        summaryScroll.scrollTo(0, 0)
+        updateSummaryChrome()
+    }
+
+    private fun dismissSummary() {
+        clearSummaryPanel()
+        cancelSummary()
     }
 
     fun floatingNarration(): String? = if (visibility == VISIBLE && hasNarration) displayed else null
@@ -222,7 +336,7 @@ internal class BooksReadAlong(
     }
 
     fun close() {
-        cancelSummary()
+        dismissSummary()
         generation++
         pending?.cancel(true)
         pending = null
@@ -254,7 +368,7 @@ internal class BooksReadAlong(
     fun render(state: BooksPlayerState) {
         if (visibility != VISIBLE) return
         currentState = state
-        if (summaryScope.active && !summaryScope.matches(summarySelection())) cancelSummary()
+        if (summaryScope.active && (!summaryScope.matches(summarySelection()) || !canShowSummary())) dismissSummary()
         val ready = state.session != null && !state.failed
         val session = state.session
         if (ready && !localMode) {
@@ -265,8 +379,6 @@ internal class BooksReadAlong(
         val failed = session != null && windows.failed(state.positionMs, session.durationMs)
         val presentation = BooksNarrationPresentation.resolve(document != null, ready, localMode, failed)
         hasNarration = presentation == BooksNarrationPresentation.NARRATION
-        cover.visibility = if (hasNarration) GONE else VISIBLE
-        scroll.visibility = if (hasNarration) VISIBLE else GONE
         updateReadingChrome()
         details.text = when (presentation) {
             BooksNarrationPresentation.NARRATION -> ""

@@ -2,6 +2,8 @@ package com.fitbaus.bikebridge.host.books
 
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -25,12 +27,13 @@ class RemoteBooksTranscriptTest {
         .put("coverage", JSONObject().put("start_ms", 300000).put("end_ms", 600000))
         .put("cues", org.json.JSONArray().put(JSONObject().put("start_ms", 301000).put("end_ms", 303000).put("text", "Narration")))
 
-    private fun client(transcript: JSONObject = result, metadata: JSONObject = manifest, failed: Boolean = false): RemoteBooksTranscript =
+    private fun client(transcript: JSONObject = result, metadata: JSONObject = manifest, failed: Boolean = false,
+                       capabilityBody: String = capabilities): RemoteBooksTranscript =
         RemoteBooksTranscript(paired, books, TranscriberHttp { url, headers, body ->
             assertEquals("Bearer $token", headers["Authorization"])
             if (url.endsWith("/v1/capabilities")) {
                 assertEquals(null, headers["X-Audiobookshelf-Token"])
-                BooksHttpResponse(200, capabilities)
+                BooksHttpResponse(200, capabilityBody)
             } else {
                 assertEquals("source-token", headers["X-Audiobookshelf-Token"])
                 when {
@@ -60,6 +63,24 @@ class RemoteBooksTranscriptTest {
         assertEquals(revision, window.revision)
         assertEquals("Narration", window.transcript.cueAt(301500)?.text)
         assertNull(window.transcript.cueAt(303000))
+    }
+
+    @Test
+    fun summaryAvailabilityRequiresBothApiAndSupportedProvider() {
+        val configured = JSONObject(capabilities).put("summary_api", true).put("summary_provider",
+            JSONObject().put("configured", true).put("protocol", "openai-chat/v1").put("model", "test-model"))
+        assertTrue(client(capabilityBody = configured.toString()).load("book", playback, 301500, null, false).summaryAvailable)
+        for (caps in listOf(
+            JSONObject(capabilities),
+            JSONObject(configured.toString()).put("summary_api", false),
+            JSONObject(configured.toString()).put("summary_provider", JSONObject().put("configured", false)),
+            JSONObject(configured.toString()).put("summary_provider", JSONObject().put("configured", true)
+                .put("protocol", "unknown/v1").put("model", "test-model"))
+        )) {
+            val window = client(capabilityBody = caps.toString()).load("book", playback, 301500, null, false)
+            assertFalse(window.summaryAvailable)
+            assertEquals("Narration", window.transcript.cueAt(301500)?.text)
+        }
     }
 
     @Test
