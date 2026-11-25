@@ -3,6 +3,8 @@ package com.fitbaus.bikebridge.host.books
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
+import android.util.Log
 import android.os.Handler
 import android.os.Looper
 import java.net.Inet4Address
@@ -15,10 +17,13 @@ internal data class LoboLanDevice(val name: String, val address: String) {
         const val SERVICE_TYPE = "_lobo._tcp."
         private val namePattern = Regex("LOBO-[0-9A-F]{6}(?: \\([0-9]{1,5}\\))?")
 
+        fun compatibleType(type: String): Boolean =
+            type.trim('.').lowercase(Locale.US).removeSuffix(".local") == SERVICE_TYPE.trimEnd('.')
+
         fun fromRecord(name: String, type: String, ipv4: String, port: Int,
                        protocol: String?, path: String?): LoboLanDevice? {
             if (!namePattern.matches(name) ||
-                type.trimEnd('.').lowercase(Locale.US) != SERVICE_TYPE.trimEnd('.') ||
+                !compatibleType(type) ||
                 port != 7869 || (protocol != null && protocol != "1") ||
                 (path != null && path != "/v1")) return null
             val parts = ipv4.split('.')
@@ -35,6 +40,7 @@ internal data class LoboLanDevice(val name: String, val address: String) {
 @Suppress("DEPRECATION")
 internal class LoboLanDiscovery(context: Context) {
     private val nsd = context.getSystemService(Context.NSD_SERVICE) as? NsdManager
+    private val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
     private val main = Handler(Looper.getMainLooper())
     private var scan: Scan? = null
     private var resolving = false
@@ -46,6 +52,11 @@ internal class LoboLanDiscovery(context: Context) {
         val seen = mutableSetOf<String>()
         var started = false
         var stopped = false
+        var multicastLock: WifiManager.MulticastLock? = null
+        var found = 0
+        var resolved = 0
+        var rejected = 0
+        var resolveFailures = 0
         lateinit var timeout: Runnable
     }
 
@@ -59,10 +70,20 @@ internal class LoboLanDiscovery(context: Context) {
         val session = Scan(update)
         scan = session
         session.timeout = Runnable { finish(session, false) }
+        try {
+            session.multicastLock = wifi?.createMulticastLock("FitBausLoboDiscovery")?.apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+            Log.d(TAG, "Multicast lock held=${session.multicastLock?.isHeld == true}")
+        } catch (_: RuntimeException) {
+            Log.w(TAG, "Unable to acquire Wi-Fi multicast lock; continuing with NSD")
+        }
         session.listener = object : NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) {
                 main.post {
                     session.started = true
+                    Log.d(TAG, "DNS-SD browse started")
                     if (session.stopped) stopListener(session)
                 }
             }
@@ -70,9 +91,11 @@ internal class LoboLanDiscovery(context: Context) {
             override fun onServiceFound(service: NsdServiceInfo) {
                 main.post {
                     if (scan !== session || session.stopped || session.seen.size >= 32) return@post
+                    session.found++
                     val name = service.serviceName ?: return@post
                     if (!name.startsWith("LOBO-") || !session.seen.add(name)) return@post
                     session.pending[name] = service
+                    Log.d(TAG, "LOBO advertisement found; resolving")
                     resolveNext()
                 }
             }
@@ -93,14 +116,20 @@ internal class LoboLanDiscovery(context: Context) {
             }
 
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                main.post { finish(session, true) }
+                main.post {
+                    Log.w(TAG, "DNS-SD start failed: $errorCode")
+                    finish(session, true)
+                }
             }
 
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
-                main.post { if (scan === session && !session.stopped) finish(session, true) }
+                main.post {
+                    Log.w(TAG, "DNS-SD stop failed: $errorCode")
+                    if (scan === session && !session.stopped) finish(session, true)
+                }
             }
         }
-        main.postDelayed(session.timeout, 8_000)
+        main.postDelayed(session.timeout, 15_000)
         publish(session, true, false)
         try {
             manager.discoverServices(LoboLanDevice.SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, session.listener)
@@ -118,25 +147,38 @@ internal class LoboLanDiscovery(context: Context) {
         val service = entry.value
         session.pending.remove(name)
         resolving = true
-        fun complete(device: LoboLanDevice?) {
+        fun complete(device: LoboLanDevice?, failureCode: Int? = null) {
             main.post {
                 resolving = false
-                if (scan === session && !session.stopped && name in session.seen && device != null) {
-                    session.devices[name] = device
-                    publish(session, true, false)
+                if (scan === session && !session.stopped) {
+                    if (failureCode != null) {
+                        session.resolveFailures++
+                        Log.d(TAG, "NSD resolution failed: $failureCode")
+                    } else if (device == null) {
+                        session.rejected++
+                        Log.d(TAG, "Resolved advertisement had incompatible address or service metadata")
+                    } else {
+                        session.resolved++
+                        if (name in session.seen) {
+                            session.devices[name] = device
+                            publish(session, true, false)
+                        }
+                    }
                 }
                 resolveNext()
             }
         }
         try {
             manager.resolveService(service, object : NsdManager.ResolveListener {
-                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = complete(null)
+                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = complete(null, errorCode)
 
                 override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                     val host = serviceInfo.host as? Inet4Address
                     val attributes = serviceInfo.attributes
+                    val type = serviceInfo.serviceType ?: LoboLanDevice.SERVICE_TYPE
+                    Log.d(TAG, "NSD resolved: compatibleType=${LoboLanDevice.compatibleType(type)}, ipv4=${host != null}, port=${serviceInfo.port}")
                     val device = host?.hostAddress?.let {
-                        LoboLanDevice.fromRecord(name, serviceInfo.serviceType ?: LoboLanDevice.SERVICE_TYPE,
+                        LoboLanDevice.fromRecord(name, type,
                             it, serviceInfo.port, attributes["proto"]?.toString(Charsets.UTF_8),
                             attributes["path"]?.toString(Charsets.UTF_8))
                     }
@@ -144,7 +186,7 @@ internal class LoboLanDiscovery(context: Context) {
                 }
             })
         } catch (_: RuntimeException) {
-            complete(null)
+            complete(null, -1)
         }
     }
 
@@ -158,6 +200,8 @@ internal class LoboLanDiscovery(context: Context) {
         main.removeCallbacks(session.timeout)
         session.pending.clear()
         if (session.started) stopListener(session)
+        releaseMulticast(session)
+        Log.d(TAG, "Browse complete: found=${session.found}, resolved=${session.resolved}, rejected=${session.rejected}, resolveFailures=${session.resolveFailures}, devices=${session.devices.size}")
         publish(session, false, failed)
     }
 
@@ -166,6 +210,16 @@ internal class LoboLanDiscovery(context: Context) {
             nsd?.stopServiceDiscovery(session.listener)
         } catch (_: RuntimeException) {
             Unit
+        }
+    }
+
+    private fun releaseMulticast(session: Scan) {
+        val lock = session.multicastLock
+        session.multicastLock = null
+        try {
+            if (lock?.isHeld == true) lock.release()
+        } catch (_: RuntimeException) {
+            Log.w(TAG, "Unable to release multicast lock")
         }
     }
 
@@ -178,5 +232,10 @@ internal class LoboLanDiscovery(context: Context) {
             session.stopped = true
             if (session.started) stopListener(session)
         }
+        releaseMulticast(session)
+    }
+
+    private companion object {
+        const val TAG = "FitBausLoboDiscovery"
     }
 }
