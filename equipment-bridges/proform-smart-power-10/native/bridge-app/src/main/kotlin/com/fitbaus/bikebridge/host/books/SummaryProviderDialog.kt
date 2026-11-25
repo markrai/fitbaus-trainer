@@ -77,6 +77,7 @@ internal class SummaryProviderDialog(
     private var pending: Future<*>? = null
     private var closed = false
     private var current: SummaryProviderStatus? = null
+    private var activeModel: String? = null
     private var tested: String? = null
     private var secretFields = mutableListOf<EditText>()
 
@@ -97,10 +98,13 @@ internal class SummaryProviderDialog(
     }
 
     private fun load() {
+        current = null
+        activeModel = null
         resetRows()
         button("RETRY") { load() }
         request("Checking server…", { api.capabilities() }) { (supported, model) ->
-            status.text = if (model != null) "Active model: $model" else "Summarization disabled or unavailable"
+            activeModel = model
+            status.text = activeStatus()
             if (!supported) {
                 resetRows()
                 label("Update FitBaus Transcriber to manage providers from the bike.")
@@ -109,30 +113,17 @@ internal class SummaryProviderDialog(
         }
     }
 
+    private fun activeStatus(): String = activeModel?.let { "Active model: $it" }
+        ?: "Summarization disabled or unavailable"
+
     private fun showAuthorization() {
-        resetRows()
-        label("Manage Ollama, LOBO or another OpenAI-compatible server.", 19f, Color.WHITE)
-        label("Generate a one-time administrator code on your Transcriber server:")
-        label("docker compose exec transcriber python -m transcriber summary-admin", 15f, ACCENT)
-        label("The code expires after 10 minutes and is single-use.")
-        if (connection.address.startsWith("http://")) {
-            label("This connection uses HTTP. Continue only on a trusted private network. New provider API keys require HTTPS to Transcriber.", 15f, ACCENT)
-        }
-        val code = field("Administrator code (XXXX-XXXX)", 9, secret = true)
-        button("AUTHORIZE", true) {
-            val entered = code.text.toString()
-            request("Authorizing…", { api.authorize(entered) }) {
-                current = it
-                showConfiguration()
-            }
-        }
+        current = null
+        showConfiguration()
     }
 
     private fun showConfiguration() {
         resetRows()
-        val active = requireNotNull(current)
-        status.text = if (active.configured) "Active model: ${active.model}" else "Summarization disabled"
-        if (active.storageError) label("Saved settings could not be loaded. Save a new provider to recover.", 15f, ACCENT)
+        status.text = activeStatus()
 
         val form = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -166,12 +157,39 @@ internal class SummaryProviderDialog(
         }
         form.addView(allowHttp)
         val hint = label("", 14f, MUTED, form)
+        val authorization = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+            background = surface(BACKGROUND, BORDER)
+        }
+        form.addView(authorization, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(0, dp(8), 0, dp(4))
+        })
+        label("Administrator authorization", 16f, Color.WHITE, authorization)
+        label("Generate a one-time code on your Transcriber server.", 14f, MUTED, authorization)
+        label("docker compose exec transcriber python -m transcriber summary-admin", 14f, ACCENT, authorization)
+        if (connection.address.startsWith("http://")) {
+            label("HTTP connection: use a trusted private network. New provider API keys require HTTPS.", 13f, MUTED, authorization)
+        }
+        val adminCode = field("Administrator code (XXXX-XXXX)", 9, secret = true, parent = authorization)
+        val authorizeButton = button("AUTHORIZE", true, authorization) {}
         val discoverButton = button("DISCOVER MODELS", parent = form) {}
         val modelPanel = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
         }
         form.addView(modelPanel, LinearLayout.LayoutParams(-1, -2))
+        val placeholder = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        form.addView(placeholder, LinearLayout.LayoutParams(-1, -2))
+        label("Model", 15f, MUTED, placeholder)
+        label("Discover models to select one", 16f, MUTED, placeholder).apply {
+            background = surface(FIELD, BORDER)
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        val placeholderTest = button("TEST INFERENCE", parent = placeholder) {}
+        val placeholderSave = button("SAVE PROVIDER", true, placeholder) {}
+        placeholderTest.alpha = 0.4f
+        placeholderSave.alpha = 0.4f
         val consent = CheckBox(context).apply {
             text = "Allow requested audiobook excerpts to be sent to this provider"
             setTextColor(Color.WHITE)
@@ -185,6 +203,13 @@ internal class SummaryProviderDialog(
             alpha = 0.4f
         }
         var suppressChanges = false
+        var reuseButton: Button? = null
+        val authorizationLabel = TextView(context).apply {
+            textSize = 14f
+            setTextColor(SUCCESS)
+            visibility = View.GONE
+        }
+        form.addView(authorizationLabel, form.indexOfChild(discoverButton), LinearLayout.LayoutParams(-1, -2))
 
         fun invalidateTest() {
             tested = null
@@ -199,6 +224,7 @@ internal class SummaryProviderDialog(
             (save.parent as? ViewGroup)?.removeView(save)
             modelPanel.removeAllViews()
             modelPanel.visibility = View.GONE
+            placeholder.visibility = View.VISIBLE
             invalidateTest()
         }
 
@@ -223,9 +249,10 @@ internal class SummaryProviderDialog(
             selected = position
             usingCurrent = reuse
             invalidateDiscovery()
-            clearSecrets()
+            auth.text.clear()
+            key.text.clear()
             endpoint.isEnabled = !reuse
-            endpoint.setText(if (reuse) active.baseUrl.orEmpty() else "")
+            endpoint.setText(if (reuse) current?.baseUrl.orEmpty() else "")
             endpoint.hint = when (position) {
                 0 -> "http://ollama-host:11434/v1"
                 1 -> "https://192.168.1.200:7869/v1"
@@ -238,7 +265,7 @@ internal class SummaryProviderDialog(
             keyLabel.visibility = if (showKey) View.VISIBLE else View.GONE
             key.visibility = keyLabel.visibility
             allowHttp.visibility = if (!reuse && position != 1) View.VISIBLE else View.GONE
-            allowHttp.isChecked = reuse && active.allowHttp
+            allowHttp.isChecked = reuse && current?.allowHttp == true
             hint.text = when {
                 reuse -> "Reuse the active endpoint, credentials and certificate trust."
                 position == 0 -> "Address must be reachable from Transcriber."
@@ -254,6 +281,7 @@ internal class SummaryProviderDialog(
             invalidateDiscovery()
             discovery = value
             modelPanel.visibility = View.VISIBLE
+            placeholder.visibility = View.GONE
             label("Model", 15f, MUTED, modelPanel)
             val result = TextView(context).apply {
                 text = "Not tested"
@@ -273,7 +301,7 @@ internal class SummaryProviderDialog(
                 watch(manual) { changed(manual.text.toString().trim()) }
             } else {
                 val models = spinner(value.models, modelPanel)
-                val index = value.models.indexOf(active.model).coerceAtLeast(0)
+                val index = value.models.indexOf(activeModel).coerceAtLeast(0)
                 models.setSelection(index)
                 model = value.models[index]
                 models.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
@@ -307,7 +335,14 @@ internal class SummaryProviderDialog(
         }
 
         updateSave = {
-            endpoint.isEnabled = pending == null && !usingCurrent
+            val idle = pending == null
+            endpoint.isEnabled = idle && !usingCurrent
+            discoverButton.isEnabled = idle && current != null
+            discoverButton.alpha = if (discoverButton.isEnabled) 1f else 0.4f
+            reuseButton?.isEnabled = idle && current?.configured == true
+            authorizeButton.isEnabled = idle && current == null
+            placeholderTest.isEnabled = false
+            placeholderSave.isEnabled = false
             val enabled = pending == null && discovery != null && tested != null && tested == model && consent.isChecked
             save.isEnabled = enabled
             save.alpha = if (enabled) 1f else 0.4f
@@ -337,13 +372,13 @@ internal class SummaryProviderDialog(
                 setMargins(if (index == 0) 0 else dp(4), 0, if (index == names.lastIndex) 0 else dp(4), 0)
             })
         }
-        if (active.configured) {
-            currentChoice = button("USE CURRENT PROVIDER", parent = form, index = 2) { configure(-1, true) }
-        }
+        currentChoice = button("USE CURRENT PROVIDER", parent = form, index = 2) { configure(-1, true) }
+        reuseButton = currentChoice
+        currentChoice?.visibility = if (current?.configured == true) View.VISIBLE else View.GONE
         listOf(endpoint, auth, key).forEach { edit -> watch(edit) { if (!suppressChanges) invalidateDiscovery() } }
         allowHttp.setOnCheckedChangeListener { _, _ -> if (!suppressChanges) invalidateDiscovery() }
         discoverButton.setOnClickListener {
-            if (closed || pending != null) return@setOnClickListener
+            if (closed || pending != null || current == null) return@setOnClickListener
             val reuse = usingCurrent
             val url = endpoint.text.toString()
             val http = allowHttp.isChecked
@@ -355,15 +390,40 @@ internal class SummaryProviderDialog(
                 if (reuse) api.discoverCurrent() else api.discoverNew(requireNotNull(kind), url, http, secret, loboAuth)
             }) { showDiscovered(it) }
         }
-        configure(if (active.configured) -1 else 0, active.configured)
-        if (active.configured) button("DISABLE SUMMARIZATION") {
+        configure(0)
+        val disableButton = button("DISABLE SUMMARIZATION") {
             AlertDialog.Builder(context).setTitle("Disable summarization?")
                 .setMessage("Summary and recap generation will be disabled for all connected bikes. Transcription and playback remain available.")
                 .setNegativeButton("CANCEL", null)
                 .setPositiveButton("DISABLE") { _, _ -> request("Disabling…", { api.disable() }) { finish(it) } }
                 .show()
         }
-        button("CANCEL ADMIN SESSION") { cancelSession() }
+        val cancelButton = button("CANCEL ADMIN SESSION") { cancelSession() }
+        fun refreshAuthorization() {
+            val authorized = current != null
+            authorization.visibility = if (authorized) View.GONE else View.VISIBLE
+            authorizationLabel.visibility = if (authorized) View.VISIBLE else View.GONE
+            authorizationLabel.text = if (current?.storageError == true)
+                "Authorized · Saved settings could not be loaded. Save a provider to recover."
+                else "Administrator authorized"
+            currentChoice?.visibility = if (current?.configured == true) View.VISIBLE else View.GONE
+            disableButton.visibility = if (current?.configured == true) View.VISIBLE else View.GONE
+            cancelButton.visibility = if (authorized) View.VISIBLE else View.GONE
+            renderSaveState()
+        }
+        authorizeButton.setOnClickListener {
+            if (closed || pending != null || current != null) return@setOnClickListener
+            val entered = adminCode.text.toString()
+            request("Authorizing…", { api.authorize(entered) }) { value ->
+                current = value
+                activeModel = value.model
+                adminCode.text.clear()
+                status.text = activeStatus()
+                if (endpoint.text.isBlank() && value.configured) configure(-1, true)
+                refreshAuthorization()
+            }
+        }
+        refreshAuthorization()
     }
 
     private fun watch(edit: EditText, changed: () -> Unit) {
@@ -378,11 +438,15 @@ internal class SummaryProviderDialog(
     private fun renderSaveState() { updateSave?.invoke() }
 
     private fun cancelSession() {
-        request("Closing administrator session…", { api.cancel() }) { load() }
+        request("Closing administrator session…", { api.cancel() }, onFailure = {
+            api.forgetGrant()
+            showAuthorization()
+        }) { load() }
     }
 
     private fun finish(value: SummaryProviderStatus) {
-        current = value
+        current = null
+        activeModel = value.model
         resetRows()
         status.text = if (value.configured) "Saved · ${value.model}" else "Summarization disabled"
         label("Changes are active on Transcriber. Reopen an audiobook to refresh its provider information.", 18f, ACCENT)
@@ -404,9 +468,10 @@ internal class SummaryProviderDialog(
                 result.fold(success) { error ->
                     onFailure()
                     status.text = failureMessage(error)
-                    if (error is SummaryManagementFailure && error.code in setOf("summary_admin_unavailable", "invalid_summary_admin_code", "unauthorized")) {
+                    if (error is SummaryManagementFailure && error.code in setOf("summary_admin_unavailable", "unauthorized")) {
                         api.forgetGrant()
                         showAuthorization()
+                        status.text = failureMessage(error)
                     }
                     renderSaveState()
                 }
