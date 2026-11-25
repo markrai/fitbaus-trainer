@@ -29,6 +29,7 @@ internal class BooksReadAlong(
     context: Context,
     private val source: BooksTranscriptSource = LocalBooksTranscriptSource(context),
     onFullscreenRequested: () -> Unit = {},
+    private val playbackPosition: (() -> Long)? = null,
 ) : LinearLayout(context) {
     private val transcriberStore = TranscriberConnectionStore(context)
     private var books: BooksConnection? = null
@@ -59,6 +60,14 @@ internal class BooksReadAlong(
         setBackgroundColor(Color.BLACK)
         textSize = 16f
     }
+    private val recapToggle = button("Recap").apply {
+        setAllCaps(false)
+        setTextColor(Color.WHITE)
+        setBackgroundColor(Color.BLACK)
+        textSize = 16f
+        contentDescription = "Recap up to ten minutes before the current playback position"
+    }
+    private var recapSelection: BooksRecapSelection? = null
     private val summaryPanel = LinearLayout(context)
     private val summaryTitle = label("Section summary", 26f)
     private val summaryRange = label("", 16f)
@@ -128,9 +137,14 @@ internal class BooksReadAlong(
         summaryToggle.visibility = GONE
         summaryToggle.contentDescription = "Show current section summary; may reveal upcoming narration"
         summaryToggle.setOnClickListener {
-            if (summarySection != null) dismissSummary() else showSummary(false)
+            if (summarySection != null || recapSelection != null) dismissSummary() else showSummary(false)
         }
         stage.addView(summaryToggle, FrameLayout.LayoutParams(dp(128), dp(48), Gravity.BOTTOM or Gravity.LEFT))
+        recapToggle.visibility = GONE
+        recapToggle.setOnClickListener { showRecap(false) }
+        val recapParams = FrameLayout.LayoutParams(dp(104), dp(48), Gravity.BOTTOM or Gravity.LEFT)
+        recapParams.leftMargin = dp(128)
+        stage.addView(recapToggle, recapParams)
         fullscreenButton.visibility = GONE
         fullscreenButton.contentDescription = "Enter fullscreen narration"
         fullscreenButton.setOnClickListener { onFullscreenRequested() }
@@ -202,7 +216,9 @@ internal class BooksReadAlong(
         summaryRetry.setOnClickListener {
             val failed = summaryState as? BooksSummaryState.Failed ?: return@setOnClickListener
             if (BooksSummaryPresentation.retryable(failed.failure)) {
-                showSummary(failed.failure == BooksSummaryFailure.BOOK_CHANGED_OR_TRANSCRIPT_FAILED)
+                val retry = failed.failure == BooksSummaryFailure.BOOK_CHANGED_OR_TRANSCRIPT_FAILED
+                val recap = recapSelection
+                if (recap != null) showRecap(retry, recap) else showSummary(retry)
             }
         }
         val retryParams = LayoutParams(WRAP, dp(48))
@@ -213,10 +229,27 @@ internal class BooksReadAlong(
     private fun canShowSummary(): Boolean = fullscreen && !localMode && windows.summaryAvailable &&
         summarySelection() != null
 
+    private fun livePosition(): Long = playbackPosition?.invoke() ?: currentState.positionMs
+
+    private fun canShowRecap(): Boolean = fullscreen && visibility == VISIBLE && !destroyed &&
+        !currentState.failed && currentState.session != null && request != null &&
+        !localMode && windows.recapAvailable && windows.revision != null
+
+    private fun recapMatches(selection: BooksRecapSelection): Boolean =
+        canShowRecap() && selection.matches(request?.itemId, currentState.session, windows.revision,
+            currentState.seekGeneration, livePosition())
+
     private fun updateSummaryChrome() {
-        val showing = fullscreen && summarySection != null
+        val showing = fullscreen && (summarySection != null || recapSelection != null)
         summaryPanel.visibility = if (showing) VISIBLE else GONE
         summaryToggle.visibility = if (showing || canShowSummary()) VISIBLE else GONE
+        recapToggle.visibility = if (!showing && canShowRecap()) VISIBLE else GONE
+        val recapMargin = if (canShowSummary()) dp(128) else 0
+        val recapParams = recapToggle.layoutParams as? FrameLayout.LayoutParams
+        if (recapParams != null && recapParams.leftMargin != recapMargin) {
+            recapParams.leftMargin = recapMargin
+            recapToggle.layoutParams = recapParams
+        }
         val toggleText = if (showing) "Read along" else "Summary"
         if (summaryToggle.text != toggleText) {
             summaryToggle.text = toggleText
@@ -233,6 +266,9 @@ internal class BooksReadAlong(
         val connection = books ?: return
         dismissSummary()
         summarySection = selection.section
+        summaryTitle.text = "Section summary"
+        summaryNotice.text = "AI-generated · May reveal upcoming narration"
+        summaryRetry.text = "Retry summary"
         summaryRange.text = BooksSummaryPresentation.range(selection.section)
         presentSummary(BooksSummaryState.Preparing)
         val block = sectionPlans.pendingBlock(selection.session, currentState.positionMs)
@@ -271,6 +307,51 @@ internal class BooksReadAlong(
         }
     }
 
+    private fun showRecap(retryTranscript: Boolean, previous: BooksRecapSelection? = null) {
+        if (!canShowRecap()) return
+        val session = currentState.session ?: return
+        val key = request ?: return
+        val revision = windows.revision ?: return
+        val connection = books ?: return
+        val selection = previous ?: BooksRecapSelection(key.itemId, session,
+            livePosition().coerceIn(0, session.durationMs), revision, currentState.seekGeneration)
+        if (!recapMatches(selection)) {
+            dismissSummary()
+            return
+        }
+        dismissSummary()
+        recapSelection = selection
+        summaryTitle.text = "Recent recap"
+        summaryNotice.text = "AI-generated · Narration before the requested position"
+        summaryRetry.text = "Retry recap"
+        summaryRange.text = BooksSummaryPresentation.recapRange(selection)
+        presentSummary(BooksSummaryState.Preparing)
+        val ticket = ++planGeneration
+        fun deliver(state: BooksSummaryState) {
+            main.post {
+                if (ticket != planGeneration || recapSelection !== selection) return@post
+                if (!recapMatches(selection) || (state.revision != null && state.revision != selection.expectedRevision)) {
+                    dismissSummary()
+                    return@post
+                }
+                presentSummary(state)
+            }
+        }
+        summaryFuture = summaryWorker.submit {
+            try {
+                val paired = transcriberStore.load() ?: throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
+                val result = RemoteBooksSummary(paired, connection).loadRecap(selection, retryTranscript) { deliver(it) }
+                deliver(result)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (error: BooksSummaryException) {
+                deliver(BooksSummaryState.Failed(error.failure))
+            } catch (_: Exception) {
+                if (!Thread.currentThread().isInterrupted) deliver(BooksSummaryState.Failed(BooksSummaryFailure.NETWORK_OR_RESPONSE))
+            }
+        }
+    }
+
     private fun planningMatches(): Boolean {
         val original = planningSelection ?: return false
         val current = summarySelection() ?: return false
@@ -294,9 +375,9 @@ internal class BooksReadAlong(
             clearSummaryPanel()
             return
         }
-        if (!fullscreen || summarySection == null) return
+        if (!fullscreen || (summarySection == null && recapSelection == null)) return
         summaryState = state
-        val presentation = BooksSummaryPresentation.resolve(state)
+        val presentation = BooksSummaryPresentation.resolve(state, recap = recapSelection != null)
         summaryText.text = presentation.text
         summaryRetry.visibility = if (presentation.retry) VISIBLE else GONE
         summaryScroll.scrollTo(0, 0)
@@ -305,6 +386,7 @@ internal class BooksReadAlong(
 
     private fun clearSummaryPanel() {
         summarySection = null
+        recapSelection = null
         summaryState = null
         summaryText.text = ""
         summaryRange.text = ""
@@ -432,7 +514,8 @@ internal class BooksReadAlong(
             sectionPlans.configure(session, windows.sectionPlanAvailable)
         }
         if ((summaryScope.active && (!summaryScope.matches(summarySelection()) || !canShowSummary())) ||
-            (planningSelection != null && (!planningMatches() || !canShowSummary()))) dismissSummary()
+            (planningSelection != null && (!planningMatches() || !canShowSummary())) ||
+            recapSelection?.let { !recapMatches(it) } == true) dismissSummary()
         if (ready && !localMode) {
             windows.plan(state.positionMs, session.durationMs, state.wantsPlay)?.let(::load)
         }
