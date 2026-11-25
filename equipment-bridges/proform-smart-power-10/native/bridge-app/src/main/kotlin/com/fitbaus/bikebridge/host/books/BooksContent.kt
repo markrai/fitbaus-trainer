@@ -6,6 +6,7 @@ import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
+import com.fitbaus.bikebridge.host.R
 import android.os.Handler
 import android.os.Looper
 import android.text.InputFilter
@@ -90,14 +91,15 @@ internal class BooksContent(
     private val prepareButton = button("TRANSCRIPTION MODELS")
     private val playerTitle = text("", 26f)
     private val playerAuthor = text("", 18f)
-    private val playerChapter = button("CHAPTERS")
+    private val playerChapter = playerAction("Chapters").apply { gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT }
     private val playerStatus = text("", 18f)
     private val playerTime = text("", 20f)
     private val progress = SeekBar(context)
-    private val playPause = button("PLAY")
-    private val rewind = button("−30s")
-    private val forward = button("+30s")
-    private val rate = button("1×")
+    private val playPause = playerAction("")
+    private val rewind = playerAction("-30s")
+    private val forward = playerAction("+30s")
+    private val rate = playerAction("1×")
+    private var playbackIcon = 0
     private var scrubbing = false
     private var playerState = BooksPlayerState()
     private val playback = BooksPlayback(context, ::renderPlayer)
@@ -113,6 +115,7 @@ internal class BooksContent(
     fun minimize(): Boolean {
         if (!active || !BooksFloatingPolicy.canFloat(playerState)) return false
         setReadingFullscreen(false)
+        readAlong.dismissSummary()
         dialog?.dismiss()
         dialog = null
         hideKeyboard()
@@ -339,6 +342,7 @@ internal class BooksContent(
         val timeline = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
         timeline.addView(playerChapter, LayoutParams(0, dp(44), 1f))
         playerStatus.gravity = Gravity.CENTER
+        playerStatus.visibility = GONE
         playerPanel.addView(playerStatus, LayoutParams(MATCH, WRAP))
         playerTime.gravity = Gravity.CENTER
         timeline.addView(playerTime, LayoutParams(WRAP, WRAP))
@@ -365,6 +369,12 @@ internal class BooksContent(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER
         }
+        rewind.setCompoundDrawablesWithIntrinsicBounds(R.drawable.books_rotate_ccw, 0, 0, 0)
+        forward.setCompoundDrawablesWithIntrinsicBounds(R.drawable.books_rotate_cw, 0, 0, 0)
+        rewind.contentDescription = "Skip back 30 seconds"
+        forward.contentDescription = "Skip forward 30 seconds"
+        rewind.gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT
+        forward.gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT
         rewind.setOnClickListener { playback.seek(playerState.positionMs - 30_000) }
         forward.setOnClickListener { playback.seek(playerState.positionMs + 30_000) }
         playPause.setOnClickListener {
@@ -381,7 +391,7 @@ internal class BooksContent(
                 .show()
         }
         for (control in listOf(rewind, playPause, forward, rate)) {
-            controls.addView(control, LayoutParams(0, dp(58), 1f))
+            controls.addView(control, LayoutParams(WRAP, dp(48)).apply { leftMargin = dp(8); rightMargin = dp(8) })
         }
         playerPanel.addView(controls, LayoutParams(MATCH, WRAP))
         playerPanel.visibility = GONE
@@ -396,7 +406,9 @@ internal class BooksContent(
         message.visibility = chrome
         for (index in 0 until playerPanel.childCount) {
             val child = playerPanel.getChildAt(index)
-            if (child !== readAlong) child.visibility = chrome
+            if (child !== readAlong) child.visibility = if (child === playerStatus) {
+                if (!fullscreen && playerStatus.text.isNotEmpty()) VISIBLE else GONE
+            } else chrome
         }
         playerPanel.setPadding(if (fullscreen) 0 else dp(20), if (fullscreen) 0 else dp(8),
             if (fullscreen) 0 else dp(20), if (fullscreen) 0 else dp(8))
@@ -442,10 +454,13 @@ internal class BooksContent(
         if (floatingPlayer.visibility == VISIBLE) floatingPlayer.render(state, readAlong.floatingNarration(), currentCover())
         playerTitle.text = state.item?.title.orEmpty()
         playerAuthor.text = state.item?.author.orEmpty()
-        playerStatus.text = state.status
+        val status = BooksPlayerPresentation.status(state.status)
+        playerStatus.text = status
+        playerStatus.visibility = if (!readingFullscreen && status.isNotEmpty()) VISIBLE else GONE
         val session = state.session
         val chapter = session?.let { it.chapters.getOrNull(it.chapterAt(state.positionMs)) }
-        playerChapter.text = chapter?.let { "Chapters · " + it.title } ?: "CHAPTERS"
+        playerChapter.text = chapter?.let { "Chapters · " + it.title } ?: "Chapters"
+        playerChapter.visibility = if (session?.chapters?.isNotEmpty() == true) VISIBLE else INVISIBLE
         playerChapter.maxLines = 1
         playerChapter.ellipsize = TextUtils.TruncateAt.END
         playerChapter.isEnabled = session?.chapters?.isNotEmpty() == true && !state.failed
@@ -455,7 +470,13 @@ internal class BooksContent(
         forward.isEnabled = ready
         rate.isEnabled = ready
         playPause.isEnabled = ready || state.failed
-        playPause.text = if (state.failed) "RETRY" else if (state.wantsPlay) "PAUSE" else "PLAY"
+        val icon = if (state.failed) 0 else if (state.wantsPlay) R.drawable.books_pause else R.drawable.books_play
+        if (playbackIcon != icon) {
+            playbackIcon = icon
+            playPause.setCompoundDrawablesWithIntrinsicBounds(icon, 0, 0, 0)
+        }
+        playPause.text = if (state.failed) "Retry" else ""
+        playPause.contentDescription = if (state.failed) "Retry playback" else if (state.wantsPlay) "Pause" else "Play"
         rate.text = "${state.speed}×"
         if (!scrubbing) {
             playerTime.text = clock(state.positionMs) + " / " + clock(session?.durationMs ?: 0)
@@ -726,6 +747,20 @@ internal class BooksContent(
             else -> "Audiobookshelf returned HTTP " + error.status + "."
         }
         else -> "Could not contact Audiobookshelf or read its response."
+    }
+
+    private fun playerAction(label: String) = Button(context).apply {
+        text = label
+        setAllCaps(false)
+        setTextColor(Color.WHITE)
+        setBackgroundColor(Color.TRANSPARENT)
+        stateListAnimator = null
+        elevation = 0f
+        textSize = 18f
+        minWidth = dp(48)
+        minimumWidth = dp(48)
+        setPadding(dp(8), 0, dp(8), 0)
+        compoundDrawablePadding = dp(6)
     }
 
     private fun button(label: String) = Button(context).apply { text = label }
