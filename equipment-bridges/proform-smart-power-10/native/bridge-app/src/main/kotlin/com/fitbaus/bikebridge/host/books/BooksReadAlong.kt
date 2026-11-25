@@ -50,27 +50,27 @@ internal class BooksReadAlong(
     private val narration = label("", 36f)
     private val details = label("", 14f)
     private val scroll = ScrollView(context)
-    private val reload = button("RETRY NARRATION")
+    private val reload = flatAction("Retry narration")
     val cover = ImageView(context)
     private val readingControls = LinearLayout(context)
     private val footer = LinearLayout(context)
     private val actions = LinearLayout(context)
     private var summaryHelp: AlertDialog? = null
     private val fullscreenButton = NarrationFullscreenButton(context)
-    private val summaryToggle = button("Summary").apply {
+    private val summaryToggle = flatAction("Summary").apply {
         setAllCaps(false)
         setTextColor(Color.WHITE)
         setBackgroundColor(Color.TRANSPARENT)
         textSize = 16f
     }
-    private val recapToggle = button("Recap").apply {
+    private val recapToggle = flatAction("Recap").apply {
         setAllCaps(false)
         setTextColor(Color.WHITE)
         setBackgroundColor(Color.TRANSPARENT)
         textSize = 16f
         contentDescription = "Recap up to ten minutes before the current playback position"
     }
-    private val bookRecapToggle = button("Book recap").apply {
+    private val bookRecapToggle = flatAction("Book recap").apply {
         setAllCaps(false)
         setTextColor(Color.WHITE)
         setBackgroundColor(Color.TRANSPARENT)
@@ -84,7 +84,7 @@ internal class BooksReadAlong(
     private val summaryNotice = label("AI-generated · May reveal upcoming narration", 14f)
     private val summaryText = label("", 26f)
     private val summaryScroll = ScrollView(context)
-    private val summaryRetry = button("Retry summary")
+    private val summaryRetry = flatAction("Retry summary")
     private var summarySection: BooksSection? = null
     private var summaryState: BooksSummaryState? = null
     private var fullscreen = false
@@ -106,9 +106,8 @@ internal class BooksReadAlong(
         setPadding(dp(16), dp(4), dp(16), dp(8))
         setBackgroundColor(Color.BLACK)
         readingControls.orientation = HORIZONTAL
-        readingControls.gravity = Gravity.CENTER_VERTICAL
-        readingControls.visibility = GONE
         readingControls.gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+        readingControls.visibility = GONE
         fontSizeLabel.gravity = Gravity.CENTER
         fontSizeLabel.text = "Text: $textSizeSp"
         narration.textSize = textSizeSp.toFloat()
@@ -255,8 +254,10 @@ internal class BooksReadAlong(
 
     private fun showSummaryHelp() {
         summaryHelp?.dismiss()
-        val reason = BooksPlayerPresentation.summaryUnavailable(
-            transcriberStore.load() != null, localMode, windows.revision != null, windows.summaryAvailable)
+        val paired = runCatching { transcriberStore.load() }
+        val reason = if (paired.isFailure) "The saved Transcriber connection could not be read. Pair it again in Transcription Models."
+            else BooksPlayerPresentation.summaryUnavailable(
+                paired.getOrNull() != null, localMode, windows.revision != null, windows.summaryAvailable)
         summaryHelp = AlertDialog.Builder(context).setTitle("Summary unavailable")
             .setMessage(reason).setPositiveButton("OK", null).show()
     }
@@ -443,7 +444,9 @@ internal class BooksReadAlong(
         updateSummaryChrome()
     }
 
-    private fun dismissSummary() {
+    fun dismissSummary() {
+        summaryHelp?.dismiss()
+        summaryHelp = null
         clearSummaryPanel()
         cancelSummary()
     }
@@ -523,8 +526,6 @@ internal class BooksReadAlong(
     }
 
     fun close() {
-        summaryHelp?.dismiss()
-        summaryHelp = null
         dismissSummary()
         generation++
         pending?.cancel(true)
@@ -650,7 +651,14 @@ internal class BooksReadAlong(
         setTextColor(Color.WHITE)
     }
 
-    private fun button(value: String) = Button(context).apply { text = value }
+    private fun flatAction(value: String) = Button(context).apply {
+        text = value
+        setAllCaps(false)
+        setTextColor(Color.WHITE)
+        setBackgroundColor(Color.TRANSPARENT)
+        stateListAnimator = null
+        elevation = 0f
+    }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
 

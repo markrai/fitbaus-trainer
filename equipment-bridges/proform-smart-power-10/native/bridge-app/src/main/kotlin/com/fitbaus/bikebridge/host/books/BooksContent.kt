@@ -115,6 +115,7 @@ internal class BooksContent(
     fun minimize(): Boolean {
         if (!active || !BooksFloatingPolicy.canFloat(playerState)) return false
         setReadingFullscreen(false)
+        readAlong.dismissSummary()
         dialog?.dismiss()
         dialog = null
         hideKeyboard()
@@ -405,7 +406,9 @@ internal class BooksContent(
         message.visibility = chrome
         for (index in 0 until playerPanel.childCount) {
             val child = playerPanel.getChildAt(index)
-            if (child !== readAlong) child.visibility = if (child === playerStatus) GONE else chrome
+            if (child !== readAlong) child.visibility = if (child === playerStatus) {
+                if (!fullscreen && playerStatus.text.isNotEmpty()) VISIBLE else GONE
+            } else chrome
         }
         playerPanel.setPadding(if (fullscreen) 0 else dp(20), if (fullscreen) 0 else dp(8),
             if (fullscreen) 0 else dp(20), if (fullscreen) 0 else dp(8))
@@ -751,6 +754,8 @@ internal class BooksContent(
         setAllCaps(false)
         setTextColor(Color.WHITE)
         setBackgroundColor(Color.TRANSPARENT)
+        stateListAnimator = null
+        elevation = 0f
         textSize = 18f
         minWidth = dp(48)
         minimumWidth = dp(48)
