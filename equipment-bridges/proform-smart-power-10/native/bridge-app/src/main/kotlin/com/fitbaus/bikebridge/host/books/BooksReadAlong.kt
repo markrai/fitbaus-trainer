@@ -40,6 +40,9 @@ internal class BooksReadAlong(
     private val worker = Executors.newSingleThreadExecutor()
     private val summaryWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1))
     private val summaryScope = BooksSummaryScope()
+    private val sectionPlans = BooksSectionPlans()
+    private var planningSelection: BooksSummarySelection? = null
+    private var planGeneration = 0L
     private var summaryFuture: Future<*>? = null
     private var summaryCallback: ((BooksSummaryState) -> Unit)? = null
     private val narration = label("", 36f)
@@ -226,11 +229,63 @@ internal class BooksReadAlong(
 
     private fun showSummary(retryTranscript: Boolean) {
         if (!canShowSummary()) return
-        val section = summarySelection()?.section ?: return
+        val selection = summarySelection() ?: return
+        val connection = books ?: return
         dismissSummary()
+        summarySection = selection.section
+        summaryRange.text = BooksSummaryPresentation.range(selection.section)
+        presentSummary(BooksSummaryState.Preparing)
+        val block = sectionPlans.pendingBlock(selection.session, currentState.positionMs)
+        val revision = selection.expectedRevision
+        if (block == null || revision == null) {
+            startSelectedSummary(retryTranscript)
+            return
+        }
+        if (!windows.sectionPlanAvailable) {
+            sectionPlans.freeze(selection.session, block, block.boundaries)
+            startSelectedSummary(retryTranscript)
+            return
+        }
+        planningSelection = selection
+        val ticket = ++planGeneration
+        summaryRange.text = "Finding narration boundaries…"
+        summaryFuture = summaryWorker.submit {
+            val cuts = try {
+                val paired = transcriberStore.load() ?: throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
+                RemoteBooksSectionPlan(paired, connection).load(selection.itemId, revision, block)
+            } catch (_: Exception) {
+                if (Thread.currentThread().isInterrupted) return@submit
+                block.boundaries
+            }
+            main.post {
+                if (ticket != planGeneration || planningSelection == null) return@post
+                if (!canShowSummary() || !planningMatches()) {
+                    dismissSummary()
+                    return@post
+                }
+                planningSelection = null
+                summaryFuture = null
+                sectionPlans.freeze(selection.session, block, cuts)
+                startSelectedSummary(retryTranscript)
+            }
+        }
+    }
+
+    private fun planningMatches(): Boolean {
+        val original = planningSelection ?: return false
+        val current = summarySelection() ?: return false
+        return current.session === original.session && current.itemId == original.itemId &&
+            current.expectedRevision == original.expectedRevision && current.section == original.section
+    }
+
+    private fun startSelectedSummary(retryTranscript: Boolean) {
+        val section = summarySelection()?.section
+        if (section == null) {
+            dismissSummary()
+            return
+        }
         summarySection = section
         summaryRange.text = BooksSummaryPresentation.range(section)
-        presentSummary(BooksSummaryState.Preparing)
         if (!requestCurrentSummary(retryTranscript, ::presentSummary)) dismissSummary()
     }
 
@@ -268,7 +323,7 @@ internal class BooksReadAlong(
     fun currentSection(): BooksSectionTranscript? {
         if (visibility != VISIBLE || destroyed || currentState.failed) return null
         val session = currentState.session ?: return null
-        val section = BooksSectionResolver.at(session, currentState.positionMs) ?: return null
+        val section = sectionPlans.at(session, currentState.positionMs) ?: return null
         return if (localMode) BooksSectionResolver.local(section, transcript) else windows.sectionTranscript(section)
     }
 
@@ -276,7 +331,7 @@ internal class BooksReadAlong(
         if (visibility != VISIBLE || destroyed || currentState.failed) return null
         val key = request ?: return null
         val session = currentState.session ?: return null
-        val section = BooksSectionResolver.at(session, currentState.positionMs) ?: return null
+        val section = sectionPlans.at(session, currentState.positionMs) ?: return null
         return BooksSummarySelection(key.itemId, session, section, windows.revision)
     }
 
@@ -316,6 +371,8 @@ internal class BooksReadAlong(
     }
 
     fun cancelSummary() {
+        planGeneration++
+        planningSelection = null
         summaryScope.cancel()
         summaryFuture?.cancel(true)
         summaryFuture = null
@@ -343,6 +400,7 @@ internal class BooksReadAlong(
         request = null
         books = null
         windows.clear()
+        sectionPlans.clear()
         localMode = false
         transcript = null
         displayed = null
@@ -368,9 +426,13 @@ internal class BooksReadAlong(
     fun render(state: BooksPlayerState) {
         if (visibility != VISIBLE) return
         currentState = state
-        if (summaryScope.active && (!summaryScope.matches(summarySelection()) || !canShowSummary())) dismissSummary()
         val ready = state.session != null && !state.failed
         val session = state.session
+        if (ready && windows.revision != null && !localMode) {
+            sectionPlans.configure(session, windows.sectionPlanAvailable)
+        }
+        if ((summaryScope.active && (!summaryScope.matches(summarySelection()) || !canShowSummary())) ||
+            (planningSelection != null && (!planningMatches() || !canShowSummary()))) dismissSummary()
         if (ready && !localMode) {
             windows.plan(state.positionMs, session.durationMs, state.wantsPlay)?.let(::load)
         }

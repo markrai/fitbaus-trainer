@@ -45,7 +45,10 @@ internal object BooksSectionResolver {
     const val MAX_SECTION_MS = 600_000L
     private const val FALLBACK_SECTION_MS = 300_000L
 
-    fun at(session: BooksPlaybackSession, positionMs: Long): BooksSection? {
+    fun at(session: BooksPlaybackSession, positionMs: Long): BooksSection? =
+        blockAt(session, positionMs, false)?.at(positionMs)
+
+    fun blockAt(session: BooksPlaybackSession, positionMs: Long, refine: Boolean): BooksSectionBlock? {
         if (positionMs !in 0 until session.durationMs) return null
         val previousIndex = session.chapters.indexOfLast { it.startMs <= positionMs }
         val previous = session.chapters.getOrNull(previousIndex)
@@ -53,12 +56,15 @@ internal object BooksSectionResolver {
         val spanStart = chapter?.startMs ?: previous?.endMs ?: 0L
         val spanEnd = chapter?.endMs ?: session.chapters.getOrNull(previousIndex + 1)?.startMs ?: session.durationMs
         val length = spanEnd - spanStart
-        val limit = if (chapter == null) FALLBACK_SECTION_MS else MAX_SECTION_MS
+        val limit = if (chapter == null) FALLBACK_SECTION_MS
+            else if (refine && length > MAX_SECTION_MS) 480_000L else MAX_SECTION_MS
         val count = (length - 1) / limit + 1
         val width = if (chapter == null) limit else (length - 1) / count + 1
         val index = (positionMs - spanStart) / width
-        val start = spanStart + index * width
-        return BooksSection(start, minOf(spanEnd, start + width), chapter, (index + 1).toInt(), count.toInt())
+        val first = index / 4 * 4
+        val last = minOf(first + 4, count)
+        val boundaries = (first..last).map { minOf(spanEnd, spanStart + it * width) }
+        return BooksSectionBlock(boundaries, chapter, (first + 1).toInt(), count.toInt())
     }
 
     fun local(section: BooksSection, transcript: BooksTranscript?): BooksSectionTranscript =
