@@ -176,7 +176,12 @@ internal class BooksReadAlong(
         if (!summaryScope.accepts(ticket, summarySelection())) return false
         fun deliver(state: BooksSummaryState) {
             main.post {
-                if (!summaryScope.accepts(ticket, summarySelection(), state.revision)) return@post
+                val current = summarySelection()
+                if (!summaryScope.accepts(ticket, current)) return@post
+                if (!summaryScope.accepts(ticket, current, state.revision)) {
+                    cancelSummary()
+                    return@post
+                }
                 summaryCallback?.invoke(state)
             }
         }

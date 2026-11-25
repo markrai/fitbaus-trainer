@@ -120,8 +120,11 @@ internal class RemoteBooksSummary(
             val track = tracks.getJSONObject(index)
             val local = selection.session.tracks[index]
             require(track.getString("file_id") == local.url.substringAfterLast('/'))
-            require(abs(integer(track, "offset_ms") - local.offsetMs) <= 1000)
-            require(abs(integer(track, "duration_ms") - local.durationMs) <= 1000)
+            val offset = integer(track, "offset_ms")
+            val trackDuration = integer(track, "duration_ms")
+            require(offset in 0..BooksTranscript.MAX_TIME_MS && trackDuration in 1..BooksTranscript.MAX_TIME_MS)
+            require(abs(offset - local.offsetMs) <= 1000)
+            require(abs(trackDuration - local.durationMs) <= 1000)
         }
         val section = selection.section
         val body = JSONObject().put("source_id", sourceId).put("item_id", selection.itemId)
@@ -175,7 +178,13 @@ internal class RemoteBooksSummary(
     private fun capabilities(): TranscriberCapabilities {
         checkCancelled()
         val caps = transcriber.test(BooksHttp { url, token ->
-            http.request(url, mapOf("Authorization" to "Bearer $token"), null)
+            val response = try {
+                http.request(url, mapOf("Authorization" to "Bearer $token"), null)
+            } catch (_: SocketTimeoutException) {
+                throw BooksSummaryException(BooksSummaryFailure.TIMEOUT)
+            }
+            if (response.status == 401) throw BooksSummaryException(BooksSummaryFailure.AUTHORIZATION)
+            response
         })
         if (caps.sourceUrl?.trimEnd('/') != books.address.trimEnd('/') || !caps.summaryApi || caps.summaryProvider == null) {
             throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
