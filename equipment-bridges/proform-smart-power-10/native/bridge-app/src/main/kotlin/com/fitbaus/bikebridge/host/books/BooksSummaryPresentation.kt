@@ -6,8 +6,14 @@ import java.util.Locale
 
 internal data class BooksSummaryPresentation(val text: String, val retry: Boolean = false) {
     companion object {
-        fun resolve(state: BooksSummaryState, recap: Boolean = false): BooksSummaryPresentation = when (state) {
-            BooksSummaryState.Preparing -> BooksSummaryPresentation(if (recap) "Preparing recap…" else "Preparing section summary…")
+        fun resolve(state: BooksSummaryState, recap: Boolean = false,
+                    cumulative: Boolean = false): BooksSummaryPresentation = when (state) {
+            BooksSummaryState.Preparing -> BooksSummaryPresentation(if (cumulative) "Preparing book recap…"
+                else if (recap) "Preparing recap…" else "Preparing section summary…")
+            is BooksSummaryState.Reducing -> BooksSummaryPresentation(
+                "Preparing book recap…\n\n${state.completedNodes} of ${state.totalNodes} summary steps complete.\n\nAudio continues while the recap is prepared.")
+            is BooksSummaryState.MissingCoverage -> BooksSummaryPresentation(
+                "Earlier narration is not fully transcribed (${state.missingWindowCount} missing windows).\n\nPrepare this audiobook in Transcription Models, or use Recent recap.")
             is BooksSummaryState.Pending -> BooksSummaryPresentation(if (recap)
                 "Preparing earlier narration…\n\nAudio continues while the recap is prepared."
                 else "Preparing narration for this section…\n\nAudio continues while the summary is prepared.")
@@ -34,7 +40,7 @@ internal data class BooksSummaryPresentation(val text: String, val retry: Boolea
         }
 
         fun recapRange(selection: BooksRecapSelection): String =
-            "Up to 10 minutes · ${stamp(selection.startMs)} – ${stamp(selection.positionMs)}"
+            "${if (selection.cumulative) "From beginning" else "Up to 10 minutes"} · ${stamp(selection.startMs)} – ${stamp(selection.positionMs)}"
 
         private fun stamp(ms: Long): String {
             val seconds = ms / 1000

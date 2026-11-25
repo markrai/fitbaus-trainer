@@ -67,6 +67,13 @@ internal class BooksReadAlong(
         textSize = 16f
         contentDescription = "Recap up to ten minutes before the current playback position"
     }
+    private val bookRecapToggle = button("Book recap").apply {
+        setAllCaps(false)
+        setTextColor(Color.WHITE)
+        setBackgroundColor(Color.BLACK)
+        textSize = 16f
+        contentDescription = "Recap from the beginning of the book to the current playback position"
+    }
     private var recapSelection: BooksRecapSelection? = null
     private val summaryPanel = LinearLayout(context)
     private val summaryTitle = label("Section summary", 26f)
@@ -145,6 +152,11 @@ internal class BooksReadAlong(
         val recapParams = FrameLayout.LayoutParams(dp(104), dp(48), Gravity.BOTTOM or Gravity.LEFT)
         recapParams.leftMargin = dp(128)
         stage.addView(recapToggle, recapParams)
+        bookRecapToggle.visibility = GONE
+        bookRecapToggle.setOnClickListener { showRecap(false, cumulative = true) }
+        val bookRecapParams = FrameLayout.LayoutParams(dp(128), dp(48), Gravity.BOTTOM or Gravity.LEFT)
+        bookRecapParams.leftMargin = dp(232)
+        stage.addView(bookRecapToggle, bookRecapParams)
         fullscreenButton.visibility = GONE
         fullscreenButton.contentDescription = "Enter fullscreen narration"
         fullscreenButton.setOnClickListener { onFullscreenRequested() }
@@ -214,11 +226,18 @@ internal class BooksReadAlong(
         summaryRetry.setAllCaps(false)
         summaryRetry.visibility = GONE
         summaryRetry.setOnClickListener {
-            val failed = summaryState as? BooksSummaryState.Failed ?: return@setOnClickListener
-            if (BooksSummaryPresentation.retryable(failed.failure)) {
-                val retry = failed.failure == BooksSummaryFailure.BOOK_CHANGED_OR_TRANSCRIPT_FAILED
-                val recap = recapSelection
-                if (recap != null) showRecap(retry, recap) else showSummary(retry)
+            val recap = recapSelection
+            when (val state = summaryState) {
+                is BooksSummaryState.MissingCoverage -> {
+                    if (recap != null && canShowRecap()) showRecap(false, recap.copy(cumulative = false))
+                }
+                is BooksSummaryState.Failed -> {
+                    if (BooksSummaryPresentation.retryable(state.failure)) {
+                        val retry = state.failure == BooksSummaryFailure.BOOK_CHANGED_OR_TRANSCRIPT_FAILED
+                        if (recap != null) showRecap(retry, recap) else showSummary(retry)
+                    }
+                }
+                else -> Unit
             }
         }
         val retryParams = LayoutParams(WRAP, dp(48))
@@ -231,24 +250,32 @@ internal class BooksReadAlong(
 
     private fun livePosition(): Long = playbackPosition?.invoke() ?: currentState.positionMs
 
-    private fun canShowRecap(): Boolean = fullscreen && visibility == VISIBLE && !destroyed &&
+    private fun recapContextAvailable(): Boolean = fullscreen && visibility == VISIBLE && !destroyed &&
         !currentState.failed && currentState.session != null && request != null &&
-        !localMode && windows.recapAvailable && windows.revision != null
+        !localMode && windows.revision != null
+
+    private fun canShowRecap(): Boolean = recapContextAvailable() && windows.recapAvailable
+
+    private fun canShowBookRecap(positionMs: Long = currentState.positionMs): Boolean =
+        recapContextAvailable() && windows.cumulativeRecapMaxPositionMs?.let { positionMs in 0..it } == true
 
     private fun recapMatches(selection: BooksRecapSelection): Boolean =
-        canShowRecap() && selection.matches(request?.itemId, currentState.session, windows.revision,
-            currentState.seekGeneration, livePosition())
+        (if (selection.cumulative) canShowBookRecap(selection.positionMs) else canShowRecap()) &&
+            selection.matches(request?.itemId, currentState.session, windows.revision,
+                currentState.seekGeneration, livePosition())
 
     private fun updateSummaryChrome() {
         val showing = fullscreen && (summarySection != null || recapSelection != null)
         summaryPanel.visibility = if (showing) VISIBLE else GONE
         summaryToggle.visibility = if (showing || canShowSummary()) VISIBLE else GONE
-        recapToggle.visibility = if (!showing && canShowRecap()) VISIBLE else GONE
+        val recentAvailable = canShowRecap()
+        recapToggle.visibility = if (!showing && recentAvailable) VISIBLE else GONE
+        bookRecapToggle.visibility = if (!showing && canShowBookRecap()) VISIBLE else GONE
         val recapMargin = if (canShowSummary()) dp(128) else 0
-        val recapParams = recapToggle.layoutParams as? FrameLayout.LayoutParams
-        if (recapParams != null && recapParams.leftMargin != recapMargin) {
-            recapParams.leftMargin = recapMargin
-            recapToggle.layoutParams = recapParams
+        updateActionMargin(recapToggle, recapMargin)
+        updateActionMargin(bookRecapToggle, recapMargin + if (recentAvailable) dp(104) else 0)
+        if (summaryState is BooksSummaryState.MissingCoverage) {
+            summaryRetry.visibility = if (recentAvailable) VISIBLE else GONE
         }
         val toggleText = if (showing) "Read along" else "Summary"
         if (summaryToggle.text != toggleText) {
@@ -258,6 +285,14 @@ internal class BooksReadAlong(
         }
         cover.visibility = if (!showing && !hasNarration) VISIBLE else GONE
         scroll.visibility = if (!showing && hasNarration) VISIBLE else GONE
+    }
+
+    private fun updateActionMargin(action: Button, margin: Int) {
+        val params = action.layoutParams as? FrameLayout.LayoutParams ?: return
+        if (params.leftMargin != margin) {
+            params.leftMargin = margin
+            action.layoutParams = params
+        }
     }
 
     private fun showSummary(retryTranscript: Boolean) {
@@ -307,21 +342,23 @@ internal class BooksReadAlong(
         }
     }
 
-    private fun showRecap(retryTranscript: Boolean, previous: BooksRecapSelection? = null) {
-        if (!canShowRecap()) return
+    private fun showRecap(retryTranscript: Boolean, previous: BooksRecapSelection? = null,
+                          cumulative: Boolean = previous?.cumulative ?: false) {
         val session = currentState.session ?: return
         val key = request ?: return
         val revision = windows.revision ?: return
         val connection = books ?: return
-        val selection = previous ?: BooksRecapSelection(key.itemId, session,
-            livePosition().coerceIn(0, session.durationMs), revision, currentState.seekGeneration)
+        val position = previous?.positionMs ?: livePosition().coerceIn(0, session.durationMs)
+        if (!(if (cumulative) canShowBookRecap(position) else canShowRecap())) return
+        val selection = previous ?: BooksRecapSelection(key.itemId, session, position, revision,
+            currentState.seekGeneration, cumulative)
         if (!recapMatches(selection)) {
             dismissSummary()
             return
         }
         dismissSummary()
         recapSelection = selection
-        summaryTitle.text = "Recent recap"
+        summaryTitle.text = if (selection.cumulative) "Book recap" else "Recent recap"
         summaryNotice.text = "AI-generated · Narration before the requested position"
         summaryRetry.text = "Retry recap"
         summaryRange.text = BooksSummaryPresentation.recapRange(selection)
@@ -377,9 +414,14 @@ internal class BooksReadAlong(
         }
         if (!fullscreen || (summarySection == null && recapSelection == null)) return
         summaryState = state
-        val presentation = BooksSummaryPresentation.resolve(state, recap = recapSelection != null)
+        val presentation = BooksSummaryPresentation.resolve(state, recap = recapSelection != null,
+            cumulative = recapSelection?.cumulative == true)
         summaryText.text = presentation.text
-        summaryRetry.visibility = if (presentation.retry) VISIBLE else GONE
+        if (recapSelection != null) {
+            summaryRetry.text = if (state is BooksSummaryState.MissingCoverage) "Recent recap" else "Retry recap"
+        }
+        summaryRetry.visibility = if (presentation.retry ||
+            (state is BooksSummaryState.MissingCoverage && canShowRecap())) VISIBLE else GONE
         summaryScroll.scrollTo(0, 0)
         updateSummaryChrome()
     }
