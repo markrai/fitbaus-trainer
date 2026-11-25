@@ -13,11 +13,7 @@
 </p>
 
 
-**FitBaus Trainer is an open-source fitness and entertainment platform that transforms your workout into something you look forward to.**
-
-Train with structured, heart-rate-guided workouts, play interactive games using body movements or game controllers, watch YouTube, listen to audiobooks, and track your fitness progress.
-
-Built for people who want more from their exercise equipment without mandatory subscriptions, proprietary ecosystems or surrendering privacy.
+FitBaus Trainer is an open-source fitness and entertainment platform that transforms your workout into something you look forward to. Train with structured, heart-rate-guided workouts, play interactive games using body movements or game controllers, watch YouTube, listen to audiobooks, and track your fitness progress. Built for people who want more from their exercise equipment without mandatory subscriptions, proprietary ecosystems or surrendering privacy.
 
 
 ## Table of Contents
