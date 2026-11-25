@@ -2,6 +2,12 @@
 
 package com.fitbaus.bikebridge.host.books
 
+import com.sun.net.httpserver.HttpServer
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.URI
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -106,6 +112,45 @@ class RemoteBooksCumulativeRecapTest {
             assertThrows(BooksSummaryException::class.java) {
                 client { BooksHttpResponse(409, """{"error":"stale_revision"}""") }.loadBookRecap(selection)
             }.failure)
+    }
+
+    @Test
+    fun actualHttpTransportPreservesCumulativeConflictBodyOnly() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var conflict = missing().toString()
+        server.createContext("/") { exchange ->
+            exchange.requestBody.use { it.readBytes() }
+            val (status, body) = when (exchange.requestURI.path) {
+                "/v1/capabilities" -> 200 to caps.toString()
+                "/v1/items/book/manifest" -> 200 to manifest.toString()
+                "/v1/cumulative-recaps" -> 409 to conflict
+                "/v1/recaps" -> 409 to conflict
+                else -> 403 to "not authorized"
+            }
+            val bytes = body.toByteArray(Charsets.UTF_8)
+            exchange.responseHeaders.set("Content-Type", "application/json")
+            exchange.sendResponseHeaders(status, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val transport = booksSummaryHttp { url ->
+                val path = URI(url).rawPath
+                URI("http://127.0.0.1:${server.address.port}$path").toURL()
+                    .openConnection(Proxy.NO_PROXY) as HttpURLConnection
+            }
+            val remote = RemoteBooksSummary(paired, books, transport, pause = {}, clock = { 0L })
+            assertEquals(BooksSummaryState.MissingCoverage(revision, 2), remote.loadBookRecap(selection))
+            assertEquals(BooksHttpResponse(409, ""), transport.request(paired.address + "/v1/recaps", emptyMap(), "{}"))
+            assertEquals(BooksHttpResponse(403, ""), transport.request(paired.address + "/other", emptyMap(), "{}"))
+            conflict = """{"error":"stale_revision"}"""
+            assertEquals(BooksSummaryFailure.BOOK_CHANGED_OR_TRANSCRIPT_FAILED,
+                assertThrows(BooksSummaryException::class.java) { remote.loadBookRecap(selection) }.failure)
+            conflict = "x".repeat(16 * 1024 + 1)
+            assertThrows(IOException::class.java) { remote.loadBookRecap(selection) }
+        } finally {
+            server.stop(0)
+        }
     }
 
     @Test

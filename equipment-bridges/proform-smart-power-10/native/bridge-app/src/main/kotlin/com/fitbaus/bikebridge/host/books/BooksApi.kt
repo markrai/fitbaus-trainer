@@ -130,7 +130,11 @@ internal fun interface BooksAuthHttp {
     fun post(url: String, headers: Map<String, String>, body: String): BooksHttpResponse
 }
 
-internal class BooksUrlConnectionHttp(private val readTimeoutMs: Int = 15_000) : BooksHttp, BooksAuthHttp {
+internal class BooksUrlConnectionHttp(
+    private val readTimeoutMs: Int = 15_000,
+    private val readConflictBody: Boolean = false,
+    private val openConnection: (String) -> HttpURLConnection = { BooksServer.openConnection(it) },
+) : BooksHttp, BooksAuthHttp {
     override fun get(url: String, token: String): BooksHttpResponse =
         request(url, "GET", mapOf("Authorization" to "Bearer $token"), null)
 
@@ -141,7 +145,7 @@ internal class BooksUrlConnectionHttp(private val readTimeoutMs: Int = 15_000) :
         request(url, "GET", headers, null)
 
     private fun request(url: String, method: String, headers: Map<String, String>, body: ByteArray?): BooksHttpResponse {
-        val connection = BooksServer.openConnection(url)
+        val connection = openConnection(url)
         try {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 10_000
@@ -156,15 +160,19 @@ internal class BooksUrlConnectionHttp(private val readTimeoutMs: Int = 15_000) :
                 connection.outputStream.use { it.write(body) }
             }
             val status = connection.responseCode
-            if (status !in 200..299) return BooksHttpResponse(status, "")
+            val success = status in 200..299
+            if (!success && !(status == 409 && readConflictBody)) return BooksHttpResponse(status, "")
+            val stream = if (success) connection.inputStream else connection.errorStream
+            if (stream == null) return BooksHttpResponse(status, "")
+            val limit = if (success) MAX_RESPONSE_BYTES else MAX_CONFLICT_BYTES
             val output = ByteArrayOutputStream()
-            connection.inputStream.use { input ->
+            stream.use { input ->
                 val buffer = ByteArray(8192)
                 while (true) {
                     if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Request cancelled")
                     val count = input.read(buffer)
                     if (count < 0) break
-                    if (output.size() + count > MAX_RESPONSE_BYTES) {
+                    if (output.size() + count > limit) {
                         throw IOException("Audiobookshelf response exceeds limit")
                     }
                     output.write(buffer, 0, count)
@@ -178,6 +186,7 @@ internal class BooksUrlConnectionHttp(private val readTimeoutMs: Int = 15_000) :
 
     private companion object {
         const val MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+        const val MAX_CONFLICT_BYTES = 16 * 1024
     }
 }
 
