@@ -28,7 +28,7 @@ internal class TranscriberConnection(val address: String, val token: String) {
         return TranscriberCapabilities(if (configured) source else null,
             json.getBoolean("transcription") && json.getBoolean("engine_ready") && configured, window,
             json.optString("source_url", "").takeIf { it.isNotBlank() && !json.isNull("source_url") },
-            SummaryProviderCapability.parse(json.optJSONObject("summary_provider")))
+            SummaryProviderCapability.parse(json.optJSONObject("summary_provider")), json.opt("summary_api") == true)
     }
 
     companion object {
@@ -64,6 +64,7 @@ internal data class TranscriberCapabilities(
     val maxWindowMs: Int,
     val sourceUrl: String? = null,
     val summaryProvider: SummaryProviderCapability? = null,
+    val summaryApi: Boolean = false,
 )
 
 internal data class SummaryProviderCapability(val model: String) {
