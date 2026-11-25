@@ -428,7 +428,7 @@ internal class BooksReadAlong(
         currentState = state
         val ready = state.session != null && !state.failed
         val session = state.session
-        if (ready && session != null && windows.revision != null && !localMode) {
+        if (ready && windows.revision != null && !localMode) {
             sectionPlans.configure(session, windows.sectionPlanAvailable)
         }
         if ((summaryScope.active && (!summaryScope.matches(summarySelection()) || !canShowSummary())) ||
