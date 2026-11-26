@@ -36,12 +36,12 @@ async function storeOrdinaryBikeTelemetrySample(value) {
     const sample = parseOrdinaryBikeTelemetrySample(value);
     if (!sample)
         return "rejected";
-    if (ordinaryTelemetryWriteFailureInjectorForTests === null || ordinaryTelemetryWriteFailureInjectorForTests === void 0 ? void 0 : ordinaryTelemetryWriteFailureInjectorForTests())
-        return "failed";
-    if (ordinaryTelemetryWriteGateForTests) {
-        await ordinaryTelemetryWriteGateForTests();
-    }
     try {
+        if (ordinaryTelemetryWriteFailureInjectorForTests === null || ordinaryTelemetryWriteFailureInjectorForTests === void 0 ? void 0 : ordinaryTelemetryWriteFailureInjectorForTests())
+            return "failed";
+        if (ordinaryTelemetryWriteGateForTests) {
+            await ordinaryTelemetryWriteGateForTests();
+        }
         return await writeOrdinaryBikeTelemetrySample(sample);
     }
     catch (error) {
@@ -323,6 +323,8 @@ export function queueWorkoutHrSample(sessionId, elapsedSec, bpm) {
     return true;
 }
 export async function flushWorkoutHrWrites(sessionId) {
+    if (sealedWorkoutHrSessions.has(sessionId))
+        return false;
     const chain = pendingWorkoutHrWrites.get(sessionId);
     if (!chain)
         return true;
@@ -351,6 +353,8 @@ export async function readCanonicalWorkoutHrSamples(sessionId) {
     return getHrSamplesStrict(sessionId);
 }
 async function withWorkoutHrDeletion(sessionId, remove) {
+    if (sealedWorkoutHrSessions.has(sessionId))
+        throw new Error("HR evidence deletion already in progress");
     sealedWorkoutHrSessions.add(sessionId);
     try {
         const chain = pendingWorkoutHrWrites.get(sessionId);
@@ -512,16 +516,18 @@ async function getAllWorkoutSummaries() {
 async function deleteWorkoutSummary(sessionId) {
     try {
         await flushOrdinaryBikeTelemetryWrites(sessionId);
-        const database = await initDB();
-        // One readwrite transaction across all three stores: a workout and its HR
-        // samples and telemetry are deleted together or not at all.
-        const tx = database.transaction([STORE_WORKOUTS, STORE_HR_SAMPLES, STORE_ORDINARY_BIKE_TELEMETRY], "readwrite");
-        const completed = transactionComplete(tx);
-        await untilTransactionComplete(Promise.all([
-            deleteWorkoutRowInTransaction(tx, sessionId),
-            deleteHrSampleRowsInTransaction(tx, sessionId),
-            deleteOrdinaryBikeTelemetryRowsInTransaction(tx, sessionId),
-        ]), completed);
+        await withWorkoutHrDeletion(sessionId, async () => {
+            const database = await initDB();
+            // One readwrite transaction across all three stores: a workout and its HR
+            // samples and telemetry are deleted together or not at all.
+            const tx = database.transaction([STORE_WORKOUTS, STORE_HR_SAMPLES, STORE_ORDINARY_BIKE_TELEMETRY], "readwrite");
+            const completed = transactionComplete(tx);
+            await untilTransactionComplete(Promise.all([
+                deleteWorkoutRowInTransaction(tx, sessionId),
+                deleteHrSampleRowsInTransaction(tx, sessionId),
+                deleteOrdinaryBikeTelemetryRowsInTransaction(tx, sessionId),
+            ]), completed);
+        });
         try {
             const history = await getAllWorkoutSummaries();
             rebuildStoredPassiveFitnessProjection(history.map((row) => row.summary));

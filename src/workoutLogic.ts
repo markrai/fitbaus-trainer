@@ -54,7 +54,7 @@ import {
   vo2LiveHrBreachCeilingV3,
   type Vo2ProtocolRuntimeV3,
 } from "./vo2ProtocolV3.js";
-import { clearOrdinaryBikeTelemetry, getHrSamples } from "./workoutStorage.js";
+import { clearOrdinaryBikeTelemetry, readCanonicalWorkoutHrSamples } from "./workoutStorage.js";
 import {
   clearBikeTelemetrySamples,
   getBikeTelemetrySamples,
@@ -942,13 +942,13 @@ type CanonicalVo2TickResult =
 
 interface CanonicalVo2TickOptions {
   isCurrent?: () => boolean;
-  readHrSamples?: typeof getHrSamples;
+  readHrSamples?: typeof readCanonicalWorkoutHrSamples;
 }
 
 interface PendingVo2Checkpoint {
   key: string;
-  read: typeof getHrSamples;
-  samples: ReturnType<typeof getHrSamples>;
+  read: typeof readCanonicalWorkoutHrSamples;
+  samples: ReturnType<typeof readCanonicalWorkoutHrSamples>;
   latest: object;
 }
 
@@ -999,7 +999,7 @@ async function tickVo2ProtocolWithCanonicalHr(
     return tickVo2Protocol(day, elapsedSec, paused, store, [], [], liveHrBpm);
   }
   const key = vo2CheckpointKey(session, elapsedSec);
-  const read = options.readHrSamples ?? getHrSamples;
+  const read = options.readHrSamples ?? readCanonicalWorkoutHrSamples;
   const ticket = {};
   let checkpoint = pending.get(day);
   if (!checkpoint || checkpoint.key !== key || checkpoint.read !== read) {
@@ -1009,13 +1009,29 @@ async function tickVo2ProtocolWithCanonicalHr(
     checkpoint.latest = ticket;
   }
   try {
-    const samples = await checkpoint.samples;
+    let samples: Awaited<ReturnType<typeof readCanonicalWorkoutHrSamples>> | undefined;
+    try {
+      samples = await checkpoint.samples;
+    } catch (error) {
+      console.error("VO2 checkpoint evidence unavailable:", error);
+    }
     if (readSessionFinalization(day, store)) return undefined;
     if (pending.get(day) !== checkpoint || checkpoint.latest !== ticket || options.isCurrent?.() === false) {
       return undefined;
     }
     const current = getSession(day, store);
     if (!current.vo2ProtocolRuntime || vo2CheckpointKey(current, elapsedSec) !== key) return undefined;
+    if (!samples) {
+      const freshHr = readFreshLiveHrBpm();
+      if (!(isVo2ProtocolRuntimeV3(current.vo2ProtocolRuntime) &&
+          vo2LiveHrBreachCeilingV3(current.vo2ProtocolRuntime, freshHr) != null)) {
+        setEarlyCooldownElapsed(day, elapsedSec, store);
+      }
+      if (typeof window !== "undefined" && typeof (window as any).showToast === "function") {
+        (window as any).showToast("Workout evidence unavailable. Ending the VO2 work interval safely.", "error");
+      }
+      return tickVo2Protocol(day, elapsedSec, paused, store, [], [], freshHr);
+    }
     const telemetrySamples = getBikeTelemetrySamples(session.sessionId, store);
     return tickVo2Protocol(day, elapsedSec, paused, store, samples, telemetrySamples, readFreshLiveHrBpm());
   } finally {
