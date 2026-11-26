@@ -179,6 +179,69 @@ class SummaryProviderManagementTest {
     }
 
     @Test
+    fun rememberedInactiveLoboDiscoveryOmitsAuthButExplicitReverificationSendsIt() {
+        val inactive = "https://192.168.1.201:7869/v1"
+        configured.put("trusted_lobo_endpoints", JSONArray().put(inactive))
+        discoveryCandidate = JSONObject(configured.toString()).put("base_url", inactive)
+        val flow = SummaryProviderWorkflow()
+        val actions = SummaryProviderActions(flow, client())
+        runAction(actions, actions.capabilities())
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(inactive))
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        assertTrue(flow.state.reusesRememberedLobo)
+        runAction(actions, actions.discover(inactive, false, "", ""))
+        val body = requests.last().third!!
+        assertEquals("lobo", body.getString("kind"))
+        assertEquals(inactive, body.getString("base_url"))
+        assertFalse(body.has("lobo_auth"))
+        assertFalse(body.has("use_current"))
+        assertFalse(body.getBoolean("allow_http"))
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.setVerifyLoboAgain(true))
+        runAction(actions, actions.discover(inactive, false, "", "FMV3-14SR"))
+        assertEquals("FMV3-14SR", requests.last().third!!.getString("lobo_auth"))
+        assertFalse(flow.state.canSave)
+    }
+
+    @Test
+    fun registryMetadataIsStrictAndOlderServersRemainCompatible() {
+        assertTrue(SummaryProviderStatus.parse(configured).trustedLoboEndpoints.isEmpty())
+        for (bad in listOf("https://8.8.8.8:7869/v1", "http://192.168.1.200:7869/v1",
+                "https://192.168.1.200:7869/v1/", "https://user@192.168.1.200:7869/v1")) {
+            val value = JSONObject(configured.toString()).put("trusted_lobo_endpoints", JSONArray().put(bad))
+            assertThrows(IllegalArgumentException::class.java) { SummaryProviderStatus.parse(value) }
+        }
+        val duplicate = JSONObject(configured.toString()).put("trusted_lobo_endpoints",
+            JSONArray().put("https://192.168.1.200:7869/v1").put("https://192.168.1.200:7869/v1"))
+        assertThrows(IllegalArgumentException::class.java) { SummaryProviderStatus.parse(duplicate) }
+        val tooMany = JSONArray()
+        for (i in 1..17) tooMany.put("https://192.168.1.$i:7869/v1")
+        assertThrows(IllegalArgumentException::class.java) {
+            SummaryProviderStatus.parse(JSONObject(configured.toString()).put("trusted_lobo_endpoints", tooMany))
+        }
+    }
+
+    @Test
+    fun rememberedDiscoveryCannotAcceptUnpinnedCandidate() {
+        val inactive = "https://192.168.1.201:7869/v1"
+        configured.put("trusted_lobo_endpoints", JSONArray().put(inactive))
+        discoveryCandidate = JSONObject(configured.toString()).put("base_url", inactive).put("custom_ca", false)
+        val flow = SummaryProviderWorkflow()
+        val actions = SummaryProviderActions(flow, client())
+        runAction(actions, actions.capabilities())
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(inactive))
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        val request = actions.discover(inactive, false, "", "")
+        val ticket = requireNotNull(actions.begin(request))
+        val error = assertThrows(IllegalArgumentException::class.java) { request.execute() }
+        assertTrue(actions.fail(ticket, error))
+        assertFalse(flow.state.canTest)
+        assertFalse(flow.state.canSave)
+    }
+
+    @Test
     fun expiredGrantAndClosedAuthorizationCompletionClearClientGrant() {
         val api = client()
         val flow = SummaryProviderWorkflow()

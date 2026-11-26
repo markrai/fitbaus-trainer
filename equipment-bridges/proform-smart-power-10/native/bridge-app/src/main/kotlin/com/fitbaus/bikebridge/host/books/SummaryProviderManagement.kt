@@ -28,7 +28,7 @@ internal data class SummaryProviderStatus(
     }
 
     fun remembersLobo(endpoint: String?): Boolean =
-        !storageError && SummaryProviderManagement.canonicalLoboEndpoint(endpoint) in trustedLoboEndpoints
+        !storageError && SummaryProviderManagement.canonicalLoboEndpoint(endpoint)?.let { it in trustedLoboEndpoints } == true
 
     companion object {
         fun parse(json: JSONObject): SummaryProviderStatus {

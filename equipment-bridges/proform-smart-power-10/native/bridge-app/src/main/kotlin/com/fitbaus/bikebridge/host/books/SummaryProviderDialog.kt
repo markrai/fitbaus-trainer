@@ -309,7 +309,7 @@ internal class SummaryProviderDialog(
                 scanningLan -> "Finding LOBO devices…"
                 failedLan -> "Discovery unavailable"
                 lanSelection.devices.isEmpty() -> "No LOBO devices found. Check the LAN or enter the address manually."
-                else -> "${lanSelection.devices.size} LOBO device(s) found · Unverified"
+                else -> "${lanSelection.devices.size} LOBO device(s) found · Identity checked on connection"
             }
             val visible = lanSelection.rows()
             val addresses = visible.map { it.address }.toSet()
@@ -320,7 +320,7 @@ internal class SummaryProviderDialog(
             }
             visible.forEach { device ->
                 val address = device.address
-                val chosen = picked?.address == address
+                val chosen = picked?.address == address || (manualLobo && state.draftEndpoint == device.endpoint)
                 val row = lanButtons.getOrPut(address) {
                     button("", parent = lanDevices) {
                         if (formCurrent() && state.editable && state.choice == SummaryProviderChoice.LOBO &&
@@ -355,7 +355,7 @@ internal class SummaryProviderDialog(
                     if (chosen) ACCENT else BORDER, if (chosen) 2 else 1)
             }
             val advertisedEndpoints = visible.map { it.endpoint }.toSet()
-            val remembered = state.authorization?.trustedLoboEndpoints.orEmpty()
+            val remembered = state.authorization?.takeUnless { it.storageError }?.trustedLoboEndpoints.orEmpty()
                 .filterNot { it in advertisedEndpoints }
             for (value in rememberedButtons.keys.toList()) {
                 if (value !in remembered) rememberedButtons.remove(value)?.let { rememberedRows.removeView(it) }
@@ -381,7 +381,7 @@ internal class SummaryProviderDialog(
                     }.apply { isAllCaps = false }
                 }
                 row.text = value.removePrefix("https://").removeSuffix("/v1") +
-                    "  ·  REMEMBERED · NOT ADVERTISED" + if (chosen) "  ·  SELECTED" else ""
+                    "  ·  REMEMBERED · NOT ADVERTISED" + (if (chosen) "  ·  SELECTED" else "")
                 row.isSelected = chosen
                 row.isEnabled = state.editable
                 row.setTextColor(if (chosen) ACCENT else Color.WHITE)
@@ -629,7 +629,7 @@ internal class SummaryProviderDialog(
             auth.visibility = authLabel.visibility
             if (snapshot.choice == SummaryProviderChoice.LOBO) {
                 hint.text = if (presentation.reuseTrust) "Reuse the saved certificate trust. Transcriber still verifies HTTPS during discovery and inference."
-                    else "Select a phone and verify its identity using the AUTH code shown on that phone."
+                    else "Verify device identity using the AUTH code shown on the selected phone. This is not an inference password."
                 discoverButton.text = if (presentation.reuseTrust) "DISCOVER TRUSTED DEVICE MODELS" else "DISCOVER MODELS"
             }
             endpoint.isEnabled = snapshot.editable && snapshot.choice != SummaryProviderChoice.REUSE
