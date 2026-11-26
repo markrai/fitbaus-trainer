@@ -92,12 +92,13 @@ internal class NativeUsbSession(
      * WarmState / AuthOnly / AuthPlusIdleLockout without assigning
      * IndependentlyEstablished.
      */
-    private val coldStartWritePlan: ColdStartWritePlan = ColdStartWritePlan.WarmState,
+    private val coldStartWritePlan: ColdStartWritePlan,
     private val maxConsecutiveExchangeFailures: Int = HostConstants.MAX_CONSECUTIVE_EXCHANGE_FAILURES,
     private val permissionPollMs: Long = HostConstants.PERMISSION_POLL_MS,
     private val resistanceQueueWaitMs: Long = HostConstants.RESISTANCE_QUEUE_WAIT_MS,
     private val resistanceTransmitWaitMs: Long = HostConstants.RESISTANCE_TRANSMIT_WAIT_MS,
     private val onRpmReading: (Int?) -> Unit = {},
+    private val workerOwnership: NativeUsbWorkerOwnership = NativeUsbWorkerOwnership.process,
 ) {
     private val running = AtomicBoolean(false)
     private val snapshot = AtomicReference(BridgeHttpJson.emptySnapshot(nowIso()))
@@ -118,6 +119,7 @@ internal class NativeUsbSession(
     private val writeSecurityBlocked = AtomicBoolean(false)
     private val workerLock = Any()
     private var worker: Thread? = null
+    private var stopsInProgress = 0
 
     @Volatile
     private var lastExchangeAtMs: Long = 0L
@@ -132,6 +134,7 @@ internal class NativeUsbSession(
         val reason = diagnostic.get()
         return when (lifecycle.get()) {
             SessionLifecycle.StopTimedOut -> "stop timed out; USB may still be held ($reason)"
+            SessionLifecycle.WaitingForOwnership -> "waiting for previous USB worker to release ownership"
             else -> reason
         }
     }
@@ -145,13 +148,9 @@ internal class NativeUsbSession(
         permissionPromptAllowed.set(true)
     }
 
-    fun ensureRunning(): Boolean {
-        val state = lifecycle.get()
-        if (state == SessionLifecycle.Stopping || state == SessionLifecycle.StopTimedOut) return false
-        if (usbWorkerAlive()) return false
-        start()
-        return true
-    }
+    fun waitingForUsbOwner(): Boolean = lifecycle.get() == SessionLifecycle.WaitingForOwnership
+
+    fun ensureRunning(): Boolean = start()
 
     /**
      * Queues a Legacy-equivalent field-2 write on the USB worker.
@@ -194,12 +193,8 @@ internal class NativeUsbSession(
         return uncertain()
     }
 
-    fun start() {
-        if (!running.compareAndSet(false, true)) return
-        terminalFailure.set(false)
-        lifecycle.set(SessionLifecycle.Running)
-        phase.set(UsbPhase.Starting)
-        note("starting")
+    fun start(): Boolean = synchronized(workerLock) {
+        if (stopsInProgress != 0 || worker?.isAlive == true || running.get()) return@synchronized false
         val thread = Thread({
             try {
                 runLoop()
@@ -208,18 +203,40 @@ internal class NativeUsbSession(
                 Log.e(HostConstants.LOG_TAG, "native session failed", ex)
                 publishOffline()
             } finally {
-                onRpmReading(null)
-                running.set(false)
-                failPendingResistance("usb session stopped")
-                if (!terminalFailure.get()) {
-                    note("stopped")
-                    phase.set(UsbPhase.Disconnected)
+                try {
+                    onRpmReading(null)
+                    failPendingResistance("usb session stopped")
+                    if (!terminalFailure.get()) {
+                        note("stopped")
+                        phase.set(UsbPhase.Disconnected)
+                    }
+                } finally {
+                    running.set(false)
+                    lifecycle.set(SessionLifecycle.Stopped)
                 }
-                lifecycle.set(SessionLifecycle.Stopped)
             }
         }, "fitbaus-native-usb")
-        synchronized(workerLock) { worker = thread }
-        thread.start()
+        val started = try {
+            workerOwnership.tryStart(thread) {
+                terminalFailure.set(false)
+                lifecycle.set(SessionLifecycle.Running)
+                phase.set(UsbPhase.Starting)
+                note("starting")
+                worker = thread
+                running.set(true)
+            }
+        } catch (failure: Throwable) {
+            running.set(false)
+            lifecycle.set(SessionLifecycle.Stopped)
+            worker = null
+            throw failure
+        }
+        if (!started) {
+            if (!waitingForUsbOwner()) Log.w(HostConstants.LOG_TAG, "USB start deferred; previous worker still alive")
+            lifecycle.set(SessionLifecycle.WaitingForOwnership)
+            phase.set(UsbPhase.Disconnected)
+        }
+        started
     }
 
     /**
@@ -227,21 +244,39 @@ internal class NativeUsbSession(
      * A completed join is not treated as USB release unless the worker is dead.
      */
     fun stop(): SessionStopResult {
-        running.set(false)
-        val thread = synchronized(workerLock) { worker } ?: return SessionStopResult.Released
-        if (!thread.isAlive) return SessionStopResult.Released
-        lifecycle.set(SessionLifecycle.Stopping)
-        thread.interrupt()
-        thread.join(stopJoinMs)
-        if (thread.isAlive) {
-            lifecycle.set(SessionLifecycle.StopTimedOut)
-            Log.e(
-                HostConstants.LOG_TAG,
-                "USB worker still alive after ${stopJoinMs}ms stop join; do not assume USB released",
-            )
-            return SessionStopResult.TimedOut
+        val thread = synchronized(workerLock) {
+            running.set(false)
+            val current = worker
+            if (current == null || !current.isAlive) {
+                if (waitingForUsbOwner()) {
+                    lifecycle.set(SessionLifecycle.Stopped)
+                    note("stopped")
+                }
+                return SessionStopResult.Released
+            }
+            stopsInProgress++
+            lifecycle.set(SessionLifecycle.Stopping)
+            current.interrupt()
+            current
         }
-        return SessionStopResult.Released
+        try {
+            if (thread !== Thread.currentThread()) thread.join(stopJoinMs)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        return synchronized(workerLock) {
+            stopsInProgress--
+            if (thread.isAlive) {
+                lifecycle.set(SessionLifecycle.StopTimedOut)
+                Log.e(
+                    HostConstants.LOG_TAG,
+                    "USB worker still alive after stop join; do not assume USB released",
+                )
+                SessionStopResult.TimedOut
+            } else {
+                SessionStopResult.Released
+            }
+        }
     }
 
     private enum class SessionOutcome {
@@ -251,6 +286,7 @@ internal class NativeUsbSession(
 
     private enum class SessionLifecycle {
         Idle,
+        WaitingForOwnership,
         Running,
         Stopping,
         Stopped,
@@ -323,6 +359,7 @@ internal class NativeUsbSession(
                 }
                 is UsbQualificationResult.Qualified -> q
             }
+            if (!running.get()) return
             val deviceName = qualified.device.deviceName
             if (!gateway.hasPermission(deviceName)) {
                 val prompted = permissionPromptAllowed.getAndSet(false)
@@ -333,6 +370,7 @@ internal class NativeUsbSession(
                     continue
                 }
             }
+            if (!running.get()) return
             when (val opened = gateway.openQualified(qualified)) {
                 is OpenResult.Failed -> {
                     if (!opened.retryable) {
@@ -349,6 +387,7 @@ internal class NativeUsbSession(
                     attempts = 0
                     phase.set(UsbPhase.UsbConnected)
                     try {
+                        if (!running.get()) return
                         when (session(opened.transport)) {
                             SessionOutcome.Stopped -> {
                                 failPendingResistance("usb session stopped")

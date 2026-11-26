@@ -35,6 +35,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class NativeUsbSessionTest {
+    private val workerOwnership = NativeUsbWorkerOwnership()
+
     @Test
     fun failedExchangeDoesNotRefreshSnapshotAtOrKeepMetricsCurrent() {
         val clock = TestClock()
@@ -73,6 +75,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 0,
             maxReconnectAttempts = 5,
             reconnectDelayMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.snapshot().connected }
@@ -128,6 +132,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 0,
             maxReconnectAttempts = 0,
             reconnectDelayMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         exhausted.start()
         waitUntil(exhausted) { !exhausted.usbWorkerAlive() }
@@ -146,6 +152,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 0,
             reconnectDelayMs = 0,
             stopJoinMs = 80,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.snapshot().connected }
@@ -159,6 +167,116 @@ class NativeUsbSessionTest {
         waitUntil(session) { transport.closed }
         assertEquals(SessionStopResult.Released, session.stop())
         assertFalse(session.usbWorkerAlive())
+    }
+
+    @Test
+    fun replacementSessionWaitsForTimedOutWorkerAndTransportRelease() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val oldTransport = ScriptedBikeTransport(onExchange = {
+            entered.countDown()
+            awaitIgnoringInterrupts(release)
+        })
+        val newTransport = ScriptedBikeTransport()
+        val oldGateway = gatewayFor(oldTransport)
+        val newGateway = gatewayFor(newTransport)
+        val old = NativeUsbSession(
+            gateway = oldGateway,
+            requestPermission = { false },
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            minRequestSpacingMs = 0,
+            stopJoinMs = 20,
+        )
+        val replacement = NativeUsbSession(
+            gateway = newGateway,
+            requestPermission = { false },
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            minRequestSpacingMs = 0,
+        )
+        val http = NativeHttpServer(
+            bindAddress = "127.0.0.1",
+            port = 0,
+            snapshot = { replacement.snapshot() },
+        )
+        try {
+            assertTrue(old.start())
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+            assertEquals(SessionStopResult.TimedOut, old.stop())
+            assertFalse(oldTransport.closed)
+            assertFalse(old.start())
+            assertFalse(old.ensureRunning())
+            assertTrue(startHttpThenUsb(http, replacement))
+            assertTrue(http.isListening())
+            assertTrue(replacement.waitingForUsbOwner())
+            assertFalse(replacement.usbWorkerAlive())
+            assertFalse(replacement.ensureRunning())
+            assertEquals(0, newGateway.openCalls)
+            assertEquals(503, replacement.setResistance(3).statusCode)
+            release.countDown()
+            waitUntil(old) { !old.usbWorkerAlive() }
+            assertTrue(oldTransport.closed)
+            assertTrue(replacement.ensureRunning())
+            waitUntil(replacement) { replacement.snapshot().connected }
+            assertFalse(replacement.waitingForUsbOwner())
+            assertEquals(1, newGateway.openCalls)
+            assertFalse(old.start())
+        } finally {
+            release.countDown()
+            replacement.stop()
+            old.stop()
+            http.stop()
+        }
+    }
+
+    @Test
+    fun delayedPermissionGrantAfterStopCannotOpenUsbAndSameSessionCanRecover() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val transport = ScriptedBikeTransport()
+        val gateway = FakeUsbGateway(listOf(matchingBrainboard())) {
+            OpenResult.Opened(ValidatedProbeTransport(transport))
+        }
+        val session = NativeUsbSession(
+            gateway = gateway,
+            requestPermission = {
+                entered.countDown()
+                awaitIgnoringInterrupts(release)
+                gateway.grant("bike0")
+                true
+            },
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
+            minRequestSpacingMs = 0,
+            stopJoinMs = 20,
+        )
+        try {
+            assertTrue(session.start())
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+            assertEquals(SessionStopResult.TimedOut, session.stop())
+            assertFalse(session.start())
+            assertFalse(session.ensureRunning())
+            assertEquals(0, gateway.openCalls)
+            release.countDown()
+            waitUntil(session) { !session.usbWorkerAlive() }
+            assertEquals(0, gateway.openCalls)
+            assertTrue(session.ensureRunning())
+            waitUntil(session) { session.snapshot().connected }
+            assertEquals(1, gateway.openCalls)
+        } finally {
+            release.countDown()
+            session.stop()
+        }
+    }
+
+    private fun awaitIgnoringInterrupts(latch: CountDownLatch) {
+        while (true) {
+            try {
+                latch.await()
+                return
+            } catch (_: InterruptedException) {
+                Unit
+            }
+        }
     }
 
     @Test
@@ -177,6 +295,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 0,
             maxReconnectAttempts = 5,
             reconnectDelayMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { !session.usbWorkerAlive() }
@@ -201,6 +321,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 0,
             maxReconnectAttempts = 2,
             reconnectDelayMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { !session.usbWorkerAlive() }
@@ -219,6 +341,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 0,
             maxReconnectAttempts = HostConstants.UNLIMITED_USB_RECONNECT,
             reconnectDelayMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.statusLine().contains("usb rejected") }
@@ -366,6 +490,8 @@ class NativeUsbSessionTest {
             sleeper = { Thread.sleep(it) },
             minRequestSpacingMs = 40,
             reconnectDelayMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { times.size >= 3 }
@@ -533,6 +659,7 @@ class NativeUsbSessionTest {
             reconnectDelayMs = 0,
             coldStartWritePlan = ColdStartWritePlan.AuthOnly,
             resistanceQueueWaitMs = 0,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.snapshot().connected && session.snapshot().machine.canSetResistance }
@@ -843,6 +970,8 @@ class NativeUsbSessionTest {
             reconnectDelayMs = 0,
             securityHashCompatibility = SecurityHashCompatibility.IndependentlyEstablished,
             resistanceQueueWaitMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.snapshot().connected }
@@ -873,6 +1002,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 0,
             reconnectDelayMs = 0,
             maxConsecutiveExchangeFailures = 3,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.phase() == UsbPhase.Streaming }
@@ -895,6 +1026,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 5,
             reconnectDelayMs = 0,
             maxConsecutiveExchangeFailures = 200,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.snapshot().connected }
@@ -924,6 +1057,8 @@ class NativeUsbSessionTest {
             minRequestSpacingMs = 0,
             reconnectDelayMs = 0,
             permissionPollMs = 5,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.phase() == UsbPhase.PermissionRequired }
@@ -958,6 +1093,8 @@ class NativeUsbSessionTest {
             sleeper = {},
             minRequestSpacingMs = 0,
             reconnectDelayMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { !session.usbWorkerAlive() }
@@ -978,6 +1115,8 @@ class NativeUsbSessionTest {
             sleeper = { Thread.sleep(it) },
             minRequestSpacingMs = 0,
             reconnectDelayMs = 100,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         assertEquals(UsbPhase.Starting, session.phase())
         session.start()
@@ -1219,6 +1358,8 @@ class NativeUsbSessionTest {
             sleeper = {},
             minRequestSpacingMs = 0,
             reconnectDelayMs = 0,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
         session.start()
         waitUntil(session) { session.snapshot().machine.canSetResistance }
@@ -1249,6 +1390,7 @@ class NativeUsbSessionTest {
             coldStartWritePlan = plan,
             resistanceQueueWaitMs = queueWaitMs,
             resistanceTransmitWaitMs = transmitWaitMs,
+            workerOwnership = workerOwnership,
         )
 
     private fun reconnectingSession(
@@ -1270,6 +1412,8 @@ class NativeUsbSessionTest {
             reconnectDelayMs = 0,
             resistanceQueueWaitMs = queueWaitMs,
             resistanceTransmitWaitMs = transmitWaitMs,
+            coldStartWritePlan = ColdStartWritePlan.WarmState,
+            workerOwnership = workerOwnership,
         )
     }
 

@@ -15,6 +15,7 @@ internal object HostConstants {
     const val PERMISSION_POLL_MS: Long = 1_000L
     const val BOOT_PERMISSION_GRACE_MS: Long = 10_000L
     const val HTTP_BIND_RETRY_MS: Long = 5_000L
+    const val USB_OWNER_RETRY_MS: Long = 1_000L
     const val USB_PERMISSION_TIMEOUT_S: Long = 60L
     const val INIT_MODE: String = "warm-state"
     const val UNLIMITED_USB_RECONNECT: Int = -1

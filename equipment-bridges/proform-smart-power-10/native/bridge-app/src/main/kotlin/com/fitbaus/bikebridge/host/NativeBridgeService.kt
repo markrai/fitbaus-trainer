@@ -38,6 +38,7 @@ class NativeBridgeService : Service() {
     private var httpError: String? = null
 
     private val bindRetry = Runnable { startHttpAndUsb() }
+    private val usbOwnerRetry = Runnable { retryUsbStart() }
 
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -92,14 +93,13 @@ class NativeBridgeService : Service() {
         if (intent?.action == HostConstants.ACTION_USB_RECHECK) {
             usb?.requestPermissionAgain()
         }
-        if (http?.isListening() == true) {
-            usb?.ensureRunning()
-        }
+        retryUsbStart()
         return START_STICKY
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(bindRetry)
+        handler.removeCallbacks(usbOwnerRetry)
         val stop = usb?.stop()
         if (stop == SessionStopResult.TimedOut) {
             Log.e(
@@ -129,6 +129,7 @@ class NativeBridgeService : Service() {
         val session = usb ?: return
         if (startHttpThenUsb(server, session)) {
             httpError = null
+            scheduleUsbOwnerRetry()
             return
         }
         val reason = server.lastError() ?: "bind failed"
@@ -139,6 +140,18 @@ class NativeBridgeService : Service() {
         )
         handler.removeCallbacks(bindRetry)
         handler.postDelayed(bindRetry, HostConstants.HTTP_BIND_RETRY_MS)
+    }
+
+    private fun retryUsbStart() {
+        if (http?.isListening() == true) usb?.ensureRunning()
+        scheduleUsbOwnerRetry()
+    }
+
+    private fun scheduleUsbOwnerRetry() {
+        handler.removeCallbacks(usbOwnerRetry)
+        if (http?.isListening() == true && usb?.waitingForUsbOwner() == true) {
+            handler.postDelayed(usbOwnerRetry, HostConstants.USB_OWNER_RETRY_MS)
+        }
     }
 
     private fun requestUsbPermission(usbManager: UsbManager, deviceName: String): Boolean {

@@ -95,3 +95,11 @@ Production APKs must be signed with the same certificate as the previously
 installed `com.fitbaus.bikebridge` package so in-place `adb install -r` can
 preserve pairing data. Keystores are not committed. See `native/local.properties`
 keys `bikebridge.signing.*`.
+
+### Process-wide USB worker ownership
+
+Native USB worker admission is process-wide, not tied to an Android service instance. A stopped worker retains exclusive admission until its thread has actually exited, including transport cleanup. A timed-out join does not authorize a second worker or a restart of the same session. A replacement service can bind HTTP and report unavailable telemetry/control while waiting; it retries USB admission once per second until the previous worker exits. It does not retry a terminal initialization failure merely because ownership was previously blocked. Service destruction removes the retry callback. Permission results or completed open calls arriving after stop must not start protocol exchange. The shutdown join remains bounded at the existing eight seconds. The process gate is not cross-process USB arbitration with stock iFIT or the separate probe APK.
+
+Every NativeUsbSession construction now specifies its cold-start write plan explicitly. Production still obtains AuthOnly through UnlockQualification.plan(); staging and test plans remain explicit. Pairing-token checks, resistance limits, transmit allowlists, and SECURITY_BLOCK behavior are unchanged.
+
+Phase 0B physical acceptance: with stock iFIT out of the USB path, confirm telemetry and normal token-authorized resistance behavior, stop and restart the bridge in-process, confirm a single USB worker owns the interface and recovery occurs after release, and confirm a resistance request without the pairing token is rejected. Do not claim the stop-timeout interleaving was reproduced on physical hardware unless observed; latch-controlled JVM tests exercise that interleaving.
