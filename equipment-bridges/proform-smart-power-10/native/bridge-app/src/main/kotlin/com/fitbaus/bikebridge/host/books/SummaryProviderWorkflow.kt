@@ -28,6 +28,7 @@ internal data class SummaryProviderWorkflowState(
     val consent: Boolean = false,
     val pending: SummaryProviderRequest? = null,
     val activeProvider: SummaryProviderStatus? = null,
+    val verifyLoboAgain: Boolean = false,
 ) {
     val idle: Boolean get() = pending == null
     val editable: Boolean get() = screen == SummaryProviderScreen.CONFIGURATION && idle
@@ -35,8 +36,13 @@ internal data class SummaryProviderWorkflowState(
     val canAuthorize: Boolean get() = editable && !authorized
     val canReuse: Boolean get() = editable && authorization?.configured == true
     val addressEntered: Boolean get() = !draftEndpoint.isNullOrBlank()
-    val reusesCurrentLobo: Boolean get() = choice == SummaryProviderChoice.LOBO &&
+    val hasStoredLoboTrust: Boolean get() = choice == SummaryProviderChoice.LOBO &&
+        (authorization?.matchesTrustedLobo(draftEndpoint) == true || authorization?.remembersLobo(draftEndpoint) == true)
+    val reusesCurrentLobo: Boolean get() = !verifyLoboAgain && choice == SummaryProviderChoice.LOBO &&
         authorization?.matchesTrustedLobo(draftEndpoint) == true
+    val reusesRememberedLobo: Boolean get() = !verifyLoboAgain && choice == SummaryProviderChoice.LOBO &&
+        authorization?.remembersLobo(draftEndpoint) == true
+    val usesStoredLoboTrust: Boolean get() = reusesCurrentLobo || reusesRememberedLobo
     val canDiscover: Boolean get() = editable && authorized &&
         (choice != SummaryProviderChoice.LOBO || addressEntered)
     val canTest: Boolean get() = editable && authorized && discovery != null
@@ -60,6 +66,7 @@ internal class SummaryProviderWorkflow {
         state = state.withoutDiscovery().copy(
             choice = choice,
             draftEndpoint = if (choice == SummaryProviderChoice.REUSE) state.authorization?.baseUrl else null,
+            verifyLoboAgain = false,
         )
         return true
     }
@@ -69,7 +76,13 @@ internal class SummaryProviderWorkflow {
         val value = endpoint.trim().trimEnd('/').takeIf {
             runCatching { SummaryProviderManagement.validateUrl(it) }.isSuccess
         }
-        state = state.withoutDiscovery().copy(draftEndpoint = value)
+        state = state.withoutDiscovery().copy(draftEndpoint = value, verifyLoboAgain = false)
+        return true
+    }
+
+    fun setVerifyLoboAgain(value: Boolean): Boolean {
+        if (!state.editable || !state.hasStoredLoboTrust || state.verifyLoboAgain == value) return false
+        state = state.withoutDiscovery().copy(verifyLoboAgain = value)
         return true
     }
 

@@ -21,10 +21,14 @@ internal class SummaryProviderActions(
         val choice = state.choice
         val reuse = choice == SummaryProviderChoice.REUSE ||
             (state.reusesCurrentLobo && state.draftEndpoint == url.trim().trimEnd('/') && auth.isBlank() && key.isEmpty() && !allowHttp)
+        val remembered = state.reusesRememberedLobo && state.draftEndpoint == url.trim().trimEnd('/') &&
+            auth.isBlank() && key.isEmpty() && !allowHttp
         val expected = state.authorization
         return SummaryProviderAction(SummaryProviderOperation.DISCOVER, {
             if (reuse) api.discoverCurrent().also { result ->
                 require(expected != null && result.candidate.sameEndpointAndTrust(expected))
+            } else if (remembered) api.discoverRememberedLobo(url).also { result ->
+                require(result.candidate.matchesTrustedLobo(url))
             } else api.discoverNew(requireNotNull(choice.kind), url, allowHttp, key, auth).also { result ->
                 require(result.candidate.baseUrl?.trimEnd('/') == url.trim().trimEnd('/'))
             }
