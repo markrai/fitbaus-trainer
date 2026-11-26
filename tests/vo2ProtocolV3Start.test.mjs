@@ -328,3 +328,32 @@ test("v2 sessions ignore over-ceiling live HR (guard is v3-only)", async () => {
     restore();
   }
 });
+
+test("live v3 ceiling breach bypasses a pending checkpoint read and stale results cannot undo cooldown", async () => {
+  const restore = installStartFakes();
+  try {
+    startWorkout();
+    tickVo2Protocol(VO2_WORKOUT_SELECTOR_ID, 300, false);
+    globalThis.window.liveBpm = 130;
+    globalThis.window.lastBpmUpdateTime = Date.now();
+    let resolve;
+    let reads = 0;
+    const promise = new Promise(done => { resolve = done; });
+    const options = { readHrSamples: () => { reads++; return promise; } };
+    const pending = tickVo2ProtocolWithCanonicalHr(VO2_WORKOUT_SELECTOR_ID, 480, false, undefined, options);
+    assert.equal(reads, 1);
+    globalThis.window.liveBpm = 150;
+    globalThis.window.lastBpmUpdateTime = Date.now();
+    const breached = await tickVo2ProtocolWithCanonicalHr(VO2_WORKOUT_SELECTOR_ID, 481, false, undefined, options);
+    assert.ok(breached);
+    assert.equal(breached.runtime.segment, "cooldown");
+    assert.equal(breached.runtime.termination.reason, "submax_hr_ceiling");
+    assert.equal(breached.runtime.cooldown_start_sec, 481);
+    assert.equal(reads, 1);
+    resolve([]);
+    assert.equal(await pending, undefined);
+    assert.deepEqual(getSession(VO2_WORKOUT_SELECTOR_ID).vo2ProtocolRuntime, breached.runtime);
+  } finally {
+    restore();
+  }
+});
