@@ -41,7 +41,12 @@ internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : Frame
 
     fun render(state: BooksDiagramState) {
         if (state is BooksDiagramState.Ready) {
-            val rendered = runCatching { diagram.showGraph(state.graph) }.isSuccess
+            val rendered = try {
+                diagram.showGraph(state.graph)
+                true
+            } catch (_: Exception) {
+                false
+            }
             diagram.visibility = if (rendered) VISIBLE else GONE
             message.visibility = if (rendered) GONE else VISIBLE
             message.text = if (rendered) "" else "Visual explanation unavailable"
