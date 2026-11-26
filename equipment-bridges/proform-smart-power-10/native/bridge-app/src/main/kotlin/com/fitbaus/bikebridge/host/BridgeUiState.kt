@@ -252,3 +252,17 @@ internal object LanEndpointDisplay {
         return list
     }
 }
+
+internal class DashboardEndpointState(private val resolveEndpoint: () -> String) {
+    private var ticks = 0
+    private var endpoint = ""
+
+    fun refresh(force: Boolean, listening: Boolean?, error: String?): String {
+        ticks += 1
+        if (force || ticks >= 10 || endpoint.isEmpty()) {
+            ticks = 0
+            endpoint = resolveEndpoint()
+        }
+        return if (listening == false && error != null) "Not listening - $error" else endpoint
+    }
+}
