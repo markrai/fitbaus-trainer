@@ -103,9 +103,11 @@ internal class BooksContent(
     private var scrubbing = false
     private var playerState = BooksPlayerState()
     private val playback = BooksPlayback(context, ::renderPlayer)
-    private var readingFullscreen = false
+    private var presentationMode = BooksPresentationMode.ORDINARY
+    private val readingFullscreen: Boolean get() = presentationMode != BooksPresentationMode.ORDINARY
+    private val diagramPanel = BooksDiagramPanel(context, ::closeDiagram)
     private val readAlong = BooksReadAlong(context, onFullscreenRequested = { setReadingFullscreen(!readingFullscreen) },
-        playbackPosition = playback::currentPosition)
+        playbackPosition = playback::currentPosition, onDiagramChanged = ::showDiagramState)
     private var narrationKey: BooksTranscriptRequest? = null
 
     val floatingPlayer = BooksFloatingPlayer(context, onRestoreRequested, ::stop, playback::toggle) { delta ->
@@ -133,6 +135,7 @@ internal class BooksContent(
         buildSetup()
         buildBrowse()
         buildPlayer()
+        addView(diagramPanel, LayoutParams(MATCH, 0, 1f))
         setup.visibility = GONE
         browse.visibility = GONE
     }
@@ -399,9 +402,36 @@ internal class BooksContent(
     }
 
     private fun setReadingFullscreen(fullscreen: Boolean) {
-        if (readingFullscreen == fullscreen) return
-        if (fullscreen && (!active || !readAlong.canEnterFullscreen())) return
-        readingFullscreen = fullscreen
+        setPresentationMode(if (fullscreen) BooksPresentationMode.NARRATION else BooksPresentationMode.ORDINARY)
+    }
+
+    fun leaveFullscreen() = setReadingFullscreen(false)
+
+    fun closeDiagram(): Boolean = readAlong.closeDiagram()
+
+    private fun showDiagramState(state: BooksDiagramState?) {
+        if (state == null) {
+            if (presentationMode == BooksPresentationMode.DIAGRAM) setPresentationMode(BooksPresentationMode.NARRATION)
+        } else if (readingFullscreen && active) {
+            diagramPanel.render(state)
+            setPresentationMode(BooksPresentationMode.DIAGRAM)
+        }
+    }
+
+    private fun setPresentationMode(mode: BooksPresentationMode) {
+        if (presentationMode == mode) return
+        if (mode != BooksPresentationMode.ORDINARY && !active) return
+        if (mode == BooksPresentationMode.NARRATION && presentationMode == BooksPresentationMode.ORDINARY &&
+            !readAlong.canEnterFullscreen()) return
+        if (mode == BooksPresentationMode.DIAGRAM && presentationMode != BooksPresentationMode.NARRATION) return
+        presentationMode = mode
+        val fullscreen = readingFullscreen
+        val diagram = mode == BooksPresentationMode.DIAGRAM
+        hud.visibility = if (diagram) GONE else VISIBLE
+        elevation = if (diagram) dp(24).toFloat() else 0f
+        diagramPanel.visibility = if (diagram) VISIBLE else GONE
+        if (!diagram) diagramPanel.clear()
+        playerPanel.visibility = if (!diagram && active && playerState.item != null) VISIBLE else GONE
         val chrome = if (fullscreen) GONE else VISIBLE
         message.visibility = chrome
         for (index in 0 until playerPanel.childCount) {
@@ -429,7 +459,7 @@ internal class BooksContent(
                 narrationKey = null
             }
         }
-        playerPanel.visibility = if (show) VISIBLE else GONE
+        playerPanel.visibility = if (show && presentationMode != BooksPresentationMode.DIAGRAM) VISIBLE else GONE
         if (!show) {
             floatingPlayer.visibility = GONE
             floatingPlayer.clearCover()

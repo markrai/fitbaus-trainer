@@ -268,6 +268,12 @@ class NativeBridgeActivity : Activity() {
         super.onDestroy()
     }
 
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onBackPressed() {
+        if (::booksContent.isInitialized && modeController.mode == ArcadeMode.Books && booksContent.closeDiagram()) return
+        super.onBackPressed()
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (ControllerDevices.belongsToController(event.device)) {
             if (exclusiveHid.isActive() && exclusiveHid.belongsTo(event.device)) exclusiveHid.noteAndroidEvent()
@@ -549,6 +555,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     private fun showContent(mode: ArcadeMode) {
+        if (mode != ArcadeMode.Books) booksContent.leaveFullscreen()
         handInput.immediateFaceLoss = mode == ArcadeMode.TrailRide
         dashboardContent.visibility = if (mode == ArcadeMode.Dashboard) View.VISIBLE else View.GONE
         arcadeContent.visibility = if (mode.isGame) View.VISIBLE else View.GONE

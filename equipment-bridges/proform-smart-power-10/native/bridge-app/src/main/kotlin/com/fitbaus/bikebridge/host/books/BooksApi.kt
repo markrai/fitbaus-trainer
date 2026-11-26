@@ -135,6 +135,7 @@ internal class BooksUrlConnectionHttp(
     private val readConflictBody: Boolean = false,
     private val openConnection: (String) -> HttpURLConnection = { BooksServer.openConnection(it) },
     private val readErrorBody: Boolean = false,
+    private val maxResponseBytes: Int = MAX_RESPONSE_BYTES,
 ) : BooksHttp, BooksAuthHttp {
     override fun get(url: String, token: String): BooksHttpResponse =
         request(url, "GET", mapOf("Authorization" to "Bearer $token"), null)
@@ -165,7 +166,7 @@ internal class BooksUrlConnectionHttp(
             if (!success && !readErrorBody && !(status == 409 && readConflictBody)) return BooksHttpResponse(status, "")
             val stream = if (success) connection.inputStream else connection.errorStream
             if (stream == null) return BooksHttpResponse(status, "")
-            val limit = if (success) MAX_RESPONSE_BYTES else MAX_CONFLICT_BYTES
+            val limit = if (success) maxResponseBytes else MAX_CONFLICT_BYTES
             val output = ByteArrayOutputStream()
             stream.use { input ->
                 val buffer = ByteArray(8192)

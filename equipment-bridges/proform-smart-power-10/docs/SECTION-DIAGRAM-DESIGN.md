@@ -139,3 +139,10 @@ Merge/deploy Transcriber support before enabling Trainer capability-driven featu
 - No model calls for missing/changed parent, unauthorized/revoked book/device, or cache hit. No arbitrary provider, source URL or prompt. No silent fallback to unverified TLS.
 - Reject malformed graph, script/HTML/directive, unsupported syntax, duplicate/dangling edges, cycles, excessive nodes/bytes and mismatched identity; test Unicode code-point and UTF-8 limits.
 - Verify admission order with simultaneous summary and diagram demand, one provider call at a time, bounded deferred retries, no stale-client delivery, and no foreground regressions. Report non-preemptible provider behavior explicitly.
+
+
+## Phase 2 implementation
+
+Trainer now recognizes the optional diagram capability, retains the verified summary source identity, and checks the exact summary digest and response identity. The HTTP client independently validates graph bounds, labels, references, connectedness and acyclicity; Mermaid source is never rendered. The response body is bounded to 32 KiB. The client allows one initial request and at most three deferred retries, checking its 180-second elapsed budget between requests (socket reads are not hard process deadlines).
+
+A visible-summary draw callback with a text generation guard initiates the bounded worker. The request scope rejects duplicate attempts and obsolete results, checks the encrypted Transcriber connection record without decrypting on playback ticks, and is invalidated with the parent summary. The long-press target is the summary TextView only. The dedicated fullscreen diagram presentation hides the HUD, narration and player chrome, places the diagram surface above floating media, and restores narration mode on Close or Back. It does not stop audio or telemetry collection. Older servers retain normal summary behavior. Phase 2 intentionally displays a loading, unavailable or ready-placeholder surface only; no graph is displayed until the native renderer is added in Phase 3. Physical gesture and fullscreen restoration qualification remain outstanding.

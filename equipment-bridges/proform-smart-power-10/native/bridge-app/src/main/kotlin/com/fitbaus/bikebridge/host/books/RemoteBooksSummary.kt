@@ -102,6 +102,7 @@ internal sealed class BooksSummaryState {
         val promptVersion: String,
         val transcriptDigest: String,
         val cacheHit: Boolean?,
+        val sourceId: String? = null,
     ) : BooksSummaryState()
     data class Empty(override val revision: String) : BooksSummaryState()
     data class Failed(val failure: BooksSummaryFailure) : BooksSummaryState()
@@ -268,7 +269,7 @@ internal class RemoteBooksSummary(
                         require(result.opt("cache_hit") is Boolean)
                         result.getBoolean("cache_hit")
                     } else null
-                    return BooksSummaryState.Ready(revision, summary, model, prompt, digest, cacheHit)
+                    return BooksSummaryState.Ready(revision, summary, model, prompt, digest, cacheHit, sourceId.takeUnless { recap })
                 }
                 else -> throw BooksSummaryException(BooksSummaryFailure.NETWORK_OR_RESPONSE)
             }

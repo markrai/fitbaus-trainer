@@ -11,8 +11,24 @@ internal class TranscriberConnectionStore(context: Context) {
 
     fun load(): TranscriberConnection? = synchronized(LOCK) {
         val envelope = prefs.getString(RECORD, null) ?: return@synchronized null
+        decode(envelope)
+    }
+
+    class RecordSnapshot internal constructor(private val store: TranscriberConnectionStore, private val envelope: String) {
+        fun isCurrent(): Boolean = synchronized(LOCK) { store.prefs.getString(RECORD, null) == envelope }
+        fun connection(): TranscriberConnection = synchronized(LOCK) {
+            check(isCurrent())
+            store.decode(envelope)
+        }
+    }
+
+    fun snapshot(): RecordSnapshot? = synchronized(LOCK) {
+        prefs.getString(RECORD, null)?.let { RecordSnapshot(this, it) }
+    }
+
+    private fun decode(envelope: String): TranscriberConnection {
         val json = JSONObject(credentialsEnvelope.decrypt(envelope))
-        TranscriberConnection(json.getString("address"), json.getString("token"))
+        return TranscriberConnection(json.getString("address"), json.getString("token"))
     }
 
     fun save(connection: TranscriberConnection) = synchronized(LOCK) {

@@ -9,6 +9,8 @@ internal class ReadAlongWindowBuffer {
         private set
     var revision: String? = null
         private set
+    var diagramAvailable = false
+        private set
     var summaryAvailable = false
         private set
     var sectionPlanAvailable = false
@@ -49,6 +51,7 @@ internal class ReadAlongWindowBuffer {
         require(revision == null || revision == window.revision)
         revision = window.revision
         summaryAvailable = window.summaryAvailable
+        diagramAvailable = window.diagramAvailable
         sectionPlanAvailable = window.sectionPlanAvailable
         recapAvailable = window.recapAvailable
         cumulativeRecapMaxPositionMs = window.cumulativeRecapMaxPositionMs
@@ -81,6 +84,7 @@ internal class ReadAlongWindowBuffer {
         pendingStart = null
         revision = null
         summaryAvailable = false
+        diagramAvailable = false
         sectionPlanAvailable = false
         recapAvailable = false
         cumulativeRecapMaxPositionMs = null
