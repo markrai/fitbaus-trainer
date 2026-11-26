@@ -1,6 +1,6 @@
 import { getSession, clearSession, markSummaryEmitted, totalPausedDurationSec, } from "./sessionStore.js";
 import { clearBikeTelemetrySamples } from "./bikeTelemetryTrace.js";
-import { clearOrdinaryBikeTelemetry, clearOrdinaryBikeTelemetryQueue, deleteFreestyleSessionEvidenceAtomic, flushOrdinaryBikeTelemetryWrites, getWorkoutSummaryBySessionId, } from "./workoutStorage.js";
+import { clearOrdinaryBikeTelemetry, clearOrdinaryBikeTelemetryQueue, deleteFreestyleSessionEvidenceAtomic, flushOrdinaryBikeTelemetryWrites, getWorkoutSummaryBySessionId, getWorkoutSummaryBySessionIdStrict, deleteUnpersistedWorkoutEvidenceAtomic, } from "./workoutStorage.js";
 import { getBikeBridgeSession } from "./platform/bikeBridgeRuntime.js";
 import { resetMachineGuidanceRuntime } from "./machines/runtime.js";
 import { FREESTYLE_WORKOUT_SELECTOR_ID, clearActiveSessionOwner, clearFreestyleAuthorityFault, clearSessionFinalization, freezeSessionFinalization, isFreestyleWorkoutSelector, markSessionFinalizationEvidenceIncomplete, markSessionFinalizationInProgress, markSessionFinalizationSaveFailed, readActiveSessionOwner, readFreestyleAuthorityFault, readSessionFinalization, } from "./freestyleRide.js";
@@ -142,10 +142,94 @@ function matchingOrdinaryEnd(day, sessionId, storage) {
     return session.sessionId === sessionId &&
         (!owner || (owner.selector === day && owner.sessionId === sessionId));
 }
+export function getOrdinaryRecoveryTarget(day, storage) {
+    if (isFreestyleWorkoutSelector(day))
+        return null;
+    const session = getSession(day, storage);
+    const finalization = readSessionFinalization(day, storage);
+    const owner = readActiveSessionOwner(storage);
+    if (!session.sessionId && !session.startTime && !finalization)
+        return null;
+    return {
+        day,
+        sessionId: session.sessionId,
+        startTime: session.startTime,
+        sessionStart: session.sessionStart,
+        summaryEmitted: session.summaryEmitted,
+        finalizationId: finalization ? finalization.sessionId : null,
+        finalizationStatus: finalization ? finalization.status : null,
+        finalizationStartedAtMs: finalization ? finalization.startedAtMs : null,
+        finalizationEndedAtMs: finalization ? finalization.endedAtMs : null,
+        ownerId: owner && owner.selector === day ? owner.sessionId : null,
+    };
+}
+const ordinaryRecoveryDiscards = new WeakMap();
+export async function discardOrdinaryRecovery(target, storage = localStorage) {
+    const day = target.day;
+    if (isFreestyleWorkoutSelector(day) || JSON.stringify(getOrdinaryRecoveryTarget(day, storage)) !== JSON.stringify(target))
+        return false;
+    const id = target.finalizationId || target.sessionId;
+    const currentOwner = readActiveSessionOwner(storage);
+    if (currentOwner && currentOwner.selector !== day && currentOwner.sessionId === id)
+        return false;
+    if (id) {
+        for (const selector of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID, FREESTYLE_WORKOUT_SELECTOR_ID]) {
+            if (selector === day)
+                continue;
+            const otherFinalization = readSessionFinalization(selector, storage);
+            if (getSession(selector, storage).sessionId === id || (otherFinalization && otherFinalization.sessionId === id))
+                return false;
+        }
+    }
+    const pending = ordinaryEnds.get(storage);
+    if (id && pending && pending.has(id))
+        return false;
+    let discards = ordinaryRecoveryDiscards.get(storage);
+    if (!discards) {
+        discards = new Set();
+        ordinaryRecoveryDiscards.set(storage, discards);
+    }
+    if (discards.has(day))
+        return false;
+    discards.add(day);
+    try {
+        if (id) {
+            const saved = await getWorkoutSummaryBySessionIdStrict(id);
+            if (JSON.stringify(getOrdinaryRecoveryTarget(day, storage)) !== JSON.stringify(target))
+                return false;
+            if (!saved)
+                await deleteUnpersistedWorkoutEvidenceAtomic(id, true);
+        }
+        if (JSON.stringify(getOrdinaryRecoveryTarget(day, storage)) !== JSON.stringify(target))
+            return false;
+        if (target.finalizationId === id)
+            clearSessionFinalization(day, storage);
+        if (target.sessionId === id || !target.sessionId && !target.finalizationId)
+            clearSession(day, storage, { preserveFinalization: true });
+        if (id)
+            releaseTransientSessionTelemetry(id, storage);
+        if (target.ownerId === id && id)
+            clearActiveSessionOwner({ selector: day, sessionId: id }, storage);
+        stopOwnedWorkoutControl(day, id, storage);
+        if (canApplyWorkoutSessionEffects(day, id, storage) && typeof window !== "undefined" && typeof window.releaseWakeLock === "function")
+            await window.releaseWakeLock();
+        return true;
+    }
+    catch (error) {
+        console.error("Could not discard interrupted workout:", error);
+        return false;
+    }
+    finally {
+        discards.delete(day);
+    }
+}
 function endOrdinaryWorkout(day, cancelled, prepare) {
     if (isFreestyleWorkoutSelector(day))
         return Promise.resolve("no_session");
     const storage = localStorage;
+    const discards = ordinaryRecoveryDiscards.get(storage);
+    if (discards && discards.has(day))
+        return Promise.resolve("superseded");
     const session = getSession(day, storage);
     if (!session.sessionId || !session.sessionStart || !session.startTime) {
         return Promise.resolve(session.sessionId ? "failed" : "no_session");
@@ -156,10 +240,11 @@ function endOrdinaryWorkout(day, cancelled, prepare) {
     if (session.summaryEmitted === "true") {
         const finalization = readSessionFinalization(day, storage);
         if (finalization && finalization.sessionId === sessionId) {
+            markSummaryEmitted(day, storage, finalization.activeDurationSec);
             releaseTransientSessionTelemetry(sessionId, storage);
             clearSessionFinalization(day, storage);
-            clearActiveSessionOwner({ selector: day, sessionId }, storage);
         }
+        clearActiveSessionOwner({ selector: day, sessionId }, storage);
         return Promise.resolve("already_saved");
     }
     if (session.summaryEmitted !== "false")
@@ -193,6 +278,7 @@ function endOrdinaryWorkout(day, cancelled, prepare) {
                 activeDurationSec: activeElapsedSeconds(session.startTime, session.paused, session.pausedElapsed, endedAtMs),
                 pausedDurationSec: totalPausedDurationSec(session, endedAtMs),
                 cancelled,
+                athleteId: session.athleteId,
                 storage,
             });
             if (freeze.ok === false)
@@ -207,6 +293,23 @@ function endOrdinaryWorkout(day, cancelled, prepare) {
             }
             if (!matchingOrdinaryEnd(day, sessionId, storage))
                 return "superseded";
+            if (prior && typeof indexedDB !== "undefined") {
+                const existing = await getWorkoutSummaryBySessionIdStrict(sessionId);
+                if (!matchingOrdinaryEnd(day, sessionId, storage))
+                    return "superseded";
+                if (existing) {
+                    if (existing.day !== day || Date.parse(existing.startedAt) !== record.startedAtMs ||
+                        Date.parse(existing.endedAt) !== record.endedAtMs ||
+                        (existing.cancelled === true) !== (record.cancelled === true) ||
+                        (record.athleteId && existing.athlete_id !== record.athleteId))
+                        throw new Error("Saved workout conflicts with frozen finalization");
+                    markSummaryEmitted(day, storage, record.activeDurationSec);
+                    releaseTransientSessionTelemetry(sessionId, storage);
+                    clearSessionFinalization(day, storage);
+                    clearActiveSessionOwner({ selector: day, sessionId }, storage);
+                    return "already_saved";
+                }
+            }
             if (!prior && prepare)
                 prepare(record.endedAtMs);
             if (typeof window.generateWorkoutSummary !== "function" ||
@@ -222,7 +325,7 @@ function endOrdinaryWorkout(day, cancelled, prepare) {
                 return "superseded";
             if (saved !== true)
                 throw new Error("Workout summary was not persisted");
-            markSummaryEmitted(day, storage);
+            markSummaryEmitted(day, storage, record.activeDurationSec);
             releaseTransientSessionTelemetry(sessionId, storage);
             clearSessionFinalization(day, storage);
             clearActiveSessionOwner({ selector: day, sessionId }, storage);

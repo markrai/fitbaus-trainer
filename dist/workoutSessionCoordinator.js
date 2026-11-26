@@ -6,6 +6,7 @@ import { FREESTYLE_WORKOUT_SELECTOR_ID, isFreestyleWorkoutSelector, readActiveSe
 import { getBikeBridgeSession } from "./platform/bikeBridgeRuntime.js";
 import { isVo2WorkoutSelector, VO2_WORKOUT_SELECTOR_ID } from "./vo2Protocol.js";
 import { deriveWorkoutState } from "./workoutDisplayState.js";
+const ordinarySelectors = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID];
 const defaultDependencies = {
     beginWorkout,
     getPausedElapsed,
@@ -38,6 +39,18 @@ const defaultDependencies = {
     isSessionStale,
     deriveWorkoutState,
 };
+function findUnresolvedOrdinaryDay(getSession, readSessionFinalization) {
+    for (const day of ordinarySelectors) {
+        if (readSessionFinalization(day))
+            return day;
+    }
+    for (const day of ordinarySelectors) {
+        const session = getSession(day);
+        if ((session.sessionId || session.startTime) && session.summaryEmitted !== "true")
+            return day;
+    }
+    return undefined;
+}
 export function createWorkoutSessionCoordinator(effects, overrides = {}) {
     const { beginWorkout, getPausedElapsed, getStartTime, isPaused, pauseWorkout, restartWorkout, resumeWorkout, requestEarlyCooldown, restoreBikeBridgeBindingForActiveSession, startWorkout, todayName, tickVo2ProtocolWithCanonicalHr, vo2TickSessionKey, requestVo2LimitReached, discardFreestyleRide, finishFreestyleRide, handleWorkoutCompletion, retryFreestyleSave, readActiveSessionOwner, readSessionFinalization, readFreestyleAuthorityFault, markFreestyleAuthorityFault, clearFreestyleAuthorityFault, getBikeBridgeSession, getPlan, getWorkoutMetadata, getSession, deriveWorkoutState } = { ...defaultDependencies, ...overrides };
     let selectedDay = null;
@@ -52,23 +65,28 @@ export function createWorkoutSessionCoordinator(effects, overrides = {}) {
         const owner = readActiveSessionOwner();
         if (owner) {
             const session = getSession(owner.selector);
-            if (session.sessionId === owner.sessionId && session.startTime) {
+            if (session.sessionId === owner.sessionId && session.startTime && session.summaryEmitted !== "true") {
                 return owner.selector;
             }
         }
         const finalization = readSessionFinalization(FREESTYLE_WORKOUT_SELECTOR_ID);
         if (finalization)
             return FREESTYLE_WORKOUT_SELECTOR_ID;
-        return getSelectedDay();
+        return findUnresolvedOrdinaryDay(getSession, readSessionFinalization) || getSelectedDay();
     }
     function selectWorkoutDay(day) {
         const owner = readActiveSessionOwner();
         if (owner) {
             const session = getSession(owner.selector);
-            if (session.sessionId === owner.sessionId && session.startTime && day !== owner.selector) {
+            if (session.sessionId === owner.sessionId && session.startTime && session.summaryEmitted !== "true" && day !== owner.selector) {
                 setSelectedDay(owner.selector);
                 return { day: owner.selector, blocked: true };
             }
+        }
+        const unresolved = findUnresolvedOrdinaryDay(getSession, readSessionFinalization);
+        if (unresolved && unresolved !== day) {
+            setSelectedDay(unresolved);
+            return { day: unresolved, blocked: true };
         }
         setSelectedDay(day);
         return { day, blocked: false };
@@ -91,7 +109,7 @@ export function createWorkoutSessionCoordinator(effects, overrides = {}) {
             const { liveBpm, lastBpmUpdateTime } = effects.readLiveHeartRate();
             // Live-HR guard contract: the v3 ceiling guard evaluates inside the tick below, so this
             // call must stay unconditional (every refresh, any elapsed) -- never gate it on checkpoints.
-            if (startTime && isVo2WorkoutSelector(day) && !readSessionFinalization(day)) {
+            if (startTime && isVo2WorkoutSelector(day) && getSession(day).summaryEmitted !== "true" && !readSessionFinalization(day)) {
                 const elapsedSec = paused ? pausedElapsed : Math.floor((Date.now() - parseInt(startTime, 10)) / 1000);
                 const sessionKey = vo2TickSessionKey(getSession(day));
                 const isCurrent = () => seq === updateDisplaySeq && resolveOwnedWorkoutDay() === day && !readSessionFinalization(day);
@@ -172,6 +190,9 @@ export function collectProtectedOrdinarySessionIds() {
         const finalization = readSessionFinalization(day);
         if (finalization)
             ids.push(finalization.sessionId);
+        const session = getSession(day);
+        if (session.sessionId && session.summaryEmitted !== "true")
+            ids.push(session.sessionId);
     }
     return ids;
 }
@@ -189,7 +210,8 @@ export function cleanupStaleWorkoutSessions(overrides = {}) {
     ];
     days.forEach((day) => {
         const session = getSession(day);
-        if (session.sessionStart && isSessionStale(day) && !readSessionFinalization(day)) {
+        if (session.sessionStart && session.startTime && session.sessionId &&
+            (session.summaryEmitted === "true" || session.summaryEmitted === "false") && isSessionStale(day) && !readSessionFinalization(day)) {
             const hours = Math.round((Date.now() - parseInt(session.sessionStart)) / (1000 * 60 * 60));
             console.warn(`Cleaning up stale workout session for ${day} (age: ${hours} hours)`);
             discardWorkoutSession(day);
@@ -220,18 +242,16 @@ export async function recoverActiveOrFinalizingSession(setSelectedDay, overrides
     }
     const owner = readActiveSessionOwner();
     if (!owner) {
-        for (const day of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID]) {
-            const finalization = readSessionFinalization(day);
-            const session = getSession(day);
-            if (finalization && session.sessionId === finalization.sessionId && session.startTime) {
-                setSelectedDay(day);
-                break;
-            }
-        }
+        const unresolved = findUnresolvedOrdinaryDay(getSession, readSessionFinalization);
+        if (unresolved)
+            setSelectedDay(unresolved);
         return;
     }
     const session = getSession(owner.selector);
     if (!session.sessionId || session.sessionId !== owner.sessionId || !session.startTime) {
+        const unresolved = findUnresolvedOrdinaryDay(getSession, readSessionFinalization);
+        if (unresolved)
+            setSelectedDay(unresolved);
         return;
     }
     setSelectedDay(owner.selector);

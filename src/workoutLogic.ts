@@ -354,7 +354,8 @@ function workoutStartBlockReason(day: string, storage?: SessionStorage): "pendin
     if ((session.startTime || session.sessionId) &&
       (isFreestyleWorkoutSelector(selector) || session.summaryEmitted !== "true"))
       return "active";
-    if (owner && owner.selector === selector && (session.sessionId || session.startTime))
+    if (owner && owner.selector === selector && (session.sessionId || session.startTime) &&
+      (session.summaryEmitted !== "true" || session.sessionId !== owner.sessionId || isFreestyleWorkoutSelector(selector)))
       return "active";
   }
   return null;
@@ -384,7 +385,9 @@ function claimWorkoutStart(day: string, sessionId: string): boolean {
   const owner = readActiveSessionOwner();
   if (owner) {
     const existing = getSession(owner.selector);
-    if (existing.sessionId || existing.startTime || readSessionFinalization(owner.selector) || readFreestyleAuthorityFault(owner.selector)) {
+    if (((existing.sessionId || existing.startTime) &&
+      (existing.summaryEmitted !== "true" || existing.sessionId !== owner.sessionId || isFreestyleWorkoutSelector(owner.selector))) ||
+      readSessionFinalization(owner.selector) || readFreestyleAuthorityFault(owner.selector)) {
       showWorkoutStartError("A workout is already in progress or requires recovery.");
       return false;
     }
@@ -910,7 +913,7 @@ function tickVo2Protocol(
   liveHrBpm: number | null = null
 ): { runtime: Vo2ProtocolRuntime | Vo2ProtocolRuntimeV3; cues: string[] } | null {
   const session = getSession(day, storage);
-  if (!session.vo2ProtocolRuntime) return null;
+  if (session.summaryEmitted === "true" || !session.vo2ProtocolRuntime) return null;
   const before = session.vo2ProtocolRuntime;
   if (isStaleVo2ProtocolTick(before, elapsedSec)) {
     return { runtime: before, cues: [] };
@@ -977,6 +980,7 @@ async function tickVo2ProtocolWithCanonicalHr(
     pendingVo2Checkpoints.set(store, pending);
   }
   const session = getSession(day, store);
+  if (session.summaryEmitted === "true") return null;
   const runtime = session.vo2ProtocolRuntime;
   if (options.isCurrent?.() === false) return undefined;
   if (!runtime) {
@@ -1012,7 +1016,7 @@ async function tickVo2ProtocolWithCanonicalHr(
       return undefined;
     }
     const current = getSession(day, store);
-    if (!current.vo2ProtocolRuntime || vo2CheckpointKey(current, elapsedSec) !== key) return undefined;
+    if (current.summaryEmitted === "true" || !current.vo2ProtocolRuntime || vo2CheckpointKey(current, elapsedSec) !== key) return undefined;
     if (!samples) {
       const freshHr = readFreshLiveHrBpm();
       if (!(isVo2ProtocolRuntimeV3(current.vo2ProtocolRuntime) &&
