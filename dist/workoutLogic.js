@@ -783,7 +783,7 @@ function readFreshLiveHrBpm(now = Date.now()) {
 }
 function tickVo2Protocol(day, elapsedSec, paused, storage, samples = [], telemetrySamples = [], liveHrBpm = null) {
     const session = getSession(day, storage);
-    if (!session.vo2ProtocolRuntime)
+    if (session.summaryEmitted === "true" || !session.vo2ProtocolRuntime)
         return null;
     const before = session.vo2ProtocolRuntime;
     if (isStaleVo2ProtocolTick(before, elapsedSec)) {
@@ -827,6 +827,8 @@ async function tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, storage, 
         pendingVo2Checkpoints.set(store, pending);
     }
     const session = getSession(day, store);
+    if (session.summaryEmitted === "true")
+        return null;
     const runtime = session.vo2ProtocolRuntime;
     if (((_a = options.isCurrent) === null || _a === void 0 ? void 0 : _a.call(options)) === false)
         return undefined;

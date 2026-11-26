@@ -1,6 +1,7 @@
 import { adjustedBlockLengths, getPhase } from "./workoutLogic.js";
 import { getHrTargets } from "./workoutData.js";
-import { getSession } from "./sessionStore.js";
+import { getCompletedWorkoutElapsed, getSession } from "./sessionStore.js";
+import { getOrdinaryRecoveryTarget, type OrdinaryRecoveryTarget } from "./workoutLifecycle.js";
 import { assessmentBasedWorkloadForPhase } from "./personalizedPrescription.js";
 import { isVo2WorkoutSelector, vo2ProtocolDisplayName } from "./vo2Protocol.js";
 import { FREESTYLE_WORKOUT_LABEL, freestyleWorkoutBlocksText, isFreestyleWorkoutSelector, readSessionFinalization } from "./freestyleRide.js";
@@ -30,6 +31,7 @@ function resolvedPrescriptionForSession(
 
 export type WorkoutDisplayState =
   | { screen: "rest"; day: string; plan: any; workoutMetadata: any }
+  | { screen: "recovery_required"; day: string; plan: any; workoutMetadata: any; target: OrdinaryRecoveryTarget }
   | { screen: "downregulation"; day: "Downregulation"; plan: any; workoutMetadata: any }
   | {
       screen: "idle";
@@ -93,11 +95,18 @@ export function deriveWorkoutState(
   if (day === "Downregulation") {
     return { screen: "downregulation", day: "Downregulation", plan, workoutMetadata };
   }
+  const session = getSession(day);
+  const finalization = !isFreestyleWorkoutSelector(day) ? readSessionFinalization(day) : null;
+  const target = getOrdinaryRecoveryTarget(day);
+  if (target && (target.finalizationId && target.finalizationId !== target.sessionId ||
+    target.ownerId && target.ownerId !== target.sessionId ||
+    !target.sessionId || !target.startTime || !target.sessionStart || !base ||
+    (target.summaryEmitted !== "true" && target.summaryEmitted !== "false"))) {
+    return { screen: "recovery_required", day, plan, workoutMetadata, target };
+  }
   if (!base) {
     return { screen: "rest", day, plan, workoutMetadata };
   }
-
-  const session = getSession(day);
   const blocks = session.phasePlan?.blocks ?? adjustedBlockLengths(base, null);
   const workoutBlocksText = isFreestyleWorkoutSelector(day)
     ? freestyleWorkoutBlocksText()
@@ -105,11 +114,12 @@ export function deriveWorkoutState(
       ? vo2WorkoutBlocksText(blocks)
       : genericWorkoutBlocksText(blocks);
 
+  if (!isFreestyleWorkoutSelector(day) && session.summaryEmitted === "true") {
+    return { screen: "completed", day, plan, workoutMetadata, base, blocks, workoutBlocksText, elapsedSec: finalization ? finalization.activeDurationSec : getCompletedWorkoutElapsed(day) };
+  }
   if (!startTime) {
     return { screen: "idle", day, plan, workoutMetadata, base, blocks, workoutBlocksText };
   }
-
-  const finalization = !isFreestyleWorkoutSelector(day) ? readSessionFinalization(day) : null;
   if (finalization && finalization.sessionId === session.sessionId) {
     return { screen: "completed", day, plan, workoutMetadata, base, blocks, workoutBlocksText, elapsedSec: finalization.activeDurationSec };
   }

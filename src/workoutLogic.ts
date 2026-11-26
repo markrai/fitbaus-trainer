@@ -910,7 +910,7 @@ function tickVo2Protocol(
   liveHrBpm: number | null = null
 ): { runtime: Vo2ProtocolRuntime | Vo2ProtocolRuntimeV3; cues: string[] } | null {
   const session = getSession(day, storage);
-  if (!session.vo2ProtocolRuntime) return null;
+  if (session.summaryEmitted === "true" || !session.vo2ProtocolRuntime) return null;
   const before = session.vo2ProtocolRuntime;
   if (isStaleVo2ProtocolTick(before, elapsedSec)) {
     return { runtime: before, cues: [] };
@@ -977,6 +977,7 @@ async function tickVo2ProtocolWithCanonicalHr(
     pendingVo2Checkpoints.set(store, pending);
   }
   const session = getSession(day, store);
+  if (session.summaryEmitted === "true") return null;
   const runtime = session.vo2ProtocolRuntime;
   if (options.isCurrent?.() === false) return undefined;
   if (!runtime) {

@@ -15,6 +15,10 @@ import {
 import { sendWorkoutToSisu } from "./sisuSync.js";
 import {
   canApplyWorkoutSessionEffects,
+  discardOrdinaryRecovery,
+  getOrdinaryRecoveryTarget,
+  handleWorkoutCompletion,
+  type OrdinaryRecoveryTarget,
   discardFreestyleRide,
   finishFreestyleRide,
   isFreestyleFinishInFlight,
@@ -475,6 +479,27 @@ async function confirmFinishFreestyleRide() {
   updateDisplay();
 }
 
+async function retryOrdinarySave(day: string) {
+  const result = await handleWorkoutCompletion(day);
+  if (result === "saved" || result === "already_saved") {
+    if (typeof (window as any).showToast === "function")
+      (window as any).showToast("Workout saved.", "success");
+  }
+  else if (typeof (window as any).showToast === "function") {
+    (window as any).showToast("Save failed. Evidence preserved.", "error");
+  }
+  updateDisplay();
+}
+async function confirmOrdinaryRecoveryDiscard(target: OrdinaryRecoveryTarget) {
+  if (!window.confirm("Discard this unfinished workout record? Unsaved evidence for the selected record will be deleted. Saved workouts in history will be kept."))
+    return;
+  const ok = await discardOrdinaryRecovery(target);
+  if (typeof (window as any).showToast === "function") {
+    (window as any).showToast(ok ? "Workout record cleared." : "Could not clear workout record. Evidence preserved or records changed.", ok ? "success" : "error");
+  }
+  updateDisplay();
+}
+
 async function confirmDiscardFreestyleRide() {
   const confirmed = window.confirm("Discard this Freestyle ride? Telemetry will be deleted and it will not appear in history.");
   if (!confirmed) return;
@@ -887,6 +912,34 @@ function renderWorkout(state: WorkoutDisplayState) {
   const cancelBtnEl = document.getElementById("cancelWorkoutButton") as HTMLButtonElement | null;
   const startButtonRowEl = document.getElementById("startButtonRow") as HTMLElement | null;
 
+  if (state.screen === "recovery_required") {
+    renderMachineGuidance(null);
+    syncInactiveWorkoutGuidance(state.day);
+    if (workoutBlocksEl)
+      workoutBlocksEl.textContent = "An unfinished workout record needs recovery.";
+    if (phaseDisplayEl) {
+      phaseDisplayEl.innerHTML = '<span class="phase-name">Workout recovery required</span>';
+      phaseDisplayEl.dataset.phaseState = "completed";
+    }
+    if (startButtonRowEl)
+      startButtonRowEl.style.display = "flex";
+    if (startBtnEl) {
+      startBtnEl.disabled = false;
+      startBtnEl.innerText = "Discard Unfinished Record";
+      startBtnEl.onclick = () => void confirmOrdinaryRecoveryDiscard(state.target);
+      startBtnEl.style.display = "block";
+    }
+    if (cancelBtnEl)
+      cancelBtnEl.style.display = "none";
+    if (hrTargetEl)
+      hrTargetEl.textContent = "";
+    updateRing(0, { warm: 1, sustain: 1, cool: 1 });
+    updateHeartPulse(null);
+    currentExpectedHeartRate = null;
+    updateHeartColor(null, null);
+    applyPhaseStyle("completed");
+    return;
+  }
   if (state.screen === "rest") {
     renderMachineGuidance(null);
     syncInactiveWorkoutGuidance(state.day);
@@ -986,10 +1039,15 @@ function renderWorkout(state: WorkoutDisplayState) {
     if (startBtnEl) {
       startBtnEl.innerText = ending && ending.status === "save_failed" ? "Retry Save" : saving ? "Saving..." : "Restart Workout";
       startBtnEl.disabled = saving;
-      startBtnEl.onclick = workoutSession.restartWorkout;
+      startBtnEl.onclick = ending && ending.status === "save_failed" ? () => void retryOrdinarySave(state.day) : workoutSession.restartWorkout;
       startBtnEl.style.display = "block";
     }
-    if (cancelBtnEl) cancelBtnEl.style.display = "none";
+    if (cancelBtnEl) {
+      const target = ending && ending.status === "save_failed" ? getOrdinaryRecoveryTarget(state.day) : null;
+      cancelBtnEl.textContent = "Discard";
+      cancelBtnEl.onclick = target ? () => void confirmOrdinaryRecoveryDiscard(target) : null;
+      cancelBtnEl.style.display = target ? "block" : "none";
+    }
     if (hrTargetEl) hrTargetEl.textContent = "";
     updateHeartPulse(null);
     currentExpectedHeartRate = null;
