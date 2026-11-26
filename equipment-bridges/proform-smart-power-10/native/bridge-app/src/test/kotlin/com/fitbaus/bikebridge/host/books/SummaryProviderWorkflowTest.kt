@@ -405,4 +405,21 @@ class SummaryProviderWorkflowTest {
         assertFalse(flow.state.canDiscover)
         assertFalse(flow.state.canSave)
     }
+
+    @Test
+    fun loboDraftRejectsNoncanonicalOrNonprivateEndpointsBeforeDiscovery() {
+        val flow = authorized()
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        for (value in listOf("https://8.8.8.8:7869/v1", "https://192.168.1.200:443/v1",
+                "http://192.168.1.200:7869/v1", "https://192.168.1.200:7869/extra/v1")) {
+            assertTrue(flow.addressEdited(value))
+            assertNull(flow.state.draftEndpoint)
+            assertFalse(flow.state.canDiscover)
+            assertFalse(summaryProviderPresentation(flow.state).showLoboVerification)
+        }
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1/"))
+        assertTrue(flow.state.canDiscover)
+        assertTrue(flow.state.reusesCurrentLobo)
+    }
+
 }
