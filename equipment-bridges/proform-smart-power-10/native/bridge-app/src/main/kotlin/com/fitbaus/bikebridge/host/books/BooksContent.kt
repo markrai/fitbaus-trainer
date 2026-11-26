@@ -108,7 +108,7 @@ internal class BooksContent(
     private val diagramPanel = BooksDiagramPanel(context, ::closeDiagram)
     private val readAlong = BooksReadAlong(context, onFullscreenRequested = { setReadingFullscreen(!readingFullscreen) },
         playbackPosition = playback::currentPosition, onDiagramChanged = ::showDiagramState)
-    private var narrationKey: BooksTranscriptRequest? = null
+    private val narrationBinding = BooksNarrationBinding()
 
     val floatingPlayer = BooksFloatingPlayer(context, onRestoreRequested, ::stop, playback::toggle) { delta ->
         playback.seek(playerState.positionMs + delta)
@@ -452,12 +452,9 @@ internal class BooksContent(
         playerState = state
         val show = active && state.item != null
         if (!show || state.failed) setReadingFullscreen(false)
-        if (!show) {
-            if (narrationKey != null) {
-                readAlong.close()
-                loader?.clear(readAlong.cover)
-                narrationKey = null
-            }
+        if (!show && narrationBinding.clear()) {
+            readAlong.close()
+            loader?.clear(readAlong.cover)
         }
         playerPanel.visibility = if (show && presentationMode != BooksPresentationMode.DIAGRAM) VISIBLE else GONE
         if (!show) {
@@ -472,19 +469,35 @@ internal class BooksContent(
         prepareButton.isEnabled = state.session != null && !state.failed
         val current = connection
         val item = state.item
-        if (current != null) {
-            val key = BooksTranscriptRequest(current.address, item.id)
-            if (narrationKey != key) {
+        val narrationAvailable = if (current != null) {
+            narrationBinding.render(current.address, item.id,
+                open = { key ->
+                    setReadingFullscreen(false)
+                    readAlong.open(key, state, current)
+                    loader?.bind(readAlong.cover, item.id)
+                },
+                update = { readAlong.render(state) },
+                unavailable = { error ->
+                    android.util.Log.w("BooksContent", "Narration disabled: " + error.javaClass.simpleName)
+                    setReadingFullscreen(false)
+                    readAlong.close()
+                    loader?.clear(readAlong.cover)
+                })
+        } else {
+            if (narrationBinding.clear()) {
                 setReadingFullscreen(false)
-                narrationKey = key
-                readAlong.open(key, state, current)
-                loader?.bind(readAlong.cover, item.id)
-            } else readAlong.render(state)
+                readAlong.close()
+                loader?.clear(readAlong.cover)
+            }
+            false
         }
         if (floatingPlayer.visibility == VISIBLE) floatingPlayer.render(state, readAlong.floatingNarration(), currentCover())
         playerTitle.text = state.item?.title.orEmpty()
         playerAuthor.text = state.item?.author.orEmpty()
-        val status = BooksPlayerPresentation.status(state.status)
+        val playbackStatus = BooksPlayerPresentation.status(state.status)
+        val status = if (!narrationAvailable && !state.failed) {
+            listOf(playbackStatus, "Narration unavailable · audio continues").filter { it.isNotEmpty() }.joinToString(" · ")
+        } else playbackStatus
         playerStatus.text = status
         playerStatus.visibility = if (!readingFullscreen && status.isNotEmpty()) VISIBLE else GONE
         val session = state.session
@@ -676,7 +689,7 @@ internal class BooksContent(
         floatingPlayer.clearCover()
         readAlong.close()
         loader?.clear(readAlong.cover)
-        narrationKey = null
+        narrationBinding.clear()
         loader?.shutdown()
         loader = null
         connection = null
