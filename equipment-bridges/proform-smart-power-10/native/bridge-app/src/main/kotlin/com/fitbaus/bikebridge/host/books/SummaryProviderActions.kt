@@ -17,7 +17,8 @@ internal class SummaryProviderActions(
 
     fun authorize(code: String) = SummaryProviderAction(SummaryProviderOperation.AUTHORIZE, { api.authorize(code) }, workflow::authorized, workflow.state)
 
-    fun discover(url: String, allowHttp: Boolean, key: String, auth: String): SummaryProviderAction<SummaryProviderDiscovery> {
+    fun discover(url: String, allowHttp: Boolean, key: String, auth: String,
+                 tofu: Boolean = false): SummaryProviderAction<SummaryProviderDiscovery> {
         val state = workflow.state
         val choice = state.choice
         val reuse = choice == SummaryProviderChoice.REUSE ||
@@ -29,7 +30,12 @@ internal class SummaryProviderActions(
         return SummaryProviderAction(SummaryProviderOperation.DISCOVER, {
             if (choice == SummaryProviderChoice.LOBO) require(state.draftEndpoint == normalizedUrl &&
                 SummaryProviderManagement.canonicalLoboEndpoint(normalizedUrl) == normalizedUrl)
-            if (reuse) api.discoverCurrent().also { result ->
+            if (tofu) {
+                require(state.canUseLoboTofu && !allowHttp && key.isEmpty() && auth.isBlank())
+                api.discoverFirstUseLobo(normalizedUrl).also { result ->
+                    require(result.candidate.matchesTrustedLobo(normalizedUrl))
+                }
+            } else if (reuse) api.discoverCurrent().also { result ->
                 require(expected != null && result.candidate.sameEndpointAndTrust(expected))
             } else if (remembered) api.discoverRememberedLobo(url).also { result ->
                 require(result.candidate.matchesTrustedLobo(url))
