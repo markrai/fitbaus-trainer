@@ -33,6 +33,9 @@ internal class BooksConceptView(context: Context) : View(context) {
         if (snippets == value) return false
         snippets = value.toList()
         styles = BooksConceptStyles.assign(snippets)
+        labels = emptyList()
+        metrics = emptyList()
+        geometry = ConceptLayout(0, emptyList())
         contentDescription = "Concepts. " + snippets.joinToString(". ")
         measuredForWidth = -1
         requestLayout()
