@@ -22,7 +22,7 @@ internal class TranscriberConnection(val address: String, val token: String) {
         require(json.getBoolean("job_api"))
         val source = json.optString("source_id", "")
         val configured = json.getBoolean("source_configured")
-        require(!configured || source.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(!configured || BooksIdentifier.isValid(source))
         val window = json.getInt("max_window_ms")
         require(window in 1..300_000)
         return TranscriberCapabilities(if (configured) source else null,
