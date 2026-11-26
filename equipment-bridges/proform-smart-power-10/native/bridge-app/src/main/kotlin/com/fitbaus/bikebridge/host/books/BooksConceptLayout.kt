@@ -1,5 +1,7 @@
 package com.fitbaus.bikebridge.host.books
 
+import kotlin.random.Random
+
 internal data class ConceptSize(val width: Int, val height: Int)
 internal data class ConceptPlacement(val index: Int, val left: Int, val top: Int, val width: Int, val height: Int)
 internal data class ConceptLayout(val height: Int, val placements: List<ConceptPlacement>)
@@ -11,8 +13,9 @@ internal object BooksConceptLayout {
         var height = 0
     }
 
-    fun place(sizes: List<ConceptSize>, width: Int, gap: Int): ConceptLayout {
+    fun place(sizes: List<ConceptSize>, width: Int, gap: Int, rowStagger: Int = 0, seed: Int = 0): ConceptLayout {
         require(width in 1..100_000 && gap in 0..width && sizes.size <= BooksConceptValidation.MAX_CONCEPTS)
+        require(rowStagger >= 0)
         require(sizes.all { it.width in 1..width && it.height in 1..100_000 })
         val rows = mutableListOf<Row>()
         val order = sizes.indices.sortedWith(compareByDescending<Int> { sizes[it].width }.thenBy { it })
@@ -26,8 +29,11 @@ internal object BooksConceptLayout {
         }
         val placed = mutableListOf<ConceptPlacement>()
         var top = 0
+        val random = Random(seed)
         for (row in rows) {
-            var left = (width - row.width) / 2
+            val free = width - row.width
+            val shift = minOf(rowStagger, free / 2)
+            var left = free / 2 + if (shift > 0) random.nextInt(-shift, shift + 1) else 0
             for (index in row.indices) {
                 val size = sizes[index]
                 placed.add(ConceptPlacement(index, left, top + (row.height - size.height) / 2, size.width, size.height))

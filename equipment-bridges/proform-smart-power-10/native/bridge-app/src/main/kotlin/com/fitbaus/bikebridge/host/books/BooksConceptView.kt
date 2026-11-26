@@ -19,7 +19,9 @@ internal class BooksConceptView(context: Context) : View(context) {
     private var labels = emptyList<StaticLayout>()
     private var geometry = ConceptLayout(0, emptyList())
     private var measuredForWidth = -1
-    private var accentFlags = emptyList<Boolean>()
+    private var styles = emptyList<ConceptCardStyle>()
+    private var metrics = emptyList<ConceptCardMetrics>()
+    private var stroke = 0
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -30,6 +32,10 @@ internal class BooksConceptView(context: Context) : View(context) {
     fun showConcepts(value: List<String>): Boolean {
         if (snippets == value) return false
         snippets = value.toList()
+        styles = BooksConceptStyles.assign(snippets)
+        labels = emptyList()
+        metrics = emptyList()
+        geometry = ConceptLayout(0, emptyList())
         contentDescription = "Concepts. " + snippets.joinToString(". ")
         measuredForWidth = -1
         requestLayout()
@@ -40,7 +46,8 @@ internal class BooksConceptView(context: Context) : View(context) {
     fun clearConcepts() {
         snippets = emptyList()
         labels = emptyList()
-        accentFlags = emptyList()
+        styles = emptyList()
+        metrics = emptyList()
         geometry = ConceptLayout(0, emptyList())
         measuredForWidth = -1
         contentDescription = null
@@ -61,28 +68,28 @@ internal class BooksConceptView(context: Context) : View(context) {
     @Suppress("DEPRECATION")
     private fun rebuild(available: Int) {
         val inner = (available - dp(40)).coerceAtLeast(1)
-        val horizontalPadding = dp(32).coerceAtMost(inner - 1)
-        val maximum = (inner * 0.67f).toInt().coerceIn(1, inner)
-        val textMax = (maximum - horizontalPadding).coerceAtLeast(1)
-        accentFlags = snippets.map { it.codePointCount(0, it.length) <= 24 }
+        stroke = if (inner > 1) dp(1).coerceIn(1, inner - 1) else 0
+        val maximum = (inner * 0.67f).toInt().coerceIn(1, inner - stroke)
+        val padding = styles.map { dp(it.horizontalPaddingDp).coerceAtMost(maximum - 1) }
         labels = snippets.mapIndexed { index, value ->
-            val length = value.codePointCount(0, value.length)
+            val style = styles[index]
+            val short = value.codePointCount(0, value.length) <= 24
             val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = if (accentFlags[index]) 0xffffce1b.toInt() else 0xffeeeeee.toInt()
-                textSize = sp(when {
-                    length <= 24 -> 28f
-                    length <= 65 -> 24f
-                    else -> 20f
-                })
-                typeface = Typeface.create(if (accentFlags[index]) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
+                color = if (short) style.palette.accent else 0xffeeeeee.toInt()
+                textSize = sp(style.fontSp)
+                typeface = Typeface.create(if (short) "sans-serif-medium" else "sans-serif", Typeface.NORMAL)
             }
+            val textMax = (maximum - padding[index]).coerceAtLeast(1)
             val width = ceil(Layout.getDesiredWidth(value, textPaint)).toInt().coerceIn(1, textMax)
             StaticLayout(value, textPaint, width, Layout.Alignment.ALIGN_CENTER, 1.08f, 0f, true)
         }
-        val sizes = labels.map {
-            ConceptSize((it.width + horizontalPadding).coerceIn(1, inner), maxOf(dp(58), it.height + dp(28)))
+        metrics = labels.mapIndexed { index, label ->
+            val style = styles[index]
+            val size = ConceptSize(label.width + padding[index], maxOf(dp(58), label.height + dp(style.verticalPaddingDp)))
+            BooksConceptStyles.metrics(size, style.rotationDegrees, inner, stroke)
         }
-        geometry = BooksConceptLayout.place(sizes, inner, dp(12).coerceAtMost(inner))
+        geometry = BooksConceptLayout.place(metrics.map { it.footprint }, inner, dp(14).coerceAtMost(inner),
+            rowStagger = dp(12), seed = snippets.hashCode())
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -92,20 +99,28 @@ internal class BooksConceptView(context: Context) : View(context) {
         canvas.save()
         canvas.translate(left, top)
         for (placed in geometry.placements) {
-            val accent = accentFlags[placed.index]
-            val bounds = RectF(placed.left.toFloat(), placed.top.toFloat(),
-                (placed.left + placed.width).toFloat(), (placed.top + placed.height).toFloat())
-            paint.style = Paint.Style.FILL
-            paint.color = if (accent) 0xff282318.toInt() else 0xff1c1c1c.toInt()
-            canvas.drawRoundRect(bounds, dp(16).toFloat(), dp(16).toFloat(), paint)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = dp(1).toFloat()
-            paint.color = if (accent) 0xff776428.toInt() else 0xff3d3d3d.toInt()
-            canvas.drawRoundRect(bounds, dp(16).toFloat(), dp(16).toFloat(), paint)
-            val label = labels[placed.index]
+            val style = styles[placed.index]
+            val card = metrics[placed.index]
+            val centerX = placed.left + placed.width / 2f
+            val centerY = placed.top + placed.height / 2f
+            val bounds = RectF(centerX - card.body.width / 2f, centerY - card.body.height / 2f,
+                centerX + card.body.width / 2f, centerY + card.body.height / 2f)
+            val radius = dp(style.radiusDp).toFloat()
             canvas.save()
-            canvas.translate(bounds.left + (bounds.width() - label.width) / 2f,
-                bounds.top + (bounds.height() - label.height) / 2f)
+            canvas.rotate(card.rotationDegrees, centerX, centerY)
+            if (!style.outlined) {
+                paint.style = Paint.Style.FILL
+                paint.color = style.palette.fill
+                canvas.drawRoundRect(bounds, radius, radius, paint)
+            }
+            if (stroke > 0) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = stroke.toFloat()
+                paint.color = style.palette.border
+                canvas.drawRoundRect(bounds, radius, radius, paint)
+            }
+            val label = labels[placed.index]
+            canvas.translate(centerX - label.width / 2f, centerY - label.height / 2f)
             label.draw(canvas)
             canvas.restore()
         }
