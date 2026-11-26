@@ -31,6 +31,7 @@ export interface SessionFinalizationV1 {
   status: SessionFinalizationStatus;
   athleteId?: string;
   evidenceIncomplete?: boolean;
+  cancelled?: boolean;
 }
 
 export type FreezeSessionFinalizationResult =
@@ -209,6 +210,7 @@ export function parseSessionFinalization(raw: unknown): SessionFinalizationV1 | 
     record.athleteId = value.athleteId;
   }
   if (value.evidenceIncomplete === true) record.evidenceIncomplete = true;
+  if (typeof value.cancelled === "boolean") record.cancelled = value.cancelled;
   return record;
 }
 
@@ -245,6 +247,7 @@ export function freezeSessionFinalization(input: {
   pausedDurationSec: number;
   athleteId?: string;
   evidenceIncomplete?: boolean;
+  cancelled?: boolean;
   storage?: SessionStorage;
 }): FreezeSessionFinalizationResult {
   const existing = readSessionFinalization(input.selector, input.storage);
@@ -270,6 +273,7 @@ export function freezeSessionFinalization(input: {
   };
   if (input.athleteId) record.athleteId = input.athleteId;
   if (input.evidenceIncomplete === true) record.evidenceIncomplete = true;
+  if (typeof input.cancelled === "boolean") record.cancelled = input.cancelled;
   writeSessionFinalization(record, input.storage);
   return { ok: true, record };
 }

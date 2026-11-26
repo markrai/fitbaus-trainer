@@ -516,7 +516,7 @@ async function emitWorkoutSummary(summary) {
             console.error("Error rebuilding passive fitness projection:", error);
         }
     }
-    if (!isFreestyleSummary(summary)) {
+    if (saved && !isFreestyleSummary(summary)) {
         await learnFromCompletedWorkout(summary);
         await learnShadowPredictionsFromCompletedWorkout(summary);
         await learnHrDynamicsFromCompletedWorkout(summary);
