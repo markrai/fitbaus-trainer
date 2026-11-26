@@ -72,7 +72,7 @@ class RemoteBooksSummaryTest {
             if (requests.size == 1) BooksHttpResponse(202, pending().toString())
             else BooksHttpResponse(200, ready().toString())
         }.load(selection, true) { pendingStates.add(it) }
-        assertEquals(BooksSummaryState.Ready(revision, "A summary.", "test-model", "section-v1", digest, true), result)
+        assertEquals(BooksSummaryState.Ready(revision, "A summary.", "test-model", "section-v1", digest, true, "home"), result)
         assertEquals(listOf(BooksSummaryState.Pending(revision, listOf(0L, 300_000L, 600_000L))), pendingStates)
         assertEquals(2, requests.size)
         for (request in requests) {
