@@ -1,4 +1,4 @@
-import { adjustedBlockLengths, beginWorkout, formatTime, getPhase, getPausedElapsed, getStartTime, isPaused, pauseWorkout, restartWorkout, resumeWorkout, requestEarlyCooldown, planEarlyCooldownTransition, lastPersistedElapsedFromHrSamples, workoutRelativeHrSample, recordVo2ActiveBikeTelemetry, ordinaryActiveBikeTelemetrySample, restoreBikeBridgeBindingForActiveSession, startWorkout, todayName, updateRing, tickVo2ProtocolWithCanonicalHr, requestVo2LimitReached, } from "./workoutLogic.js";
+import { adjustedBlockLengths, beginWorkout, formatTime, getPhase, getPausedElapsed, getStartTime, isPaused, pauseWorkout, restartWorkout, resumeWorkout, requestEarlyCooldown, planEarlyCooldownTransition, lastPersistedElapsedFromHrSamples, workoutRelativeHrSample, recordVo2ActiveBikeTelemetry, ordinaryActiveBikeTelemetrySample, restoreBikeBridgeBindingForActiveSession, startWorkout, todayName, updateRing, tickVo2ProtocolWithCanonicalHr, vo2TickSessionKey, requestVo2LimitReached, } from "./workoutLogic.js";
 import { getPlan, getWorkoutMetadata, getHrTargets } from "./workoutData.js";
 import { getAllWorkoutSummaries, deleteWorkoutSummary, getHrSamples, getOrdinaryBikeTelemetrySamples, queueOrdinaryBikeTelemetrySample, } from "./workoutStorage.js";
 import { sendWorkoutToSisu } from "./sisuSync.js";
@@ -1313,8 +1313,10 @@ async function updateDisplayAsync() {
         // call must stay unconditional (every refresh, any elapsed) -- never gate it on checkpoints.
         if (startTime && isVo2WorkoutSelector(day)) {
             const elapsedSec = paused ? pausedElapsed : Math.floor((Date.now() - parseInt(startTime, 10)) / 1000);
-            const tick = await tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused);
-            if (seq !== updateDisplaySeq)
+            const sessionKey = vo2TickSessionKey(getSession(day));
+            const isCurrent = () => seq === updateDisplaySeq && resolveOwnedWorkoutDay() === day;
+            const tick = await tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, undefined, { isCurrent });
+            if (tick === undefined || !isCurrent() || vo2TickSessionKey(getSession(day)) !== sessionKey)
                 return;
             pendingVo2Cues = (_a = tick === null || tick === void 0 ? void 0 : tick.cues) !== null && _a !== void 0 ? _a : [];
         }
