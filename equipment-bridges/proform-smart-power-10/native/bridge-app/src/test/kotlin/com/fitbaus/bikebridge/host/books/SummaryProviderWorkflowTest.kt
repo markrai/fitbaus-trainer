@@ -440,4 +440,43 @@ class SummaryProviderWorkflowTest {
         assertTrue(flow.state.reusesCurrentLobo)
     }
 
+    @Test
+    fun pairedSelectionRestoresLoboAndTestsBeforeAutomaticActivation() {
+        val flow = SummaryProviderWorkflow()
+        val status = configured.copy(adminRequired = false, administrator = false, loboTofuSupported = true)
+        assertTrue(flow.capabilities(begin(flow, SummaryProviderOperation.CAPABILITIES),
+            SummaryProviderCapabilities(true, status.model, status, false)))
+        assertEquals(SummaryProviderChoice.LOBO, flow.state.choice)
+        assertEquals(status.baseUrl, flow.state.draftEndpoint)
+        assertTrue(flow.state.canOpen)
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.authorized(begin(flow, SummaryProviderOperation.AUTHORIZE), status))
+        assertFalse(flow.state.canSetPolicy)
+        assertFalse(flow.state.canOpen)
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER), discovered))
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 50))
+        assertTrue(flow.state.canSave)
+        assertTrue(flow.saved(begin(flow, SummaryProviderOperation.SAVE), status))
+        assertEquals(SummaryProviderScreen.FINISHED, flow.state.screen)
+    }
+
+    @Test
+    fun automaticModeDoesNotChooseAnArbitraryModelOrBypassAdministratorPolicy() {
+        val flow = SummaryProviderWorkflow()
+        val status = configured.copy(adminRequired = true)
+        assertTrue(flow.capabilities(begin(flow, SummaryProviderOperation.CAPABILITIES),
+            SummaryProviderCapabilities(true, status.model, status, true)))
+        assertFalse(flow.state.canOpen)
+        assertTrue(flow.authorized(begin(flow, SummaryProviderOperation.AUTHORIZE), status))
+        assertTrue(flow.state.canSetPolicy)
+        val candidates = SummaryProviderDiscovery(listOf("first", "second"), configured.copy(model = "discovery"))
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER), candidates))
+        assertNull(flow.state.model)
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.selectModel("second"))
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 20))
+        assertTrue(flow.state.canSave)
+    }
+
 }
