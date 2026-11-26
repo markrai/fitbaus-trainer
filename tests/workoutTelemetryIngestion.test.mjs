@@ -17,6 +17,7 @@ function fixture() {
     observedResistance: 4, observedResistanceCurrent: true, desiredResistance: 5, commandedResistance: 6,
   };
   let load = async () => [];
+  let accept = true;
   const ingestion = createWorkoutTelemetryIngestion(() => day, {
     getSession: () => session,
     getHrSamples: (id) => load(id),
@@ -30,12 +31,12 @@ function fixture() {
     },
     queueOrdinaryBikeTelemetrySample: (sample) => events.push(["queue", sample.sessionId]),
     recordMachineHeartRateSample: (...args) => events.push(["machine", ...args]),
-    storeHrSample: (...args) => events.push(["store", ...args]),
+    storeHrSample: (...args) => { if (!accept) return false; events.push(["store", ...args]); return true; },
     now: () => now,
   });
   return { ingestion, events, state, setDay: (v) => { day = v; }, setSession: (v) => { session = { ...session, ...v }; },
     setNow: (v) => { now = v; }, setFinalization: (v) => { finalization = v; }, setFault: (v) => { fault = v; },
-    setLoad: (v) => { load = v; } };
+    setLoad: (v) => { load = v; }, setAccept: (v) => { accept = v; } };
 }
 
 test("ordinary telemetry retains observed and requested provenance independently", () => {
@@ -87,7 +88,7 @@ test("ordinary stale snapshots reach the canonical evidence builder unchanged", 
   assert.equal(f.events[0][2].telemetryStale, true);
 });
 
-test("HR hydration deduplicates persisted seconds and concurrent samples; machine precedes storage", async () => {
+test("HR hydration deduplicates persisted seconds and concurrent samples; admission precedes machine recording", async () => {
   const f = fixture();
   let reads = 0;
   f.setLoad(async () => { reads++; return [{ timestamp_sec: 5 }]; });
@@ -96,7 +97,7 @@ test("HR hydration deduplicates persisted seconds and concurrent samples; machin
   f.setNow(106000);
   await Promise.all([f.ingestion.persistWorkoutRelativeHr(145), f.ingestion.persistWorkoutRelativeHr(146)]);
   assert.equal(reads, 1);
-  assert.deepEqual(f.events, [["machine", "ride-1", 6, 145], ["store", "ride-1", 6, 145]]);
+  assert.deepEqual(f.events, [["store", "ride-1", 6, 145], ["machine", "ride-1", 6, 145]]);
 });
 
 test("HR rechecks session identity and finalization after asynchronous hydration", async () => {
@@ -118,7 +119,7 @@ test("HR hydration state is scoped to ingestion owner and new session", async ()
   f.setSession({ sessionId: "ride-2" });
   await f.ingestion.persistWorkoutRelativeHr(141);
   assert.deepEqual(f.events.map(e => e.slice(0, 3)), [
-    ["machine", "ride-1", 5], ["store", "ride-1", 5], ["machine", "ride-2", 5], ["store", "ride-2", 5],
+    ["store", "ride-1", 5], ["machine", "ride-1", 5], ["store", "ride-2", 5], ["machine", "ride-2", 5],
   ]);
 });
 
@@ -135,4 +136,32 @@ test("ending and emitted sessions reject all HR and bike evidence", async () => 
     await f.ingestion.persistWorkoutRelativeHr(151);
     assert.deepEqual(f.events, []);
   }
+});
+
+test("failed hydration is not treated as an empty history and the next sample retries", async () => {
+  const f = fixture();
+  let reads = 0;
+  f.setLoad(async () => {
+    reads++;
+    if (reads === 1) throw new Error("read failure");
+    return [{ timestamp_sec: 5 }];
+  });
+  await f.ingestion.persistWorkoutRelativeHr(140);
+  assert.deepEqual(f.events, []);
+  await f.ingestion.persistWorkoutRelativeHr(141);
+  assert.equal(reads, 2);
+  assert.deepEqual(f.events, []);
+  f.setNow(106000);
+  await f.ingestion.persistWorkoutRelativeHr(142);
+  assert.deepEqual(f.events, [["store", "ride-1", 6, 142], ["machine", "ride-1", 6, 142]]);
+});
+
+test("rejected queue admission does not advance the HR cursor or record machine evidence", async () => {
+  const f = fixture();
+  f.setAccept(false);
+  await f.ingestion.persistWorkoutRelativeHr(140);
+  assert.deepEqual(f.events, []);
+  f.setAccept(true);
+  await f.ingestion.persistWorkoutRelativeHr(141);
+  assert.deepEqual(f.events, [["store", "ride-1", 5, 141], ["machine", "ride-1", 5, 141]]);
 });

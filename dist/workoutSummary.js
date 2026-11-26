@@ -2,13 +2,12 @@
  * Workout summary construction and emit orchestration. Sequences identity,
  * optional personalization artifacts (E1 copy / Response / E2), VO₂ assessment
  * attach, then summary persistence. On successful save only: VO₂ FitnessState
- * promotion and Phase D rebuild. Machine-model learning runs afterward and is
- * currently not gated by successful summary persistence. Scientific policy
+ * promotion, Phase D rebuild and machine-model learning. Scientific policy
  * remains in subsystem modules — this file is the finalization boundary, not
  * the science owner. See docs/personalization-architecture.md.
  */
 import { calculateZoneMinutes, determinePrimaryZone } from "./zoneCalculator.js";
-import { flushOrdinaryBikeTelemetryWrites, getAllWorkoutSummaries, getHrSamples, getOrdinaryBikeTelemetrySamples, storeWorkoutSummary, } from "./workoutStorage.js";
+import { flushOrdinaryBikeTelemetryWrites, getAllWorkoutSummaries, readCanonicalWorkoutHrSamples, getOrdinaryBikeTelemetrySamplesStrict, storeWorkoutSummary, } from "./workoutStorage.js";
 import { formatISO8601UTC } from "./utils/dateTime.js";
 import { getMachineUsageSnapshot } from "./machines/runtime.js";
 import { getSession, totalPausedDurationSec } from "./sessionStore.js";
@@ -245,7 +244,10 @@ async function generateWorkoutSummary(sessionId, startedAt, endedAt, day, option
     else if (durationMinutesCheck > MAX_DURATION_MINUTES) {
         throw new Error(`Workout duration ${durationMinutesCheck} minutes exceeds maximum of ${MAX_DURATION_MINUTES} minutes. This likely indicates a stale workout session. Started: ${new Date(effectiveStartedAt).toISOString()}, Ended: ${new Date(effectiveEndedAt).toISOString()}`);
     }
-    const hrSamples = await getHrSamples(sessionId);
+    const telemetryFlush = await flushOrdinaryBikeTelemetryWrites(sessionId);
+    if (!telemetryFlush.ok)
+        throw new Error("Workout bike evidence writes remain unconfirmed");
+    const hrSamples = await readCanonicalWorkoutHrSamples(sessionId);
     const zoneMinutes = calculateZoneMinutes(hrSamples);
     const primaryZone = isFreestyle
         ? determinePrimaryZoneHonest(zoneMinutes)
@@ -342,9 +344,8 @@ async function generateWorkoutSummary(sessionId, startedAt, endedAt, day, option
     }));
     // Freestyle Level-A analytics: derive after open_ended_timing, before structured response
     if (isFreestyle && session.athleteId && session.activity === "bike") {
+        const bikeSamples = await getOrdinaryBikeTelemetrySamplesStrict(sessionId);
         try {
-            await flushOrdinaryBikeTelemetryWrites(sessionId);
-            const bikeSamples = await getOrdinaryBikeTelemetrySamples(sessionId);
             attachFreestyleDerivedAnalytics(summary, {
                 athleteId: session.athleteId,
                 sessionId,
@@ -370,9 +371,8 @@ async function generateWorkoutSummary(sessionId, startedAt, endedAt, day, option
         session.activity === "bike" &&
         session.athleteId &&
         (phasePlan === null || phasePlan === void 0 ? void 0 : phasePlan.resolvedPrescription)) {
+        const bikeSamples = await getOrdinaryBikeTelemetrySamplesStrict(sessionId);
         try {
-            await flushOrdinaryBikeTelemetryWrites(sessionId);
-            const bikeSamples = await getOrdinaryBikeTelemetrySamples(sessionId);
             const response = deriveWorkoutResponse({
                 athleteId: session.athleteId,
                 sessionId,

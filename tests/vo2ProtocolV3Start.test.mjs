@@ -357,3 +357,43 @@ test("live v3 ceiling breach bypasses a pending checkpoint read and stale result
     restore();
   }
 });
+
+test("failed checkpoint evidence enters safe cooldown without evaluating missing samples", async () => {
+  const restore = installStartFakes();
+  try {
+    startWorkout();
+    tickVo2Protocol(VO2_WORKOUT_SELECTOR_ID, 300, false);
+    globalThis.window.liveBpm = 130;
+    globalThis.window.lastBpmUpdateTime = Date.now();
+    const tick = await tickVo2ProtocolWithCanonicalHr(VO2_WORKOUT_SELECTOR_ID, 480, false, undefined, {
+      readHrSamples: async () => { throw new Error("database read failure"); },
+    });
+    assert.equal(tick.runtime.segment, "cooldown");
+    assert.equal(tick.runtime.termination.reason, "early_cooldown");
+    assert.equal(tick.runtime.stages[0].status, "incomplete");
+  } finally {
+    restore();
+  }
+});
+
+test("live ceiling remains higher priority when a checkpoint read rejects", async () => {
+  const restore = installStartFakes();
+  try {
+    startWorkout();
+    tickVo2Protocol(VO2_WORKOUT_SELECTOR_ID, 300, false);
+    globalThis.window.liveBpm = 130;
+    globalThis.window.lastBpmUpdateTime = Date.now();
+    let rejectRead;
+    const pending = tickVo2ProtocolWithCanonicalHr(VO2_WORKOUT_SELECTOR_ID, 480, false, undefined, {
+      readHrSamples: () => new Promise((_, reject) => { rejectRead = reject; }),
+    });
+    globalThis.window.liveBpm = 150;
+    globalThis.window.lastBpmUpdateTime = Date.now();
+    rejectRead(new Error("database read failure"));
+    const tick = await pending;
+    assert.equal(tick.runtime.segment, "cooldown");
+    assert.equal(tick.runtime.termination.reason, "submax_hr_ceiling");
+  } finally {
+    restore();
+  }
+});

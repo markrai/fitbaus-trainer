@@ -53,7 +53,7 @@ function telemetrySample({ session = "w1", sec, at = T0 + sec * 1000, fresh = tr
   return sample;
 }
 
-test("workoutStorage facade runtime export surface is unchanged", () => {
+test("workoutStorage facade runtime export surface retains compatibility and exposes strict evidence APIs", () => {
   const surface = Object.fromEntries(Object.keys(workoutStorage).sort().map((name) => [name, typeof workoutStorage[name]]));
   assert.deepEqual(surface, {
     ABANDONED_ORDINARY_TELEMETRY_MAX_AGE_MS: "number",
@@ -68,20 +68,26 @@ test("workoutStorage facade runtime export surface is unchanged", () => {
     deleteOrdinaryBikeTelemetryForSessionStrict: "function",
     deleteWorkoutSummary: "function",
     flushOrdinaryBikeTelemetryWrites: "function",
+    flushWorkoutHrWrites: "function",
     getAllWorkoutSummaries: "function",
     getHrSamples: "function",
+    getHrSamplesStrict: "function",
     getOrdinaryBikeTelemetrySamples: "function",
+    getOrdinaryBikeTelemetrySamplesStrict: "function",
     getSisuSettings: "function",
     getWorkoutSummaryBySessionId: "function",
     initDB: "function",
     peekOrdinaryBikeTelemetryWriteFailures: "function",
     queueOrdinaryBikeTelemetrySample: "function",
+    queueWorkoutHrSample: "function",
+    readCanonicalWorkoutHrSamples: "function",
     registerStorageGlobals: "function",
     resetWorkoutStorageForTests: "function",
     setFreestyleEvidenceDeleteFailureInjectorForTests: "function",
     setOrdinaryTelemetryDeleteFailureInjectorForTests: "function",
     setOrdinaryTelemetryWriteFailureInjectorForTests: "function",
     setOrdinaryTelemetryWriteGateForTests: "function",
+    setWorkoutHrPersistenceHooksForTests: "function",
     storeHrSample: "function",
     storeOrdinaryBikeTelemetrySample: "function",
     storeSisuSettings: "function",
@@ -653,5 +659,62 @@ test("a failure mid-cleanup aborts everything: no partial deletion, facade logs 
   assert.deepEqual(logged, ["Error cleaning abandoned ordinary bike telemetry:"]);
   for (const session of ["orphan-a", "orphan-b", "orphan-c"]) {
     assert.deepEqual(await telemetrySeconds(session), [1], `${session} must not be partially deleted`);
+  }
+});
+
+test("strict HR read distinguishes failed storage from an empty history", async () => {
+  await freshDatabase();
+  try {
+    assert.deepEqual(await workoutStorage.getHrSamplesStrict("empty"), []);
+    workoutStorage.setWorkoutHrPersistenceHooksForTests(null, () => true);
+    await assert.rejects(workoutStorage.getHrSamplesStrict("empty"), /evidence read failed/);
+    await assert.rejects(workoutStorage.readCanonicalWorkoutHrSamples("empty"), /evidence read failed/);
+    assert.deepEqual(await workoutStorage.getHrSamples("empty"), []);
+  } finally {
+    await workoutStorage.resetWorkoutStorageForTests();
+  }
+});
+
+test("HR drain waits for accepted writes and retains first sample on a failed write", async () => {
+  await freshDatabase();
+  let fail = true;
+  try {
+    workoutStorage.setWorkoutHrPersistenceHooksForTests(async () => {
+      if (fail) throw new Error("injected write failure");
+    });
+    assert.equal(workoutStorage.queueWorkoutHrSample("retry-hr", 5, 121), true);
+    assert.equal(workoutStorage.queueWorkoutHrSample("retry-hr", 5, 145), true);
+    assert.equal(workoutStorage.queueWorkoutHrSample("other-hr", 6, 150), true);
+    assert.equal(await workoutStorage.flushWorkoutHrWrites("retry-hr"), false);
+    assert.deepEqual(await workoutStorage.getHrSamplesStrict("retry-hr"), []);
+    await assert.rejects(workoutStorage.readCanonicalWorkoutHrSamples("retry-hr"), /unconfirmed/);
+    fail = false;
+    const recovered = await workoutStorage.readCanonicalWorkoutHrSamples("retry-hr");
+    assert.deepEqual(recovered.map(row => [row.timestamp_sec, row.hr]), [[5, 121]]);
+    assert.equal(await workoutStorage.flushWorkoutHrWrites("other-hr"), true);
+    assert.equal((await workoutStorage.getHrSamplesStrict("other-hr"))[0].hr, 150);
+  } finally {
+    await workoutStorage.resetWorkoutStorageForTests();
+  }
+});
+
+test("HR deletion seals the session and waits for an already admitted write", async () => {
+  await freshDatabase();
+  let release;
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  try {
+    workoutStorage.setWorkoutHrPersistenceHooksForTests(async () => { entered(); await gate; });
+    workoutStorage.queueWorkoutHrSample("discard-hr", 1, 120);
+    await started;
+    const deleting = workoutStorage.deleteHrSamplesForSessionStrict("discard-hr");
+    assert.equal(workoutStorage.queueWorkoutHrSample("discard-hr", 2, 130), false);
+    release();
+    await deleting;
+    assert.deepEqual(await workoutStorage.getHrSamplesStrict("discard-hr"), []);
+  } finally {
+    release();
+    await workoutStorage.resetWorkoutStorageForTests();
   }
 });
