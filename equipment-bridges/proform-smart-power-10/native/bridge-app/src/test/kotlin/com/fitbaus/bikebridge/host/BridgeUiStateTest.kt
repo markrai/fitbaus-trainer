@@ -171,12 +171,13 @@ class BridgeUiStateTest {
     }
 
     @Test
-    fun activitySourceKeepsLegacyCaptionsAndPalette() {
-        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+    fun dashboardSourceKeepsLegacyCaptionsAndPalette() {
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/BridgeDashboardView.kt").readText()
         for (caption in listOf(
             "\"RPM\"", "\"WATTS\"", "\"RESISTANCE\"", "\"HR\"", "\"DIAGNOSTICS\"", "\"STATUS\"", "\"USB\"",
             "\"INIT\"", "\"BIKE\"", "\"CONTROL\"", "\"REQUESTED\"", "\"OBSERVED\"", "\"MACHINE\"", "\"BRIDGE\"",
-            "\"HTTP\"", "\"FITBAUS\"",
+            "\"HTTP\"",
         )) {
             assertTrue(source.contains(caption), caption)
         }
@@ -187,7 +188,34 @@ class BridgeUiStateTest {
         )) {
             assertTrue(source.contains(color), color)
         }
-        assertTrue(source.contains("FLAG_KEEP_SCREEN_ON"))
+        assertTrue(activity.contains("\"FITBAUS\""))
+        assertTrue(activity.contains("FLAG_KEEP_SCREEN_ON"))
+    }
+
+    @Test
+    fun dashboardEndpointCachesAddressForTenRefreshesAndForcesOnResume() {
+        var lookups = 0
+        val endpoint = DashboardEndpointState { "192.168.1.${++lookups}:8765" }
+        assertEquals("192.168.1.1:8765", endpoint.refresh(false, null, null))
+        repeat(9) {
+            assertEquals("192.168.1.1:8765", endpoint.refresh(false, true, null))
+        }
+        assertEquals(1, lookups)
+        assertEquals("192.168.1.2:8765", endpoint.refresh(false, true, null))
+        assertEquals("192.168.1.3:8765", endpoint.refresh(true, true, null))
+        assertEquals(3, lookups)
+    }
+
+    @Test
+    fun dashboardEndpointShowsLiveBindErrorWithoutDiscardingCachedAddress() {
+        var lookups = 0
+        val endpoint = DashboardEndpointState { lookups++; "192.168.1.200:8765" }
+        assertEquals("Not listening - bind failed", endpoint.refresh(false, false, "bind failed"))
+        assertEquals("Not listening - address in use", endpoint.refresh(false, false, "address in use"))
+        assertEquals("192.168.1.200:8765", endpoint.refresh(false, true, "address in use"))
+        assertEquals("192.168.1.200:8765", endpoint.refresh(false, false, null))
+        assertEquals("192.168.1.200:8765", endpoint.refresh(false, null, null))
+        assertEquals(1, lookups)
     }
 }
 
