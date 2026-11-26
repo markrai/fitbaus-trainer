@@ -89,6 +89,7 @@ internal class BooksReadAlong(
         readingControls.orientation = HORIZONTAL
         readingControls.gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
         readingControls.visibility = GONE
+        fontSizeLabel.setTextColor(0xffa0a0a0.toInt())
         fontSizeLabel.gravity = Gravity.CENTER
         fontSizeLabel.text = "Text: $textSizeSp"
         narration.textSize = textSizeSp.toFloat()
@@ -113,6 +114,7 @@ internal class BooksReadAlong(
         readingControls.addView(fontSizeLabel, LayoutParams(dp(80), dp(40)))
         readingControls.addView(fontSlider, LayoutParams(dp(176), dp(40)))
         addView(readingControls, LayoutParams(MATCH, WRAP))
+        narration.setTextColor(0xfff5f5f5.toInt())
         narration.gravity = Gravity.CENTER
         narration.setPadding(dp(12), dp(6), dp(12), dp(6))
         narration.setLineSpacing(dp(4).toFloat(), 1.12f)
@@ -125,7 +127,7 @@ internal class BooksReadAlong(
         inlineSummary.apply {
             gravity = Gravity.CENTER
             setTypeface(Typeface.DEFAULT, Typeface.ITALIC)
-            setTextColor(0xffb8b8b8.toInt())
+            setTextColor(0xffbfbfbf.toInt())
             setLineSpacing(dp(2).toFloat(), 1.08f)
             visibility = GONE
         }
@@ -154,7 +156,7 @@ internal class BooksReadAlong(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        details.setTextColor(Color.LTGRAY)
+        details.setTextColor(0xffa0a0a0.toInt())
         details.maxLines = 2
         details.ellipsize = TextUtils.TruncateAt.END
         footer.addView(details, LayoutParams(0, WRAP, 1f))
