@@ -1,5 +1,5 @@
 import { lastPersistedElapsedFromHrSamples, workoutRelativeHrSample, recordVo2ActiveBikeTelemetry, ordinaryActiveBikeTelemetrySample, } from "./workoutLogic.js";
-import { getHrSamples, queueOrdinaryBikeTelemetrySample } from "./workoutStorage.js";
+import { getHrSamplesStrict, queueOrdinaryBikeTelemetrySample, queueWorkoutHrSample } from "./workoutStorage.js";
 import { getSession } from "./sessionStore.js";
 import { isVo2WorkoutSelector } from "./vo2Protocol.js";
 import { readSessionFinalization, readFreestyleAuthorityFault } from "./freestyleRide.js";
@@ -7,7 +7,7 @@ import { getBikeBridgeSession } from "./platform/bikeBridgeRuntime.js";
 import { recordMachineHeartRateSample } from "./machines/runtime.js";
 const defaultDependencies = {
     getSession,
-    getHrSamples,
+    getHrSamples: getHrSamplesStrict,
     getBikeBridgeSession,
     readSessionFinalization,
     readFreestyleAuthorityFault,
@@ -16,16 +16,12 @@ const defaultDependencies = {
     queueOrdinaryBikeTelemetrySample,
     recordMachineHeartRateSample,
     now: () => Date.now(),
-    storeHrSample: (sessionId, elapsedSec, bpm) => {
-        if (typeof window.storeHrSample === "function") {
-            window.storeHrSample(sessionId, elapsedSec, bpm).catch((err) => console.error("Error storing HR sample:", err));
-        }
-    },
+    storeHrSample: queueWorkoutHrSample,
 };
 export function createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay, overrides = {}) {
     const { getSession, getHrSamples, getBikeBridgeSession, readSessionFinalization, readFreestyleAuthorityFault, recordVo2ActiveBikeTelemetry, ordinaryActiveBikeTelemetrySample, queueOrdinaryBikeTelemetrySample, recordMachineHeartRateSample, now, storeHrSample } = { ...defaultDependencies, ...overrides };
-    let lastPersistedWorkoutHrElapsed;
-    let lastPersistedWorkoutHrSessionId = null;
+    let lastAcceptedWorkoutHrElapsed;
+    let lastAcceptedWorkoutHrSessionId = null;
     let lastPersistedHydratedSessionId = null;
     let lastPersistedHydrate = null;
     async function ensureLastPersistedHydrated(sessionId) {
@@ -40,17 +36,20 @@ export function createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay, override
             if ((lastPersistedHydrate === null || lastPersistedHydrate === void 0 ? void 0 : lastPersistedHydrate.sessionId) !== sessionId)
                 return;
             const max = lastPersistedElapsedFromHrSamples(samples);
-            if (lastPersistedWorkoutHrSessionId !== sessionId) {
-                lastPersistedWorkoutHrSessionId = sessionId;
-                lastPersistedWorkoutHrElapsed = max;
+            if (lastAcceptedWorkoutHrSessionId !== sessionId) {
+                lastAcceptedWorkoutHrSessionId = sessionId;
+                lastAcceptedWorkoutHrElapsed = max;
             }
             else if (max !== undefined &&
-                (lastPersistedWorkoutHrElapsed === undefined || max > lastPersistedWorkoutHrElapsed)) {
-                lastPersistedWorkoutHrElapsed = max;
+                (lastAcceptedWorkoutHrElapsed === undefined || max > lastAcceptedWorkoutHrElapsed)) {
+                lastAcceptedWorkoutHrElapsed = max;
             }
             lastPersistedHydratedSessionId = sessionId;
         })
-            .catch((err) => console.error("Error hydrating persisted HR elapsed:", err));
+            .finally(() => {
+            if (lastPersistedHydrate && lastPersistedHydrate.promise === promise)
+                lastPersistedHydrate = null;
+        });
         lastPersistedHydrate = { sessionId, promise };
         await promise;
     }
@@ -58,20 +57,27 @@ export function createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay, override
         const session = getSession(resolveOwnedWorkoutDay());
         if (!session.sessionId || session.summaryEmitted === "true" || readSessionFinalization(resolveOwnedWorkoutDay()))
             return;
-        await ensureLastPersistedHydrated(session.sessionId);
+        try {
+            await ensureLastPersistedHydrated(session.sessionId);
+        }
+        catch (error) {
+            console.error("Error hydrating persisted HR elapsed:", error);
+            return;
+        }
         const latest = getSession(resolveOwnedWorkoutDay());
         if (latest.sessionId !== session.sessionId || latest.summaryEmitted === "true")
             return;
         if (latest.sessionId && readSessionFinalization(resolveOwnedWorkoutDay()))
             return;
-        const lastElapsed = latest.sessionId === lastPersistedWorkoutHrSessionId ? lastPersistedWorkoutHrElapsed : undefined;
+        const lastElapsed = latest.sessionId === lastAcceptedWorkoutHrSessionId ? lastAcceptedWorkoutHrElapsed : undefined;
         const sample = workoutRelativeHrSample(latest, now(), lastElapsed);
         if (!sample || !latest.sessionId)
             return;
-        lastPersistedWorkoutHrSessionId = latest.sessionId;
-        lastPersistedWorkoutHrElapsed = sample.elapsedSec;
+        if (!storeHrSample(latest.sessionId, sample.elapsedSec, bpm))
+            return;
+        lastAcceptedWorkoutHrSessionId = latest.sessionId;
+        lastAcceptedWorkoutHrElapsed = sample.elapsedSec;
         recordMachineHeartRateSample(latest.sessionId, sample.elapsedSec, bpm);
-        storeHrSample(latest.sessionId, sample.elapsedSec, bpm);
     }
     function recordVo2BikeTelemetryIfActive() {
         const day = resolveOwnedWorkoutDay();

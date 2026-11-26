@@ -178,22 +178,25 @@ function peekOrdinaryBikeTelemetryWriteFailures(sessionId) {
     var _a, _b;
     return (_b = (_a = pendingOrdinaryWrites.get(sessionId)) === null || _a === void 0 ? void 0 : _a.failedCount) !== null && _b !== void 0 ? _b : 0;
 }
+export async function getOrdinaryBikeTelemetrySamplesStrict(sessionId) {
+    const rows = await getOrdinaryBikeTelemetryRows(sessionId);
+    const samples = [];
+    for (const row of rows) {
+        const parsed = parseOrdinaryBikeTelemetrySample(row === null || row === void 0 ? void 0 : row.sample);
+        if (!parsed ||
+            parsed.sessionId !== sessionId ||
+            row.session_id !== parsed.sessionId ||
+            row.athlete_id !== parsed.athleteId ||
+            row.active_sec !== parsed.activeSec) {
+            continue;
+        }
+        samples.push(parsed);
+    }
+    return samples.sort((a, b) => a.activeSec - b.activeSec);
+}
 async function getOrdinaryBikeTelemetrySamples(sessionId) {
     try {
-        const rows = await getOrdinaryBikeTelemetryRows(sessionId);
-        const samples = [];
-        for (const row of rows) {
-            const parsed = parseOrdinaryBikeTelemetrySample(row === null || row === void 0 ? void 0 : row.sample);
-            if (!parsed ||
-                parsed.sessionId !== sessionId ||
-                row.session_id !== parsed.sessionId ||
-                row.athlete_id !== parsed.athleteId ||
-                row.active_sec !== parsed.activeSec) {
-                continue;
-            }
-            samples.push(parsed);
-        }
-        return samples.sort((a, b) => a.activeSec - b.activeSec);
+        return await getOrdinaryBikeTelemetrySamplesStrict(sessionId);
     }
     catch (error) {
         console.error("Error getting ordinary bike telemetry:", error);
@@ -222,45 +225,47 @@ export async function deleteOrdinaryBikeTelemetryForSessionStrict(sessionId) {
     await deleteOrdinaryBikeTelemetryRowsForSession(sessionId);
 }
 export async function deleteHrSamplesForSessionStrict(sessionId) {
-    await deleteHrSampleRowsForSession(sessionId);
+    await withWorkoutHrDeletion(sessionId, () => deleteHrSampleRowsForSession(sessionId));
 }
 /**
  * Atomically delete Freestyle HR + ordinary telemetry for one session.
  * Queued writes are flushed and sealed first so they cannot recreate rows.
  */
 async function deleteFreestyleSessionEvidenceAtomic(sessionId) {
-    const flush = await flushOrdinaryBikeTelemetryWrites(sessionId);
-    if (!flush.ok && flush.retryableFailures > 0) {
-        throw new Error("cannot discard while telemetry flush has retryable failures");
-    }
-    sealedOrdinaryTelemetrySessions.add(sessionId);
-    pendingOrdinaryWrites.delete(sessionId);
-    try {
-        const database = await openCurrentDatabase();
-        const tx = database.transaction([STORE_WORKOUTS, STORE_HR_SAMPLES, STORE_ORDINARY_BIKE_TELEMETRY], "readwrite");
-        const completed = transactionComplete(tx);
-        const work = (async () => {
-            const workout = await getWorkoutRowInTransaction(tx, sessionId);
-            if (workout !== undefined) {
-                throw new Error("cannot delete evidence owned by a persisted workout");
-            }
-            await deleteOrdinaryBikeTelemetryRowsInTransaction(tx, sessionId);
-            if (freestyleEvidenceDeleteFailureInjectorForTests === null || freestyleEvidenceDeleteFailureInjectorForTests === void 0 ? void 0 : freestyleEvidenceDeleteFailureInjectorForTests()) {
-                try {
-                    tx.abort();
+    await withWorkoutHrDeletion(sessionId, async () => {
+        const flush = await flushOrdinaryBikeTelemetryWrites(sessionId);
+        if (!flush.ok && flush.retryableFailures > 0) {
+            throw new Error("cannot discard while telemetry flush has retryable failures");
+        }
+        sealedOrdinaryTelemetrySessions.add(sessionId);
+        pendingOrdinaryWrites.delete(sessionId);
+        try {
+            const database = await openCurrentDatabase();
+            const tx = database.transaction([STORE_WORKOUTS, STORE_HR_SAMPLES, STORE_ORDINARY_BIKE_TELEMETRY], "readwrite");
+            const completed = transactionComplete(tx);
+            const work = (async () => {
+                const workout = await getWorkoutRowInTransaction(tx, sessionId);
+                if (workout !== undefined) {
+                    throw new Error("cannot delete evidence owned by a persisted workout");
                 }
-                catch {
-                    // Already aborting or finished.
+                await deleteOrdinaryBikeTelemetryRowsInTransaction(tx, sessionId);
+                if (freestyleEvidenceDeleteFailureInjectorForTests === null || freestyleEvidenceDeleteFailureInjectorForTests === void 0 ? void 0 : freestyleEvidenceDeleteFailureInjectorForTests()) {
+                    try {
+                        tx.abort();
+                    }
+                    catch {
+                        // Already aborting or finished.
+                    }
+                    throw new Error("injected freestyle evidence delete failure");
                 }
-                throw new Error("injected freestyle evidence delete failure");
-            }
-            await deleteHrSampleRowsInTransaction(tx, sessionId);
-        })();
-        await untilTransactionComplete(work, completed);
-    }
-    finally {
-        sealedOrdinaryTelemetrySessions.delete(sessionId);
-    }
+                await deleteHrSampleRowsInTransaction(tx, sessionId);
+            })();
+            await untilTransactionComplete(work, completed);
+        }
+        finally {
+            sealedOrdinaryTelemetrySessions.delete(sessionId);
+        }
+    });
 }
 /** Delete old raw traces only when no immutable workout summary owns the session. */
 async function cleanupAbandonedOrdinaryBikeTelemetry(now = Date.now(), maxAgeMs = ABANDONED_ORDINARY_TELEMETRY_MAX_AGE_MS, protectedSessionIds = []) {
@@ -273,6 +278,89 @@ async function cleanupAbandonedOrdinaryBikeTelemetry(now = Date.now(), maxAgeMs 
     catch (error) {
         console.error("Error cleaning abandoned ordinary bike telemetry:", error);
         return 0;
+    }
+}
+let hrWriteGateForTests = null;
+let hrReadFailureForTests = null;
+export function setWorkoutHrPersistenceHooksForTests(writeGate, readFailure = null) {
+    hrWriteGateForTests = writeGate;
+    hrReadFailureForTests = readFailure;
+}
+const pendingWorkoutHrWrites = new Map();
+const sealedWorkoutHrSessions = new Set();
+async function writeWorkoutHrSample(sample) {
+    if (hrWriteGateForTests)
+        await hrWriteGateForTests();
+    await addHrSampleIfAbsent(sample.session_id, sample.timestamp_sec, sample.hr);
+}
+async function attemptWorkoutHrWrite(chain, sample) {
+    try {
+        await writeWorkoutHrSample(sample);
+        chain.failed.delete(sample.timestamp_sec);
+    }
+    catch (error) {
+        chain.failed.set(sample.timestamp_sec, sample);
+        console.error("Error storing workout HR evidence:", error);
+    }
+}
+export function queueWorkoutHrSample(sessionId, elapsedSec, bpm) {
+    if (sealedWorkoutHrSessions.has(sessionId))
+        return false;
+    let chain = pendingWorkoutHrWrites.get(sessionId);
+    if (!chain) {
+        chain = { tail: Promise.resolve(), failed: new Map() };
+        pendingWorkoutHrWrites.set(sessionId, chain);
+    }
+    const sample = { session_id: sessionId, timestamp_sec: elapsedSec, hr: bpm };
+    const task = chain.tail.then(async () => {
+        await attemptWorkoutHrWrite(chain, chain.failed.get(elapsedSec) || sample);
+    });
+    chain.tail = task;
+    void task.then(() => {
+        if (pendingWorkoutHrWrites.get(sessionId) === chain && chain.tail === task && chain.failed.size === 0)
+            pendingWorkoutHrWrites.delete(sessionId);
+    });
+    return true;
+}
+export async function flushWorkoutHrWrites(sessionId) {
+    const chain = pendingWorkoutHrWrites.get(sessionId);
+    if (!chain)
+        return true;
+    const task = chain.tail.then(async () => {
+        for (const sample of Array.from(chain.failed.values())) {
+            await attemptWorkoutHrWrite(chain, sample);
+        }
+    });
+    chain.tail = task;
+    await task;
+    if (chain.tail !== task)
+        return flushWorkoutHrWrites(sessionId);
+    const ok = chain.failed.size === 0;
+    if (ok && pendingWorkoutHrWrites.get(sessionId) === chain)
+        pendingWorkoutHrWrites.delete(sessionId);
+    return ok;
+}
+export async function getHrSamplesStrict(sessionId) {
+    if (hrReadFailureForTests && hrReadFailureForTests())
+        throw new Error("Workout HR evidence read failed");
+    return getHrSampleRows(sessionId);
+}
+export async function readCanonicalWorkoutHrSamples(sessionId) {
+    if (!(await flushWorkoutHrWrites(sessionId)))
+        throw new Error("Workout HR evidence writes remain unconfirmed");
+    return getHrSamplesStrict(sessionId);
+}
+async function withWorkoutHrDeletion(sessionId, remove) {
+    sealedWorkoutHrSessions.add(sessionId);
+    try {
+        const chain = pendingWorkoutHrWrites.get(sessionId);
+        if (chain)
+            await chain.tail;
+        await remove();
+        pendingWorkoutHrWrites.delete(sessionId);
+    }
+    finally {
+        sealedWorkoutHrSessions.delete(sessionId);
     }
 }
 async function storeHrSample(sessionId, timestampSec, hr) {
@@ -318,7 +406,7 @@ async function getWorkoutSummaryBySessionId(sessionId) {
 }
 async function clearHrSamples(sessionId) {
     try {
-        return await deleteHrSampleRowsForSession(sessionId);
+        return await deleteHrSamplesForSessionStrict(sessionId);
     }
     catch (error) {
         console.error("Error clearing HR samples:", error);
@@ -500,5 +588,12 @@ export function registerStorageGlobals() {
     window.clearSisuSettings = clearSisuSettings;
 }
 /** Close the cached IDB handle and delete the app database (tests only). */
-export const resetWorkoutStorageForTests = resetCurrentDatabaseForTests;
+export async function resetWorkoutStorageForTests() {
+    await Promise.all(Array.from(pendingWorkoutHrWrites.values(), chain => chain.tail));
+    pendingWorkoutHrWrites.clear();
+    sealedWorkoutHrSessions.clear();
+    hrWriteGateForTests = null;
+    hrReadFailureForTests = null;
+    await resetCurrentDatabaseForTests();
+}
 export { initDB, storeHrSample, getHrSamples, storeWorkoutSummary, getWorkoutSummaryBySessionId, clearHrSamples, storeOrdinaryBikeTelemetrySample, getOrdinaryBikeTelemetrySamples, clearOrdinaryBikeTelemetry, cleanupAbandonedOrdinaryBikeTelemetry, getAllWorkoutSummaries, deleteWorkoutSummary, storeSisuSettings, getSisuSettings, clearSisuSettings, peekOrdinaryBikeTelemetryWriteFailures, setOrdinaryTelemetryWriteFailureInjectorForTests, setOrdinaryTelemetryWriteGateForTests, setOrdinaryTelemetryDeleteFailureInjectorForTests, setFreestyleEvidenceDeleteFailureInjectorForTests, deleteFreestyleSessionEvidenceAtomic, clearOrdinaryBikeTelemetryQueue, };
