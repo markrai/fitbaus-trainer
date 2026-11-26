@@ -9,7 +9,14 @@ internal data class BooksSummaryPresentation(val text: String, val retry: Boolea
         fun inlineText(state: BooksSummaryState?, visible: Boolean): String? =
             if (visible && state is BooksSummaryState.Ready) state.summary.trim().takeIf { it.isNotEmpty() } else null
 
-        fun inlineSizeSp(narrationSizeSp: Int): Float = (narrationSizeSp * 0.60f).coerceIn(17f, 26f)
+        const val INLINE_SIZE_SP = 13f
+
+        fun inlineTopPx(viewportHeight: Int, narrationBottom: Int, gap: Int, bottomInset: Int,
+                        minimumHeight: Int): Int? {
+            val top = narrationBottom + gap
+            val bottom = viewportHeight - bottomInset
+            return top.takeIf { it >= 0 && bottom - it >= minimumHeight && minimumHeight > 0 }
+        }
 
         fun resolve(state: BooksSummaryState, recap: Boolean = false,
                     cumulative: Boolean = false): BooksSummaryPresentation = when (state) {
