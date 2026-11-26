@@ -122,6 +122,15 @@ internal class ArcadeContent(context: Context) : LinearLayout(context) {
         show(ArcadeMode.Dashboard)
     }
 
+    fun applyDiagnosticsOverlay(enabled: Boolean) {
+        playground.diagnosticsOverlay = enabled
+        math.diagnosticsOverlay = enabled
+        flak.diagnosticsOverlay = enabled
+        trail.diagnosticsOverlay = enabled
+        ghoul.diagnosticsOverlay = enabled
+        biketris.diagnosticsOverlay = enabled
+    }
+
     fun show(game: ArcadeMode) {
         if (previousMode.isGame && previousMode != game) {
             when (previousMode) {

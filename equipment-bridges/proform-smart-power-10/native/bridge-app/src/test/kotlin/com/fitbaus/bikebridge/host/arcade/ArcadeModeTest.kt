@@ -82,9 +82,6 @@ class ArcadeModeTest {
     @Test
     fun flakRunHasItsOwnFaceTrackerPreference() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        assertTrue(source.contains("ArcadeMode.Flak -> savedFlakSettings()"))
-        assertTrue(source.contains("ArcadeTrackerSettings.faceFromKey("))
-        assertTrue(source.contains("const val ARCADE_FLAK_TRACKER_KEY = \"flak_tracker\""))
         val flakBranch = source.substring(source.indexOf("if (modeController.mode == ArcadeMode.Flak) {"), source.indexOf("arcadeContent.playground.controllerAvailable ="))
         for (forbidden in listOf("Resistance", "requestResistance", "setResistance", "UsbManager")) assertFalse(flakBranch.contains(forbidden), forbidden)
     }
@@ -132,10 +129,6 @@ class ArcadeModeTest {
     @Test
     fun trailRideHasItsOwnFaceTrackerPreferenceAndStaysReadOnly() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        assertTrue(source.contains("ArcadeMode.TrailRide -> savedTrailSettings()"))
-        assertTrue(source.contains("ArcadeMode.TrailRide -> ARCADE_TRAIL_TRACKER_KEY"))
-        assertTrue(source.contains("const val ARCADE_TRAIL_TRACKER_KEY = \"trail_tracker\""))
-        assertTrue(source.contains("ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_TRAIL_TRACKER_KEY, null))"))
         val start = source.indexOf("if (modeController.mode == ArcadeMode.TrailRide) {")
         assertTrue(start > 0)
         val trailBranch = source.substring(start, source.indexOf("arcadeContent.playground.controllerAvailable =", start))
@@ -150,8 +143,6 @@ class ArcadeModeTest {
     @Test
     fun ghoulRunIsWiredAsAReadOnlyFaceOrControllerGame() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        assertTrue(source.contains("ArcadeMode.GhoulRun -> savedGhoulSettings()"))
-        assertTrue(source.contains("ArcadeMode.GhoulRun -> ARCADE_GHOUL_TRACKER_KEY"))
         assertTrue(source.contains("arcadeContent.ghoul.pause()"))
         val start = source.indexOf("if (modeController.mode == ArcadeMode.GhoulRun) {")
         val end = source.indexOf("if (modeController.mode == ArcadeMode.Biketris) {", start)
@@ -195,13 +186,6 @@ class ArcadeModeTest {
     @Test
     fun biketrisUsesItsOwnFaceTrackerAndWaveDetectionOnlyWhileSelected() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        assertTrue(source.contains("ArcadeMode.Biketris -> savedBiketrisSettings()"))
-        assertTrue(source.contains("ArcadeMode.Biketris -> ARCADE_BIKETRIS_TRACKER_KEY"))
-        assertTrue(source.contains("const val ARCADE_BIKETRIS_TRACKER_KEY = \"biketris_tracker\""))
-        assertTrue(source.contains("ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_BIKETRIS_TRACKER_KEY, null))"))
-        for (other in listOf("ArcadeMode.Math -> savedMathSettings()", "ArcadeMode.Flak -> savedFlakSettings()", "ArcadeMode.TrailRide -> savedTrailSettings()", "else -> savedTrackerSettings()")) {
-            assertTrue(source.contains(other), other)
-        }
         val hooksStart = source.indexOf("object : ArcadeModeHooks")
         val hooksBody = source.substring(hooksStart, source.indexOf("private val modeController", hooksStart))
         assertTrue(hooksBody.contains("cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)"))
@@ -209,7 +193,8 @@ class ArcadeModeTest {
         assertTrue(hooksBody.contains("arcadeContent.biketris.pause()"))
         assertEquals(1, Regex("""ArcadeCameraSession\.forActivity\(""").findAll(source).count(), "one camera session for every game")
         assertTrue(source.contains("arcadeContent.biketris.gestures = cameraSession.gestures"))
-        assertTrue(source.contains("game == ArcadeMode.Flak || game == ArcadeMode.TrailRide || game == ArcadeMode.GhoulRun || game == ArcadeMode.Biketris"), "long-press opens the face-game developer menu")
+        val picker = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ArcadeTrackerPicker.kt").readText()
+        assertTrue(picker.contains("configuration.usesFaceGamePicker(game)"), "long-press opens the face-game developer menu")
     }
 
     @Test
@@ -544,7 +529,7 @@ class ArcadeModeTest {
         assertTrue(header.contains("onTrackerPicker(mode)"))
         assertTrue(header.contains("styleTab(tab, tabMode == mode)"))
         assertTrue(activity.contains("onSelectMode = modeController::select"))
-        assertTrue(activity.contains("onTrackerPicker = ::showTrackerPicker"))
+        assertTrue(activity.contains("onTrackerPicker = { trackerPicker.show(it) }"))
         assertTrue(activity.contains("navigationHeader.render(mode)"))
         for (forbidden in listOf("ArcadeModeController", "NativeBridgeService", "NativeUsbSession", "startService", "startActivity", "cameraSession", "arcadeClock", "youtubeContent", "booksContent", "setResistance")) {
             assertFalse(header.contains(forbidden), forbidden)

@@ -4,7 +4,6 @@ package com.fitbaus.bikebridge.host
 
 import android.Manifest
 import android.app.Activity
-import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -42,6 +41,9 @@ import com.fitbaus.arcade.BikeMotionMonitor
 import com.fitbaus.arcade.HandPositionInput
 import com.fitbaus.arcade.RateMeter
 import com.fitbaus.bikebridge.host.arcade.ArcadeContent
+import com.fitbaus.bikebridge.host.arcade.ArcadeConfiguration
+import com.fitbaus.bikebridge.host.arcade.AndroidArcadeConfigurationPersistence
+import com.fitbaus.bikebridge.host.arcade.ArcadeTrackerPicker
 import com.fitbaus.bikebridge.host.arcade.ArcadeMode
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeController
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
@@ -71,6 +73,10 @@ class NativeBridgeActivity : Activity() {
     private var resumed = false
     private var pendingYouTubeImport: String? = null
     private lateinit var navigationHeader: BridgeNavigationHeader
+    private val arcadeConfiguration by lazy { ArcadeConfiguration(AndroidArcadeConfigurationPersistence(this)) }
+    private val trackerPicker by lazy {
+        ArcadeTrackerPicker(this, arcadeConfiguration, arcadeContent, ::applyTrackerSettings, ::setDiagnosticsOverlay)
+    }
     private val handInput = HandPositionInput()
     private val exclusiveHid by lazy { ExclusiveHid(this) }
     private val controllerOwnership by lazy {
@@ -98,7 +104,7 @@ class NativeBridgeActivity : Activity() {
             this,
             handInput,
             CAMERA_PERMISSION_REQUEST,
-            settings = savedTrackerSettings(),
+            settings = arcadeConfiguration.settingsFor(ArcadeMode.Bricks),
             externalCamera = UvcProcess.acquire(this, this),
             zoomHook = UvcProcess.zoomHook(this),
         )
@@ -118,7 +124,7 @@ class NativeBridgeActivity : Activity() {
             bikeMotion.reset()
             gameController.refresh()
             gameController.resetTransient()
-            cameraSession.updateSettings(trackerSettingsFor(game))
+            cameraSession.updateSettings(arcadeConfiguration.settingsFor(game))
             cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)
             cameraSession.start()
             arcadeClock.start()
@@ -603,7 +609,7 @@ class NativeBridgeActivity : Activity() {
             this,
             onSelectMode = modeController::select,
             onOpenSettings = ::openPairingSettings,
-            onTrackerPicker = ::showTrackerPicker,
+            onTrackerPicker = { trackerPicker.show(it) },
         )
         val titleRow = navigationHeader.view
         root.addView(titleRow)
@@ -621,17 +627,11 @@ class NativeBridgeActivity : Activity() {
         arcadeContent.ghoul.onInputSourceChanged = { gameController.resetTransient() }
         arcadeContent.playground.input = handInput
         arcadeContent.playground.preview = cameraSession.preview
-        arcadeContent.playground.faceControl = savedTrackerSettings().mode == ArcadeTrackerMode.Face
+        arcadeContent.playground.faceControl = arcadeConfiguration.settingsFor(ArcadeMode.Bricks).mode == ArcadeTrackerMode.Face
         arcadeContent.math.fingers = cameraSession.fingers
         arcadeContent.math.preview = cameraSession.preview
         arcadeContent.biketris.gestures = cameraSession.gestures
-        val overlay = getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getBoolean(ARCADE_OVERLAY_KEY, false)
-        arcadeContent.playground.diagnosticsOverlay = overlay
-        arcadeContent.math.diagnosticsOverlay = overlay
-        arcadeContent.flak.diagnosticsOverlay = overlay
-        arcadeContent.trail.diagnosticsOverlay = overlay
-        arcadeContent.ghoul.diagnosticsOverlay = overlay
-        arcadeContent.biketris.diagnosticsOverlay = overlay
+        arcadeContent.applyDiagnosticsOverlay(arcadeConfiguration.diagnosticsOverlay())
         contentHost.addView(
             arcadeContent,
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
@@ -719,112 +719,13 @@ class NativeBridgeActivity : Activity() {
         startActivity(intent)
     }
 
-    private fun savedTrackerSettings(): ArcadeTrackerSettings =
-        ArcadeTrackerSettings.fromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_TRACKER_KEY, null))
-
-    private fun savedMathSettings(): ArcadeTrackerSettings =
-        ArcadeTrackerSettings.fingersFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_MATH_TRACKER_KEY, null))
-
-    private fun savedFlakSettings(): ArcadeTrackerSettings =
-        ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_FLAK_TRACKER_KEY, null))
-
-    private fun savedTrailSettings(): ArcadeTrackerSettings =
-        ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_TRAIL_TRACKER_KEY, null))
-
-    private fun savedGhoulSettings(): ArcadeTrackerSettings =
-        ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_GHOUL_TRACKER_KEY, null))
-
-    private fun savedBiketrisSettings(): ArcadeTrackerSettings =
-        ArcadeTrackerSettings.faceFromKey(getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).getString(ARCADE_BIKETRIS_TRACKER_KEY, null))
-
-    private fun trackerSettingsFor(game: ArcadeMode): ArcadeTrackerSettings = when (game) {
-        ArcadeMode.Math -> savedMathSettings()
-        ArcadeMode.Flak -> savedFlakSettings()
-        ArcadeMode.TrailRide -> savedTrailSettings()
-        ArcadeMode.GhoulRun -> savedGhoulSettings()
-        ArcadeMode.Biketris -> savedBiketrisSettings()
-        else -> savedTrackerSettings()
-    }
-
-    private fun faceGameOptions(game: ArcadeMode): List<String> = when (game) {
-        ArcadeMode.TrailRide -> arcadeContent.trail.developerOptions()
-        ArcadeMode.GhoulRun -> arcadeContent.ghoul.developerOptions()
-        ArcadeMode.Biketris -> arcadeContent.biketris.developerOptions()
-        else -> arcadeContent.flak.developerOptions()
-    }
-
-    private fun selectFaceGameOption(game: ArcadeMode, option: Int) {
-        when (game) {
-            ArcadeMode.TrailRide -> arcadeContent.trail.selectDeveloperOption(option)
-            ArcadeMode.GhoulRun -> arcadeContent.ghoul.selectDeveloperOption(option)
-            ArcadeMode.Biketris -> arcadeContent.biketris.selectDeveloperOption(option)
-            else -> arcadeContent.flak.selectDeveloperOption(option)
-        }
-    }
-
-    private fun showFaceGamePicker(game: ArcadeMode) {
-        val presets = ArcadeTrackerSettings.FACE_PRESETS
-        val options = faceGameOptions(game)
-        val overlay = arcadeContent.playground.diagnosticsOverlay
-        val current = presets.indexOf(trackerSettingsFor(game))
-        val labels = presets.map { (if (it == presets.getOrNull(current)) "[x] " else "[ ] ") + it.label } + options +
-            (if (overlay) "Diagnostics overlay: ON (tap to hide)" else "Diagnostics overlay: OFF (tap to show)")
-        AlertDialog.Builder(this)
-            .setTitle("${game.caption} (developer)")
-            .setItems(labels.toTypedArray()) { dialog, which ->
-                dialog.dismiss()
-                when {
-                    which < presets.size -> applyTrackerSettings(game, presets[which])
-                    which < presets.size + options.size -> {
-                        selectFaceGameOption(game, which - presets.size)
-                        showFaceGamePicker(game)
-                    }
-                    else -> setDiagnosticsOverlay(!overlay)
-                }
-            }
-            .setNegativeButton("Close", null)
-            .show()
-    }
-
-    private fun showTrackerPicker(game: ArcadeMode) {
-        if (game == ArcadeMode.Flak || game == ArcadeMode.TrailRide || game == ArcadeMode.GhoulRun || game == ArcadeMode.Biketris) {
-            showFaceGamePicker(game)
-            return
-        }
-        val presets = if (game == ArcadeMode.Math) ArcadeTrackerSettings.FINGER_PRESETS else ArcadeTrackerSettings.PRESETS
-        val current = presets.indexOf(trackerSettingsFor(game)).coerceAtLeast(0)
-        val overlay = arcadeContent.playground.diagnosticsOverlay
-        val labels = presets.map { it.label } + (if (overlay) "Diagnostics overlay: ON (tap to hide)" else "Diagnostics overlay: OFF (tap to show)")
-        AlertDialog.Builder(this)
-            .setTitle("${game.caption} tracker (developer)")
-            .setSingleChoiceItems(labels.toTypedArray(), current) { dialog, which ->
-                if (which < presets.size) applyTrackerSettings(game, presets[which]) else setDiagnosticsOverlay(!overlay)
-                dialog.dismiss()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
     private fun setDiagnosticsOverlay(enabled: Boolean) {
-        getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).edit().putBoolean(ARCADE_OVERLAY_KEY, enabled).apply()
-        arcadeContent.playground.diagnosticsOverlay = enabled
-        arcadeContent.math.diagnosticsOverlay = enabled
-        arcadeContent.flak.diagnosticsOverlay = enabled
-        arcadeContent.trail.diagnosticsOverlay = enabled
-        arcadeContent.ghoul.diagnosticsOverlay = enabled
-        arcadeContent.biketris.diagnosticsOverlay = enabled
+        arcadeConfiguration.saveDiagnosticsOverlay(enabled)
+        arcadeContent.applyDiagnosticsOverlay(enabled)
     }
 
     private fun applyTrackerSettings(game: ArcadeMode, next: ArcadeTrackerSettings) {
-        val key = when (game) {
-            ArcadeMode.Math -> ARCADE_MATH_TRACKER_KEY
-            ArcadeMode.Flak -> ARCADE_FLAK_TRACKER_KEY
-            ArcadeMode.TrailRide -> ARCADE_TRAIL_TRACKER_KEY
-            ArcadeMode.GhoulRun -> ARCADE_GHOUL_TRACKER_KEY
-            ArcadeMode.Biketris -> ARCADE_BIKETRIS_TRACKER_KEY
-            else -> ARCADE_TRACKER_KEY
-        }
-        getSharedPreferences(ARCADE_DEV_PREFS, Context.MODE_PRIVATE).edit().putString(key, next.key).apply()
+        arcadeConfiguration.saveTracker(game, next)
         if (game == ArcadeMode.Bricks) arcadeContent.playground.faceControl = next.mode == ArcadeTrackerMode.Face
         if (game != modeController.mode || next == cameraSession.settings) return
         cameraSession.updateSettings(next)
@@ -850,14 +751,6 @@ class NativeBridgeActivity : Activity() {
         const val REFRESH_MS = 200L
         const val CAMERA_PERMISSION_REQUEST = 4101
         const val YOUTUBE_VOICE_PERMISSION_REQUEST = 4103
-        const val ARCADE_DEV_PREFS = "arcade_dev"
-        const val ARCADE_TRACKER_KEY = "tracker"
-        const val ARCADE_OVERLAY_KEY = "overlay"
-        const val ARCADE_MATH_TRACKER_KEY = "math_tracker"
-        const val ARCADE_FLAK_TRACKER_KEY = "flak_tracker"
-        const val ARCADE_TRAIL_TRACKER_KEY = "trail_tracker"
-        const val ARCADE_GHOUL_TRACKER_KEY = "ghoul_tracker"
-        const val ARCADE_BIKETRIS_TRACKER_KEY = "biketris_tracker"
         val BACKGROUND: Int = Color.BLACK
         val PRIMARY: Int = Color.WHITE
     }
