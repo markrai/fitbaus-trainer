@@ -45,7 +45,7 @@ internal class BooksReadAlong(
     private val diagramWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1))
     private val diagramScope = BooksDiagramScope()
     private var diagramFuture: Future<*>? = null
-    private var diagramConnection: TranscriberConnection? = null
+    private var diagramConnection: TranscriberConnectionStore.RecordSnapshot? = null
     private val summaryScope = BooksSummaryScope()
     private val inlineAttempt = BooksInlineSummaryAttempt()
     private val sectionPlans = BooksSectionPlans()
@@ -276,11 +276,7 @@ internal class BooksReadAlong(
                 it.promptVersion == "section-v1" && it.revision == windows.revision
         }
 
-    private fun diagramConnectionMatches(): Boolean {
-        val expected = diagramConnection ?: return false
-        val current = transcriberStore.load() ?: return false
-        return expected.address == current.address && expected.token == current.token
-    }
+    private fun diagramConnectionMatches(): Boolean = diagramConnection?.isCurrent() == true
 
     private fun prefetchVisibleDiagram() {
         if (destroyed || !narrationViewport.summaryIsVisible()) return
@@ -289,13 +285,13 @@ internal class BooksReadAlong(
         if (diagramScope.matches(selection, ready)) return
         clearDiagram()
         val connection = books ?: return
-        val paired = transcriberStore.load() ?: return
+        val paired = transcriberStore.snapshot() ?: return
         val identity = BooksDiagramIdentity(selection, ready)
         val ticket = diagramScope.begin(identity) ?: return
         diagramConnection = paired
         diagramFuture = diagramWorker.submit {
             val result = try {
-                BooksDiagramState.Ready(RemoteBooksDiagram(paired, connection).load(identity))
+                BooksDiagramState.Ready(RemoteBooksDiagram(paired.connection(), connection).load(identity))
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 return@submit
@@ -317,7 +313,7 @@ internal class BooksReadAlong(
 
     private fun openDiagram(): Boolean {
         if (!narrationViewport.summaryIsVisible() || diagramSummary() == null) return false
-        if (!diagramScope.matches(summarySelection(), diagramSummary())) prefetchVisibleDiagram()
+        if (!diagramScope.matches(summarySelection(), diagramSummary())) return false
         if (!diagramConnectionMatches() || !diagramScope.show()) return false
         onDiagramChanged(diagramScope.state)
         return true
