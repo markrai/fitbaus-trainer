@@ -44,6 +44,11 @@ internal class SummaryProviderActions(
 
     fun disable() = SummaryProviderAction(SummaryProviderOperation.DISABLE, api::disable, workflow::disabled)
 
+    fun forgetLobo(): SummaryProviderAction<SummaryProviderStatus> {
+        val endpoint = workflow.state.draftEndpoint.orEmpty()
+        return SummaryProviderAction(SummaryProviderOperation.FORGET_LOBO, { api.forgetLobo(endpoint) }, workflow::forgotten)
+    }
+
     fun cancel() = SummaryProviderAction(SummaryProviderOperation.CANCEL, api::cancel) { ticket, _ ->
         workflow.cancelled(ticket)
     }
@@ -55,7 +60,9 @@ internal class SummaryProviderActions(
             discardClosedCompletion()
             return false
         }
-        return action.complete(ticket, value)
+        val accepted = action.complete(ticket, value)
+        if (accepted && workflow.state.screen == SummaryProviderScreen.RELOAD_REQUIRED) api.forgetGrant()
+        return accepted
     }
 
     fun authorizationLost(error: Throwable): Boolean =
@@ -68,7 +75,7 @@ internal class SummaryProviderActions(
             return false
         }
         if (lost || ticket.operation in setOf(SummaryProviderOperation.CANCEL, SummaryProviderOperation.AUTHORIZE,
-                SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE)) {
+                SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE, SummaryProviderOperation.FORGET_LOBO)) {
             api.forgetGrant()
         }
         return true

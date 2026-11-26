@@ -6,6 +6,8 @@ internal data class SummaryProviderPresentation(
     val candidateTitle: String,
     val candidateDetail: String,
     val reuseTrust: Boolean,
+    val showLoboVerification: Boolean,
+    val discoveryLabel: String,
 )
 
 internal fun summaryProviderPresentation(state: SummaryProviderWorkflowState): SummaryProviderPresentation {
@@ -24,11 +26,22 @@ internal fun summaryProviderPresentation(state: SummaryProviderWorkflowState): S
     }
     val candidateDetail = when {
         state.tested != null -> "Inference test passed · not saved"
-        state.discovery != null -> "Models discovered · test inference before saving"
+        state.discovery != null -> if (state.choice == SummaryProviderChoice.LOBO)
+            "Device identity verified · test inference before saving" else "Models discovered · test inference before saving"
         state.usesStoredLoboTrust -> "Stored certificate trust · model discovery required"
         state.verifyLoboAgain -> "Verify the replacement certificate before discovery"
+        state.choice == SummaryProviderChoice.LOBO && state.addressEntered && !state.authorized -> "Unlock changes to check remembered trust"
         state.choice == SummaryProviderChoice.LOBO && state.addressEntered -> "Device identity must be verified"
         else -> "Not saved"
     }
-    return SummaryProviderPresentation(activeTitle, activeDetail, candidateTitle, candidateDetail, state.usesStoredLoboTrust)
+    val verify = state.authorized && state.choice == SummaryProviderChoice.LOBO && state.addressEntered &&
+        !state.usesStoredLoboTrust && state.discovery == null
+    val label = when {
+        verify -> "VERIFY & DISCOVER MODELS"
+        state.discovery != null -> "DISCOVER AGAIN"
+        state.choice == SummaryProviderChoice.REUSE -> "DISCOVER CURRENT MODELS"
+        else -> "DISCOVER MODELS"
+    }
+    return SummaryProviderPresentation(activeTitle, activeDetail, candidateTitle, candidateDetail,
+        state.usesStoredLoboTrust, verify, label)
 }

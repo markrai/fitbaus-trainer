@@ -9,7 +9,7 @@ internal enum class SummaryProviderChoice(val kind: String?) {
 }
 
 internal enum class SummaryProviderOperation {
-    CAPABILITIES, AUTHORIZE, DISCOVER, TEST, SAVE, DISABLE, CANCEL
+    CAPABILITIES, AUTHORIZE, DISCOVER, TEST, SAVE, DISABLE, FORGET_LOBO, CANCEL
 }
 
 internal class SummaryProviderRequest(val operation: SummaryProviderOperation)
@@ -48,6 +48,8 @@ internal data class SummaryProviderWorkflowState(
     val canTest: Boolean get() = editable && authorized && discovery != null
     val canSave: Boolean get() = canTest && tested != null && tested.model == model && consent
     val canDisable: Boolean get() = editable && authorization?.configured == true
+    val canForgetLobo: Boolean get() = editable && choice == SummaryProviderChoice.LOBO &&
+        authorization?.remembersLobo(draftEndpoint) == true && !authorization.matchesTrustedLobo(draftEndpoint)
     val canCancel: Boolean get() = editable && authorized
 
     fun withoutTest(): SummaryProviderWorkflowState = copy(tested = null, consent = false)
@@ -116,13 +118,14 @@ internal class SummaryProviderWorkflow {
             SummaryProviderOperation.TEST -> state.canTest
             SummaryProviderOperation.SAVE -> state.canSave
             SummaryProviderOperation.DISABLE -> state.canDisable
+            SummaryProviderOperation.FORGET_LOBO -> state.canForgetLobo
             SummaryProviderOperation.CANCEL -> state.canCancel
         }
         if (!allowed) return null
         val request = SummaryProviderRequest(operation)
         state = when (operation) {
             SummaryProviderOperation.CAPABILITIES -> SummaryProviderWorkflowState()
-            SummaryProviderOperation.DISCOVER -> state.withoutDiscovery()
+            SummaryProviderOperation.DISCOVER, SummaryProviderOperation.FORGET_LOBO -> state.withoutDiscovery()
             SummaryProviderOperation.TEST -> state.withoutTest()
             else -> state
         }.copy(pending = request)
@@ -188,6 +191,18 @@ internal class SummaryProviderWorkflow {
         return true
     }
 
+    fun forgotten(request: SummaryProviderRequest, status: SummaryProviderStatus): Boolean {
+        if (!accepts(request, SummaryProviderOperation.FORGET_LOBO)) return false
+        val previous = state.authorization
+        val endpoint = state.draftEndpoint
+        state = if (previous != null && endpoint != null &&
+            status == previous.copy(trustedLoboEndpoints = previous.trustedLoboEndpoints.filterNot { it == endpoint })) {
+            state.withoutDiscovery().copy(authorization = status, activeProvider = status, activeModel = status.model,
+                verifyLoboAgain = false, pending = null)
+        } else SummaryProviderWorkflowState(SummaryProviderScreen.RELOAD_REQUIRED)
+        return true
+    }
+
     fun cancelled(request: SummaryProviderRequest): Boolean {
         if (!accepts(request, SummaryProviderOperation.CANCEL)) return false
         state = SummaryProviderWorkflowState()
@@ -196,7 +211,7 @@ internal class SummaryProviderWorkflow {
 
     fun failed(request: SummaryProviderRequest, authorizationLost: Boolean = false): Boolean {
         if (state.pending !== request) return false
-        state = if (request.operation in setOf(SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE)) {
+        state = if (request.operation in setOf(SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE, SummaryProviderOperation.FORGET_LOBO)) {
             SummaryProviderWorkflowState(SummaryProviderScreen.RELOAD_REQUIRED)
         } else if (authorizationLost || request.operation == SummaryProviderOperation.CANCEL) {
             SummaryProviderWorkflowState(SummaryProviderScreen.CONFIGURATION, activeModel = state.activeModel,
