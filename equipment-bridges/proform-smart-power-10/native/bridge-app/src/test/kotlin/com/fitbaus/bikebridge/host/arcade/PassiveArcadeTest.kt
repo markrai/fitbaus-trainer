@@ -37,7 +37,7 @@ class PassiveArcadeTest {
     fun hostArcadeSourcesNeverReferenceControlApis() {
         assertTrue(hostArcadeDir.isDirectory, "run from the bridge-app module directory")
         val files = hostArcadeDir.walkTopDown().filter { it.isFile && it.extension == "kt" }.toList()
-        assertEquals(setOf("ArcadeMode.kt", "ExerciseHud.kt"), files.map { it.name }.toSet())
+        assertEquals(setOf("ArcadeMode.kt", "ExerciseHud.kt", "ArcadeConfiguration.kt", "ArcadeTrackerPicker.kt"), files.map { it.name }.toSet())
         val offenders = ArrayList<String>()
         for (file in files) {
             val text = file.readText()
@@ -65,16 +65,17 @@ class PassiveArcadeTest {
     }
 
     @Test
-    fun trackerSelectionIsDeveloperOnlyAndDefaultsToClassical() {
+    fun trackerSelectionIsDeveloperOnlyAndUsesSavedConfiguration() {
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        assertTrue(activity.contains("settings = savedTrackerSettings()"))
-        assertTrue(activity.contains("ArcadeTrackerSettings.fromKey("), "unknown or missing preference falls back to Classical")
+        assertTrue(activity.contains("settings = arcadeConfiguration.settingsFor(ArcadeMode.Bricks)"))
+        assertTrue(activity.contains("cameraSession.updateSettings(arcadeConfiguration.settingsFor(game))"))
         val header = File("src/main/kotlin/com/fitbaus/bikebridge/host/BridgeNavigationHeader.kt").readText()
         val longPress = Regex("""if \(mode\.isGame\) \{\s+tab\.setOnLongClickListener \{\s+onTrackerPicker\(mode\)""")
         assertTrue(longPress.containsMatchIn(header), "picker only behind a long-press on a game tab")
-        assertTrue(activity.contains("ArcadeTrackerSettings.FINGER_PRESETS"))
-        assertTrue(activity.contains("ArcadeTrackerSettings.fingersFromKey("))
-        assertTrue(activity.contains("ArcadeTrackerSettings.PRESETS"))
+        val picker = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ArcadeTrackerPicker.kt").readText()
+        assertTrue(picker.contains("if (!game.isGame) return"))
+        assertTrue(picker.contains("configuration.presetsFor(game)"))
+        assertTrue(activity.contains("arcadeConfiguration.saveTracker(game, next)"))
         assertFalse(activity.contains("tflite", ignoreCase = true), "no model or runtime details in the host")
     }
 
