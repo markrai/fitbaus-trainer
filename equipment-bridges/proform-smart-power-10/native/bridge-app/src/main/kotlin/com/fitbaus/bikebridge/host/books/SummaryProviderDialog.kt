@@ -228,8 +228,8 @@ internal class SummaryProviderDialog(
         }
         var suppressChanges = false
         var manualLobo = false
-        var lanSelection: LoboLanDevice? = null
-        var lastLanDevices = emptyList<LoboLanDevice>()
+        val lanSelection = LoboLanPickerState()
+        val lanButtons = linkedMapOf<String, Button>()
         var scanningLan = false
         var failedLan = false
         var reuseButton: Button? = null
@@ -274,53 +274,62 @@ internal class SummaryProviderDialog(
         }
 
         fun renderLanDevices() {
-            lanDevices.removeAllViews()
+            val picked = lanSelection.selected
             lanStatus.text = when {
+                picked != null -> if (lanSelection.isAvailable(picked.address))
+                    "Selected: ${picked.name} · Unverified"
+                    else "Selected: ${picked.name} · Last seen, not currently advertised"
                 scanningLan -> "Finding LOBO devices…"
                 failedLan -> "Discovery unavailable"
-                lastLanDevices.isEmpty() -> "No LOBO devices found. Check the LAN or enter the address manually."
-                else -> "${lastLanDevices.size} LOBO device(s) found · Unverified"
+                lanSelection.devices.isEmpty() -> "No LOBO devices found. Check the LAN or enter the address manually."
+                else -> "${lanSelection.devices.size} LOBO device(s) found · Unverified"
             }
-            lastLanDevices.forEach { device ->
-                val chosen = lanSelection == device
-                button("${device.name}   ·   ${device.address}", parent = lanDevices) {
-                    if (lanSelection != device || manualLobo) {
-                        manualLobo = false
-                        lanSelection = device
-                        endpoint.setText(device.endpoint)
-                        auth.text.clear()
-                        endpoint.visibility = View.GONE
-                        endpointLabel.visibility = View.GONE
-                        manualAddress.text = "ENTER ADDRESS MANUALLY"
-                        renderLanDevices()
-                    }
-                }.apply {
-                    isAllCaps = false
-                    isEnabled = pending == null
-                    setTextColor(if (chosen) ACCENT else Color.WHITE)
-                    background = surface(if (chosen) 0xff342f1c.toInt() else FIELD,
-                        if (chosen) ACCENT else BORDER, if (chosen) 2 else 1)
+            val visible = lanSelection.rows()
+            val addresses = visible.map { it.address }.toSet()
+            for (address in lanButtons.keys.toList()) {
+                if (address !in addresses) {
+                    lanButtons.remove(address)?.let { lanDevices.removeView(it) }
                 }
+            }
+            visible.forEach { device ->
+                val address = device.address
+                val chosen = picked?.address == address
+                val row = lanButtons.getOrPut(address) {
+                    button("", parent = lanDevices) {
+                        if (lanSelection.selected?.address != address || manualLobo) {
+                            val chosenDevice = lanSelection.select(address)
+                            if (chosenDevice != null) {
+                                manualLobo = false
+                                endpoint.setText(chosenDevice.endpoint)
+                                auth.text.clear()
+                                endpoint.visibility = View.GONE
+                                endpointLabel.visibility = View.GONE
+                                manualAddress.text = "ENTER ADDRESS MANUALLY"
+                                renderLanDevices()
+                            }
+                        }
+                    }.apply {
+                        isAllCaps = false
+                        backgroundTintList = null
+                    }
+                }
+                row.text = if (chosen) "${device.name}  ·  ${device.address}  ·  SELECTED"
+                    else "${device.name}  ·  ${device.address}"
+                row.isSelected = chosen
+                row.isEnabled = pending == null
+                row.setTextColor(if (chosen) ACCENT else Color.WHITE)
+                row.background = surface(if (chosen) 0xff342f1c.toInt() else FIELD,
+                    if (chosen) ACCENT else BORDER, if (chosen) 2 else 1)
             }
         }
 
         fun scanLan() {
             if (closed || pending != null || selected != 1 || usingCurrent) return
-            if (!manualLobo && lanSelection != null) {
-                lanSelection = null
-                endpoint.text.clear()
-                auth.text.clear()
-            }
             loboDiscovery.start { devices, scanning, failed ->
                 if (!closed && selected == 1 && !usingCurrent) {
-                    lastLanDevices = devices
+                    lanSelection.update(devices)
                     scanningLan = scanning
                     failedLan = failed
-                    if (pending == null && lanSelection != null && lanSelection !in devices) {
-                        lanSelection = null
-                        endpoint.text.clear()
-                        auth.text.clear()
-                    }
                     renderLanDevices()
                 }
             }
@@ -329,10 +338,11 @@ internal class SummaryProviderDialog(
         fun configure(position: Int, reuse: Boolean = false) {
             suppressChanges = true
             loboDiscovery.stop()
-            lastLanDevices = emptyList()
+            lanSelection.reset()
+            lanButtons.clear()
+            lanDevices.removeAllViews()
             scanningLan = false
             failedLan = false
-            lanSelection = null
             manualLobo = false
             selected = position
             usingCurrent = reuse
@@ -472,7 +482,7 @@ internal class SummaryProviderDialog(
         manualAddress.setOnClickListener {
             if (closed || pending != null) return@setOnClickListener
             manualLobo = !manualLobo
-            lanSelection = null
+            lanSelection.clearSelection()
             endpoint.text.clear()
             auth.text.clear()
             endpoint.visibility = if (manualLobo) View.VISIBLE else View.GONE
