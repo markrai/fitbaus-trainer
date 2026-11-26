@@ -10,6 +10,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 
 internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : FrameLayout(context) {
+    private val diagram = BooksDiagramView(context).apply { visibility = GONE }
     private val message = TextView(context).apply {
         gravity = Gravity.CENTER
         textSize = 20f
@@ -21,6 +22,9 @@ internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : Frame
         setBackgroundColor(Color.BLACK)
         visibility = GONE
         isClickable = true
+        addView(diagram, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
+            bottomMargin = dp(56)
+        })
         addView(message, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         val dismiss = Button(context).apply {
             text = "×"
@@ -36,14 +40,31 @@ internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : Frame
     }
 
     fun render(state: BooksDiagramState) {
-        message.text = when (state) {
-            BooksDiagramState.Loading -> "Preparing visual explanation…"
-            BooksDiagramState.Unavailable -> "Visual explanation unavailable"
-            is BooksDiagramState.Ready -> "Visual explanation ready. Rendering is not available in this build."
+        if (state is BooksDiagramState.Ready) {
+            val rendered = try {
+                diagram.showGraph(state.graph)
+                true
+            } catch (_: Exception) {
+                false
+            }
+            diagram.visibility = if (rendered) VISIBLE else GONE
+            message.visibility = if (rendered) GONE else VISIBLE
+            message.text = if (rendered) "" else "Visual explanation unavailable"
+            if (!rendered) diagram.clearGraph()
+        } else {
+            diagram.clearGraph()
+            diagram.visibility = GONE
+            message.visibility = VISIBLE
+            message.text = if (state == BooksDiagramState.Loading) "Preparing visual explanation…" else "Visual explanation unavailable"
         }
     }
 
-    fun clear() { message.text = "" }
+    fun clear() {
+        diagram.clearGraph()
+        diagram.visibility = GONE
+        message.text = ""
+        message.visibility = VISIBLE
+    }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 }
