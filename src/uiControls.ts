@@ -1,23 +1,9 @@
 
 import {
   adjustedBlockLengths,
-  beginWorkout,
   formatTime,
-  getPausedElapsed,
-  getStartTime,
-  isPaused,
-  pauseWorkout,
-  restartWorkout,
-  resumeWorkout,
-  requestEarlyCooldown,
   planEarlyCooldownTransition,
-  restoreBikeBridgeBindingForActiveSession,
-  startWorkout,
-  todayName,
   updateRing,
-  tickVo2ProtocolWithCanonicalHr,
-  vo2TickSessionKey,
-  requestVo2LimitReached,
 } from "./workoutLogic.js";
 import { getPlan, getWorkoutMetadata, getHrTargets } from "./workoutData.js";
 import {
@@ -30,7 +16,6 @@ import { sendWorkoutToSisu } from "./sisuSync.js";
 import {
   discardFreestyleRide,
   finishFreestyleRide,
-  handleWorkoutCompletion,
   isFreestyleFinishInFlight,
   retryFreestyleSave,
 } from "./workoutLifecycle.js";
@@ -149,10 +134,10 @@ import {
   resolveWorkoutPrescription,
 } from "./workoutPrescription.js";
 import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
-import { BPM_TIMEOUT_MS, deriveWorkoutState, type WorkoutDisplayState } from "./workoutDisplayState.js";
+import { BPM_TIMEOUT_MS, type WorkoutDisplayState } from "./workoutDisplayState.js";
 import { createWorkoutTelemetryIngestion } from "./workoutTelemetryIngestion.js";
+import { createWorkoutSessionCoordinator } from "./workoutSessionCoordinator.js";
 
-let selectedDay: string | null = null;
 let liveBpm: number | null = null;
 let lastBpmUpdateTime: number | null = null;
 let showElapsedInRing = false;
@@ -193,27 +178,6 @@ function getShowElapsed() {
 
 let phaseDisplayEl: HTMLElement | null = null;
 let settingsModalEscHandler: ((e: KeyboardEvent) => void) | null = null;
-function getSelectedDay() {
-  return selectedDay || todayName();
-}
-
-function setSelectedDay(day: string) {
-  selectedDay = day;
-}
-
-function resolveOwnedWorkoutDay(): string {
-  const owner = readActiveSessionOwner();
-  if (owner) {
-    const session = getSession(owner.selector);
-    if (session.sessionId === owner.sessionId && session.startTime) {
-      return owner.selector;
-    }
-  }
-  const finalization = readSessionFinalization(FREESTYLE_WORKOUT_SELECTOR_ID);
-  if (finalization) return FREESTYLE_WORKOUT_SELECTOR_ID;
-  return getSelectedDay();
-}
-
 function ensureFreestyleDropdownOption(select: HTMLSelectElement): void {
   const hasFreestyle = Array.from(select.options).some((o) => o.value === FREESTYLE_WORKOUT_SELECTOR_ID);
   if (hasFreestyle) return;
@@ -253,20 +217,13 @@ function ensureWorkoutDayDropdown() {
     downregOpt.textContent = "Downregulation";
     select.appendChild(downregOpt);
     select.addEventListener("change", function () {
-      const owner = readActiveSessionOwner();
-      if (owner) {
-        const session = getSession(owner.selector);
-        if (session.sessionId === owner.sessionId && session.startTime && this.value !== owner.selector) {
-          this.value = owner.selector;
-          selectedDay = owner.selector;
-          if (typeof (window as any).showToast === "function") {
-            (window as any).showToast("Finish or discard the active ride before switching workouts.", "error");
-          }
-          updateDisplay();
-          return;
+      const selection = workoutSession.selectWorkoutDay(this.value);
+      if (selection.blocked) {
+        this.value = selection.day;
+        if (typeof (window as any).showToast === "function") {
+          (window as any).showToast("Finish or discard the active ride before switching workouts.", "error");
         }
       }
-      selectedDay = this.value;
       updateDisplay();
     });
   }
@@ -288,7 +245,7 @@ function ensureWorkoutDayDropdown() {
     select.appendChild(downregOpt);
   }
   const current = resolveOwnedWorkoutDay();
-  selectedDay = current;
+  setSelectedDay(current);
   if (select.value !== current) select.value = current;
 }
 
@@ -497,8 +454,7 @@ function openCancelModal() {
 
 async function confirmFinishFreestyleRide() {
   closeCancelModal();
-  const day = resolveOwnedWorkoutDay();
-  const result = await finishFreestyleRide(day);
+  const result = await workoutSession.finishOwnedFreestyleRide();
   if (result.ok === true) {
     if (typeof (window as any).showToast === "function") {
       (window as any).showToast("Freestyle ride saved.", "success");
@@ -524,18 +480,7 @@ async function confirmDiscardFreestyleRide() {
   const confirmed = window.confirm("Discard this Freestyle ride? Telemetry will be deleted and it will not appear in history.");
   if (!confirmed) return;
   closeCancelModal();
-  const day = resolveOwnedWorkoutDay();
-  const session = getSession(day);
-  const finalization = readSessionFinalization(day);
-  const targetSessionId =
-    session.sessionId && finalization?.sessionId && session.sessionId !== finalization.sessionId
-      ? undefined
-      : session.sessionId ?? finalization?.sessionId ?? undefined;
-  const result = await discardFreestyleRide(
-    day,
-    undefined,
-    targetSessionId ? { sessionId: targetSessionId } : undefined
-  );
+  const result = await workoutSession.discardOwnedFreestyleRide();
   if (result.ok === false) {
     if (result.reason === "finalizing") {
       if (typeof (window as any).showToast === "function") {
@@ -555,8 +500,7 @@ async function confirmDiscardFreestyleRide() {
 }
 
 async function confirmRetryFreestyleSave() {
-  const day = FREESTYLE_WORKOUT_SELECTOR_ID;
-  const result = await retryFreestyleSave(day);
+  const result = await workoutSession.retryOwnedFreestyleSave();
   if (result.ok === true) {
     if (typeof (window as any).showToast === "function") {
       (window as any).showToast("Freestyle ride saved.", "success");
@@ -600,7 +544,7 @@ function promptWorkoutActivitySelection(activities: Activity[]) {
     button.textContent = ACTIVITY_LABELS[activity];
     button.addEventListener("click", () => {
       closeActivitySelectModal();
-      beginWorkout(activity);
+      workoutSession.beginWorkout(activity);
     });
     options.appendChild(button);
   }
@@ -612,7 +556,7 @@ function promptWorkoutActivitySelection(activities: Activity[]) {
 }
 
 function confirmCancelWorkout() {
-  restartWorkout();
+  workoutSession.restartWorkout();
   closeCancelModal();
 }
 
@@ -621,7 +565,7 @@ function confirmEarlyCooldownWorkout() {
   if (btn?.disabled) return;
   if (btn) btn.disabled = true;
   closeCancelModal();
-  const decision = requestEarlyCooldown();
+  const decision = workoutSession.requestEarlyCooldown();
   if (decision.type === "unavailable" && btn) btn.disabled = false;
 }
 
@@ -630,7 +574,7 @@ function confirmVo2LimitReached() {
   if (btn?.disabled) return;
   if (btn) btn.disabled = true;
   closeCancelModal();
-  const decision = requestVo2LimitReached();
+  const decision = workoutSession.requestVo2LimitReached();
   if (decision.type !== "enter-limit-reached" && btn) btn.disabled = false;
 }
 
@@ -970,7 +914,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     if (startButtonRowEl) startButtonRowEl.style.display = "flex";
     if (startBtnEl) {
       startBtnEl.innerText = isFreestyleWorkoutSelector(state.day) ? "Start Freestyle Ride" : "Start Workout";
-      startBtnEl.onclick = startWorkout;
+      startBtnEl.onclick = workoutSession.startWorkout;
       startBtnEl.style.display = "block";
     }
     if (cancelBtnEl) {
@@ -996,7 +940,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     if (startButtonRowEl) startButtonRowEl.style.display = "flex";
     if (startBtnEl) {
       startBtnEl.innerText = "Restart Test";
-      startBtnEl.onclick = restartWorkout;
+      startBtnEl.onclick = workoutSession.restartWorkout;
       startBtnEl.style.display = "block";
     }
     if (cancelBtnEl) cancelBtnEl.style.display = "none";
@@ -1014,8 +958,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     renderMachineGuidance(null);
     syncBikeBridgeGuidance(null, false, false);
     updateRing(state.elapsedSec, state.blocks as any);
-    if (typeof (window as any).releaseWakeLock === "function") (window as any).releaseWakeLock();
-    handleWorkoutCompletion(state.day);
+    workoutSession.complete(state.day);
     if (phaseDisplayEl) {
       phaseDisplayEl.innerHTML = '<span class="phase-name">Completed</span>';
       phaseDisplayEl.dataset.phaseState = "completed";
@@ -1030,7 +973,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     if (startButtonRowEl) startButtonRowEl.style.display = "flex";
     if (startBtnEl) {
       startBtnEl.innerText = "Restart Workout";
-      startBtnEl.onclick = restartWorkout;
+      startBtnEl.onclick = workoutSession.restartWorkout;
       startBtnEl.style.display = "block";
     }
     if (cancelBtnEl) cancelBtnEl.style.display = "none";
@@ -1074,18 +1017,14 @@ function renderWorkout(state: WorkoutDisplayState) {
       startBtnEl.disabled = false;
       startBtnEl.innerText = "Resume";
       startBtnEl.onclick = function () {
-        resumeWorkout(active.day);
-        if (typeof (window as any).requestWakeLock === "function") (window as any).requestWakeLock();
-        updateDisplay();
+        workoutSession.resume(active.day);
       };
       startBtnEl.style.display = "block";
     } else {
       startBtnEl.disabled = false;
       startBtnEl.innerText = "Pause";
       startBtnEl.onclick = function () {
-        pauseWorkout(active.day, active.elapsedSec);
-        if (typeof (window as any).releaseWakeLock === "function") (window as any).releaseWakeLock();
-        updateDisplay();
+        workoutSession.pause(active.day, active.elapsedSec);
       };
       startBtnEl.style.display = "block";
     }
@@ -1180,7 +1119,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     }
   }
   if (!finalizingLocked && !authorityFaultSessionId) {
-    restoreBikeBridgeBindingForActiveSession(active.day);
+    workoutSession.restoreBikeBridgeBindingForActiveSession(active.day);
   }
   const vo2Targets = isVo2WorkoutSelector(active.day)
     ? vo2ProtocolUiTargetsForRuntime(session.vo2ProtocolRuntime, active.phase.phaseId)
@@ -1232,64 +1171,10 @@ function renderWorkout(state: WorkoutDisplayState) {
   applyPhaseStyle(active.phase.phase);
 }
 
-let updateDisplaySeq = 0;
-
 function updateDisplay() {
-  void updateDisplayAsync();
+  void workoutSession.refresh();
 }
 
-async function updateDisplayAsync() {
-  const seq = ++updateDisplaySeq;
-  try {
-    if (typeof getPlan !== "function" || typeof getWorkoutMetadata !== "function") return;
-    const day = resolveOwnedWorkoutDay();
-    if (selectedDay !== day) selectedDay = day;
-    const plan = getPlan();
-    const workoutMetadata = getWorkoutMetadata();
-    const base = (plan as any)[day];
-    const startTime = getStartTime(day);
-    const paused = typeof isPaused === "function" && isPaused(day);
-    const pausedElapsed = typeof getPausedElapsed === "function" ? getPausedElapsed(day) : 0;
-    const liveBpm = (window as any).liveBpm as number | null;
-    const lastBpmUpdateTime = (window as any).lastBpmUpdateTime as number | null;
-    // Live-HR guard contract: the v3 ceiling guard evaluates inside the tick below, so this
-    // call must stay unconditional (every refresh, any elapsed) -- never gate it on checkpoints.
-    if (startTime && isVo2WorkoutSelector(day)) {
-      const elapsedSec = paused ? pausedElapsed : Math.floor((Date.now() - parseInt(startTime, 10)) / 1000);
-      const sessionKey = vo2TickSessionKey(getSession(day));
-      const isCurrent = () => seq === updateDisplaySeq && resolveOwnedWorkoutDay() === day;
-      const tick = await tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, undefined, { isCurrent });
-      if (tick === undefined || !isCurrent() || vo2TickSessionKey(getSession(day)) !== sessionKey) return;
-      pendingVo2Cues = tick?.cues ?? [];
-    } else {
-      pendingVo2Cues = [];
-    }
-
-    const state = deriveWorkoutState(
-      day,
-      plan,
-      workoutMetadata,
-      base,
-      startTime,
-      paused,
-      pausedElapsed,
-      liveBpm,
-      lastBpmUpdateTime
-    );
-
-    if (state.screen === "active" && state.liveBpmStale) {
-      updateHrDisplay(liveBpm, true);
-    }
-
-    renderWorkout(state);
-  } catch (e: any) {
-    if (e instanceof TypeError && e.message && e.message.includes("null")) {
-      console.warn("updateDisplay: DOM element missing", e.message);
-    } else {
-      throw e;
-    }
-  }
-}
 function switchTab(tabName: string) {
   const tabs = ["personal", "preferences", "equipment", "workouts", "sisu", "install"];
   tabs.forEach((name) => {
@@ -2383,6 +2268,35 @@ function displayWorkoutSummaries(workouts: any[]) {
     listContainer.appendChild(workoutItem);
   });
 }
+
+const workoutSession = createWorkoutSessionCoordinator({
+  readLiveHeartRate: () => ({
+    liveBpm: (window as any).liveBpm as number | null,
+    lastBpmUpdateTime: (window as any).lastBpmUpdateTime as number | null,
+  }),
+  setVo2Cues: (cues) => { pendingVo2Cues = cues; },
+  render: (state, liveBpm) => {
+    if (state.screen === "active" && state.liveBpmStale) {
+      updateHrDisplay(liveBpm, true);
+    }
+    renderWorkout(state);
+  },
+  onRefreshError: (error) => {
+    if (error instanceof TypeError && error.message && error.message.includes("null")) {
+      console.warn("updateDisplay: DOM element missing", error.message);
+    } else {
+      throw error;
+    }
+  },
+  requestWakeLock: () => {
+    if (typeof (window as any).requestWakeLock === "function") (window as any).requestWakeLock();
+  },
+  releaseWakeLock: () => {
+    if (typeof (window as any).releaseWakeLock === "function") (window as any).releaseWakeLock();
+  },
+  updateDisplay,
+});
+const { getSelectedDay, setSelectedDay, resolveOwnedWorkoutDay } = workoutSession;
 
 const workoutTelemetry = createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay);
 
