@@ -49,9 +49,10 @@ internal class BooksReadAlong(
     private var summaryFuture: Future<*>? = null
     private var summaryCallback: ((BooksSummaryState) -> Unit)? = null
     private val narration = label("", 36f)
-    private val inlineSummary = label("", 22f)
+    private val inlineSummary = label("", BooksSummaryPresentation.INLINE_SIZE_SP)
     private val details = label("", 14f)
     private val scroll = ScrollView(context)
+    private val narrationViewport = BooksNarrationViewport(context, scroll, narration, inlineSummary)
     private val reload = flatAction("Retry narration")
     val cover = ImageView(context)
     private val readingControls = LinearLayout(context)
@@ -93,7 +94,6 @@ internal class BooksReadAlong(
         fontSizeLabel.gravity = Gravity.CENTER
         fontSizeLabel.text = "Text: $textSizeSp"
         narration.textSize = textSizeSp.toFloat()
-        inlineSummary.textSize = BooksSummaryPresentation.inlineSizeSp(textSizeSp)
         fontSlider.max = 24
         fontSlider.progress = textSizeSp - 28
         fontSlider.contentDescription = "Narration text size"
@@ -102,7 +102,7 @@ internal class BooksReadAlong(
                 if (!fromUser) return
                 textSizeSp = progress + 28
                 narration.textSize = textSizeSp.toFloat()
-                inlineSummary.textSize = BooksSummaryPresentation.inlineSizeSp(textSizeSp)
+                narrationViewport.requestLayout()
                 fontSizeLabel.text = "Text: $textSizeSp"
                 scroll.scrollTo(0, 0)
                 readingPrefs.edit().putInt("text_size_sp", textSizeSp).apply()
@@ -119,27 +119,18 @@ internal class BooksReadAlong(
         narration.setPadding(dp(12), dp(6), dp(12), dp(6))
         narration.setLineSpacing(dp(4).toFloat(), 1.12f)
         scroll.isFillViewport = true
-        val narrationStack = LinearLayout(context).apply {
-            orientation = VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        narrationStack.addView(narration, LayoutParams(MATCH, WRAP))
+        scroll.addView(narration, FrameLayout.LayoutParams(MATCH, WRAP))
         inlineSummary.apply {
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_HORIZONTAL
             setTypeface(Typeface.DEFAULT, Typeface.ITALIC)
             setTextColor(0xffbfbfbf.toInt())
-            setLineSpacing(dp(2).toFloat(), 1.08f)
-            visibility = GONE
+            setLineSpacing(dp(1).toFloat(), 1.08f)
         }
-        narrationStack.addView(inlineSummary, LayoutParams(MATCH, WRAP).apply {
-            setMargins(dp(48), dp(18), dp(48), dp(12))
-        })
-        scroll.addView(narrationStack, FrameLayout.LayoutParams(MATCH, WRAP))
         cover.scaleType = ImageView.ScaleType.FIT_CENTER
         cover.contentDescription = "Audiobook cover"
         val stage = FrameLayout(context)
         stage.addView(cover, FrameLayout.LayoutParams(MATCH, MATCH))
-        stage.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
+        stage.addView(narrationViewport, FrameLayout.LayoutParams(MATCH, MATCH))
         buildSummaryPanel()
         stage.addView(summaryPanel, FrameLayout.LayoutParams(MATCH, MATCH))
         fullscreenButton.visibility = GONE
@@ -266,8 +257,7 @@ internal class BooksReadAlong(
         scroll.visibility = if (!showing && hasNarration) VISIBLE else GONE
         val text = BooksSummaryPresentation.inlineText(summaryState,
             fullscreen && hasNarration && !showing && summarySection != null && canShowSummary())
-        if (inlineSummary.text.toString() != text.orEmpty()) inlineSummary.text = text.orEmpty()
-        inlineSummary.visibility = if (text == null) GONE else VISIBLE
+        narrationViewport.setSummary(text)
     }
 
     private fun maybeStartInlineSummary() {
@@ -565,6 +555,7 @@ internal class BooksReadAlong(
             displayed = text
             narration.text = text.orEmpty()
             scroll.scrollTo(0, 0)
+            narrationViewport.requestLayout()
         }
         maybeStartInlineSummary()
     }

@@ -62,9 +62,20 @@ class BooksSummaryPresentationTest {
     }
 
     @Test
-    fun inlineFontRemainsSmallerAtEveryNarrationSetting() {
-        for (size in 28..52) assertTrue(BooksSummaryPresentation.inlineSizeSp(size) < size)
-        assertEquals(21.6f, BooksSummaryPresentation.inlineSizeSp(36), 0.01f)
+    fun inlineFontIsFixedAndSubstantiallySmallerAtEveryNarrationSetting() {
+        assertEquals(13f, BooksSummaryPresentation.INLINE_SIZE_SP, 0.01f)
+        for (size in 28..52) assertTrue(BooksSummaryPresentation.INLINE_SIZE_SP < size / 2f)
+    }
+
+    @Test
+    fun summaryUsesOnlySpaceBelowTheUnchangedNarration() {
+        assertEquals(312, BooksSummaryPresentation.inlineTopPx(600, 300, 12, 8, 20))
+        assertEquals(462, BooksSummaryPresentation.inlineTopPx(600, 450, 12, 8, 20))
+        assertEquals(572, BooksSummaryPresentation.inlineTopPx(600, 560, 12, 8, 20))
+        assertEquals(null, BooksSummaryPresentation.inlineTopPx(600, 561, 12, 8, 20))
+        assertEquals(null, BooksSummaryPresentation.inlineTopPx(600, 600, 12, 8, 20))
+        assertEquals(null, BooksSummaryPresentation.inlineTopPx(600, 900, 12, 8, 20))
+        assertEquals(null, BooksSummaryPresentation.inlineTopPx(0, 0, 12, 8, 20))
     }
 
 }
