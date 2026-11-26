@@ -16,7 +16,7 @@ internal class BooksNarrationViewport(
     private val inlineSummary: TextView,
 ) : FrameLayout(context) {
     private val summaryScroll = ScrollView(context).apply {
-        visibility = GONE
+        visibility = INVISIBLE
         isFillViewport = false
         isVerticalScrollBarEnabled = false
         overScrollMode = View.OVER_SCROLL_NEVER
@@ -37,31 +37,36 @@ internal class BooksNarrationViewport(
             summaryScroll.scrollTo(0, 0)
             requestLayout()
         }
-        summaryScroll.visibility = if (text == null) GONE else VISIBLE
+        if (text == null) summaryScroll.visibility = INVISIBLE
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         narrationScroll.measure(widthMeasureSpec, heightMeasureSpec)
         setMeasuredDimension(narrationScroll.measuredWidthAndState, narrationScroll.measuredHeightAndState)
+        val width = narrationScroll.measuredWidth
+        val height = narrationScroll.measuredHeight
+        val summaryWidth = (width - 2 * horizontalInset).coerceAtLeast(0)
+        val summaryHeight = (height - bottomInset - BooksSummaryPresentation.inlineTopPx(height)).coerceAtLeast(0)
+        summaryScroll.measure(View.MeasureSpec.makeMeasureSpec(summaryWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(summaryHeight, View.MeasureSpec.EXACTLY))
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         val width = right - left
         val height = bottom - top
         if (narrationScroll.visibility != GONE) narrationScroll.layout(0, 0, width, height)
-        if (summaryScroll.visibility == GONE) return
+        val summaryTop = BooksSummaryPresentation.inlineTopPx(height)
+        val summaryLeft = horizontalInset.coerceAtMost(width / 2)
+        summaryScroll.layout(summaryLeft, summaryTop, summaryLeft + summaryScroll.measuredWidth,
+            summaryTop + summaryScroll.measuredHeight)
 
         val textLayout = narration.layout
         val narrationBottom = if (textLayout == null || narrationScroll.visibility != VISIBLE) height
             else narration.top + narration.totalPaddingTop + textLayout.height + narration.compoundPaddingBottom
-        val summaryTop = BooksSummaryPresentation.inlineTopPx(height, narrationBottom, gap, bottomInset,
+        val fits = BooksSummaryPresentation.inlineFits(height, narrationBottom, gap, bottomInset,
             inlineSummary.lineHeight + dp(4))
-        val summaryWidth = (width - 2 * horizontalInset).coerceAtLeast(0)
-        val summaryHeight = if (summaryTop == null || summaryWidth == 0) 0 else height - bottomInset - summaryTop
-        val y = summaryTop ?: height
-        summaryScroll.measure(View.MeasureSpec.makeMeasureSpec(summaryWidth, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(summaryHeight, View.MeasureSpec.EXACTLY))
-        summaryScroll.layout(horizontalInset, y, horizontalInset + summaryWidth, y + summaryHeight)
+        summaryScroll.visibility = if (inlineSummary.text.isNotBlank() && summaryScroll.measuredWidth > 0 && fits)
+            VISIBLE else INVISIBLE
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
