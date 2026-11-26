@@ -59,7 +59,7 @@ class SummaryProviderWorkflowTest {
     fun authorizationPreservesDraftAndOnlyOffersReuseForConfiguredProvider() {
         val flow = configuration()
         assertTrue(flow.choose(SummaryProviderChoice.LOBO))
-        assertTrue(flow.addressEdited(true))
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1"))
         assertFalse(flow.state.canDiscover)
         assertFalse(flow.choose(SummaryProviderChoice.REUSE))
         assertTrue(flow.authorized(begin(flow, SummaryProviderOperation.AUTHORIZE), configured))
@@ -84,7 +84,7 @@ class SummaryProviderWorkflowTest {
         assertNull(flow.state.discovery)
         assertNull(flow.state.tested)
         assertFalse(flow.state.consent)
-        assertTrue(flow.addressEdited(true))
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1"))
         assertTrue(flow.state.canDiscover)
         assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER), discovered))
         assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 8))
@@ -149,7 +149,7 @@ class SummaryProviderWorkflowTest {
         val request = begin(flow, SummaryProviderOperation.TEST)
         val pending = flow.state
         assertFalse(flow.choose(SummaryProviderChoice.CUSTOM))
-        assertFalse(flow.addressEdited(true))
+        assertFalse(flow.addressEdited("https://192.168.1.200:7869/v1"))
         assertFalse(flow.credentialsOrTrustEdited())
         assertFalse(flow.selectModel("other"))
         assertFalse(flow.setConsent(true))
@@ -219,6 +219,51 @@ class SummaryProviderWorkflowTest {
     }
 
     @Test
+    fun activeAndDraftHaveIndependentIdentityAndSaveChecksEndpoint() {
+        val flow = authorized()
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited("https://192.168.1.201:7869/v1"))
+        val replacement = configured.copy(baseUrl = "https://192.168.1.201:7869/v1", model = "other")
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER),
+            SummaryProviderDiscovery(listOf("lobo-nano", "other"), replacement)))
+        assertEquals("lobo-nano", flow.state.activeModel)
+        assertEquals(configured, flow.state.activeProvider)
+        assertEquals("other", flow.state.model)
+        assertEquals("other", summaryProviderPresentation(flow.state).candidateTitle)
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 25))
+        assertTrue(flow.setConsent(true))
+        assertTrue(flow.saved(begin(flow, SummaryProviderOperation.SAVE), configured.copy(model = "other")))
+        assertEquals(SummaryProviderScreen.RELOAD_REQUIRED, flow.state.screen)
+    }
+
+    @Test
+    fun reuseTrustIsOnlyForExactAuthorizedPrivateEndpoint() {
+        val flow = authorized()
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1/"))
+        assertTrue(flow.state.reusesCurrentLobo)
+        assertTrue(flow.addressEdited("https://192.168.1.201:7869/v1"))
+        assertFalse(flow.state.reusesCurrentLobo)
+        assertFalse(configured.copy(customCa = false).matchesTrustedLobo(configured.baseUrl))
+        assertFalse(configured.copy(storageError = true).matchesTrustedLobo(configured.baseUrl))
+        val public = configured.copy(baseUrl = "https://8.8.8.8:7869/v1")
+        assertFalse(public.matchesTrustedLobo(public.baseUrl))
+        assertTrue(flow.addressEdited("https://user:secret@192.168.1.200:7869/v1"))
+        assertNull(flow.state.draftEndpoint)
+        assertFalse(flow.state.canDiscover)
+    }
+
+    @Test
+    fun failedSaveRequiresReloadRatherThanClaimingOldProviderIsStillActive() {
+        val flow = testedFlow()
+        assertTrue(flow.failed(begin(flow, SummaryProviderOperation.SAVE)))
+        assertEquals(SummaryProviderScreen.RELOAD_REQUIRED, flow.state.screen)
+        assertFalse(flow.state.authorized)
+        assertFalse(flow.state.canSave)
+        assertEquals("Not verified", summaryProviderPresentation(flow.state).activeTitle)
+    }
+
+    @Test
     fun disableAndCancelClearAuthorizationAndCandidate() {
         val flow = testedFlow()
         assertTrue(flow.disabled(begin(flow, SummaryProviderOperation.DISABLE), disabled))
@@ -244,7 +289,7 @@ class SummaryProviderWorkflowTest {
         picker.update(listOf(device))
         assertTrue(flow.choose(SummaryProviderChoice.LOBO))
         assertNotNull(picker.select(device.address))
-        assertTrue(flow.addressEdited(true))
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1"))
         assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER), discovered))
         assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 300))
         assertTrue(flow.setConsent(true))
@@ -254,7 +299,7 @@ class SummaryProviderWorkflowTest {
         assertEquals(before, flow.state)
         assertTrue(flow.state.canSave)
         picker.clearSelection()
-        assertTrue(flow.addressEdited(false))
+        assertTrue(flow.addressEdited(""))
         assertFalse(flow.state.canDiscover)
         assertFalse(flow.state.canSave)
     }

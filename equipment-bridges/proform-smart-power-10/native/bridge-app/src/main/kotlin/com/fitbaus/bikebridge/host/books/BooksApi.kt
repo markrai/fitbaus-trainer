@@ -82,7 +82,7 @@ internal class BooksServer(address: String) {
                 (uri.scheme.equals("http", ignoreCase = true) && isPrivateIpv4(host)))
         }
 
-        private fun isPrivateIpv4(host: String): Boolean {
+        fun isPrivateIpv4(host: String): Boolean {
             val parts = host.split('.')
             if (parts.size != 4) return false
             val octets = parts.map { part ->

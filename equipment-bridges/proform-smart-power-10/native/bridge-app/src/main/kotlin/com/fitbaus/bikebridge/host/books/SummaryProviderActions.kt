@@ -17,10 +17,17 @@ internal class SummaryProviderActions(
     fun authorize(code: String) = SummaryProviderAction(SummaryProviderOperation.AUTHORIZE, { api.authorize(code) }, workflow::authorized)
 
     fun discover(url: String, allowHttp: Boolean, key: String, auth: String): SummaryProviderAction<SummaryProviderDiscovery> {
-        val choice = workflow.state.choice
+        val state = workflow.state
+        val choice = state.choice
+        val reuse = choice == SummaryProviderChoice.REUSE ||
+            (state.reusesCurrentLobo && state.draftEndpoint == url.trim().trimEnd('/') && auth.isBlank() && key.isEmpty() && !allowHttp)
+        val expected = state.authorization
         return SummaryProviderAction(SummaryProviderOperation.DISCOVER, {
-            if (choice == SummaryProviderChoice.REUSE) api.discoverCurrent()
-            else api.discoverNew(requireNotNull(choice.kind), url, allowHttp, key, auth)
+            if (reuse) api.discoverCurrent().also { result ->
+                require(expected != null && result.candidate.sameEndpointAndTrust(expected))
+            } else api.discoverNew(requireNotNull(choice.kind), url, allowHttp, key, auth).also { result ->
+                require(result.candidate.baseUrl?.trimEnd('/') == url.trim().trimEnd('/'))
+            }
         }, workflow::discovered)
     }
 
@@ -56,7 +63,8 @@ internal class SummaryProviderActions(
             discardClosedCompletion()
             return false
         }
-        if (lost || ticket.operation == SummaryProviderOperation.CANCEL || ticket.operation == SummaryProviderOperation.AUTHORIZE) {
+        if (lost || ticket.operation in setOf(SummaryProviderOperation.CANCEL, SummaryProviderOperation.AUTHORIZE,
+                SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE)) {
             api.forgetGrant()
         }
         return true
