@@ -11,6 +11,9 @@ internal class ReadAlongWindowBuffer {
         private set
     var diagramAvailable = false
         private set
+    var conceptAvailable = false
+        private set
+    val visualizationAvailable: Boolean get() = diagramAvailable || conceptAvailable
     var summaryAvailable = false
         private set
     var sectionPlanAvailable = false
@@ -52,6 +55,7 @@ internal class ReadAlongWindowBuffer {
         revision = window.revision
         summaryAvailable = window.summaryAvailable
         diagramAvailable = window.diagramAvailable
+        conceptAvailable = window.conceptAvailable
         sectionPlanAvailable = window.sectionPlanAvailable
         recapAvailable = window.recapAvailable
         cumulativeRecapMaxPositionMs = window.cumulativeRecapMaxPositionMs
@@ -85,6 +89,7 @@ internal class ReadAlongWindowBuffer {
         revision = null
         summaryAvailable = false
         diagramAvailable = false
+        conceptAvailable = false
         sectionPlanAvailable = false
         recapAvailable = false
         cumulativeRecapMaxPositionMs = null
