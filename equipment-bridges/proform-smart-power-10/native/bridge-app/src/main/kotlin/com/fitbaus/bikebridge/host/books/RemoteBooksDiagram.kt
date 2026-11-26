@@ -36,9 +36,14 @@ internal class BooksDiagramIdentity(
         .put("summary_model", summary.model).put("summary_prompt_version", summary.promptVersion)
         .put("summary_digest", summaryDigest)
 
-    fun validate(result: JSONObject) {
-        require(result.opt("schema") == "fitbaus.section-diagram/v1" &&
-            result.opt("diagram_prompt_version") == "flowchart-v1" && result.opt("parser_version") == "flowchart-subset-v1")
+    fun validate(result: JSONObject, concepts: Boolean = false) {
+        if (concepts) {
+            require(result.opt("schema") == "fitbaus.section-concepts/v1" &&
+                result.opt("concept_prompt_version") == "concepts-v1" && result.opt("concept_input_version") == "plain-lines-v1")
+        } else {
+            require(result.opt("schema") == "fitbaus.section-diagram/v1" &&
+                result.opt("diagram_prompt_version") == "flowchart-v1" && result.opt("parser_version") == "flowchart-subset-v1")
+        }
         val expected = body()
         for (key in expected.keys()) {
             val value = result.get(key)
@@ -133,7 +138,16 @@ internal class RemoteBooksDiagram(
         require(books.server.isCleartext || !transcriber.address.startsWith("http://", ignoreCase = true))
     }
 
-    fun load(identity: BooksDiagramIdentity): BooksDiagramGraph {
+    fun load(identity: BooksDiagramIdentity): BooksDiagramGraph =
+        BooksDiagramValidation.parse(fetch(identity, preferConcepts = false).second)
+
+    fun loadVisualization(identity: BooksDiagramIdentity): BooksDiagramState {
+        val (concepts, result) = fetch(identity, preferConcepts = true)
+        return if (concepts) BooksDiagramState.Concepts(BooksConceptValidation.parse(result))
+        else BooksDiagramState.Ready(BooksDiagramValidation.parse(result))
+    }
+
+    private fun fetch(identity: BooksDiagramIdentity, preferConcepts: Boolean): Pair<Boolean, JSONObject> {
         val deadline = clock() + 180_000_000_000L
         fun check() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Diagram cancelled")
@@ -141,14 +155,16 @@ internal class RemoteBooksDiagram(
         }
         check()
         val caps = transcriber.test(BooksHttp { url, token -> http.request(url, mapOf("Authorization" to "Bearer $token"), null) })
-        require(caps.summaryDiagramApi && caps.summaryProvider?.model == identity.summary.model &&
+        val concepts = preferConcepts && caps.summaryConceptApi
+        require((concepts || caps.summaryDiagramApi) && caps.summaryProvider?.model == identity.summary.model &&
             caps.sourceId == identity.sourceId && caps.sourceUrl?.trimEnd('/') == books.address.trimEnd('/'))
+        val endpoint = if (concepts) "/v1/section-concepts" else "/v1/section-diagrams"
         val payload = identity.body().toString()
         repeat(4) { attempt ->
             check()
             val response = books.session.authorized { token ->
                 check()
-                val result = http.request(transcriber.address + "/v1/section-diagrams",
+                val result = http.request(transcriber.address + endpoint,
                     mapOf("Authorization" to "Bearer ${transcriber.token}", "X-Audiobookshelf-Token" to token), payload)
                 check()
                 result
@@ -157,12 +173,12 @@ internal class RemoteBooksDiagram(
             if (response.status !in setOf(200, 202)) throw IOException("Diagram unavailable")
             require(response.body.toByteArray(Charsets.UTF_8).size <= 32 * 1024)
             val result = JSONObject(response.body)
-            identity.validate(result)
+            identity.validate(result, concepts)
             if (response.status == 200) {
                 require(result.opt("state") == "ready")
-                return BooksDiagramValidation.parse(result)
+                return concepts to result
             }
-            require(result.opt("state") == "deferred" && !result.has("graph") && !result.has("mermaid"))
+            require(result.opt("state") == "deferred" && !result.has("graph") && !result.has("mermaid") && !result.has("concepts"))
             val rawSeconds = result.opt("retry_after_seconds")
             require(rawSeconds is Int || rawSeconds is Long)
             val seconds = (rawSeconds as Number).toLong()
