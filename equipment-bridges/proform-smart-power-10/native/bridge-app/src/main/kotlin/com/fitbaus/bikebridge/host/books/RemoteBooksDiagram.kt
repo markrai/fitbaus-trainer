@@ -163,10 +163,12 @@ internal class RemoteBooksDiagram(
                 return BooksDiagramValidation.parse(result)
             }
             require(result.opt("state") == "deferred" && !result.has("graph") && !result.has("mermaid"))
-            val seconds = result.opt("retry_after_seconds")
-            require((seconds is Int || seconds is Long) && (seconds as Number).toLong() in 1L..10L)
+            val rawSeconds = result.opt("retry_after_seconds")
+            require(rawSeconds is Int || rawSeconds is Long)
+            val seconds = (rawSeconds as Number).toLong()
+            require(seconds in 1L..10L)
             if (attempt == 3) throw IOException("Diagram admission unavailable")
-            pause((seconds as Number).toLong() * 1000L)
+            pause(seconds * 1000L)
         }
         throw IOException("Diagram unavailable")
     }
