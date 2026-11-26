@@ -75,7 +75,7 @@ internal class BooksNarrationViewport(
             VISIBLE else INVISIBLE
     }
 
-    fun summaryIsVisible(): Boolean = summaryScroll.visibility == VISIBLE && inlineSummary.isShown &&
+    fun summaryIsVisible(): Boolean = windowVisibility == VISIBLE && summaryScroll.visibility == VISIBLE && inlineSummary.isShown &&
         inlineSummary.getGlobalVisibleRect(Rect())
 
     fun setSummaryLongPress(action: (() -> Boolean)?) {
