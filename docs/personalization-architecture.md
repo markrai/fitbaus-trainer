@@ -324,3 +324,7 @@ does not necessarily mean deprecated.
 Surfaces frozen E1/`candidatePower` watt advice for a phase. It is derived from
 formal assessment calibration, **advisory / shadow only**, and is not machine
 control authority or a validated FTP/threshold prescription.
+
+## Phone session presentation boundary (Phase 5A)
+
+`workoutDisplayState.ts` owns the read-only workout screen projection (rest, downregulation, idle, completed, VO2 restart required, active). It uses the existing session reader, phase resolver and frozen prescription, and retains the legacy fallback for sessions without a frozen prescription. It does not mutate storage, render DOM, issue machine commands or advance VO2. `uiControls.ts` remains the owner of display refresh sequencing, the unconditional live-HR VO2 guard/tick, cue delivery, DOM rendering and machine guidance integration. The display HR freshness threshold is shared with the existing UI renderer, not merged with any safety or machine-control freshness policy. Existing behavior, including reads of the current session after the canonical tick, is unchanged. The extracted module is included in the PWA precache and compiled outputs. Behavioral tests exercise all screen families, frozen targets, pause/wall clock, freshness, early cooldown, Freestyle and legacy/current VO2 presentation without importing the DOM UI. This is a first bounded phone extraction; telemetry ingestion and session finalization remain separate future slices.

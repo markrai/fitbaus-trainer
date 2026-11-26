@@ -32,6 +32,7 @@ const urlsToCache = [
   '/dist/utils/uuid.js',
   '/dist/voice.js',
   '/dist/uiControls.js',
+  '/dist/workoutDisplayState.js',
   '/dist/sisuSync.js',
   '/dist/pwaInstall.js',
   '/dist/wakeLock.js',
