@@ -230,9 +230,9 @@ class ArcadeModeTest {
 
     @Test
     fun gameTabsScrollWhileTheSettingsGearStaysFixed() {
-        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/BridgeNavigationHeader.kt").readText()
         val row = source.substring(source.indexOf("private fun buildTitleRow()"), source.indexOf("private fun settingsButton()"))
-        assertTrue(row.contains("HorizontalScrollView(this)"))
+        assertTrue(row.contains("HorizontalScrollView(context)"))
         assertTrue(row.contains("tabScroller.isFillViewport = true"))
         assertTrue(row.contains("LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)"), "tabs take only the space left between brand and gear")
         assertTrue(row.indexOf("row.addView(tabScroller") < row.indexOf("row.addView(settingsButton()"), "gear is a direct row child after the tabs")
@@ -386,6 +386,7 @@ class ArcadeModeTest {
     @Test
     fun youTubeTabIsWiredWithoutCameraClockOrBridgeService() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val header = File("src/main/kotlin/com/fitbaus/bikebridge/host/BridgeNavigationHeader.kt").readText()
         val hooksStart = source.indexOf("object : ArcadeModeHooks")
         val hooksBody = source.substring(hooksStart, source.indexOf("private val modeController", hooksStart))
         val start = hooksBody.substring(hooksBody.indexOf("override fun startMedia"), hooksBody.indexOf("override fun stopMedia"))
@@ -396,15 +397,15 @@ class ArcadeModeTest {
             assertFalse(start.contains(forbidden), forbidden)
             assertFalse(stop.contains(forbidden), forbidden)
         }
-        assertTrue(source.contains("tabGroup(ArcadeMode.YouTube, ArcadeMode.Books)"))
+        assertTrue(header.contains("tabGroup(ArcadeMode.YouTube, ArcadeMode.Books)"))
         assertTrue(
-            source.indexOf("tabGroup(ArcadeMode.YouTube, ArcadeMode.Books)") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"),
+            header.indexOf("tabGroup(ArcadeMode.YouTube, ArcadeMode.Books)") > header.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"),
             "YouTube follows the game tabs",
         )
         assertTrue(source.contains("dashboardContent.visibility = if (mode == ArcadeMode.Dashboard) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("youtubeContent.visibility = if (mode == ArcadeMode.YouTube) View.VISIBLE else View.GONE"))
         assertTrue(source.contains("arcadeContent.visibility = if (mode.isGame) View.VISIBLE else View.GONE"))
-        val tab = source.substring(source.indexOf("private fun modeTab("), source.indexOf("private fun savedTrackerSettings()"))
+        val tab = header.substring(header.indexOf("private fun modeTab("), header.indexOf("private fun label("))
         assertTrue(tab.contains("if (mode.isGame) {"), "only game tabs open the tracker developer menu")
         val destroy = source.substring(source.indexOf("override fun onDestroy()"), source.indexOf("override fun onRequestPermissionsResult"))
         assertTrue(destroy.indexOf("modeController.onHostDestroy()") < destroy.indexOf("youtubeContent.destroy()"))
@@ -453,7 +454,7 @@ class ArcadeModeTest {
         val host = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val arcade = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ExerciseHud.kt").readText()
         val showContent = host.substringAfter("private fun showContent(mode: ArcadeMode) {")
-            .substringBefore("private fun styleTab(")
+            .substringBefore("private fun bindHttpEndpoint(")
         assertTrue(showContent.contains("arcadeContent.show(mode)"))
         assertFalse(showContent.contains("if (mode.isGame) arcadeContent.show(mode)"))
         assertTrue(arcade.contains("show(ArcadeMode.Dashboard)"))
@@ -508,6 +509,7 @@ class ArcadeModeTest {
     @Test
     fun activityModeSwitchDoesNotTouchBridgeService() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        val header = File("src/main/kotlin/com/fitbaus/bikebridge/host/BridgeNavigationHeader.kt").readText()
         assertEquals(3, Regex("""startBridgeService\(\)""").findAll(source).count(), "definition + onCreate + onNewIntent only")
         assertFalse(source.contains("stopService"))
         val hooksStart = source.indexOf("object : ArcadeModeHooks")
@@ -516,20 +518,36 @@ class ArcadeModeTest {
         for (forbidden in listOf("startBridgeService", "NativeBridgeService", "startService", "startForegroundService", "session()")) {
             assertFalse(hooksBody.contains(forbidden), forbidden)
         }
-        assertTrue(source.contains("tabGroup(ArcadeMode.Dashboard)"))
-        assertTrue(source.contains("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"))
-        assertFalse(source.contains("\"ARCADE\""))
-        assertNotNull(Regex("""setOnLongClickListener""").find(source), "long-press FITBAUS still opens pairing")
+        assertTrue(header.contains("tabGroup(ArcadeMode.Dashboard)"))
+        assertTrue(header.contains("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"))
+        assertFalse(header.contains("\"ARCADE\""))
+        assertNotNull(Regex("""setOnLongClickListener""").find(header), "long-press FITBAUS still opens pairing")
         assertTrue(source.contains("PairingActivity::class.java"))
-        assertTrue(source.contains("openPairingSettings()"), "settings entry points share PairingActivity launch")
-        assertTrue(source.contains("BuildConfig.VERSION_NAME"), "header version comes from installed BuildConfig")
-        assertTrue(source.contains("BridgeUiStateMapper.versionLabel"), "header formats BuildConfig with a single v prefix")
-        assertTrue(source.contains("R.drawable.ic_settings"), "visible settings gear uses vector icon")
-        assertTrue(source.contains("R.string.open_bike_bridge_settings"), "settings gear has accessible content description")
-        assertTrue(source.contains("settingsButton()"), "header exposes a dedicated settings control")
+        assertTrue(source.contains("onOpenSettings = ::openPairingSettings"), "settings entry points share PairingActivity launch")
+        assertTrue(header.contains("onOpenSettings()"))
+        assertTrue(header.contains("BuildConfig.VERSION_NAME"), "header version comes from installed BuildConfig")
+        assertTrue(header.contains("BridgeUiStateMapper.versionLabel"), "header formats BuildConfig with a single v prefix")
+        assertTrue(header.contains("R.drawable.ic_settings"), "visible settings gear uses vector icon")
+        assertTrue(header.contains("R.string.open_bike_bridge_settings"), "settings gear has accessible content description")
+        assertTrue(header.contains("settingsButton()"), "header exposes a dedicated settings control")
         assertTrue(
-            source.indexOf("settingsButton()") > source.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"),
+            header.indexOf("settingsButton()") > header.indexOf("tabGroup(ArcadeMode.Bricks, ArcadeMode.Math, ArcadeMode.Flak, ArcadeMode.TrailRide, ArcadeMode.GhoulRun, ArcadeMode.Biketris)"),
             "settings gear stays after navigation tabs",
         )
+    }
+
+    @Test
+    fun navigationHeaderDelegatesWithoutOwningModeOrEquipmentLifecycle() {
+        val header = File("src/main/kotlin/com/fitbaus/bikebridge/host/BridgeNavigationHeader.kt").readText()
+        val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
+        assertTrue(header.contains("setOnClickListener { onSelectMode(mode) }"))
+        assertTrue(header.contains("onTrackerPicker(mode)"))
+        assertTrue(header.contains("styleTab(tab, tabMode == mode)"))
+        assertTrue(activity.contains("onSelectMode = modeController::select"))
+        assertTrue(activity.contains("onTrackerPicker = ::showTrackerPicker"))
+        assertTrue(activity.contains("navigationHeader.render(mode)"))
+        for (forbidden in listOf("ArcadeModeController", "NativeBridgeService", "NativeUsbSession", "startService", "startActivity", "cameraSession", "arcadeClock", "youtubeContent", "booksContent", "setResistance")) {
+            assertFalse(header.contains(forbidden), forbidden)
+        }
     }
 }
