@@ -71,7 +71,7 @@ internal class BooksConceptView(context: Context) : View(context) {
         stroke = if (inner > 1) dp(1).coerceIn(1, inner - 1) else 0
         val gap = dp(16).coerceAtMost(inner)
         val maximum = if (snippets.size > 1 && inner >= dp(440)) {
-            ((inner - gap) / 2 - stroke).coerceIn(1, inner - stroke)
+            minOf((inner * 0.46f).toInt(), (inner - gap) / 2 - stroke).coerceIn(1, inner - stroke)
         } else {
             (inner * 0.67f).toInt().coerceIn(1, inner - stroke)
         }
