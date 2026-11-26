@@ -91,10 +91,10 @@ export function createWorkoutSessionCoordinator(effects, overrides = {}) {
             const { liveBpm, lastBpmUpdateTime } = effects.readLiveHeartRate();
             // Live-HR guard contract: the v3 ceiling guard evaluates inside the tick below, so this
             // call must stay unconditional (every refresh, any elapsed) -- never gate it on checkpoints.
-            if (startTime && isVo2WorkoutSelector(day)) {
+            if (startTime && isVo2WorkoutSelector(day) && !readSessionFinalization(day)) {
                 const elapsedSec = paused ? pausedElapsed : Math.floor((Date.now() - parseInt(startTime, 10)) / 1000);
                 const sessionKey = vo2TickSessionKey(getSession(day));
-                const isCurrent = () => seq === updateDisplaySeq && resolveOwnedWorkoutDay() === day;
+                const isCurrent = () => seq === updateDisplaySeq && resolveOwnedWorkoutDay() === day && !readSessionFinalization(day);
                 const tick = await tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, undefined, { isCurrent });
                 if (tick === undefined || !isCurrent() || vo2TickSessionKey(getSession(day)) !== sessionKey)
                     return;
@@ -164,8 +164,17 @@ export function createWorkoutSessionCoordinator(effects, overrides = {}) {
     }
     return { getSelectedDay, setSelectedDay, resolveOwnedWorkoutDay, selectWorkoutDay, refresh, startWorkout, beginWorkout, restartWorkout, requestEarlyCooldown, requestVo2LimitReached, pause, resume, complete, finishOwnedFreestyleRide, discardOwnedFreestyleRide, retryOwnedFreestyleSave, checkFreestyleAuthority, restoreBikeBridgeBindingForActiveSession };
 }
+export function collectProtectedOrdinarySessionIds() {
+    const ids = [];
+    for (const day of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID]) {
+        const finalization = readSessionFinalization(day);
+        if (finalization)
+            ids.push(finalization.sessionId);
+    }
+    return ids;
+}
 export function cleanupStaleWorkoutSessions(overrides = {}) {
-    const { getSession, isSessionStale, discardWorkoutSession } = { ...defaultDependencies, ...overrides };
+    const { getSession, isSessionStale, discardWorkoutSession, readSessionFinalization } = { ...defaultDependencies, ...overrides };
     const days = [
         "Monday",
         "Tuesday",
@@ -178,7 +187,7 @@ export function cleanupStaleWorkoutSessions(overrides = {}) {
     ];
     days.forEach((day) => {
         const session = getSession(day);
-        if (session.sessionStart && isSessionStale(day)) {
+        if (session.sessionStart && isSessionStale(day) && !readSessionFinalization(day)) {
             const hours = Math.round((Date.now() - parseInt(session.sessionStart)) / (1000 * 60 * 60));
             console.warn(`Cleaning up stale workout session for ${day} (age: ${hours} hours)`);
             discardWorkoutSession(day);

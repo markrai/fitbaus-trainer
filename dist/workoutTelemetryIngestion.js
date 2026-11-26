@@ -56,11 +56,11 @@ export function createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay, override
     }
     async function persistWorkoutRelativeHr(bpm) {
         const session = getSession(resolveOwnedWorkoutDay());
-        if (!session.sessionId)
+        if (!session.sessionId || session.summaryEmitted === "true" || readSessionFinalization(resolveOwnedWorkoutDay()))
             return;
         await ensureLastPersistedHydrated(session.sessionId);
         const latest = getSession(resolveOwnedWorkoutDay());
-        if (latest.sessionId !== session.sessionId)
+        if (latest.sessionId !== session.sessionId || latest.summaryEmitted === "true")
             return;
         if (latest.sessionId && readSessionFinalization(resolveOwnedWorkoutDay()))
             return;
@@ -78,7 +78,7 @@ export function createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay, override
         if (!isVo2WorkoutSelector(day))
             return;
         const session = getSession(day);
-        if (!session.sessionId || !session.startTime)
+        if (!session.sessionId || !session.startTime || session.summaryEmitted === "true" || readSessionFinalization(day))
             return;
         const state = getBikeBridgeSession().getViewState();
         if (state.telemetryStale)
@@ -104,7 +104,8 @@ export function createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay, override
         if (!session.sessionId ||
             !session.startTime ||
             !session.athleteId ||
-            session.activity !== "bike") {
+            session.activity !== "bike" ||
+            session.summaryEmitted === "true") {
             return;
         }
         if (readSessionFinalization(day))

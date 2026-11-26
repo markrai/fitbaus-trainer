@@ -22,7 +22,7 @@ import {
   FREESTYLE_WORKOUT_SELECTOR_ID,
   collectProtectedFreestyleSessionIds,
 } from "./freestyleRide.js";
-import { cleanupStaleWorkoutSessions, recoverActiveOrFinalizingSession } from "./workoutSessionCoordinator.js";
+import { cleanupStaleWorkoutSessions, recoverActiveOrFinalizingSession, collectProtectedOrdinarySessionIds } from "./workoutSessionCoordinator.js";
 import { setSelectedDay } from "./uiControls.js";
 
 applyRuntimeDocumentState();
@@ -53,10 +53,10 @@ async function bootstrap() {
   void cleanupAbandonedOrdinaryBikeTelemetry(
     Date.now(),
     undefined,
-    collectProtectedFreestyleSessionIds(
-      undefined,
-      getSession(FREESTYLE_WORKOUT_SELECTOR_ID).sessionId
-    )
+    [
+      ...collectProtectedFreestyleSessionIds(undefined, getSession(FREESTYLE_WORKOUT_SELECTOR_ID).sessionId),
+      ...collectProtectedOrdinarySessionIds(),
+    ]
   );
   await initializeWorkoutPlan();
   if (!getEquipmentSelection().bike) {

@@ -878,9 +878,13 @@ function renderWorkout(state) {
         renderMachineGuidance(null);
         syncBikeBridgeGuidance(null, false, false);
         updateRing(state.elapsedSec, state.blocks);
-        workoutSession.complete(state.day);
+        const ending = readSessionFinalization(state.day);
+        if (!ending || ending.status === "finalizing")
+            workoutSession.complete(state.day);
         if (phaseDisplayEl) {
-            phaseDisplayEl.innerHTML = '<span class="phase-name">Completed</span>';
+            phaseDisplayEl.innerHTML = ending && ending.status === "save_failed"
+                ? '<span class="phase-name">Save failed</span>'
+                : '<span class="phase-name">Completed</span>';
             phaseDisplayEl.dataset.phaseState = "completed";
         }
         const completedPhrase = isVo2WorkoutSelector(state.day) ? "Test complete" : "Completed";
@@ -894,7 +898,8 @@ function renderWorkout(state) {
         if (startButtonRowEl)
             startButtonRowEl.style.display = "flex";
         if (startBtnEl) {
-            startBtnEl.innerText = "Restart Workout";
+            startBtnEl.innerText = ending && ending.status === "save_failed" ? "Retry Save" : ending ? "Saving..." : "Restart Workout";
+            startBtnEl.disabled = Boolean(ending && ending.status === "finalizing");
             startBtnEl.onclick = workoutSession.restartWorkout;
             startBtnEl.style.display = "block";
         }
