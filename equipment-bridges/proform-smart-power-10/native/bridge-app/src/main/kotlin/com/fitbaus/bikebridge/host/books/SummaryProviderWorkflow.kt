@@ -21,18 +21,22 @@ internal data class SummaryProviderWorkflowState(
     val activeModel: String? = null,
     val authorization: SummaryProviderStatus? = null,
     val choice: SummaryProviderChoice = SummaryProviderChoice.OLLAMA,
-    val addressEntered: Boolean = false,
+    val draftEndpoint: String? = null,
     val discovery: SummaryProviderDiscovery? = null,
     val model: String? = null,
     val tested: SummaryProviderTestResult? = null,
     val consent: Boolean = false,
     val pending: SummaryProviderRequest? = null,
+    val activeProvider: SummaryProviderStatus? = null,
 ) {
     val idle: Boolean get() = pending == null
     val editable: Boolean get() = screen == SummaryProviderScreen.CONFIGURATION && idle
     val authorized: Boolean get() = authorization != null
     val canAuthorize: Boolean get() = editable && !authorized
     val canReuse: Boolean get() = editable && authorization?.configured == true
+    val addressEntered: Boolean get() = !draftEndpoint.isNullOrBlank()
+    val reusesCurrentLobo: Boolean get() = choice == SummaryProviderChoice.LOBO &&
+        authorization?.matchesTrustedLobo(draftEndpoint) == true
     val canDiscover: Boolean get() = editable && authorized &&
         (choice != SummaryProviderChoice.LOBO || addressEntered)
     val canTest: Boolean get() = editable && authorized && discovery != null
@@ -55,14 +59,15 @@ internal class SummaryProviderWorkflow {
         if (state.choice == choice && choice != SummaryProviderChoice.REUSE) return false
         state = state.withoutDiscovery().copy(
             choice = choice,
-            addressEntered = choice == SummaryProviderChoice.REUSE && !state.authorization?.baseUrl.isNullOrBlank(),
+            draftEndpoint = if (choice == SummaryProviderChoice.REUSE) state.authorization?.baseUrl else null,
         )
         return true
     }
 
-    fun addressEdited(nonBlank: Boolean): Boolean {
+    fun addressEdited(endpoint: String): Boolean {
         if (!state.editable || state.choice == SummaryProviderChoice.REUSE) return false
-        state = state.withoutDiscovery().copy(addressEntered = nonBlank)
+        val value = endpoint.trim().trimEnd('/').takeIf { it.isNotBlank() }
+        state = state.withoutDiscovery().copy(draftEndpoint = value)
         return true
     }
 
@@ -120,7 +125,7 @@ internal class SummaryProviderWorkflow {
 
     fun authorized(request: SummaryProviderRequest, status: SummaryProviderStatus): Boolean {
         if (!accepts(request, SummaryProviderOperation.AUTHORIZE)) return false
-        state = state.copy(authorization = status, activeModel = status.model, pending = null)
+        state = state.copy(authorization = status, activeModel = status.model, activeProvider = status, pending = null)
         if (state.choice != SummaryProviderChoice.LOBO && !state.addressEntered && status.configured) {
             choose(SummaryProviderChoice.REUSE)
         }
@@ -132,7 +137,7 @@ internal class SummaryProviderWorkflow {
         val value = discovery.copy(models = discovery.models.toList())
         state = state.withoutTest().copy(
             discovery = value,
-            model = value.models.firstOrNull { it == state.activeModel } ?: value.models.firstOrNull(),
+            model = value.models.firstOrNull { it == value.candidate.model } ?: value.models.firstOrNull(),
             pending = null,
         )
         return true
@@ -149,8 +154,10 @@ internal class SummaryProviderWorkflow {
 
     fun saved(request: SummaryProviderRequest, status: SummaryProviderStatus): Boolean {
         if (!accepts(request, SummaryProviderOperation.SAVE)) return false
-        state = if (status.configured && status.model == state.tested?.model) {
-            SummaryProviderWorkflowState(SummaryProviderScreen.FINISHED, activeModel = status.model)
+        val candidate = state.discovery?.candidate
+        state = if (status.configured && status.model == state.tested?.model && candidate != null &&
+            status.sameEndpointAndTrust(candidate)) {
+            SummaryProviderWorkflowState(SummaryProviderScreen.FINISHED, activeModel = status.model, activeProvider = status)
         } else {
             SummaryProviderWorkflowState(SummaryProviderScreen.RELOAD_REQUIRED)
         }
@@ -161,6 +168,7 @@ internal class SummaryProviderWorkflow {
         if (!accepts(request, SummaryProviderOperation.DISABLE)) return false
         state = SummaryProviderWorkflowState(
             if (status.configured) SummaryProviderScreen.RELOAD_REQUIRED else SummaryProviderScreen.FINISHED,
+            activeProvider = status.takeUnless { it.configured },
         )
         return true
     }
@@ -174,7 +182,8 @@ internal class SummaryProviderWorkflow {
     fun failed(request: SummaryProviderRequest, authorizationLost: Boolean = false): Boolean {
         if (state.pending !== request) return false
         state = if (authorizationLost || request.operation == SummaryProviderOperation.CANCEL) {
-            SummaryProviderWorkflowState(SummaryProviderScreen.CONFIGURATION, activeModel = state.activeModel)
+            SummaryProviderWorkflowState(SummaryProviderScreen.CONFIGURATION, activeModel = state.activeModel,
+                activeProvider = state.activeProvider)
         } else {
             state.copy(pending = null)
         }

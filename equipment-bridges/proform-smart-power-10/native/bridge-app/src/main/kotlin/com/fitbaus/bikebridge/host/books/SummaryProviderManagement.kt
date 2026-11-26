@@ -15,6 +15,19 @@ internal data class SummaryProviderStatus(
     val allowHttp: Boolean,
     val storageError: Boolean,
 ) {
+    fun sameEndpointAndTrust(other: SummaryProviderStatus): Boolean =
+        configured && other.configured && !storageError && !other.storageError &&
+            baseUrl?.trimEnd('/') == other.baseUrl?.trimEnd('/') &&
+            hasKey == other.hasKey && customCa == other.customCa && allowHttp == other.allowHttp
+
+    fun matchesTrustedLobo(endpoint: String?): Boolean {
+        if (!configured || storageError || !customCa || hasKey || allowHttp || endpoint == null ||
+            baseUrl?.trimEnd('/') != endpoint.trimEnd('/')) return false
+        val uri = runCatching { URI(endpoint) }.getOrNull() ?: return false
+        return uri.scheme == "https" && uri.port == 7869 && uri.path.trimEnd('/') == "/v1" &&
+            uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null
+    }
+
     companion object {
         fun parse(json: JSONObject): SummaryProviderStatus {
             val configured = json.opt("configured") as? Boolean ?: error("Invalid provider status")
