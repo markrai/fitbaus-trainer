@@ -46,6 +46,7 @@ internal class BooksReadAlong(
     private val diagramScope = BooksDiagramScope()
     private var diagramFuture: Future<*>? = null
     private var diagramConnection: TranscriberConnectionStore.RecordSnapshot? = null
+    private var invalidatedDiagramSummary: BooksSummaryState.Ready? = null
     private val summaryScope = BooksSummaryScope()
     private val inlineAttempt = BooksInlineSummaryAttempt()
     private val sectionPlans = BooksSectionPlans()
@@ -265,7 +266,10 @@ internal class BooksReadAlong(
             fullscreen && hasNarration && !showing && summarySection != null && canShowSummary())
         narrationViewport.setSummary(text)
         val ready = diagramSummary()
-        if (diagramScope.ticket != null && !diagramScope.matches(summarySelection(), ready)) clearDiagram()
+        if (diagramScope.ticket != null && !diagramScope.matches(summarySelection(), ready)) {
+            invalidatedDiagramSummary = diagramScope.ticket?.identity?.summary
+            clearDiagram()
+        }
         narrationViewport.setSummaryLongPress(if (text != null && ready != null) ::openDiagram else null)
     }
 
@@ -273,7 +277,7 @@ internal class BooksReadAlong(
         (summaryState as? BooksSummaryState.Ready)?.takeIf {
             windows.diagramAvailable && canShowSummary() && recapSelection == null &&
                 summarySection == summarySelection()?.section && it.sourceId != null &&
-                it.promptVersion == "section-v1" && it.revision == windows.revision
+                it.promptVersion == "section-v1" && it.revision == windows.revision && it !== invalidatedDiagramSummary
         }
 
     private fun diagramConnectionMatches(): Boolean = diagramConnection?.isCurrent() == true
@@ -303,6 +307,7 @@ internal class BooksReadAlong(
                 if (diagramScope.ticket !== ticket) return@post
                 diagramFuture = null
                 if (!diagramScope.matches(summarySelection(), diagramSummary()) || !diagramConnectionMatches()) {
+                    invalidatedDiagramSummary = ticket.identity.summary
                     clearDiagram()
                     return@post
                 }
@@ -477,6 +482,7 @@ internal class BooksReadAlong(
 
     private fun clearSummaryPanel() {
         clearDiagram()
+        invalidatedDiagramSummary = null
         summarySection = null
         recapSelection = null
         summaryState = null
@@ -603,7 +609,10 @@ internal class BooksReadAlong(
     fun render(state: BooksPlayerState) {
         if (visibility != VISIBLE) return
         currentState = state
-        if (diagramScope.ticket != null && !diagramConnectionMatches()) clearDiagram()
+        if (diagramScope.ticket != null && !diagramConnectionMatches()) {
+            invalidatedDiagramSummary = diagramScope.ticket?.identity?.summary
+            clearDiagram()
+        }
         val ready = state.session != null && !state.failed
         val session = state.session
         if (ready && windows.revision != null && !localMode) {
