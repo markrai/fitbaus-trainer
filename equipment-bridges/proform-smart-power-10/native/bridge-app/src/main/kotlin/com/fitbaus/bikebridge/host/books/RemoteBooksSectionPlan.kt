@@ -18,7 +18,7 @@ internal class RemoteBooksSectionPlan(
     init { require(books.server.isCleartext || !transcriber.address.startsWith("http://", ignoreCase = true)) }
 
     fun load(itemId: String, revision: String, block: BooksSectionBlock): List<Long> {
-        require(itemId.matches(Regex("[A-Za-z0-9_-]{1,128}")) && DIGEST.matches(revision))
+        require(BooksIdentifier.isValid(itemId) && DIGEST.matches(revision))
         val sourceId = source() ?: return block.boundaries
         val body = JSONObject().put("source_id", sourceId).put("item_id", itemId)
             .put("audio_revision", revision).put("boundaries_ms", JSONArray(block.boundaries)).toString()
