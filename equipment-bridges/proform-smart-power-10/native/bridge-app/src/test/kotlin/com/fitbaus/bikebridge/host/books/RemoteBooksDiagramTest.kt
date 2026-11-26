@@ -148,7 +148,7 @@ class RemoteBooksDiagramTest {
         val readAlong = File(root + "books/BooksReadAlong.kt").readText()
         val content = File(root + "books/BooksContent.kt").readText()
         assertTrue(viewport.contains("super.dispatchDraw(canvas)"))
-        assertTrue(viewport.contains("if (summaryIsVisible()) onSummaryDrawn?.invoke()"))
+        assertTrue(viewport.contains("if (drawnGeneration == summaryGeneration && summaryIsVisible()) onSummaryDrawn?.invoke()"))
         assertTrue(readAlong.contains("narrationViewport.onSummaryDrawn = ::prefetchVisibleDiagram"))
         assertTrue(readAlong.contains("if (diagramScope.ticket !== ticket) return@post"))
         assertTrue(content.contains("hud.visibility = if (diagram) GONE else VISIBLE"))
