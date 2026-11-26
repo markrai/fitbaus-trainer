@@ -227,6 +227,8 @@ class RemoteBooksDiagramTest {
         val cancelled = requireNotNull(gate.begin(true))
         gate.cancel(cancelled)
         val replacement = requireNotNull(gate.begin(true))
+        gate.finish(cancelled, true) { deliveries++; true }
+        assertEquals(1, deliveries)
         gate.finish(replacement, true) { deliveries++; true }
         assertEquals(2, deliveries)
     }
