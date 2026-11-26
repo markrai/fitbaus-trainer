@@ -259,9 +259,11 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         when (selectedTab) {
             Tab.Models -> {
                 views.label(content, "Transcription models", 21f, Color.WHITE, true)
-                modelsPanel = TranscriberManagementDialog(context, connection, onReadiness = { readiness ->
-                    if (active && saved === connection && selectedTab == Tab.Models) renderReadiness(readiness)
-                }).also { it.attach(content) }
+                modelsPanel = TranscriberManagementDialog(context, connection).also { panel ->
+                    panel.attach(content) { readiness ->
+                        if (active && saved === connection && selectedTab == Tab.Models) renderReadiness(readiness)
+                    }
+                }
             }
             Tab.Summarization -> {
                 views.label(content, "Summarization provider", 21f, Color.WHITE, true)
@@ -286,7 +288,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
     }
 
     private fun renderReadiness(readiness: TranscriberReadiness) {
-        setStatus(readiness.message + " · last checked", readiness.ready)
+        setStatus(readiness.message, readiness.ready)
     }
 
     private fun setStatus(message: String, ready: Boolean = false) {

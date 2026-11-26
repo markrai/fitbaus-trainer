@@ -57,10 +57,11 @@ internal fun modelMegabytes(bytes: Long): String =
 internal fun modelCardsUseColumns(screenWidthDp: Int): Boolean = screenWidthDp >= 720
 
 internal enum class TranscriberReadiness(val message: String, val ready: Boolean) {
-    Ready("Connected · read-along ready", true),
-    NotReady("Connected · service not ready", false),
-    Unknown("Connected · readiness not reported", false),
-    Unverified("Paired · unable to verify server", false);
+    Ready("Last check · read-along ready", true),
+    NotReady("Last check · connected, service not ready", false),
+    Unknown("Last check · connected, readiness not reported", false),
+    Unverified("Paired · unable to verify server", false),
+    CheckIncomplete("Paired · model refresh incomplete", false);
 
     companion object {
         fun fromFlags(transcription: Boolean?, engineReady: Boolean?, sourceConfigured: Boolean?): TranscriberReadiness =

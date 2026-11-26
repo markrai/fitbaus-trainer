@@ -68,6 +68,18 @@ class TranscriberManagementTest {
     }
 
     @Test
+    fun readinessUsesReportedCapabilitiesWithoutExtraRequests() {
+        assertEquals(TranscriberReadiness.Unknown, client().snapshot().readiness)
+        val ready = JSONObject(caps.toString()).put("transcription", true)
+            .put("engine_ready", true).put("source_configured", true)
+        requests.clear()
+        assertEquals(TranscriberReadiness.Ready, client(ready).snapshot().readiness)
+        assertEquals(1, requests.count { it.first == "/v1/capabilities" })
+        ready.put("engine_ready", false)
+        assertEquals(TranscriberReadiness.NotReady, client(ready).snapshot().readiness)
+    }
+
+    @Test
     fun startAndResumeUseExistingSessionWithoutSharingRefresh() {
         val api = client()
         api.download("base")

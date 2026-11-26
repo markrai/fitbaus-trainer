@@ -27,7 +27,6 @@ internal class TranscriberManagementDialog(
     private val books: BooksConnection? = null,
     private val item: BooksItem? = null,
     private val playback: BooksPlaybackSession? = null,
-    private val onReadiness: (TranscriberReadiness) -> Unit = {},
     private val onGrant: (TranscriberManagement, String) -> Unit = { _, _ -> },
 ) {
     private val main = Handler(Looper.getMainLooper())
@@ -44,6 +43,7 @@ internal class TranscriberManagementDialog(
     }
     private val scroll by lazy { ScrollView(context).apply { addView(rows) } }
     private var embedded = false
+    private var onReadiness: (TranscriberReadiness) -> Unit = {}
     private val refresh = Button(context).apply {
         text = "Refresh models"
         isAllCaps = false
@@ -82,9 +82,10 @@ internal class TranscriberManagementDialog(
         return dialog
     }
 
-    fun attach(parent: LinearLayout) {
+    fun attach(parent: LinearLayout, onReadiness: (TranscriberReadiness) -> Unit = {}) {
         check(!closed && !embedded)
         embedded = true
+        this.onReadiness = onReadiness
         rows.setPadding(0, dp(4), 0, dp(8))
         status.setPadding(dp(4), dp(8), dp(4), dp(8))
         parent.addView(status)
@@ -97,6 +98,7 @@ internal class TranscriberManagementDialog(
     fun close() {
         if (closed) return
         closed = true
+        onReadiness = {}
         main.removeCallbacks(poll)
         login?.dismiss()
         login = null
@@ -143,6 +145,7 @@ internal class TranscriberManagementDialog(
                         }
                         else -> "Unable to load or manage transcription. Check server settings and version."
                     }
+                    onReadiness(TranscriberReadiness.CheckIncomplete)
                     last?.let { renderRows(it, false) }
                 })
             }
@@ -172,6 +175,7 @@ internal class TranscriberManagementDialog(
     private fun renderRows(snapshot: PreparationSnapshot, enabled: Boolean) {
         val position = if (embedded) 0 else scroll.scrollY
         rows.removeAllViews()
+        if (!enabled) label("Last reported model states · refresh to update", 14f)
         if (item != null) heading("Choose a model")
         if (snapshot.models.isEmpty()) {
             label("No transcription models reported. Refresh or check the server version.", 16f)
@@ -184,7 +188,7 @@ internal class TranscriberManagementDialog(
         for (model in snapshot.models) {
             val presentation = modelCardPresentation(model)
             val selected = item != null && selectedModel == model.id && model.installed && model.qualified
-            val card = panel(selected).apply {
+            val card = panel(selected || (item == null && model.id == "tiny")).apply {
                 gravity = Gravity.TOP
                 minimumHeight = dp(if (columns) 232 else 0)
             }
@@ -204,7 +208,7 @@ internal class TranscriberManagementDialog(
                 ModelCardTone.Neutral -> MUTED
             }
             val statusText = if (presentation.tone == ModelCardTone.Ready) "✓ ${presentation.status}" else presentation.status
-            label(statusText, 16f, card, statusColor, true)
+            label(statusText, 16f, card, if (enabled) statusColor else MUTED, true)
             presentation.detail?.let { label(it, 14f, card) }
             presentation.progressValue?.let { progress(it, presentation.progressMax, card) }
             if (columns) card.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
