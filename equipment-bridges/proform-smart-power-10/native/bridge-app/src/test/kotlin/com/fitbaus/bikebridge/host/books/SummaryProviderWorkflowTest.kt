@@ -1,0 +1,261 @@
+package com.fitbaus.bikebridge.host.books
+
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+class SummaryProviderWorkflowTest {
+    private val disabled = SummaryProviderStatus(false, null, null, false, false, false, false)
+    private val configured = SummaryProviderStatus(
+        true, "https://192.168.1.200:7869/v1", "lobo-nano", false, true, false, false,
+    )
+    private val discovered = SummaryProviderDiscovery(listOf("other", "lobo-nano"), configured)
+
+    private fun begin(flow: SummaryProviderWorkflow, operation: SummaryProviderOperation): SummaryProviderRequest =
+        requireNotNull(flow.begin(operation))
+
+    private fun configuration(activeModel: String? = null): SummaryProviderWorkflow =
+        SummaryProviderWorkflow().also {
+            assertTrue(it.capabilities(begin(it, SummaryProviderOperation.CAPABILITIES), true, activeModel))
+        }
+
+    private fun authorized(status: SummaryProviderStatus = configured): SummaryProviderWorkflow =
+        configuration(status.model).also {
+            assertTrue(it.authorized(begin(it, SummaryProviderOperation.AUTHORIZE), status))
+        }
+
+    private fun discoveredFlow(): SummaryProviderWorkflow =
+        authorized().also {
+            assertTrue(it.discovered(begin(it, SummaryProviderOperation.DISCOVER), discovered))
+        }
+
+    private fun testedFlow(): SummaryProviderWorkflow =
+        discoveredFlow().also {
+            assertTrue(it.tested(begin(it, SummaryProviderOperation.TEST), 3200))
+            assertTrue(it.setConsent(true))
+        }
+
+    @Test
+    fun capabilityCheckGatesManagementAndUnsupportedCanRetry() {
+        val flow = SummaryProviderWorkflow()
+        assertNull(flow.begin(SummaryProviderOperation.AUTHORIZE))
+        val check = begin(flow, SummaryProviderOperation.CAPABILITIES)
+        assertFalse(flow.state.idle)
+        assertNull(flow.begin(SummaryProviderOperation.CAPABILITIES))
+        assertTrue(flow.capabilities(check, false, "old-model"))
+        assertEquals(SummaryProviderScreen.UNSUPPORTED, flow.state.screen)
+        assertFalse(flow.state.canAuthorize)
+        assertFalse(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.capabilities(begin(flow, SummaryProviderOperation.CAPABILITIES), true, null))
+        assertTrue(flow.state.canAuthorize)
+        assertFalse(flow.state.canDiscover)
+        assertFalse(flow.state.canSave)
+    }
+
+    @Test
+    fun authorizationPreservesDraftAndOnlyOffersReuseForConfiguredProvider() {
+        val flow = configuration()
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(true))
+        assertFalse(flow.state.canDiscover)
+        assertFalse(flow.choose(SummaryProviderChoice.REUSE))
+        assertTrue(flow.authorized(begin(flow, SummaryProviderOperation.AUTHORIZE), configured))
+        assertEquals(SummaryProviderChoice.LOBO, flow.state.choice)
+        assertTrue(flow.state.addressEntered)
+        assertTrue(flow.state.canDiscover)
+        assertTrue(flow.state.canReuse)
+        assertEquals(SummaryProviderChoice.REUSE, authorized().state.choice)
+        val empty = authorized(disabled)
+        assertEquals(SummaryProviderChoice.OLLAMA, empty.state.choice)
+        assertFalse(empty.state.canReuse)
+        assertFalse(empty.state.canDisable)
+        assertTrue(empty.state.canCancel)
+    }
+
+    @Test
+    fun loboNeedsAddressAndEditsInvalidateOnlyCandidateNotAuthorization() {
+        val flow = testedFlow()
+        assertTrue(flow.state.canSave)
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertFalse(flow.state.canDiscover)
+        assertNull(flow.state.discovery)
+        assertNull(flow.state.tested)
+        assertFalse(flow.state.consent)
+        assertTrue(flow.addressEdited(true))
+        assertTrue(flow.state.canDiscover)
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER), discovered))
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 8))
+        assertTrue(flow.setConsent(true))
+        assertTrue(flow.credentialsOrTrustEdited())
+        assertNull(flow.state.discovery)
+        assertNull(flow.state.model)
+        assertNull(flow.state.tested)
+        assertFalse(flow.state.consent)
+        assertTrue(flow.state.authorized)
+        assertTrue(flow.state.canDiscover)
+        assertFalse(flow.state.canSave)
+    }
+
+    @Test
+    fun rediscoveryAndModelChangesRequireNewTestAndConsent() {
+        val flow = testedFlow()
+        assertEquals("lobo-nano", flow.state.model)
+        assertEquals(SummaryProviderTestResult("lobo-nano", 3200), flow.state.tested)
+        assertFalse(flow.selectModel("not-listed"))
+        assertTrue(flow.state.canSave)
+        assertTrue(flow.selectModel("other"))
+        assertNull(flow.state.tested)
+        assertFalse(flow.state.consent)
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.setConsent(true))
+        val test = begin(flow, SummaryProviderOperation.TEST)
+        assertFalse(flow.state.consent)
+        assertTrue(flow.tested(test, 42))
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.setConsent(true))
+        assertTrue(flow.state.canSave)
+        val again = begin(flow, SummaryProviderOperation.DISCOVER)
+        assertNull(flow.state.discovery)
+        assertNull(flow.state.tested)
+        assertTrue(flow.discovered(again, discovered))
+        assertFalse(flow.state.canSave)
+    }
+
+    @Test
+    fun manualModelRequiresValidSuccessfulTestAndExplicitConsent() {
+        val flow = authorized()
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER),
+            SummaryProviderDiscovery(emptyList(), configured)))
+        assertNull(flow.state.model)
+        assertTrue(flow.selectModel("invalid model"))
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 12))
+        assertNull(flow.state.tested)
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.selectModel(" model:latest "))
+        assertEquals("model:latest", flow.state.model)
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 12))
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.setConsent(true))
+        assertTrue(flow.state.canSave)
+    }
+
+    @Test
+    fun inFlightOperationsRejectEditsAndDuplicateRequests() {
+        val flow = discoveredFlow()
+        val old = flow.state
+        val request = begin(flow, SummaryProviderOperation.TEST)
+        val pending = flow.state
+        assertFalse(flow.choose(SummaryProviderChoice.CUSTOM))
+        assertFalse(flow.addressEdited(true))
+        assertFalse(flow.credentialsOrTrustEdited())
+        assertFalse(flow.selectModel("other"))
+        assertFalse(flow.setConsent(true))
+        assertNull(flow.begin(SummaryProviderOperation.CAPABILITIES))
+        assertNull(flow.begin(SummaryProviderOperation.CANCEL))
+        assertFalse(flow.saved(request, configured))
+        assertEquals(pending, flow.state)
+        assertTrue(flow.tested(request, 14))
+        assertEquals(old.model, flow.state.tested?.model)
+    }
+
+    @Test
+    fun staleCompletionCannotOverwriteNewOperationOrClosedState() {
+        val flow = authorized()
+        val first = begin(flow, SummaryProviderOperation.DISCOVER)
+        assertTrue(flow.failed(first))
+        val second = begin(flow, SummaryProviderOperation.DISCOVER)
+        val pending = flow.state
+        assertFalse(flow.discovered(first, discovered))
+        assertFalse(flow.failed(first, authorizationLost = true))
+        assertEquals(pending, flow.state)
+        assertTrue(flow.discovered(second, discovered))
+        val test = begin(flow, SummaryProviderOperation.TEST)
+        flow.close()
+        val closed = flow.state
+        assertFalse(flow.tested(test, 10))
+        assertFalse(flow.failed(test, authorizationLost = true))
+        assertNull(flow.begin(SummaryProviderOperation.CAPABILITIES))
+        assertEquals(closed, flow.state)
+        assertEquals(SummaryProviderScreen.CLOSED, flow.state.screen)
+    }
+
+    @Test
+    fun failedTestAndExpiredGrantNeverLeaveSaveEnabled() {
+        val flow = testedFlow()
+        val test = begin(flow, SummaryProviderOperation.TEST)
+        assertTrue(flow.failed(test))
+        assertNull(flow.state.tested)
+        assertFalse(flow.state.consent)
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.state.canTest)
+        val retry = begin(flow, SummaryProviderOperation.TEST)
+        assertTrue(flow.failed(retry, authorizationLost = true))
+        assertFalse(flow.state.authorized)
+        assertTrue(flow.state.canAuthorize)
+        assertNull(flow.state.discovery)
+        assertFalse(flow.state.canSave)
+        assertEquals("lobo-nano", flow.state.activeModel)
+    }
+
+    @Test
+    fun saveConsumesWorkflowAuthorizationAndMismatchRequiresReload() {
+        val flow = testedFlow()
+        val save = begin(flow, SummaryProviderOperation.SAVE)
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.saved(save, configured))
+        assertEquals(SummaryProviderScreen.FINISHED, flow.state.screen)
+        assertEquals("lobo-nano", flow.state.activeModel)
+        assertFalse(flow.state.authorized)
+        assertFalse(flow.state.canSave)
+        val mismatch = testedFlow()
+        assertTrue(mismatch.saved(begin(mismatch, SummaryProviderOperation.SAVE),
+            configured.copy(model = "unexpected")))
+        assertEquals(SummaryProviderScreen.RELOAD_REQUIRED, mismatch.state.screen)
+        assertFalse(mismatch.state.authorized)
+        assertNotNull(mismatch.begin(SummaryProviderOperation.CAPABILITIES))
+    }
+
+    @Test
+    fun disableAndCancelClearAuthorizationAndCandidate() {
+        val flow = testedFlow()
+        assertTrue(flow.disabled(begin(flow, SummaryProviderOperation.DISABLE), disabled))
+        assertEquals(SummaryProviderScreen.FINISHED, flow.state.screen)
+        assertNull(flow.state.activeModel)
+        assertFalse(flow.state.authorized)
+        val cancelled = testedFlow()
+        assertTrue(cancelled.cancelled(begin(cancelled, SummaryProviderOperation.CANCEL)))
+        assertEquals(SummaryProviderScreen.CHECKING, cancelled.state.screen)
+        assertFalse(cancelled.state.authorized)
+        assertNull(cancelled.state.discovery)
+        val failedCancel = testedFlow()
+        assertTrue(failedCancel.failed(begin(failedCancel, SummaryProviderOperation.CANCEL)))
+        assertTrue(failedCancel.state.canAuthorize)
+        assertFalse(failedCancel.state.canSave)
+    }
+
+    @Test
+    fun lanInventoryUpdatesDoNotInvalidateTestOrConsentWithoutExplicitAddressEdit() {
+        val flow = authorized()
+        val picker = LoboLanPickerState()
+        val device = LoboLanDevice("LOBO-17AE84", "192.168.1.200:7869")
+        picker.update(listOf(device))
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertNotNull(picker.select(device.address))
+        assertTrue(flow.addressEdited(true))
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER), discovered))
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 300))
+        assertTrue(flow.setConsent(true))
+        val before = flow.state
+        picker.update(emptyList())
+        assertEquals(device, picker.selected)
+        assertEquals(before, flow.state)
+        assertTrue(flow.state.canSave)
+        picker.clearSelection()
+        assertTrue(flow.addressEdited(false))
+        assertFalse(flow.state.canDiscover)
+        assertFalse(flow.state.canSave)
+    }
+}
