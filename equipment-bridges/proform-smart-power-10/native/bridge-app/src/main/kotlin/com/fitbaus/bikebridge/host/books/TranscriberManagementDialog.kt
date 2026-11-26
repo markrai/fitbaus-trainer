@@ -43,8 +43,12 @@ internal class TranscriberManagementDialog(
     }
     private val scroll by lazy { ScrollView(context).apply { addView(rows) } }
     private var embedded = false
+    private var onReadiness: (TranscriberReadiness) -> Unit = {}
     private val refresh = Button(context).apply {
-        text = "REFRESH"
+        text = "Refresh models"
+        isAllCaps = false
+        textSize = 15f
+        backgroundTintList = null
         setTextColor(Color.WHITE)
         background = surface(NativeDialogStyle.TRANSCRIPTION_MODELS.buttonFill, NativeDialogStyle.TRANSCRIPTION_MODELS.buttonBorder)
     }
@@ -78,9 +82,10 @@ internal class TranscriberManagementDialog(
         return dialog
     }
 
-    fun attach(parent: LinearLayout) {
+    fun attach(parent: LinearLayout, onReadiness: (TranscriberReadiness) -> Unit = {}) {
         check(!closed && !embedded)
         embedded = true
+        this.onReadiness = onReadiness
         rows.setPadding(0, dp(4), 0, dp(8))
         status.setPadding(dp(4), dp(8), dp(4), dp(8))
         parent.addView(status)
@@ -93,6 +98,7 @@ internal class TranscriberManagementDialog(
     fun close() {
         if (closed) return
         closed = true
+        onReadiness = {}
         main.removeCallbacks(poll)
         login?.dismiss()
         login = null
@@ -124,6 +130,7 @@ internal class TranscriberManagementDialog(
                 refresh.isEnabled = true
                 result.fold({ snapshot ->
                     last = snapshot
+                    onReadiness(snapshot.readiness)
                     render(snapshot)
                     if (shouldPoll()) {
                         main.postDelayed(poll, 5000)
@@ -138,6 +145,7 @@ internal class TranscriberManagementDialog(
                         }
                         else -> "Unable to load or manage transcription. Check server settings and version."
                     }
+                    onReadiness(TranscriberReadiness.CheckIncomplete)
                     last?.let { renderRows(it, false) }
                 })
             }
@@ -159,7 +167,7 @@ internal class TranscriberManagementDialog(
             item != null && !snapshot.sourceMatches -> "Audiobookshelf address differs from the Transcriber's configured source. Check Settings."
             item != null && !snapshot.canPrepare -> "Update the Transcriber server to manage preparation."
             !snapshot.canManageModels -> "Update the Transcriber server to manage model downloads from the bike."
-            else -> "Tiny generates narration on demand. Prepare a book with Base or Small for higher-quality narration."
+            else -> "Speech-to-text models run on your Transcriber server. Tiny is bundled; Base and Small are optional."
         }
         renderRows(snapshot, true)
     }
@@ -167,52 +175,51 @@ internal class TranscriberManagementDialog(
     private fun renderRows(snapshot: PreparationSnapshot, enabled: Boolean) {
         val position = if (embedded) 0 else scroll.scrollY
         rows.removeAllViews()
-        heading("Choose a model")
-        val models = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        if (!enabled) label("Last reported model states · refresh to update", 14f)
+        if (item != null) heading("Choose a model")
+        if (snapshot.models.isEmpty()) {
+            label("No transcription models reported. Refresh or check the server version.", 16f)
+        }
+        val columns = modelCardsUseColumns(context.resources.configuration.screenWidthDp)
+        val models = LinearLayout(context).apply {
+            orientation = if (columns) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        }
         rows.addView(models, LinearLayout.LayoutParams(-1, -2))
         for (model in snapshot.models) {
-            val title = model.id.replaceFirstChar { it.uppercase(Locale.US) }
+            val presentation = modelCardPresentation(model)
             val selected = item != null && selectedModel == model.id && model.installed && model.qualified
-            val card = panel(selected).apply { gravity = Gravity.TOP }
-            models.addView(card, LinearLayout.LayoutParams(0, -1, 1f).apply {
+            val card = panel(selected || (item == null && model.id == "tiny")).apply {
+                gravity = Gravity.TOP
+                minimumHeight = dp(if (columns) 232 else 0)
+            }
+            models.addView(card, LinearLayout.LayoutParams(if (columns) 0 else -1,
+                if (columns) -1 else -2, if (columns) 1f else 0f).apply {
                 setMargins(dp(4), dp(4), dp(4), dp(8))
             })
-            label(title, 25f, card, Color.WHITE, true)
-            label(when (model.id) {
-                "tiny" -> "FAST · DEFAULT"
-                "base" -> "BALANCED"
-                else -> "HIGHER QUALITY"
-            }, 13f, card, ACCENT, true)
-            label(when (model.id) {
-                "tiny" -> "Bundled. Lowest resource use."
-                "base" -> "More detail, moderate server load."
-                else -> "Best of these models, highest server load."
-            }, 15f, card)
-            val description = when {
-                model.downloading -> "${megabytes(model.received)} / ${megabytes(model.total)}"
-                !model.installed -> "Not installed · ${megabytes(model.total)}"
-                !model.qualified && model.automaticState == "queued" -> "Waiting for hardware check"
-                !model.qualified && model.automaticState == "running" -> "Hardware check ${model.completedRuns}/${model.totalRuns}"
-                !model.qualified && model.automaticState == "waiting_resources" -> "Waiting for memory"
-                !model.qualified && model.automaticState == "failed" -> "Hardware check failed"
-                !model.qualified -> "Hardware qualification required"
-                !model.memoryAllowed -> "Installed · waiting for memory"
-                else -> "Ready"
+            label(presentation.title, 26f, card, Color.WHITE, true)
+            label(presentation.role, 13f, card, ACCENT, true)
+            label(presentation.description, 15f, card)
+            card.addView(View(context).apply { setBackgroundColor(0xff455368.toInt()) },
+                LinearLayout.LayoutParams(-1, dp(1)).apply { topMargin = dp(8); bottomMargin = dp(4) })
+            val statusColor = when (presentation.tone) {
+                ModelCardTone.Ready -> SUCCESS
+                ModelCardTone.Working -> ACCENT
+                ModelCardTone.Attention -> 0xffffb47a.toInt()
+                ModelCardTone.Neutral -> MUTED
             }
-            label(description, 15f, card, if (model.installed && model.qualified && model.memoryAllowed) SUCCESS else MUTED, true)
-            card.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
+            val statusText = if (presentation.tone == ModelCardTone.Ready) "✓ ${presentation.status}" else presentation.status
+            label(statusText, 16f, card, if (enabled) statusColor else MUTED, true)
+            presentation.detail?.let { label(it, 14f, card) }
+            presentation.progressValue?.let { progress(it, presentation.progressMax, card) }
+            if (columns) card.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
             if (model.downloading) {
-                progress(model.received, model.total, card)
                 button("CANCEL DOWNLOAD", enabled && snapshot.canManageModels, card) { mutate { it.download(model.id, true) } }
             } else if (!model.installed && model.id != "tiny") {
-                button("DOWNLOAD", enabled && snapshot.canManageModels && snapshot.models.none { it.downloading }, card, true) {
+                button(if (model.state in setOf("failed", "interrupted")) "RETRY DOWNLOAD" else "DOWNLOAD", enabled && snapshot.canManageModels && snapshot.models.none { it.downloading }, card, true) {
                     selectedModel = model.id
                     mutate { it.download(model.id) }
                 }
-            } else if (model.installed && !model.qualified && model.qualifying) {
-                if (model.automaticState == "running") progress(model.completedRuns.toLong(), model.totalRuns.toLong(), card)
-            } else if (model.installed && !model.qualified && snapshot.automaticQualification) {
-                model.qualificationError?.let { label(it.replace('_', ' '), 13f, card) }
+            } else if (model.installed && !model.qualified && !model.qualifying && snapshot.automaticQualification) {
                 button("RETRY CHECK", enabled && snapshot.canManageModels, card) { mutate { it.retryQualification(model.id) } }
             } else if (item != null && model.installed && model.qualified) {
                 button(if (selected) "SELECTED" else "SELECT", enabled && snapshot.canPrepare && !selected, card, selected) {
@@ -293,8 +300,8 @@ internal class TranscriberManagementDialog(
     private fun panel(selected: Boolean) = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(12), dp(12), dp(12), dp(12))
-        background = surface(if (selected) 0xff342f1c.toInt() else 0xff1a2330.toInt(),
-            if (selected) ACCENT else NativeDialogStyle.TRANSCRIPTION_MODELS.buttonBorder)
+        background = views.surface(if (selected) 0xff342f1c.toInt() else 0xff1a2330.toInt(),
+            if (selected) ACCENT else NativeDialogStyle.TRANSCRIPTION_MODELS.buttonBorder, if (selected) 2 else 1)
     }
 
     private fun heading(value: String) = label(value, 21f, rows, Color.WHITE, true)
@@ -327,7 +334,6 @@ internal class TranscriberManagementDialog(
         val SUCCESS = 0xff58d5a5.toInt()
     }
 
-    private fun megabytes(bytes: Long) = String.format(Locale.US, "%.0f MB", bytes / 1_000_000.0)
     private fun duration(ms: Long) = String.format(Locale.US, "%d:%02d:%02d", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60)
     private fun dp(value: Int) = views.dp(value)
 }
