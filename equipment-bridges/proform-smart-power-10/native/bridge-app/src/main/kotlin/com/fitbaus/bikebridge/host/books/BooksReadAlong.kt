@@ -275,7 +275,7 @@ internal class BooksReadAlong(
 
     private fun diagramSummary(selection: BooksSummarySelection? = summarySelection()): BooksSummaryState.Ready? =
         (summaryState as? BooksSummaryState.Ready)?.takeIf {
-            windows.diagramAvailable && canShowSummary() && recapSelection == null &&
+            windows.visualizationAvailable && canShowSummary() && recapSelection == null &&
                 selection != null && summarySection == selection.section && it.sourceId != null &&
                 it.promptVersion == "section-v1" && it.revision == windows.revision && it !== invalidatedDiagramSummary
         }
@@ -295,7 +295,7 @@ internal class BooksReadAlong(
         diagramConnection = paired
         diagramFuture = diagramWorker.submit {
             val result = try {
-                BooksDiagramState.Ready(RemoteBooksDiagram(paired.connection(), connection).load(identity))
+                RemoteBooksDiagram(paired.connection(), connection).loadVisualization(identity)
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 return@submit
