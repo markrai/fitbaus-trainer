@@ -4,7 +4,6 @@ import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.content.res.ColorStateList
 import android.os.Handler
 import android.os.Looper
@@ -26,6 +25,9 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.AdapterView
+import com.fitbaus.bikebridge.host.ui.NativeDialogStyle
+import com.fitbaus.bikebridge.host.ui.NativeDialogViews
+import com.fitbaus.bikebridge.host.ui.setDialogTreeEnabled
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -40,6 +42,7 @@ internal class SummaryProviderDialog(
     private val loboDiscovery = LoboLanDiscovery(context)
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private val views = NativeDialogViews(context, NativeDialogStyle.SUMMARY_PROVIDER)
     private val rows = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(20), dp(8), dp(20), dp(16))
@@ -662,23 +665,11 @@ internal class SummaryProviderDialog(
         scroll.scrollTo(0, 0)
     }
 
-    private fun enableRows(enabled: Boolean) {
-        fun visit(view: View) {
-            view.isEnabled = enabled
-            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
-        }
-        visit(rows)
-    }
+    private fun enableRows(enabled: Boolean) = setDialogTreeEnabled(rows, enabled)
 
     private fun label(value: String, size: Float = 16f, color: Int = MUTED,
                       parent: LinearLayout = rows): TextView =
-        TextView(context).apply {
-            text = value
-            textSize = size
-            setTextColor(color)
-            setPadding(0, dp(8), 0, dp(4))
-            parent.addView(this, LinearLayout.LayoutParams(-1, -2))
-        }
+        views.label(parent, value, size, color)
 
     private fun field(hintText: String, limit: Int, secret: Boolean = false,
                       parent: LinearLayout = rows): EditText =
@@ -713,32 +704,23 @@ internal class SummaryProviderDialog(
     }
 
     private fun button(value: String, primary: Boolean = false, parent: LinearLayout = rows,
-                       index: Int = -1, action: () -> Unit): Button =
-        Button(context).apply {
-            text = value
-            setTextColor(if (primary) Color.BLACK else Color.WHITE)
-            background = surface(if (primary) ACCENT else FIELD, if (primary) ACCENT else BORDER)
-            val generation = formGeneration
-            setOnClickListener { if (!closed && state.idle && generation == formGeneration) action() }
-            parent.addView(this, index, LinearLayout.LayoutParams(-1, dp(48)).apply {
-                setMargins(0, dp(6), 0, dp(4))
-            })
+                       index: Int = -1, action: () -> Unit): Button {
+        val generation = formGeneration
+        return views.button(parent, value, primary = primary, index = index) {
+            if (!closed && state.idle && generation == formGeneration) action()
         }
-
-    private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density + 0.5f).toInt()
-
-    private fun surface(fill: Int, stroke: Int, width: Int = 1) = GradientDrawable().apply {
-        setColor(fill)
-        cornerRadius = dp(8).toFloat()
-        setStroke(dp(width), stroke)
     }
 
+    private fun dp(value: Int): Int = views.dp(value)
+
+    private fun surface(fill: Int, stroke: Int, width: Int = 1) = views.surface(fill, stroke, width)
+
     private companion object {
-        val ACCENT = 0xffffce1b.toInt()
+        val ACCENT = NativeDialogStyle.SUMMARY_PROVIDER.accent
         val BACKGROUND = 0xff101720.toInt()
         val CARD = 0xff1a2330.toInt()
-        val FIELD = 0xff263341.toInt()
-        val BORDER = 0xff455368.toInt()
+        val FIELD = NativeDialogStyle.SUMMARY_PROVIDER.buttonFill
+        val BORDER = NativeDialogStyle.SUMMARY_PROVIDER.buttonBorder
         val MUTED = 0xffc1cbd7.toInt()
         val SUCCESS = 0xff58d5a5.toInt()
     }

@@ -5,10 +5,8 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
 import android.widget.Button
@@ -16,6 +14,9 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import com.fitbaus.bikebridge.host.ui.NativeDialogStyle
+import com.fitbaus.bikebridge.host.ui.NativeDialogViews
+import com.fitbaus.bikebridge.host.ui.setDialogTreeEnabled
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
@@ -30,6 +31,7 @@ internal class TranscriberManagementDialog(
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
+    private val views = NativeDialogViews(context, NativeDialogStyle.TRANSCRIPTION_MODELS)
     private val rows = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(16), dp(10), dp(16), dp(16))
@@ -125,13 +127,7 @@ internal class TranscriberManagementDialog(
         }
     }
 
-    private fun enableRows(enabled: Boolean) {
-        fun visit(view: View) {
-            view.isEnabled = enabled
-            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
-        }
-        visit(rows)
-    }
+    private fun enableRows(enabled: Boolean) = setDialogTreeEnabled(rows, enabled)
 
     private fun mutate(action: (TranscriberManagement) -> Unit) {
         request {
@@ -275,11 +271,7 @@ internal class TranscriberManagementDialog(
         }
     }
 
-    private fun surface(fill: Int, stroke: Int) = GradientDrawable().apply {
-        setColor(fill)
-        cornerRadius = dp(10).toFloat()
-        setStroke(dp(1), stroke)
-    }
+    private fun surface(fill: Int, stroke: Int) = views.surface(fill, stroke)
 
     private fun panel(selected: Boolean) = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -292,30 +284,14 @@ internal class TranscriberManagementDialog(
 
     private fun label(value: String, size: Float, parent: LinearLayout = rows, color: Int = MUTED,
                       bold: Boolean = false, fullWidth: Boolean = true) {
-        parent.addView(TextView(context).apply {
-            text = value
-            textSize = size
-            setTextColor(color)
-            if (bold) typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, dp(5), 0, dp(3))
-        }, LinearLayout.LayoutParams(if (fullWidth) -1 else -2, -2))
+        views.label(parent, value, size, color, bold, fullWidth)
     }
 
     private fun button(value: String, enabled: Boolean, parent: LinearLayout = rows,
                        primary: Boolean = false, action: () -> Unit) {
-        parent.addView(Button(context).apply {
-            text = value
-            textSize = 15f
-            isEnabled = enabled
-            setTextColor(if (primary) Color.BLACK else Color.WHITE)
-            alpha = if (enabled || value == "SELECTED") 1f else 0.45f
-            background = surface(if (primary) ACCENT else 0xff2c3b4d.toInt(),
-                if (primary) ACCENT else 0xff425166.toInt())
-            setOnClickListener { if (!closed && pending == null) action() }
-        }, LinearLayout.LayoutParams(if (parent.orientation == LinearLayout.HORIZONTAL) 0 else -1, dp(48),
-            if (parent.orientation == LinearLayout.HORIZONTAL) 1f else 0f).apply {
-            setMargins(dp(3), dp(6), dp(3), 0)
-        })
+        views.button(parent, value, enabled, primary, retainOpacity = value == "SELECTED") {
+            if (!closed && pending == null) action()
+        }
     }
 
     private fun progress(value: Long, max: Long, parent: LinearLayout = rows) {
@@ -329,11 +305,11 @@ internal class TranscriberManagementDialog(
     }
 
     private companion object {
-        val ACCENT = 0xff58d5a5.toInt()
+        val ACCENT = NativeDialogStyle.TRANSCRIPTION_MODELS.accent
         val MUTED = 0xffc1cbd7.toInt()
     }
 
     private fun megabytes(bytes: Long) = String.format(Locale.US, "%.0f MB", bytes / 1_000_000.0)
     private fun duration(ms: Long) = String.format(Locale.US, "%d:%02d:%02d", ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60)
-    private fun dp(value: Int) = (value * context.resources.displayMetrics.density + 0.5f).toInt()
+    private fun dp(value: Int) = views.dp(value)
 }
