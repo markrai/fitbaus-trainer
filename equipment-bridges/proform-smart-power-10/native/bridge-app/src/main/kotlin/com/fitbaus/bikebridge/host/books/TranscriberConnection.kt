@@ -30,11 +30,18 @@ internal class TranscriberConnection(val address: String, val token: String) {
             json.optString("source_url", "").takeIf { it.isNotBlank() && !json.isNull("source_url") },
             SummaryProviderCapability.parse(json.optJSONObject("summary_provider")), json.opt("summary_api") == true,
             json.opt("section_plan_api") == true, json.opt("recap_api") == true,
-            cumulativeRecapLimit(json))
+            cumulativeRecapLimit(json), diagramSupported(json))
     }
 
     companion object {
         const val MAX_CUMULATIVE_RECAP_MS = 86_400_000L
+
+        private fun diagramSupported(json: JSONObject): Boolean {
+            if (json.opt("summary_diagram_api") != true) return false
+            val formats = json.optJSONArray("summary_diagram_formats") ?: return false
+            return formats.length() in 1..16 && (0 until formats.length()).all { formats.opt(it) is String } &&
+                (0 until formats.length()).any { formats.opt(it) == "flowchart" }
+        }
 
         private fun cumulativeRecapLimit(json: JSONObject): Long? {
             if (json.opt("cumulative_recap_api") != true) return null
@@ -79,6 +86,7 @@ internal data class TranscriberCapabilities(
     val sectionPlanApi: Boolean = false,
     val recapApi: Boolean = false,
     val cumulativeRecapMaxPositionMs: Long? = null,
+    val summaryDiagramApi: Boolean = false,
 )
 
 internal data class SummaryProviderCapability(val model: String) {
