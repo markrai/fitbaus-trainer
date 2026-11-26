@@ -153,22 +153,22 @@ export function queueOrdinaryBikeTelemetrySample(sample: OrdinaryBikeTelemetrySa
 }
 
 export function flushOrdinaryBikeTelemetryWrites(sessionId: string): Promise<OrdinaryTelemetryFlushResult> {
+  if (sealedOrdinaryTelemetrySessions.has(sessionId)) return Promise.resolve({ ok: false, failedCount: 0, retriedCount: 0, unresolvedFailures: 1, rejectedCount: 0, retryableFailures: 1 });
+  return joinOrdinaryTelemetryDrain(sessionId);
+}
+function joinOrdinaryTelemetryDrain(sessionId: string): Promise<OrdinaryTelemetryFlushResult> {
   const existing = ordinaryFlushes.get(sessionId);
   if (existing)
     return existing;
-  const task = drainOrdinaryBikeTelemetryWrites(sessionId).finally(() => {
-    ordinaryFlushes.delete(sessionId);
-  });
+  const chain = pendingOrdinaryWrites.get(sessionId);
+  if (!chain) return Promise.resolve({ ok: true, failedCount: 0, retriedCount: 0, unresolvedFailures: 0, rejectedCount: 0, retryableFailures: 0 });
+  const task = drainOrdinaryBikeTelemetryWrites(sessionId, chain);
   ordinaryFlushes.set(sessionId, task);
   return task;
 }
-async function drainOrdinaryBikeTelemetryWrites(sessionId: string): Promise<OrdinaryTelemetryFlushResult> {
+async function drainOrdinaryBikeTelemetryWrites(sessionId: string, chain: PendingOrdinaryWriteChain): Promise<OrdinaryTelemetryFlushResult> {
   let failedCount = 0;
   let retriedCount = 0;
-  const chain = pendingOrdinaryWrites.get(sessionId);
-  if (!chain) {
-    return { ok: true, failedCount, retriedCount, unresolvedFailures: 0, rejectedCount: 0, retryableFailures: 0 };
-  }
   chain.flushing = true;
   try {
     for (;;) {
@@ -208,6 +208,7 @@ async function drainOrdinaryBikeTelemetryWrites(sessionId: string): Promise<Ordi
   }
   finally {
     chain.flushing = false;
+    ordinaryFlushes.delete(sessionId);
   }
 }
 
@@ -253,7 +254,7 @@ async function withOrdinaryTelemetryDeletion(sessionId: string, remove: (flush: 
   if (sealedOrdinaryTelemetrySessions.has(sessionId)) throw new Error("Bike evidence deletion already in progress");
   sealedOrdinaryTelemetrySessions.add(sessionId);
   try {
-    const flush = await flushOrdinaryBikeTelemetryWrites(sessionId);
+    const flush = await joinOrdinaryTelemetryDrain(sessionId);
     await remove(flush);
     pendingOrdinaryWrites.delete(sessionId);
   } finally {
@@ -402,30 +403,31 @@ export function flushWorkoutHrWrites(sessionId: string): Promise<boolean> {
   const existing = workoutHrFlushes.get(sessionId);
   if (existing)
     return existing;
-  const task = drainWorkoutHrWrites(sessionId).finally(() => {
-    workoutHrFlushes.delete(sessionId);
-  });
+  const chain = pendingWorkoutHrWrites.get(sessionId);
+  if (!chain) return Promise.resolve(true);
+  const task = drainWorkoutHrWrites(sessionId, chain);
   workoutHrFlushes.set(sessionId, task);
   return task;
 }
-async function drainWorkoutHrWrites(sessionId: string): Promise<boolean> {
-  const chain = pendingWorkoutHrWrites.get(sessionId);
-  if (!chain)
-    return true;
-  for (;;) {
-    const task = chain.tail.then(async () => {
-      for (const sample of Array.from(chain.failed.values())) {
-        await attemptWorkoutHrWrite(chain, sample);
-      }
-    });
-    chain.tail = task;
-    await task;
-    if (chain.tail !== task)
-      continue;
-    const ok = chain.failed.size === 0;
-    if (ok && pendingWorkoutHrWrites.get(sessionId) === chain)
-      pendingWorkoutHrWrites.delete(sessionId);
-    return ok;
+async function drainWorkoutHrWrites(sessionId: string, chain: PendingWorkoutHrWrites): Promise<boolean> {
+  try {
+    for (;;) {
+      const task = chain.tail.then(async () => {
+        for (const sample of Array.from(chain.failed.values())) {
+          await attemptWorkoutHrWrite(chain, sample);
+        }
+      });
+      chain.tail = task;
+      await task;
+      if (chain.tail !== task)
+        continue;
+      const ok = chain.failed.size === 0;
+      if (ok && pendingWorkoutHrWrites.get(sessionId) === chain)
+        pendingWorkoutHrWrites.delete(sessionId);
+      return ok;
+    }
+  } finally {
+    workoutHrFlushes.delete(sessionId);
   }
 }
 export async function getHrSamplesStrict(sessionId: string): Promise<HrSample[]> {
