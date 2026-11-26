@@ -188,7 +188,8 @@ class BridgeUiStateTest {
         )) {
             assertTrue(source.contains(color), color)
         }
-        assertTrue(activity.contains("\"FITBAUS\""))
+        val header = File("src/main/kotlin/com/fitbaus/bikebridge/host/BridgeNavigationHeader.kt").readText()
+        assertTrue(header.contains("\"FITBAUS\""))
         assertTrue(activity.contains("FLAG_KEEP_SCREEN_ON"))
     }
 

@@ -77,7 +77,7 @@ class YouTubeFloatingPlayerTest {
     fun floatingPreviewHasNoHeaderAndCloseOverlaysTheVideoCorner() {
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val builder = activity.substringAfter("private fun buildFloatingPlayer(): FrameLayout {")
-            .substringBefore("private fun buildTitleRow(): View {")
+            .substringBefore("private fun openPairingSettings()")
         assertFalse(builder.contains("val header ="))
         assertFalse(builder.contains("val title ="))
         assertTrue(builder.contains("floating.addView("))
