@@ -273,25 +273,25 @@ internal class BooksReadAlong(
         narrationViewport.setSummaryLongPress(if (text != null && ready != null) ::openDiagram else null)
     }
 
-    private fun diagramSummary(): BooksSummaryState.Ready? =
+    private fun diagramSummary(selection: BooksSummarySelection? = summarySelection()): BooksSummaryState.Ready? =
         (summaryState as? BooksSummaryState.Ready)?.takeIf {
             windows.diagramAvailable && canShowSummary() && recapSelection == null &&
-                summarySection == summarySelection()?.section && it.sourceId != null &&
+                selection != null && summarySection == selection.section && it.sourceId != null &&
                 it.promptVersion == "section-v1" && it.revision == windows.revision && it !== invalidatedDiagramSummary
         }
 
     private fun diagramConnectionMatches(): Boolean = diagramConnection?.isCurrent() == true
 
-    private fun prefetchVisibleDiagram() {
-        if (destroyed || !narrationViewport.summaryIsVisible()) return
-        val ready = diagramSummary() ?: return
-        val selection = summarySelection() ?: return
-        if (diagramScope.matches(selection, ready)) return
+    private fun prefetchVisibleDiagram(): Boolean {
+        if (destroyed || !narrationViewport.summaryIsVisible()) return false
+        val selection = summarySelection(livePosition()) ?: return false
+        val ready = diagramSummary(selection) ?: return false
+        if (diagramScope.matches(selection, ready)) return true
         clearDiagram()
-        val connection = books ?: return
-        val paired = transcriberStore.snapshot() ?: return
+        val connection = books ?: return false
+        val paired = transcriberStore.snapshot() ?: return false
         val identity = BooksDiagramIdentity(selection, ready)
-        val ticket = diagramScope.begin(identity) ?: return
+        val ticket = diagramScope.begin(identity) ?: return true
         diagramConnection = paired
         diagramFuture = diagramWorker.submit {
             val result = try {
@@ -306,7 +306,8 @@ internal class BooksReadAlong(
             main.post {
                 if (diagramScope.ticket !== ticket) return@post
                 diagramFuture = null
-                if (!diagramScope.matches(summarySelection(), diagramSummary()) || !diagramConnectionMatches()) {
+                val liveSelection = summarySelection(livePosition())
+                if (!diagramScope.matches(liveSelection, diagramSummary(liveSelection)) || !diagramConnectionMatches()) {
                     invalidatedDiagramSummary = ticket.identity.summary
                     clearDiagram()
                     return@post
@@ -314,11 +315,14 @@ internal class BooksReadAlong(
                 if (diagramScope.complete(ticket, result) && diagramScope.open) onDiagramChanged(result)
             }
         }
+        return true
     }
 
     private fun openDiagram(): Boolean {
-        if (!narrationViewport.summaryIsVisible() || diagramSummary() == null) return false
-        if (!diagramScope.matches(summarySelection(), diagramSummary())) return false
+        if (!narrationViewport.summaryIsVisible()) return false
+        val selection = summarySelection(livePosition()) ?: return false
+        val ready = diagramSummary(selection) ?: return false
+        if (!diagramScope.matches(selection, ready)) return false
         if (!diagramConnectionMatches() || !diagramScope.show()) return false
         onDiagramChanged(diagramScope.state)
         return true
@@ -507,11 +511,11 @@ internal class BooksReadAlong(
         return if (localMode) BooksSectionResolver.local(section, transcript) else windows.sectionTranscript(section)
     }
 
-    private fun summarySelection(): BooksSummarySelection? {
+    private fun summarySelection(positionMs: Long = currentState.positionMs): BooksSummarySelection? {
         if (visibility != VISIBLE || destroyed || currentState.failed) return null
         val key = request ?: return null
         val session = currentState.session ?: return null
-        val section = sectionPlans.at(session, currentState.positionMs) ?: return null
+        val section = sectionPlans.at(session, positionMs) ?: return null
         return BooksSummarySelection(key.itemId, session, section, windows.revision)
     }
 
