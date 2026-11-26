@@ -104,4 +104,81 @@ class SummaryProviderManagementTest {
         api.cancel()
         assertThrows(IllegalArgumentException::class.java) { api.status() }
     }
+
+    private fun <T> runAction(actions: SummaryProviderActions, action: SummaryProviderAction<T>): T {
+        val ticket = requireNotNull(actions.begin(action))
+        val result = action.execute()
+        assertTrue(actions.complete(action, ticket, result))
+        return result
+    }
+
+    @Test
+    fun dialogActionAdapterUsesWorkflowToGateActualManagementCalls() {
+        val flow = SummaryProviderWorkflow()
+        val actions = SummaryProviderActions(flow, client())
+        runAction(actions, actions.capabilities())
+        assertNull(actions.begin(actions.discover("https://example.test/v1", false, "", "")))
+        assertEquals(1, requests.size)
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(true))
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        assertEquals(SummaryProviderChoice.LOBO, flow.state.choice)
+        runAction(actions, actions.discover("https://192.168.1.200:7869/v1", false, "", "FMV3-14SR"))
+        assertEquals("lobo-nano", flow.state.model)
+        assertEquals("FMV3-14SR", requests.last().third!!.getString("lobo_auth"))
+        assertNull(actions.begin(actions.save()))
+        runAction(actions, actions.test())
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.setConsent(true))
+        runAction(actions, actions.save())
+        assertEquals(SummaryProviderScreen.FINISHED, flow.state.screen)
+        assertFalse(flow.state.authorized)
+        assertTrue(requests.last().third!!.getBoolean("confirm_egress"))
+        assertNull(actions.begin(actions.save()))
+    }
+
+    @Test
+    fun expiredGrantAndClosedAuthorizationCompletionClearClientGrant() {
+        val api = client()
+        val flow = SummaryProviderWorkflow()
+        val actions = SummaryProviderActions(flow, api)
+        runAction(actions, actions.capabilities())
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        val discover = actions.discover("", false, "", "")
+        val ticket = requireNotNull(actions.begin(discover))
+        failure = BooksHttpResponse(401, """{"error":"summary_admin_unavailable"}""")
+        val error = assertThrows(SummaryManagementFailure::class.java) { discover.execute() }
+        assertTrue(actions.fail(ticket, error))
+        assertTrue(flow.state.canAuthorize)
+        assertFalse(flow.state.canSave)
+        assertThrows(IllegalArgumentException::class.java) { api.status() }
+        failure = null
+        val authorize = actions.authorize("ABCD-EFGH")
+        val pending = requireNotNull(actions.begin(authorize))
+        actions.close()
+        val late = authorize.execute()
+        assertFalse(actions.complete(authorize, pending, late))
+        assertEquals(SummaryProviderScreen.CLOSED, flow.state.screen)
+        assertThrows(IllegalArgumentException::class.java) { api.status() }
+    }
+
+    @Test
+    fun adapterDoesNotAcceptAnOldCompletionForNewOperation() {
+        val flow = SummaryProviderWorkflow()
+        val actions = SummaryProviderActions(flow, client())
+        runAction(actions, actions.capabilities())
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        val first = actions.discover("", false, "", "")
+        val old = requireNotNull(actions.begin(first))
+        val result = first.execute()
+        assertTrue(actions.fail(old, IllegalStateException("test")))
+        val second = actions.discover("", false, "", "")
+        val current = requireNotNull(actions.begin(second))
+        assertFalse(actions.complete(first, old, result))
+        assertFalse(actions.fail(old, SummaryManagementFailure(401, "summary_admin_unavailable")))
+        assertTrue(flow.state.pending === current)
+        assertTrue(actions.complete(second, current, second.execute()))
+        assertEquals("lobo-nano", flow.state.model)
+        assertTrue(flow.state.canTest)
+    }
 }
