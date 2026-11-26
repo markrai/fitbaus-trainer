@@ -338,7 +338,7 @@ internal class SummaryProviderDialog(
                                 endpointLabel.visibility = View.GONE
                                 manualAddress.text = "ENTER ADDRESS MANUALLY"
                                 renderLanDevices()
-                                if (state.usesStoredLoboTrust) discoverDraft?.invoke()
+                                if (state.usesStoredLoboTrust || state.canUseLoboTofu) discoverDraft?.invoke()
                             }
                         }
                     }.apply {
@@ -377,7 +377,7 @@ internal class SummaryProviderDialog(
                             endpointLabel.visibility = View.VISIBLE
                             manualAddress.text = "CHOOSE DISCOVERED DEVICE"
                             renderLanDevices()
-                            if (state.usesStoredLoboTrust) discoverDraft?.invoke()
+                            if (state.usesStoredLoboTrust || state.canUseLoboTofu) discoverDraft?.invoke()
                         }
                     }.apply { isAllCaps = false }
                 }
@@ -442,7 +442,7 @@ internal class SummaryProviderDialog(
             hint.text = when {
                 reuse -> "Reuse the active endpoint, credentials and certificate trust."
                 choice == SummaryProviderChoice.OLLAMA -> "Address must be reachable from Transcriber."
-                lobo -> "Select a phone. New devices require the AUTH code shown on the phone; LAN discovery alone does not verify identity."
+                lobo -> "Select a phone. On a trusted LAN you may accept its first certificate, or verify its identity using AUTH."
                 else -> "Custom private CAs can be configured on the server and reused here."
             }
             discoverButton.text = if (reuse) "DISCOVER CURRENT MODELS" else "DISCOVER MODELS"
@@ -480,6 +480,9 @@ internal class SummaryProviderDialog(
                     result.text = "Not tested"
                     result.setTextColor(MUTED)
                     refreshControls()
+                    if (state.choice == SummaryProviderChoice.LOBO && discoveryForPanel.models.isNotEmpty() && state.model != null) {
+                        testButton?.performClick()
+                    }
                 }
             }
             if (value.models.isEmpty()) {
@@ -523,6 +526,7 @@ internal class SummaryProviderDialog(
                 setMargins(0, dp(6), 0, dp(2))
             })
             refreshControls()
+            if (state.choice == SummaryProviderChoice.LOBO && state.model != null) testButton?.performClick()
         }
 
         consent.setOnCheckedChangeListener { _, checked ->
@@ -578,6 +582,7 @@ internal class SummaryProviderDialog(
                 suppressChanges = false
                 clearModelPanel()
                 renderLanDevices()
+                if (!state.verifyLoboAgain && (state.usesStoredLoboTrust || state.canUseLoboTofu)) discoverDraft?.invoke()
             }
         }
         watch(endpoint) {
@@ -596,25 +601,40 @@ internal class SummaryProviderDialog(
         }
         listOf(auth, key).forEach { edit -> watch(edit) { credentialsEdited() } }
         allowHttp.setOnCheckedChangeListener { _, _ -> credentialsEdited() }
+        fun connectDraft(tofu: Boolean) {
+            if (!formCurrent() || !state.canDiscover || (tofu && !state.canUseLoboTofu)) return
+            request(actions.discover(endpoint.text.toString(), allowHttp.isChecked, key.text.toString(),
+                auth.text.toString(), tofu = tofu),
+                if (state.choice == SummaryProviderChoice.LOBO) "Connecting to LOBO…" else "Discovering models…",
+                onStart = { clearModelPanel() }, onFailure = {
+                    suppressChanges = true
+                    auth.text.clear()
+                    suppressChanges = false
+                }) {
+                suppressChanges = true
+                auth.text.clear()
+                suppressChanges = false
+                state.discovery?.let { showDiscovered(it) }
+            }
+        }
+
         discoverDraft = {
             if (formCurrent() && state.canDiscover) {
-                if (state.choice == SummaryProviderChoice.LOBO && !state.usesStoredLoboTrust && state.discovery != null) {
+                if (state.canUseLoboTofu) {
+                    val selected = state.draftEndpoint
+                    confirmChange("Trust this LOBO device?",
+                        "Use first-use trust only on your trusted LAN. The first connection to $selected is not independently authenticated. " +
+                            "Its certificate will be remembered after Save; future connections must match. For stronger identity verification, cancel and choose Verify with AUTH.",
+                        "TRUST & CONNECT") {
+                        if (formCurrent() && state.canUseLoboTofu && state.draftEndpoint == selected) connectDraft(true)
+                    }
+                } else if (state.choice == SummaryProviderChoice.LOBO && !state.usesStoredLoboTrust &&
+                    state.discovery != null) {
                     workflow.credentialsOrTrustEdited()
                     clearModelPanel()
                 } else if (!summaryProviderPresentation(state).showLoboVerification ||
                     SummaryProviderManagement.normalizeLoboAuth(auth.text.toString()) != null) {
-                    request(actions.discover(endpoint.text.toString(), allowHttp.isChecked, key.text.toString(), auth.text.toString()),
-                        if (summaryProviderPresentation(state).showLoboVerification) "Verifying identity and discovering models…" else "Discovering models…",
-                        onStart = { clearModelPanel() }, onFailure = {
-                            suppressChanges = true
-                            auth.text.clear()
-                            suppressChanges = false
-                        }) {
-                        suppressChanges = true
-                        auth.text.clear()
-                        suppressChanges = false
-                        state.discovery?.let { showDiscovered(it) }
-                    }
+                    connectDraft(false)
                 }
             }
         }
@@ -622,7 +642,7 @@ internal class SummaryProviderDialog(
         forgetDevice.setOnClickListener {
             val selected = state.draftEndpoint
             if (formCurrent() && state.canForgetLobo && selected != null) {
-                confirmChange("Forget remembered device?", "Remove stored certificate trust for $selected? You will need the phone's AUTH code to use it again.", "FORGET") {
+                confirmChange("Forget remembered device?", "Remove stored certificate trust for $selected? You will need to trust or verify the device again.", "FORGET") {
                     if (formCurrent() && state.canForgetLobo && state.draftEndpoint == selected) {
                         request(actions.forgetLobo(), "Removing stored certificate trust…", onStart = { clearModelPanel() }) {
                             if (state.screen == SummaryProviderScreen.RELOAD_REQUIRED) finish()
@@ -668,23 +688,32 @@ internal class SummaryProviderDialog(
                 snapshot.authorization?.remembersLobo(snapshot.draftEndpoint) == true &&
                 snapshot.authorization?.matchesTrustedLobo(snapshot.draftEndpoint) != true) View.VISIBLE else View.GONE
             forgetDevice.isEnabled = snapshot.canForgetLobo
-            verifyAgain.visibility = if (snapshot.hasStoredLoboTrust) View.VISIBLE else View.GONE
+            verifyAgain.visibility = if (snapshot.authorized && snapshot.choice == SummaryProviderChoice.LOBO &&
+                snapshot.addressEntered && (snapshot.hasStoredLoboTrust || snapshot.canUseLoboTofu || snapshot.verifyLoboAgain))
+                View.VISIBLE else View.GONE
             verifyAgain.isEnabled = snapshot.editable
-            verifyAgain.text = if (snapshot.verifyLoboAgain) "USE REMEMBERED CERTIFICATE" else "VERIFY DEVICE AGAIN"
+            verifyAgain.text = when {
+                snapshot.verifyLoboAgain && snapshot.hasStoredLoboTrust -> "USE REMEMBERED CERTIFICATE"
+                snapshot.verifyLoboAgain -> "USE FIRST-USE TRUST"
+                snapshot.hasStoredLoboTrust -> "VERIFY DEVICE AGAIN"
+                else -> "VERIFY WITH AUTH"
+            }
             authLabel.visibility = if (needsLoboAuth) View.VISIBLE else View.GONE
             auth.visibility = authLabel.visibility
             if (snapshot.choice == SummaryProviderChoice.LOBO) {
                 hint.text = when {
                     !snapshot.addressEntered -> "Select a phone or enter its address."
                     !snapshot.authorized -> "Unlock changes to check whether the phone is remembered."
-                    snapshot.discovery != null -> "Identity verified for this proposed provider. Test inference and save to activate it."
+                    snapshot.discovery != null -> "HTTPS connection established. Save after a successful inference test."
                     presentation.reuseTrust -> "Stored certificate trust · HTTPS is still verified."
+                    snapshot.canUseLoboTofu -> "First-use trust is available on a trusted LAN. AUTH verification is optional."
                     else -> "Use the AUTH code shown on the phone to verify its identity. This is not an inference password."
                 }
             }
             endpoint.isEnabled = snapshot.editable && snapshot.choice != SummaryProviderChoice.REUSE
             discoverButton.text = presentation.discoveryLabel
-            discoverButton.visibility = if (snapshot.authorized) View.VISIBLE else View.GONE
+            discoverButton.visibility = if (snapshot.authorized && !(snapshot.choice == SummaryProviderChoice.LOBO &&
+                snapshot.discovery != null)) View.VISIBLE else View.GONE
             val discoveryReady = snapshot.canDiscover && (!needsLoboAuth ||
                 SummaryProviderManagement.normalizeLoboAuth(auth.text.toString()) != null)
             discoverButton.isEnabled = discoveryReady
@@ -701,7 +730,9 @@ internal class SummaryProviderDialog(
                 needsLoboAuth -> "Verify the device to discover its models."
                 else -> "Discover models to choose one."
             }
-            testButton?.isEnabled = snapshot.canTest
+            testButton?.isEnabled = snapshot.canTest && snapshot.model != null
+            testButton?.visibility = if (snapshot.choice == SummaryProviderChoice.LOBO &&
+                (snapshot.tested != null || snapshot.pending?.operation == SummaryProviderOperation.TEST)) View.GONE else View.VISIBLE
             consent.isEnabled = snapshot.canTest
             consent.isChecked = snapshot.consent
             save.isEnabled = snapshot.canSave
@@ -728,7 +759,7 @@ internal class SummaryProviderDialog(
                 if (state.choice != previousChoice) configure()
                 refreshControls()
                 if (state.choice == SummaryProviderChoice.LOBO) renderLanDevices()
-                if (state.usesStoredLoboTrust || state.choice == SummaryProviderChoice.REUSE) discoverDraft?.invoke()
+                if (state.usesStoredLoboTrust || state.canUseLoboTofu || state.choice == SummaryProviderChoice.REUSE) discoverDraft?.invoke()
             }
         }
         configure()
@@ -807,7 +838,9 @@ internal class SummaryProviderDialog(
 
     private fun failureMessage(error: Throwable): String = when (error) {
         is SummaryManagementFailure -> when (error.code) {
-            "lobo_identity_verification_required" -> "This endpoint is not remembered by Transcriber. Verify device identity again."
+            "lobo_identity_verification_required" -> "This endpoint is not remembered by Transcriber. Verify with AUTH or update Transcriber for first-use trust."
+            "lobo_already_remembered" -> "This device is already remembered. Reload settings; use its stored trust or verify with AUTH."
+            "lobo_trust_storage_error" -> "Remembered trust could not be read. Use manual AUTH to recover."
             "lobo_trust_registry_full_or_invalid" -> "Remembered device storage is full or invalid. Forget an inactive device before adding another."
             "lobo_trust_active" -> "Switch away from this active provider before forgetting it."
             "lobo_trust_not_found" -> "The device is no longer remembered. Reload settings."

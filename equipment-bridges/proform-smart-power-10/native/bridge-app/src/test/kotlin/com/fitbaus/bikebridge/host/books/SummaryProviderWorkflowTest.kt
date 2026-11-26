@@ -292,6 +292,24 @@ class SummaryProviderWorkflowTest {
     }
 
     @Test
+    fun verificationIsOptionalOnlyWhenFirstUseTrustIsAdvertised() {
+        val flow = configuration()
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited("https://192.168.1.202:7869/v1"))
+        assertFalse(flow.state.canUseLoboTofu)
+        assertTrue(flow.authorized(begin(flow, SummaryProviderOperation.AUTHORIZE), configured.copy(loboTofuSupported = true)))
+        assertTrue(flow.state.canUseLoboTofu)
+        assertFalse(summaryProviderPresentation(flow.state).showLoboVerification)
+        assertTrue(flow.setVerifyLoboAgain(true))
+        assertFalse(flow.state.canUseLoboTofu)
+        assertTrue(summaryProviderPresentation(flow.state).showLoboVerification)
+        assertTrue(flow.setVerifyLoboAgain(false))
+        assertTrue(flow.state.canUseLoboTofu)
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1"))
+        assertFalse(flow.state.canUseLoboTofu)
+    }
+
+    @Test
     fun verificationIsOnlyShownAfterUnlockForSelectedUnrememberedDevice() {
         val flow = configuration()
         assertTrue(flow.choose(SummaryProviderChoice.LOBO))

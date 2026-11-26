@@ -15,6 +15,7 @@ internal data class SummaryProviderStatus(
     val allowHttp: Boolean,
     val storageError: Boolean,
     val trustedLoboEndpoints: List<String> = emptyList(),
+    val loboTofuSupported: Boolean = false,
 ) {
     fun sameEndpointAndTrust(other: SummaryProviderStatus): Boolean =
         configured && other.configured && !storageError && !other.storageError &&
@@ -49,7 +50,7 @@ internal data class SummaryProviderStatus(
             }
             return SummaryProviderStatus(configured, url, model,
                 json.opt("has_api_key") == true, json.opt("custom_ca") == true,
-                json.opt("allow_http") == true, json.opt("storage_error") == true, trusted)
+                json.opt("allow_http") == true, json.opt("storage_error") == true, trusted, json.opt("lobo_tofu_supported") == true)
         }
     }
 }
@@ -100,6 +101,12 @@ internal class SummaryProviderManagement(
             body.put("lobo_auth", requireNotNull(normalizeLoboAuth(auth)))
         }
         return discover(body)
+    }
+
+    fun discoverFirstUseLobo(baseUrl: String): SummaryProviderDiscovery {
+        val endpoint = requireNotNull(canonicalLoboEndpoint(baseUrl))
+        return discover(JSONObject().put("kind", "lobo").put("base_url", endpoint).put("allow_http", false)
+            .put("lobo_tofu", true))
     }
 
     fun discoverRememberedLobo(baseUrl: String): SummaryProviderDiscovery {

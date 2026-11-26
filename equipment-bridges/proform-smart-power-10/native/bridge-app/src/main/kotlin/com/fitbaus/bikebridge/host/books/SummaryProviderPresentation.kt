@@ -27,18 +27,20 @@ internal fun summaryProviderPresentation(state: SummaryProviderWorkflowState): S
     val candidateDetail = when {
         state.tested != null -> "Inference test passed · not saved"
         state.discovery != null -> if (state.choice == SummaryProviderChoice.LOBO)
-            "Device identity verified · test inference before saving" else "Models discovered · test inference before saving"
+            "HTTPS connection established · testing inference" else "Models discovered · test inference before saving"
         state.usesStoredLoboTrust -> "Stored certificate trust · model discovery required"
         state.verifyLoboAgain -> "Verify the replacement certificate before discovery"
         state.choice == SummaryProviderChoice.LOBO && state.addressEntered && !state.authorized -> "Unlock changes to check remembered trust"
+        state.canUseLoboTofu -> "First-use trust available · trusted LAN only"
         state.choice == SummaryProviderChoice.LOBO && state.addressEntered -> "Device identity must be verified"
         else -> "Not saved"
     }
     val verify = state.authorized && state.choice == SummaryProviderChoice.LOBO && state.addressEntered &&
-        !state.usesStoredLoboTrust && state.discovery == null
+        !state.usesStoredLoboTrust && !state.canUseLoboTofu && state.discovery == null
     val label = when {
         verify -> "VERIFY & DISCOVER MODELS"
         state.discovery != null -> "DISCOVER AGAIN"
+        state.canUseLoboTofu -> "CONNECT TO LOBO"
         state.choice == SummaryProviderChoice.REUSE -> "DISCOVER CURRENT MODELS"
         else -> "DISCOVER MODELS"
     }
