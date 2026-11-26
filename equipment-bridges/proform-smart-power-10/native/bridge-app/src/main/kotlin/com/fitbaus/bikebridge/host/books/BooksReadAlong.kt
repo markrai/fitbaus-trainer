@@ -31,6 +31,7 @@ internal class BooksReadAlong(
     private val source: BooksTranscriptSource = LocalBooksTranscriptSource(context),
     onFullscreenRequested: () -> Unit = {},
     private val playbackPosition: (() -> Long)? = null,
+    private val onDiagramChanged: (BooksDiagramState?) -> Unit = {},
 ) : LinearLayout(context) {
     private val transcriberStore = TranscriberConnectionStore(context)
     private var books: BooksConnection? = null
@@ -41,6 +42,10 @@ internal class BooksReadAlong(
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private val summaryWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1))
+    private val diagramWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1))
+    private val diagramScope = BooksDiagramScope()
+    private var diagramFuture: Future<*>? = null
+    private var diagramConnection: TranscriberConnection? = null
     private val summaryScope = BooksSummaryScope()
     private val inlineAttempt = BooksInlineSummaryAttempt()
     private val sectionPlans = BooksSectionPlans()
@@ -126,6 +131,7 @@ internal class BooksReadAlong(
             setTextColor(0xffbfbfbf.toInt())
             setLineSpacing(dp(1).toFloat(), 1.08f)
         }
+        narrationViewport.onSummaryDrawn = ::prefetchVisibleDiagram
         cover.scaleType = ImageView.ScaleType.FIT_CENTER
         cover.contentDescription = "Audiobook cover"
         val stage = FrameLayout(context)
@@ -258,6 +264,80 @@ internal class BooksReadAlong(
         val text = BooksSummaryPresentation.inlineText(summaryState,
             fullscreen && hasNarration && !showing && summarySection != null && canShowSummary())
         narrationViewport.setSummary(text)
+        val ready = diagramSummary()
+        if (diagramScope.ticket != null && !diagramScope.matches(summarySelection(), ready)) clearDiagram()
+        narrationViewport.setSummaryLongPress(if (text != null && ready != null) ::openDiagram else null)
+    }
+
+    private fun diagramSummary(): BooksSummaryState.Ready? =
+        (summaryState as? BooksSummaryState.Ready)?.takeIf {
+            windows.diagramAvailable && canShowSummary() && recapSelection == null &&
+                summarySection == summarySelection()?.section && it.sourceId != null &&
+                it.promptVersion == "section-v1" && it.revision == windows.revision
+        }
+
+    private fun diagramConnectionMatches(): Boolean {
+        val expected = diagramConnection ?: return false
+        val current = transcriberStore.load() ?: return false
+        return expected.address == current.address && expected.token == current.token
+    }
+
+    private fun prefetchVisibleDiagram() {
+        if (destroyed || !narrationViewport.summaryIsVisible()) return
+        val ready = diagramSummary() ?: return
+        val selection = summarySelection() ?: return
+        if (diagramScope.matches(selection, ready)) return
+        clearDiagram()
+        val connection = books ?: return
+        val paired = transcriberStore.load() ?: return
+        val identity = BooksDiagramIdentity(selection, ready)
+        val ticket = diagramScope.begin(identity) ?: return
+        diagramConnection = paired
+        diagramFuture = diagramWorker.submit {
+            val result = try {
+                BooksDiagramState.Ready(RemoteBooksDiagram(paired, connection).load(identity))
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return@submit
+            } catch (_: Exception) {
+                if (Thread.currentThread().isInterrupted) return@submit
+                BooksDiagramState.Unavailable
+            }
+            main.post {
+                if (diagramScope.ticket !== ticket) return@post
+                diagramFuture = null
+                if (!diagramScope.matches(summarySelection(), diagramSummary()) || !diagramConnectionMatches()) {
+                    clearDiagram()
+                    return@post
+                }
+                if (diagramScope.complete(ticket, result) && diagramScope.open) onDiagramChanged(result)
+            }
+        }
+    }
+
+    private fun openDiagram(): Boolean {
+        if (!narrationViewport.summaryIsVisible() || diagramSummary() == null) return false
+        if (!diagramScope.matches(summarySelection(), diagramSummary())) prefetchVisibleDiagram()
+        if (!diagramConnectionMatches() || !diagramScope.show()) return false
+        onDiagramChanged(diagramScope.state)
+        return true
+    }
+
+    fun closeDiagram(): Boolean {
+        if (!diagramScope.open) return false
+        diagramScope.hide()
+        onDiagramChanged(null)
+        return true
+    }
+
+    private fun clearDiagram() {
+        val wasOpen = diagramScope.open
+        diagramScope.clear()
+        diagramConnection = null
+        diagramFuture?.cancel(true)
+        diagramFuture = null
+        diagramWorker.purge()
+        if (wasOpen) onDiagramChanged(null)
     }
 
     private fun maybeStartInlineSummary() {
@@ -400,6 +480,7 @@ internal class BooksReadAlong(
     }
 
     private fun clearSummaryPanel() {
+        clearDiagram()
         summarySection = null
         recapSelection = null
         summaryState = null
@@ -520,11 +601,13 @@ internal class BooksReadAlong(
         destroyed = true
         worker.shutdownNow()
         summaryWorker.shutdownNow()
+        diagramWorker.shutdownNow()
     }
 
     fun render(state: BooksPlayerState) {
         if (visibility != VISIBLE) return
         currentState = state
+        if (diagramScope.ticket != null && !diagramConnectionMatches()) clearDiagram()
         val ready = state.session != null && !state.failed
         val session = state.session
         if (ready && windows.revision != null && !localMode) {
