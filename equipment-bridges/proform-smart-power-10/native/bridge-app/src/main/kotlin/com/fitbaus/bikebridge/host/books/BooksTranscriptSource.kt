@@ -10,7 +10,7 @@ import java.security.MessageDigest
 internal data class BooksTranscriptRequest(val serverAddress: String, val itemId: String) {
     init {
         BooksServer(serverAddress)
-        require(itemId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(BooksIdentifier.isValid(itemId))
     }
 
     fun relativePath(): String {

@@ -21,7 +21,7 @@ internal class BooksDiagramIdentity(
         .joinToString("") { String.format(Locale.US, "%02x", it.toInt() and 255) }
 
     init {
-        require(sourceId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(BooksIdentifier.isValid(sourceId))
         require(selection.expectedRevision == null || selection.expectedRevision == summary.revision)
         require(summary.promptVersion == "section-v1")
     }

@@ -55,7 +55,7 @@ internal class BooksServer(address: String) {
     fun coverUrl(itemId: String): String = "$origin/api/items/${id(itemId)}/cover?width=256"
 
     private fun id(value: String): String {
-        require(value.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(BooksIdentifier.isValid(value))
         return value
     }
 

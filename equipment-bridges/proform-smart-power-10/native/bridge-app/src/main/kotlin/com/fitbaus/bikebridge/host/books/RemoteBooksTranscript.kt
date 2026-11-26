@@ -38,7 +38,7 @@ internal class RemoteBooksTranscript(
     }
 
     fun load(itemId: String, playback: BooksPlaybackSession, positionMs: Long, expectedRevision: String?, retry: Boolean): RemoteBooksWindow {
-        require(itemId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(BooksIdentifier.isValid(itemId))
         val capabilities = transcriber.test(BooksHttp { url, token ->
             http.request(url, mapOf("Authorization" to "Bearer $token"), null)
         })
