@@ -911,6 +911,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     if (typeof (window as any).resetVoiceState === "function") (window as any).resetVoiceState();
     if (startButtonRowEl) startButtonRowEl.style.display = "flex";
     if (startBtnEl) {
+      startBtnEl.disabled = false;
       startBtnEl.innerText = isFreestyleWorkoutSelector(state.day) ? "Start Freestyle Ride" : "Start Workout";
       startBtnEl.onclick = workoutSession.startWorkout;
       startBtnEl.style.display = "block";
@@ -937,6 +938,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     }
     if (startButtonRowEl) startButtonRowEl.style.display = "flex";
     if (startBtnEl) {
+      startBtnEl.disabled = false;
       startBtnEl.innerText = "Restart Test";
       startBtnEl.onclick = workoutSession.restartWorkout;
       startBtnEl.style.display = "block";
@@ -956,12 +958,16 @@ function renderWorkout(state: WorkoutDisplayState) {
     renderMachineGuidance(null);
     syncBikeBridgeGuidance(null, false, false);
     updateRing(state.elapsedSec, state.blocks as any);
-    workoutSession.complete(state.day);
+    const ending = readSessionFinalization(state.day);
+    const saving = ending ? ending.status === "finalizing" : getSession(state.day).summaryEmitted === "false";
+    if (!ending || ending.status === "finalizing") workoutSession.complete(state.day);
     if (phaseDisplayEl) {
-      phaseDisplayEl.innerHTML = '<span class="phase-name">Completed</span>';
+      phaseDisplayEl.innerHTML = ending && ending.status === "save_failed"
+        ? '<span class="phase-name">Save failed</span>'
+        : saving ? '<span class="phase-name">Saving...</span>' : '<span class="phase-name">Completed</span>';
       phaseDisplayEl.dataset.phaseState = "completed";
     }
-    const completedPhrase = isVo2WorkoutSelector(state.day) ? "Test complete" : "Completed";
+    const completedPhrase = ending && ending.cancelled ? "Workout ended" : isVo2WorkoutSelector(state.day) ? "Test complete" : "Completed";
     if (typeof (window as any).announceWorkoutGuidance === "function") {
       (window as any).announceWorkoutGuidance(completedPhrase, null, pendingVo2Cues);
     } else if (typeof (window as any).announcePhaseIfChanged === "function") {
@@ -970,7 +976,8 @@ function renderWorkout(state: WorkoutDisplayState) {
     pendingVo2Cues = [];
     if (startButtonRowEl) startButtonRowEl.style.display = "flex";
     if (startBtnEl) {
-      startBtnEl.innerText = "Restart Workout";
+      startBtnEl.innerText = ending && ending.status === "save_failed" ? "Retry Save" : saving ? "Saving..." : "Restart Workout";
+      startBtnEl.disabled = saving;
       startBtnEl.onclick = workoutSession.restartWorkout;
       startBtnEl.style.display = "block";
     }

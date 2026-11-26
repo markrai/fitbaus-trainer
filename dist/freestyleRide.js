@@ -152,6 +152,8 @@ export function parseSessionFinalization(raw) {
     }
     if (value.evidenceIncomplete === true)
         record.evidenceIncomplete = true;
+    if (typeof value.cancelled === "boolean")
+        record.cancelled = value.cancelled;
     return record;
 }
 export function readSessionFinalization(selector, storage) {
@@ -195,6 +197,8 @@ export function freezeSessionFinalization(input) {
         record.athleteId = input.athleteId;
     if (input.evidenceIncomplete === true)
         record.evidenceIncomplete = true;
+    if (typeof input.cancelled === "boolean")
+        record.cancelled = input.cancelled;
     writeSessionFinalization(record, input.storage);
     return { ok: true, record };
 }

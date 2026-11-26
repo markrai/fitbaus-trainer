@@ -101,76 +101,121 @@ export function discardWorkoutSession(day, storage) {
         void clearOrdinaryBikeTelemetry(sessionId);
     }
 }
-export function handleWorkoutCompletion(day) {
-    if (isFreestyleWorkoutSelector(day)) {
-        return;
-    }
-    const session = getSession(day);
-    if (session.summaryEmitted !== "false" || typeof window.generateWorkoutSummary !== "function")
-        return;
-    const sessionId = session.sessionId;
-    const sessionStart = session.sessionStart;
-    if (!sessionId || !sessionStart)
-        return;
-    const sessionStartTime = parseInt(sessionStart);
-    const sessionAge = Date.now() - sessionStartTime;
-    if (sessionAge > MAX_SESSION_AGE_MS) {
-        console.warn(`Skipping stale workout session for ${day} on completion (age: ${Math.round(sessionAge / (1000 * 60 * 60))} hours)`);
-        discardWorkoutSession(day);
-        return;
-    }
-    const endedAt = Date.now();
-    return window
-        .generateWorkoutSummary(sessionId, sessionStartTime, endedAt, day)
-        .then((summary) => window.emitWorkoutSummary(summary).then(() => summary))
-        .then((summary) => {
-        markSummaryEmitted(day);
-        presentVo2AssessmentIfAny(summary);
-        releaseTransientSessionTelemetry(sessionId);
-        clearActiveSessionOwner({ selector: day, sessionId });
-        disarmBikeBridge();
-    })
-        .catch((error) => {
-        console.error("Error emitting workout summary on completion:", error);
-        if (error.message && error.message.includes("exceeds maximum")) {
-            console.warn("Stale session detected on completion, cleaning up...");
-            discardWorkoutSession(day);
-        }
-    });
+const ordinaryEnds = new WeakMap();
+function matchingOrdinaryEnd(day, sessionId, storage) {
+    const session = getSession(day, storage);
+    const owner = readActiveSessionOwner(storage);
+    return session.sessionId === sessionId &&
+        (!owner || (owner.selector === day && owner.sessionId === sessionId));
 }
-export async function handleWorkoutCancellation(day) {
-    if (isFreestyleWorkoutSelector(day)) {
-        return;
+function endOrdinaryWorkout(day, cancelled, prepare) {
+    if (isFreestyleWorkoutSelector(day))
+        return Promise.resolve("no_session");
+    const storage = localStorage;
+    const session = getSession(day, storage);
+    if (!session.sessionId || !session.sessionStart || !session.startTime) {
+        return Promise.resolve(session.sessionId ? "failed" : "no_session");
     }
-    const session = getSession(day);
-    if (!session.startTime ||
-        !session.sessionId ||
-        !session.sessionStart ||
-        session.summaryEmitted !== "false" ||
-        typeof window.generateWorkoutSummary !== "function") {
-        return;
-    }
-    const sessionStartTime = parseInt(session.sessionStart);
-    const sessionAge = Date.now() - sessionStartTime;
-    if (sessionAge > MAX_SESSION_AGE_MS) {
-        console.warn(`Skipping stale workout session for ${day} (age: ${Math.round(sessionAge / (1000 * 60 * 60))} hours)`);
-        return;
-    }
-    const endedAt = Date.now();
-    try {
-        const summary = await window.generateWorkoutSummary(session.sessionId, sessionStartTime, endedAt, day, { cancelled: true });
-        await window.emitWorkoutSummary(summary);
-        presentVo2AssessmentIfAny(summary);
-        releaseTransientSessionTelemetry(session.sessionId);
-        clearActiveSessionOwner({ selector: day, sessionId: session.sessionId });
-        disarmBikeBridge();
-    }
-    catch (error) {
-        console.error("Error emitting workout summary on cancel:", error);
-        if (error.message && error.message.includes("exceeds maximum")) {
-            console.warn("Stale session detected, cleaning up...");
+    const sessionId = session.sessionId;
+    if (!matchingOrdinaryEnd(day, sessionId, storage))
+        return Promise.resolve("superseded");
+    if (session.summaryEmitted === "true") {
+        const finalization = readSessionFinalization(day, storage);
+        if (finalization && finalization.sessionId === sessionId) {
+            releaseTransientSessionTelemetry(sessionId, storage);
+            clearSessionFinalization(day, storage);
+            clearActiveSessionOwner({ selector: day, sessionId }, storage);
         }
+        return Promise.resolve("already_saved");
     }
+    if (session.summaryEmitted !== "false")
+        return Promise.resolve("failed");
+    let pending = ordinaryEnds.get(storage);
+    if (!pending) {
+        pending = new Map();
+        ordinaryEnds.set(storage, pending);
+    }
+    const existing = pending.get(sessionId);
+    if (existing)
+        return existing;
+    const prior = readSessionFinalization(day, storage);
+    if (prior && prior.sessionId !== sessionId)
+        return Promise.resolve("superseded");
+    const startedAtMs = Number(session.sessionStart);
+    const endedAtMs = prior ? prior.endedAtMs : Date.now();
+    if (!prior && endedAtMs - startedAtMs > MAX_SESSION_AGE_MS) {
+        discardWorkoutSession(day, storage);
+        return Promise.resolve("no_session");
+    }
+    const task = Promise.resolve().then(async () => {
+        if (!matchingOrdinaryEnd(day, sessionId, storage))
+            return "superseded";
+        try {
+            const freeze = freezeSessionFinalization({
+                selector: day,
+                sessionId,
+                startedAtMs,
+                endedAtMs,
+                activeDurationSec: activeElapsedSeconds(session.startTime, session.paused, session.pausedElapsed, endedAtMs),
+                pausedDurationSec: totalPausedDurationSec(session, endedAtMs),
+                cancelled,
+                storage,
+            });
+            if (freeze.ok === false)
+                return "superseded";
+            const record = freeze.record;
+            markSessionFinalizationInProgress(day, storage);
+            disarmBikeBridge();
+            if (typeof window.releaseWakeLock === "function") {
+                void window.releaseWakeLock();
+            }
+            if (!prior && prepare)
+                prepare(record.endedAtMs);
+            if (typeof window.generateWorkoutSummary !== "function" ||
+                typeof window.emitWorkoutSummary !== "function")
+                throw new Error("Summary persistence unavailable");
+            const summary = await window.generateWorkoutSummary(sessionId, record.startedAtMs, record.endedAtMs, day, { cancelled: record.cancelled === true });
+            if (!matchingOrdinaryEnd(day, sessionId, storage))
+                return "superseded";
+            if (summary.external_session_id !== sessionId)
+                throw new Error("Summary session identity mismatch");
+            const saved = await window.emitWorkoutSummary(summary);
+            if (!matchingOrdinaryEnd(day, sessionId, storage))
+                return "superseded";
+            if (saved !== true)
+                throw new Error("Workout summary was not persisted");
+            markSummaryEmitted(day, storage);
+            releaseTransientSessionTelemetry(sessionId, storage);
+            clearSessionFinalization(day, storage);
+            clearActiveSessionOwner({ selector: day, sessionId }, storage);
+            try {
+                presentVo2AssessmentIfAny(summary);
+            }
+            catch (error) {
+                console.error("Could not present saved workout assessment:", error);
+            }
+            return "saved";
+        }
+        catch (error) {
+            console.error("Error finalizing workout:", error);
+            if (!matchingOrdinaryEnd(day, sessionId, storage))
+                return "superseded";
+            const current = readSessionFinalization(day, storage);
+            if (current && current.sessionId === sessionId)
+                markSessionFinalizationSaveFailed(day, storage);
+            return "failed";
+        }
+    }).finally(() => {
+        pending.delete(sessionId);
+    });
+    pending.set(sessionId, task);
+    return task;
+}
+export function handleWorkoutCompletion(day) {
+    return endOrdinaryWorkout(day, false);
+}
+export function handleWorkoutCancellation(day, prepare) {
+    return endOrdinaryWorkout(day, true, prepare);
 }
 let freestyleFinishInFlight = null;
 async function completeFreestyleCleanupAfterSave(day, finalization, summary, storage) {

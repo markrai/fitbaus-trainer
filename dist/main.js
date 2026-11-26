@@ -19,7 +19,7 @@ import { applyRuntimeDocumentState } from "./platform/runtime.js";
 import { startBikeBridgeRuntime } from "./platform/bikeBridgeRuntime.js";
 import { getEquipmentSelection, setSelectedMachine } from "./machines/selection.js";
 import { FREESTYLE_WORKOUT_SELECTOR_ID, collectProtectedFreestyleSessionIds, } from "./freestyleRide.js";
-import { cleanupStaleWorkoutSessions, recoverActiveOrFinalizingSession } from "./workoutSessionCoordinator.js";
+import { cleanupStaleWorkoutSessions, recoverActiveOrFinalizingSession, collectProtectedOrdinarySessionIds } from "./workoutSessionCoordinator.js";
 import { setSelectedDay } from "./uiControls.js";
 applyRuntimeDocumentState();
 async function bootstrap() {
@@ -43,7 +43,10 @@ async function bootstrap() {
     loadProfile();
     loadProfileFitness();
     cleanupStaleWorkoutSessions();
-    void cleanupAbandonedOrdinaryBikeTelemetry(Date.now(), undefined, collectProtectedFreestyleSessionIds(undefined, getSession(FREESTYLE_WORKOUT_SELECTOR_ID).sessionId));
+    void cleanupAbandonedOrdinaryBikeTelemetry(Date.now(), undefined, [
+        ...collectProtectedFreestyleSessionIds(undefined, getSession(FREESTYLE_WORKOUT_SELECTOR_ID).sessionId),
+        ...collectProtectedOrdinarySessionIds(),
+    ]);
     await initializeWorkoutPlan();
     if (!getEquipmentSelection().bike) {
         setSelectedMachine("bike", "proform-smart-power-10");

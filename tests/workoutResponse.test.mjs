@@ -604,7 +604,7 @@ test("replacing session A clears only A's abandoned ordinary telemetry", async (
   }
 });
 
-test("restart clears the old session's ordinary telemetry", async () => {
+test("restart clears the old session's ordinary telemetry only after confirmed summary persistence", async () => {
   await resetWorkoutStorageForTests();
   const previousStorage = globalThis.localStorage;
   const previousWindow = globalThis.window;
@@ -613,16 +613,21 @@ test("restart clears the old session's ordinary telemetry", async () => {
   globalThis.window = {
     getSelectedDay: () => "Tuesday",
     updateDisplay: () => undefined,
+    generateWorkoutSummary,
+    emitWorkoutSummary,
   };
   try {
     await initDB();
-    startSession("Tuesday", Date.now(), "session-restart", "bike", storage);
+    startSession("Tuesday", Date.now() - 60_000, "session-restart", "bike", storage);
     queueOrdinaryBikeTelemetrySample(rawSample({
       sessionId: "session-restart",
       sourceSampleId: "snapshot-restart",
     }));
     await restartWorkout();
     assert.deepEqual(await getOrdinaryBikeTelemetrySamples("session-restart"), []);
+    const persisted = (await getAllWorkoutSummaries()).filter(row => row.summary.external_session_id === "session-restart");
+    assert.equal(persisted.length, 1);
+    assert.equal(persisted[0].summary.cancelled, true);
   } finally {
     globalThis.localStorage = previousStorage;
     globalThis.window = previousWindow;

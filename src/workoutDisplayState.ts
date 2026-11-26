@@ -3,7 +3,7 @@ import { getHrTargets } from "./workoutData.js";
 import { getSession } from "./sessionStore.js";
 import { assessmentBasedWorkloadForPhase } from "./personalizedPrescription.js";
 import { isVo2WorkoutSelector, vo2ProtocolDisplayName } from "./vo2Protocol.js";
-import { FREESTYLE_WORKOUT_LABEL, freestyleWorkoutBlocksText, isFreestyleWorkoutSelector } from "./freestyleRide.js";
+import { FREESTYLE_WORKOUT_LABEL, freestyleWorkoutBlocksText, isFreestyleWorkoutSelector, readSessionFinalization } from "./freestyleRide.js";
 import { genericWorkoutBlocksText, vo2WorkoutBlocksText } from "./vo2AssessmentView.js";
 import { getActiveWorkoutActivity } from "./workoutActivity.js";
 import { findResolvedPhaseTarget, formatResolvedHeartRateTarget, resolveWorkoutPrescription } from "./workoutPrescription.js";
@@ -107,6 +107,11 @@ export function deriveWorkoutState(
 
   if (!startTime) {
     return { screen: "idle", day, plan, workoutMetadata, base, blocks, workoutBlocksText };
+  }
+
+  const finalization = !isFreestyleWorkoutSelector(day) ? readSessionFinalization(day) : null;
+  if (finalization && finalization.sessionId === session.sessionId) {
+    return { screen: "completed", day, plan, workoutMetadata, base, blocks, workoutBlocksText, elapsedSec: finalization.activeDurationSec };
   }
 
   if (isVo2WorkoutSelector(day) && session.vo2ProtocolRestartRequired) {
