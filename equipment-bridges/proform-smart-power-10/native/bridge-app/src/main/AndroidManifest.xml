@@ -51,7 +51,8 @@
             android:name=".PairingActivity"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="false"
-            android:screenOrientation="landscape" />
+            android:screenOrientation="landscape"
+            android:windowSoftInputMode="adjustResize" />
         <service
             android:name=".speech.OfflineVoiceSearchService"
             android:exported="false"

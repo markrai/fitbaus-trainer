@@ -29,6 +29,17 @@ class NativeDialogStyleTest {
     }
 
     @Test
+    fun modelAndSummarySurfacesShareTheMustardPalette() {
+        val summary = NativeDialogStyle.SUMMARY_PROVIDER
+        val models = NativeDialogStyle.TRANSCRIPTION_MODELS
+        assertEquals(0xffffce1b.toInt(), models.accent)
+        assertEquals(summary.accent, models.accent)
+        assertEquals(summary.cornerDp, models.cornerDp)
+        assertEquals(summary.buttonFill, models.buttonFill)
+        assertEquals(summary.buttonBorder, models.buttonBorder)
+    }
+
+    @Test
     fun densityConversionPreservesLegacyRoundedPixelSizes() {
         assertEquals(0, dialogDp(0, 1.5f))
         assertEquals(48, dialogDp(48, 1f))

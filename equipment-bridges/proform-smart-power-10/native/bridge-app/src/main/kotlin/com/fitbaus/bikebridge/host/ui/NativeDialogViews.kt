@@ -52,6 +52,7 @@ internal class NativeDialogViews(
         isEnabled = enabled
         setTextColor(if (primary) Color.BLACK else Color.WHITE)
         alpha = style.buttonAlpha(enabled, retainOpacity)
+        backgroundTintList = null
         background = surface(if (primary) style.accent else style.buttonFill,
             if (primary) style.accent else style.buttonBorder)
         setOnClickListener { action() }
