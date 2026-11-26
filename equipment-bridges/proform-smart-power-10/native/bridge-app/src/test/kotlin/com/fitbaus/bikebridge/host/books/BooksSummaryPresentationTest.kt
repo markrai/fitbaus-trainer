@@ -46,4 +46,25 @@ class BooksSummaryPresentationTest {
         assertEquals("Section 2 of 2 · 1:10:00 – 1:20:00",
             BooksSummaryPresentation.range(BooksSection(4_200_000, 4_800_000, chapter, 2, 2)))
     }
+
+    @Test
+    fun inlineSummaryShowsOnlyNonblankReadyTextInEligibleNarration() {
+        val ready = BooksSummaryState.Ready(revision, "  A summary.  ", "test-model", "section-v1", "b".repeat(64), true)
+        assertEquals("A summary.", BooksSummaryPresentation.inlineText(ready, true))
+        assertEquals(null, BooksSummaryPresentation.inlineText(ready, false))
+        assertEquals(null, BooksSummaryPresentation.inlineText(ready.copy(summary = " "), true))
+        for (state in listOf(null, BooksSummaryState.Preparing, BooksSummaryState.Pending(revision, listOf(0L)),
+                BooksSummaryState.Empty(revision), BooksSummaryState.Failed(BooksSummaryFailure.BUSY),
+                BooksSummaryState.Cancelled, BooksSummaryState.Reducing(revision, 1, 2),
+                BooksSummaryState.MissingCoverage(revision, 1))) {
+            assertEquals(null, BooksSummaryPresentation.inlineText(state, true))
+        }
+    }
+
+    @Test
+    fun inlineFontRemainsSmallerAtEveryNarrationSetting() {
+        for (size in 28..52) assertTrue(BooksSummaryPresentation.inlineSizeSp(size) < size)
+        assertEquals(21.6f, BooksSummaryPresentation.inlineSizeSp(36), 0.01f)
+    }
+
 }
