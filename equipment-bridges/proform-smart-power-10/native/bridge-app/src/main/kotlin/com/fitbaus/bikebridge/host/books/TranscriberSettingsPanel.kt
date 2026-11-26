@@ -256,6 +256,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
             }
             Tab.Summarization -> {
                 views.label(content, "Summarization provider", 21f, Color.WHITE, true)
+                views.label(content, "Save provider changes before switching tabs.", 14f, MUTED)
                 summaryPanel = SummaryProviderDialog(context, connection).also { it.attach(content) }
             }
         }
