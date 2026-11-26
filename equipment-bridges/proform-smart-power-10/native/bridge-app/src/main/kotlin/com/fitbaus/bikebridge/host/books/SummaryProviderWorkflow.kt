@@ -43,6 +43,8 @@ internal data class SummaryProviderWorkflowState(
     val reusesRememberedLobo: Boolean get() = !verifyLoboAgain && choice == SummaryProviderChoice.LOBO &&
         authorization?.remembersLobo(draftEndpoint) == true
     val usesStoredLoboTrust: Boolean get() = reusesCurrentLobo || reusesRememberedLobo
+    val canUseLoboTofu: Boolean get() = choice == SummaryProviderChoice.LOBO && addressEntered &&
+        !hasStoredLoboTrust && !verifyLoboAgain && authorization?.let { it.loboTofuSupported && !it.storageError } == true
     val canDiscover: Boolean get() = editable && authorized &&
         (choice != SummaryProviderChoice.LOBO || SummaryProviderManagement.canonicalLoboEndpoint(draftEndpoint) != null)
     val canTest: Boolean get() = editable && authorized && discovery != null
@@ -84,7 +86,8 @@ internal class SummaryProviderWorkflow {
     }
 
     fun setVerifyLoboAgain(value: Boolean): Boolean {
-        if (!state.editable || !state.hasStoredLoboTrust || state.verifyLoboAgain == value) return false
+        if (!state.editable || state.choice != SummaryProviderChoice.LOBO || !state.addressEntered || !state.authorized ||
+            (!state.hasStoredLoboTrust && state.authorization?.loboTofuSupported != true) || state.verifyLoboAgain == value) return false
         state = state.withoutDiscovery().copy(verifyLoboAgain = value)
         return true
     }
