@@ -54,26 +54,27 @@ internal class BooksDiagramScope {
 
 
 internal class BooksSummaryDrawGate {
+    class Ticket(val generation: Long)
     private var generation = 0L
-    private var pending: Long? = null
+    private var pending: Ticket? = null
     private var consumed: Long? = null
 
     fun changed() {
         generation++
     }
 
-    fun begin(visible: Boolean): Long? {
+    fun begin(visible: Boolean): Ticket? {
         if (!visible || pending != null || consumed == generation) return null
-        return generation.also { pending = it }
+        return Ticket(generation).also { pending = it }
     }
 
-    fun finish(ticket: Long, visible: Boolean, deliver: () -> Boolean) {
-        if (pending != ticket) return
+    fun finish(ticket: Ticket, visible: Boolean, deliver: () -> Boolean) {
+        if (pending !== ticket) return
         pending = null
-        if (ticket == generation && visible && deliver()) consumed = ticket
+        if (ticket.generation == generation && visible && deliver()) consumed = ticket.generation
     }
 
-    fun cancel(ticket: Long) {
-        if (pending == ticket) pending = null
+    fun cancel(ticket: Ticket) {
+        if (pending === ticket) pending = null
     }
 }
