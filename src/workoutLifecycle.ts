@@ -215,6 +215,8 @@ export interface OrdinaryRecoveryTarget {
   summaryEmitted: string | null;
   finalizationId: string | null;
   finalizationStatus: string | null;
+  finalizationStartedAtMs: number | null;
+  finalizationEndedAtMs: number | null;
   ownerId: string | null;
 }
 
@@ -234,6 +236,8 @@ export function getOrdinaryRecoveryTarget(day: string, storage?: SessionStorage)
     summaryEmitted: session.summaryEmitted,
     finalizationId: finalization ? finalization.sessionId : null,
     finalizationStatus: finalization ? finalization.status : null,
+    finalizationStartedAtMs: finalization ? finalization.startedAtMs : null,
+    finalizationEndedAtMs: finalization ? finalization.endedAtMs : null,
     ownerId: owner && owner.selector === day ? owner.sessionId : null,
   };
 }
@@ -246,6 +250,13 @@ export async function discardOrdinaryRecovery(target: OrdinaryRecoveryTarget, st
   const currentOwner = readActiveSessionOwner(storage);
   if (currentOwner && currentOwner.selector !== day && currentOwner.sessionId === id)
     return false;
+  if (id) {
+    for (const selector of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID, FREESTYLE_WORKOUT_SELECTOR_ID]) {
+      if (selector === day) continue;
+      const otherFinalization = readSessionFinalization(selector, storage);
+      if (getSession(selector, storage).sessionId === id || (otherFinalization && otherFinalization.sessionId === id)) return false;
+    }
+  }
   const pending = ordinaryEnds.get(storage);
   if (id && pending && pending.has(id))
     return false;
@@ -260,6 +271,7 @@ export async function discardOrdinaryRecovery(target: OrdinaryRecoveryTarget, st
   try {
     if (id) {
       const saved = await getWorkoutSummaryBySessionIdStrict(id);
+      if (JSON.stringify(getOrdinaryRecoveryTarget(day, storage)) !== JSON.stringify(target)) return false;
       if (!saved)
         await deleteUnpersistedWorkoutEvidenceAtomic(id, true);
     }
@@ -306,8 +318,8 @@ function endOrdinaryWorkout(day: string, cancelled: boolean, prepare?: (endedAtM
       markSummaryEmitted(day, storage, finalization.activeDurationSec);
       releaseTransientSessionTelemetry(sessionId, storage);
       clearSessionFinalization(day, storage);
-      clearActiveSessionOwner({ selector: day, sessionId }, storage);
     }
+    clearActiveSessionOwner({ selector: day, sessionId }, storage);
     return Promise.resolve("already_saved");
   }
   if (session.summaryEmitted !== "false")

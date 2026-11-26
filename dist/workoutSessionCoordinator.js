@@ -65,7 +65,7 @@ export function createWorkoutSessionCoordinator(effects, overrides = {}) {
         const owner = readActiveSessionOwner();
         if (owner) {
             const session = getSession(owner.selector);
-            if (session.sessionId === owner.sessionId && session.startTime) {
+            if (session.sessionId === owner.sessionId && session.startTime && session.summaryEmitted !== "true") {
                 return owner.selector;
             }
         }
@@ -78,7 +78,7 @@ export function createWorkoutSessionCoordinator(effects, overrides = {}) {
         const owner = readActiveSessionOwner();
         if (owner) {
             const session = getSession(owner.selector);
-            if (session.sessionId === owner.sessionId && session.startTime && day !== owner.selector) {
+            if (session.sessionId === owner.sessionId && session.startTime && session.summaryEmitted !== "true" && day !== owner.selector) {
                 setSelectedDay(owner.selector);
                 return { day: owner.selector, blocked: true };
             }
@@ -210,7 +210,8 @@ export function cleanupStaleWorkoutSessions(overrides = {}) {
     ];
     days.forEach((day) => {
         const session = getSession(day);
-        if (session.sessionStart && isSessionStale(day) && !readSessionFinalization(day)) {
+        if (session.sessionStart && session.startTime && session.sessionId &&
+            (session.summaryEmitted === "true" || session.summaryEmitted === "false") && isSessionStale(day) && !readSessionFinalization(day)) {
             const hours = Math.round((Date.now() - parseInt(session.sessionStart)) / (1000 * 60 * 60));
             console.warn(`Cleaning up stale workout session for ${day} (age: ${hours} hours)`);
             discardWorkoutSession(day);

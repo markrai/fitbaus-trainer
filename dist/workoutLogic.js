@@ -253,7 +253,8 @@ function workoutStartBlockReason(day, storage) {
         if ((session.startTime || session.sessionId) &&
             (isFreestyleWorkoutSelector(selector) || session.summaryEmitted !== "true"))
             return "active";
-        if (owner && owner.selector === selector && (session.sessionId || session.startTime))
+        if (owner && owner.selector === selector && (session.sessionId || session.startTime) &&
+            (session.summaryEmitted !== "true" || session.sessionId !== owner.sessionId || isFreestyleWorkoutSelector(selector)))
             return "active";
     }
     return null;
@@ -283,7 +284,9 @@ function claimWorkoutStart(day, sessionId) {
     const owner = readActiveSessionOwner();
     if (owner) {
         const existing = getSession(owner.selector);
-        if (existing.sessionId || existing.startTime || readSessionFinalization(owner.selector) || readFreestyleAuthorityFault(owner.selector)) {
+        if (((existing.sessionId || existing.startTime) &&
+            (existing.summaryEmitted !== "true" || existing.sessionId !== owner.sessionId || isFreestyleWorkoutSelector(owner.selector))) ||
+            readSessionFinalization(owner.selector) || readFreestyleAuthorityFault(owner.selector)) {
             showWorkoutStartError("A workout is already in progress or requires recovery.");
             return false;
         }
@@ -868,7 +871,7 @@ async function tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, storage, 
             return undefined;
         }
         const current = getSession(day, store);
-        if (!current.vo2ProtocolRuntime || vo2CheckpointKey(current, elapsedSec) !== key)
+        if (current.summaryEmitted === "true" || !current.vo2ProtocolRuntime || vo2CheckpointKey(current, elapsedSec) !== key)
             return undefined;
         if (!samples) {
             const freshHr = readFreshLiveHrBpm();

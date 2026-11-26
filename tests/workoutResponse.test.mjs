@@ -36,9 +36,9 @@ import { emitWorkoutSummary, generateWorkoutSummary } from "../dist/workoutSumma
 import { buildSisuWorkoutPayload } from "../dist/sisuSync.js";
 import { FITNESS_STATE_STORAGE_KEY } from "../dist/fitnessState.js";
 import { ATHLETE_PROFILE_STORAGE_KEY, migrateLegacyProfile } from "../dist/profile.js";
-import { startSession, getSession } from "../dist/sessionStore.js";
-import { handleWorkoutCompletion } from "../dist/workoutLifecycle.js";
-import { readSessionFinalization } from "../dist/freestyleRide.js";
+import { startSession, getSession, getCompletedWorkoutElapsed } from "../dist/sessionStore.js";
+import { discardOrdinaryRecovery, getOrdinaryRecoveryTarget, handleWorkoutCompletion } from "../dist/workoutLifecycle.js";
+import { readSessionFinalization, writeSessionFinalization } from "../dist/freestyleRide.js";
 import { transformWorkoutData } from "../dist/workoutData.js";
 import {
   ORDINARY_BIKE_TELEMETRY_SCHEMA_VERSION_V1,
@@ -745,6 +745,71 @@ test("real summary finalization waits for pending HR and preserves evidence when
     if (release) release();
     setWorkoutHrPersistenceHooksForTests(null);
     setOrdinaryTelemetryWriteFailureInjectorForTests(null);
+    globalThis.localStorage = previousStorage;
+    globalThis.window = previousWindow;
+    await resetWorkoutStorageForTests();
+  }
+});
+
+test("committed summary is recovered without replaying emission or learning", async () => {
+  await resetWorkoutStorageForTests();
+  const previousStorage = globalThis.localStorage;
+  const previousWindow = globalThis.window;
+  const storage = memoryStorage();
+  globalThis.localStorage = storage;
+  const day = "Tuesday";
+  const id = "saved-before-marker";
+  const start = Date.now() - 60_000;
+  const end = start + 42_000;
+  globalThis.window = {
+    generateWorkoutSummary: async () => { throw new Error("must not regenerate"); },
+    emitWorkoutSummary: async () => { throw new Error("must not emit twice"); },
+  };
+  try {
+    startSession(day, start, id, "bike", storage);
+    writeSessionFinalization({ schemaVersion: 1, selector: day, sessionId: id, startedAtMs: start, endedAtMs: end,
+      activeDurationSec: 42, pausedDurationSec: 0, status: "save_failed", cancelled: true }, storage);
+    assert.equal(await storeWorkoutSummary(summary(id, { startedAt: new Date(start).toISOString(),
+      endedAt: new Date(end).toISOString(), cancelled: true })), true);
+    assert.equal(await handleWorkoutCompletion(day), "already_saved");
+    assert.equal(getSession(day, storage).summaryEmitted, "true");
+    assert.equal(getCompletedWorkoutElapsed(day, storage), 42);
+    assert.equal(readSessionFinalization(day, storage), null);
+    assert.equal((await getAllWorkoutSummaries()).length, 1);
+  } finally {
+    globalThis.localStorage = previousStorage;
+    globalThis.window = previousWindow;
+    await resetWorkoutStorageForTests();
+  }
+});
+
+test("explicit recovery discard deletes only the selected unsaved evidence and preserves a saved row", async () => {
+  await resetWorkoutStorageForTests();
+  const previousStorage = globalThis.localStorage;
+  const previousWindow = globalThis.window;
+  const storage = memoryStorage();
+  globalThis.localStorage = storage;
+  globalThis.window = {};
+  try {
+    const day = "Tuesday";
+    const id = "unfinished-old";
+    const start = Date.now() - 60_000;
+    startSession(day, start, "newer-live", "bike", storage);
+    writeSessionFinalization({ schemaVersion: 1, selector: day, sessionId: id, startedAtMs: start, endedAtMs: start + 20_000,
+      activeDurationSec: 20, pausedDurationSec: 0, status: "save_failed" }, storage);
+    await storeHrSample(id, 1, 120);
+    await storeHrSample("newer-live", 2, 140);
+    assert.equal(await discardOrdinaryRecovery(getOrdinaryRecoveryTarget(day, storage), storage), true);
+    assert.equal(getSession(day, storage).sessionId, "newer-live");
+    assert.equal(readSessionFinalization(day, storage), null);
+    assert.deepEqual(await getHrSamples(id), []);
+    assert.equal((await getHrSamples("newer-live")).length, 1);
+    await storeWorkoutSummary(summary("newer-live"));
+    assert.equal(await discardOrdinaryRecovery(getOrdinaryRecoveryTarget(day, storage), storage), true);
+    assert.equal(getSession(day, storage).sessionId, null);
+    assert.equal((await getAllWorkoutSummaries()).length, 1);
+    assert.equal((await getHrSamples("newer-live")).length, 1);
+  } finally {
     globalThis.localStorage = previousStorage;
     globalThis.window = previousWindow;
     await resetWorkoutStorageForTests();

@@ -63,7 +63,7 @@ test("active owner blocks selector changes, but a stale owner does not", () => {
   assert.equal(f.coordinator.resolveOwnedWorkoutDay(), "Tuesday");
   assert.deepEqual(f.coordinator.selectWorkoutDay("Friday"), { day: "Tuesday", blocked: true });
   f.sessions.Tuesday.sessionId = "replacement";
-  assert.deepEqual(f.coordinator.selectWorkoutDay("Friday"), { day: "Friday", blocked: false });
+  assert.deepEqual(f.coordinator.selectWorkoutDay("Friday"), { day: "Tuesday", blocked: true });
   f.setFinalization({ sessionId: "ride" });
   assert.equal(f.coordinator.resolveOwnedWorkoutDay(), FREESTYLE_WORKOUT_SELECTOR_ID);
 });
@@ -150,7 +150,7 @@ test("bootstrap recovery prioritizes pending finalization over the active owner"
 
 test("stale cleanup deliberately excludes Freestyle evidence", () => {
   const f = fixture();
-  f.sessions.Monday = { sessionStart: "1" };
+  f.sessions.Monday = { sessionStart: "1", startTime: "1", sessionId: "stale", summaryEmitted: "false" };
   f.sessions[FREESTYLE_WORKOUT_SELECTOR_ID] = { sessionStart: "1" };
   cleanupStaleWorkoutSessions(f.dependencies);
   assert.deepEqual(f.events, [["discardStale", "Monday"]]);
@@ -185,4 +185,18 @@ test("completed render does not release a wake lock or reenter already saved lif
   f.setFinalization({ sessionId: "old" });
   f.coordinator.complete("Monday");
   assert.deepEqual(f.events, [["complete", "Monday"]]);
+});
+
+test("bootstrap selects incomplete ordinary finalization without guessing an identity", async () => {
+  const f = fixture();
+  f.dependencies.readSessionFinalization = day => day === "Thursday" ? { sessionId: "missing-live", status: "save_failed" } : null;
+  await recoverActiveOrFinalizingSession(day => f.events.push(["select", day]), f.dependencies);
+  assert.deepEqual(f.events, [["select", "Thursday"]]);
+});
+
+test("bootstrap selects ownerless ordinary session for recovery", async () => {
+  const f = fixture();
+  f.sessions.Friday = { sessionId: "ownerless", startTime: "1", summaryEmitted: "false" };
+  await recoverActiveOrFinalizingSession(day => f.events.push(["select", day]), f.dependencies);
+  assert.deepEqual(f.events, [["select", "Friday"]]);
 });

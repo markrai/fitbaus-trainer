@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BPM_TIMEOUT_MS, deriveWorkoutState } from "../dist/workoutDisplayState.js";
 import { resolveWorkoutPrescription } from "../dist/workoutPrescription.js";
-import { FREESTYLE_WORKOUT_SELECTOR_ID, FREESTYLE_WORKOUT_LABEL, freestylePlanBlocks } from "../dist/freestyleRide.js";
+import { FREESTYLE_WORKOUT_SELECTOR_ID, FREESTYLE_WORKOUT_LABEL, freestylePlanBlocks, writeSessionFinalization } from "../dist/freestyleRide.js";
 import { VO2_WORKOUT_SELECTOR_ID, vo2PlanBlocks, buildVo2ProtocolPlan, createVo2ProtocolRuntime, vo2ProtocolDisplayName } from "../dist/vo2Protocol.js";
 import { LEGACY_VO2_PROTOCOL_ID, LEGACY_VO2_PROTOCOL_VERSION_V1 } from "../dist/types.js";
 
@@ -27,6 +27,7 @@ function withSession(t, selector, values = {}) {
     ["session_id_" + selector]: "display-test",
     ["session_start_" + selector]: start,
     ["activity_" + selector]: "bike",
+    ["summary_emitted_" + selector]: "false",
     ...values,
   }));
   Object.defineProperty(globalThis, "localStorage", {
@@ -136,4 +137,29 @@ test("current VO2 runtime supplies protocol phase and never ordinary target advi
   assert.equal(state.resolvedPhaseTarget, undefined);
   assert.equal(state.assessmentBasedWorkload, null);
   assert.deepEqual([...map], before);
+});
+
+test("an emitted early cancellation is completed even after its frozen record is cleared", t => {
+  withSession(t, day, { ["summary_emitted_" + day]: "true", ["completed_elapsed_" + day]: "42" });
+  const state = display(day, blocks, start, false, 0);
+  assert.equal(state.screen, "completed");
+  assert.equal(state.elapsedSec, 42);
+});
+
+test("an incomplete ordinary marker remains visible even without a plan", t => {
+  const map = withSession(t, day);
+  map.delete("start_" + day);
+  const state = display(day, null, null);
+  assert.equal(state.screen, "recovery_required");
+  assert.equal(state.target.sessionId, "display-test");
+});
+
+test("conflicting finalization offers recovery instead of active guidance", t => {
+  withSession(t, day);
+  writeSessionFinalization({ schemaVersion: 1, selector: day, sessionId: "old", startedAtMs: now - 1000,
+    endedAtMs: now, activeDurationSec: 1, pausedDurationSec: 0, status: "save_failed" });
+  const state = display();
+  assert.equal(state.screen, "recovery_required");
+  assert.equal(state.target.finalizationId, "old");
+  assert.equal(state.target.sessionId, "display-test");
 });

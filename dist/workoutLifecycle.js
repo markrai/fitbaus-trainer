@@ -158,6 +158,8 @@ export function getOrdinaryRecoveryTarget(day, storage) {
         summaryEmitted: session.summaryEmitted,
         finalizationId: finalization ? finalization.sessionId : null,
         finalizationStatus: finalization ? finalization.status : null,
+        finalizationStartedAtMs: finalization ? finalization.startedAtMs : null,
+        finalizationEndedAtMs: finalization ? finalization.endedAtMs : null,
         ownerId: owner && owner.selector === day ? owner.sessionId : null,
     };
 }
@@ -170,6 +172,15 @@ export async function discardOrdinaryRecovery(target, storage = localStorage) {
     const currentOwner = readActiveSessionOwner(storage);
     if (currentOwner && currentOwner.selector !== day && currentOwner.sessionId === id)
         return false;
+    if (id) {
+        for (const selector of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID, FREESTYLE_WORKOUT_SELECTOR_ID]) {
+            if (selector === day)
+                continue;
+            const otherFinalization = readSessionFinalization(selector, storage);
+            if (getSession(selector, storage).sessionId === id || (otherFinalization && otherFinalization.sessionId === id))
+                return false;
+        }
+    }
     const pending = ordinaryEnds.get(storage);
     if (id && pending && pending.has(id))
         return false;
@@ -184,6 +195,8 @@ export async function discardOrdinaryRecovery(target, storage = localStorage) {
     try {
         if (id) {
             const saved = await getWorkoutSummaryBySessionIdStrict(id);
+            if (JSON.stringify(getOrdinaryRecoveryTarget(day, storage)) !== JSON.stringify(target))
+                return false;
             if (!saved)
                 await deleteUnpersistedWorkoutEvidenceAtomic(id, true);
         }
@@ -230,8 +243,8 @@ function endOrdinaryWorkout(day, cancelled, prepare) {
             markSummaryEmitted(day, storage, finalization.activeDurationSec);
             releaseTransientSessionTelemetry(sessionId, storage);
             clearSessionFinalization(day, storage);
-            clearActiveSessionOwner({ selector: day, sessionId }, storage);
         }
+        clearActiveSessionOwner({ selector: day, sessionId }, storage);
         return Promise.resolve("already_saved");
     }
     if (session.summaryEmitted !== "false")
