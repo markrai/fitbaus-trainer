@@ -268,7 +268,7 @@ class NativeBridgeActivity : Activity() {
         super.onDestroy()
     }
 
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
         if (::booksContent.isInitialized && modeController.mode == ArcadeMode.Books && booksContent.closeDiagram()) return
         super.onBackPressed()
