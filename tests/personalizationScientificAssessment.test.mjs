@@ -948,7 +948,7 @@ test("developer diagnostics is the only permitted E4A consumer", () => {
 test("no runtime or control module consumes E4A, directly or through diagnostics", () => {
   const sourceFiles = walkSourceFiles();
   const boundary = sourceFiles.filter((file) =>
-    /\/(workoutPrescription|workoutLogic|fitnessState|fitnessRefinement|personalizedPrescription|personalizedPrescriptionCharacterization|uiControls|workoutDisplayState)\.ts$/.test(file) ||
+    /\/(workoutPrescription|workoutLogic|fitnessState|fitnessRefinement|personalizedPrescription|personalizedPrescriptionCharacterization|uiControls|workoutDisplayState|workoutTelemetryIngestion)\.ts$/.test(file) ||
     /\/machines\//.test(file) ||
     /\/platform\/bikeBridge/i.test(file) ||
     /\/vo2/i.test(file));
