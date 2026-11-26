@@ -10,15 +10,30 @@ import kotlin.random.Random
 
 class BooksConceptLayoutTest {
     @Test
-    fun greedyPackingFillsAvailableRowsDeterministically() {
-        val sizes = listOf(ConceptSize(120, 30), ConceptSize(40, 20), ConceptSize(60, 50),
-            ConceptSize(50, 15))
-        val result = BooksConceptLayout.place(sizes, 200, 10)
-        assertEquals(result, BooksConceptLayout.place(sizes, 200, 10))
-        assertEquals(listOf(0, 2, 3, 1), result.placements.map { it.index })
-        assertEquals(80, result.height)
-        assertEquals(5, result.placements.first().left)
-        assertEquals(10, result.placements.first().top)
+    fun longCardsUseSideBySideSpaceAndIndependentVerticalPositions() {
+        val sizes = listOf(ConceptSize(280, 150), ConceptSize(280, 70),
+            ConceptSize(280, 70), ConceptSize(180, 90))
+        val result = BooksConceptLayout.place(sizes, 600, 16, stagger = 20, seed = 54)
+        assertEquals(result, BooksConceptLayout.place(sizes, 600, 16, stagger = 20, seed = 54))
+        val first = result.placements.first { it.index == 0 }
+        val second = result.placements.first { it.index == 1 }
+        val third = result.placements.first { it.index == 2 }
+        assertTrue(first.left + first.width + 16 <= second.left ||
+            second.left + second.width + 16 <= first.left)
+        assertTrue(second.top < first.top + first.height)
+        assertTrue(third.top < first.top + first.height + 16)
+        assertTrue(result.height < sizes.sumOf { it.height } + 48)
+    }
+
+    @Test
+    fun wideCardsAlternateHorizontalOffsetsEvenWhenTheyMustStack() {
+        val sizes = List(4) { ConceptSize(420, 80) }
+        val result = BooksConceptLayout.place(sizes, 600, 16, stagger = 20, seed = 54)
+        for ((a, b) in result.placements.zipWithNext()) {
+            assertTrue(kotlin.math.abs(a.left - b.left) >= 70)
+            assertTrue(a.top + a.height + 16 <= b.top)
+        }
+        assertEquals(sizes.indices.toSet(), result.placements.map { it.index }.toSet())
     }
 
     @Test
@@ -30,7 +45,8 @@ class BooksConceptLayoutTest {
             val sizes = List(random.nextInt(1, 11)) {
                 ConceptSize(random.nextInt(1, width + 1), random.nextInt(1, 250))
             }
-            val result = BooksConceptLayout.place(sizes, width, gap)
+            val result = BooksConceptLayout.place(sizes, width, gap, stagger = 20, seed = it)
+            assertEquals(result, BooksConceptLayout.place(sizes, width, gap, stagger = 20, seed = it))
             assertEquals(sizes.indices.toSet(), result.placements.map { it.index }.toSet())
             assertEquals(sizes.size, result.placements.size)
             for ((i, a) in result.placements.withIndex()) {
@@ -38,8 +54,8 @@ class BooksConceptLayoutTest {
                 assertTrue(a.left >= 0 && a.top >= 0 && a.left + a.width <= width &&
                     a.top + a.height <= result.height)
                 for (b in result.placements.drop(i + 1)) {
-                    assertTrue(a.left + a.width <= b.left || b.left + b.width <= a.left ||
-                        a.top + a.height <= b.top || b.top + b.height <= a.top)
+                    assertTrue(a.left + a.width + gap <= b.left || b.left + b.width + gap <= a.left ||
+                        a.top + a.height + gap <= b.top || b.top + b.height + gap <= a.top)
                 }
             }
         }

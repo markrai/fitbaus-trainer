@@ -69,7 +69,12 @@ internal class BooksConceptView(context: Context) : View(context) {
     private fun rebuild(available: Int) {
         val inner = (available - dp(40)).coerceAtLeast(1)
         stroke = if (inner > 1) dp(1).coerceIn(1, inner - 1) else 0
-        val maximum = (inner * 0.67f).toInt().coerceIn(1, inner - stroke)
+        val gap = dp(16).coerceAtMost(inner)
+        val maximum = if (snippets.size > 1 && inner >= dp(440)) {
+            minOf((inner * 0.46f).toInt(), (inner - gap) / 2 - stroke).coerceIn(1, inner - stroke)
+        } else {
+            (inner * 0.67f).toInt().coerceIn(1, inner - stroke)
+        }
         val padding = styles.map { dp(it.horizontalPaddingDp).coerceAtMost(maximum - 1) }
         labels = snippets.mapIndexed { index, value ->
             val style = styles[index]
@@ -86,10 +91,10 @@ internal class BooksConceptView(context: Context) : View(context) {
         metrics = labels.mapIndexed { index, label ->
             val style = styles[index]
             val size = ConceptSize(label.width + padding[index], maxOf(dp(58), label.height + dp(style.verticalPaddingDp)))
-            BooksConceptStyles.metrics(size, style.rotationDegrees, inner, stroke)
+            BooksConceptStyles.metrics(size, inner, stroke)
         }
-        geometry = BooksConceptLayout.place(metrics.map { it.footprint }, inner, dp(14).coerceAtMost(inner),
-            rowStagger = dp(12), seed = snippets.hashCode())
+        geometry = BooksConceptLayout.place(metrics.map { it.footprint }, inner, gap,
+            stagger = dp(20), seed = snippets.hashCode())
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -107,12 +112,9 @@ internal class BooksConceptView(context: Context) : View(context) {
                 centerX + card.body.width / 2f, centerY + card.body.height / 2f)
             val radius = dp(style.radiusDp).toFloat()
             canvas.save()
-            canvas.rotate(card.rotationDegrees, centerX, centerY)
-            if (!style.outlined) {
-                paint.style = Paint.Style.FILL
-                paint.color = style.palette.fill
-                canvas.drawRoundRect(bounds, radius, radius, paint)
-            }
+            paint.style = Paint.Style.FILL
+            paint.color = style.palette.fill
+            canvas.drawRoundRect(bounds, radius, radius, paint)
             if (stroke > 0) {
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = stroke.toFloat()

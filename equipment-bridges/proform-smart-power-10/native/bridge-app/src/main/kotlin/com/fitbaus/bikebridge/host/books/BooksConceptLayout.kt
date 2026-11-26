@@ -1,5 +1,6 @@
 package com.fitbaus.bikebridge.host.books
 
+import kotlin.math.abs
 import kotlin.random.Random
 
 internal data class ConceptSize(val width: Int, val height: Int)
@@ -7,40 +8,47 @@ internal data class ConceptPlacement(val index: Int, val left: Int, val top: Int
 internal data class ConceptLayout(val height: Int, val placements: List<ConceptPlacement>)
 
 internal object BooksConceptLayout {
-    private class Row {
-        val indices = mutableListOf<Int>()
-        var width = 0
-        var height = 0
-    }
-
-    fun place(sizes: List<ConceptSize>, width: Int, gap: Int, rowStagger: Int = 0, seed: Int = 0): ConceptLayout {
+    fun place(sizes: List<ConceptSize>, width: Int, gap: Int, stagger: Int = 0, seed: Int = 0): ConceptLayout {
         require(width in 1..100_000 && gap in 0..width && sizes.size <= BooksConceptValidation.MAX_CONCEPTS)
-        require(rowStagger >= 0)
+        require(stagger in 0..100_000)
         require(sizes.all { it.width in 1..width && it.height in 1..100_000 })
-        val rows = mutableListOf<Row>()
-        val order = sizes.indices.sortedWith(compareByDescending<Int> { sizes[it].width }.thenBy { it })
-        for (index in order) {
-            val size = sizes[index]
-            val row = rows.firstOrNull { it.width + gap + size.width <= width } ?: Row().also { rows.add(it) }
-            if (row.indices.isNotEmpty()) row.width += gap
-            row.indices.add(index)
-            row.width += size.width
-            row.height = maxOf(row.height, size.height)
-        }
         val placed = mutableListOf<ConceptPlacement>()
-        var top = 0
         val random = Random(seed)
-        for (row in rows) {
-            val free = width - row.width
-            val shift = minOf(rowStagger, free / 2)
-            var left = free / 2 + if (shift > 0) random.nextInt(-shift, shift + 1) else 0
-            for (index in row.indices) {
-                val size = sizes[index]
-                placed.add(ConceptPlacement(index, left, top + (row.height - size.height) / 2, size.width, size.height))
-                left += size.width + gap
+        val startRight = random.nextBoolean()
+        val order = sizes.indices.sortedWith(compareByDescending<Int> { sizes[it].width }.thenBy { it })
+        for ((rank, index) in order.withIndex()) {
+            val size = sizes[index]
+            val free = width - size.width
+            val preferred = if (stagger == 0 || sizes.size == 1) {
+                free / 2
+            } else {
+                val nextWidth = order.getOrNull(rank + 1)?.let { sizes[it].width }
+                val slack = if (nextWidth != null && nextWidth + gap <= free) free - nextWidth - gap else free
+                val edge = (slack * random.nextDouble(0.10, 0.28)).toInt()
+                if ((rank % 2 == 0) == startRight) free - edge else edge
             }
-            top += row.height + gap
+            val offset = if (stagger > 0 && sizes.size > 1) random.nextInt(0, stagger + 1) else 0
+            val candidates = linkedSetOf(preferred, 0, free, free / 2, free / 4, free * 3 / 4)
+            for (other in placed) {
+                candidates.add((other.left - size.width - gap).coerceIn(0, free))
+                candidates.add((other.left + other.width + gap).coerceIn(0, free))
+                candidates.add(other.left.coerceIn(0, free))
+            }
+            val obstacles = placed.sortedBy { it.top }
+            val positions = candidates.map { left ->
+                var top = offset
+                for (other in obstacles) {
+                    if (left + size.width + gap <= other.left || other.left + other.width + gap <= left) continue
+                    if (top + size.height + gap <= other.top) break
+                    top = maxOf(top, other.top + other.height + gap)
+                }
+                ConceptPlacement(index, left, top, size.width, size.height)
+            }
+            val earliest = positions.minOf { it.top }
+            val best = positions.filter { it.top <= earliest + stagger }
+                .minWithOrNull(compareBy<ConceptPlacement> { abs(it.left - preferred) }.thenBy { it.top })!!
+            placed.add(best)
         }
-        return ConceptLayout(if (rows.isEmpty()) 0 else top - gap, placed)
+        return ConceptLayout(placed.maxOfOrNull { it.top + it.height } ?: 0, placed)
     }
 }
