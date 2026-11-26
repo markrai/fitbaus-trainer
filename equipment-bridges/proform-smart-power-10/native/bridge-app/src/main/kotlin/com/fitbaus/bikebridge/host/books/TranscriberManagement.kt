@@ -44,6 +44,7 @@ internal data class PreparationSnapshot(
     val renewable: Boolean,
     val sourceMatches: Boolean,
     val automaticQualification: Boolean = false,
+    val readiness: TranscriberReadiness = TranscriberReadiness.Unknown,
 )
 
 internal class TranscriberManagement(
@@ -152,7 +153,9 @@ internal class TranscriberManagement(
             }
         } else emptyList()
         return PreparationSnapshot(models, jobs, manage, prepare, caps.optBoolean("paired_background_refresh"), matches,
-            caps.optBoolean("automatic_model_qualification"))
+            caps.optBoolean("automatic_model_qualification"),
+            TranscriberReadiness.fromFlags(caps.opt("transcription") as? Boolean,
+                caps.opt("engine_ready") as? Boolean, caps.opt("source_configured") as? Boolean))
     }
 
     fun download(model: String, cancel: Boolean = false) {

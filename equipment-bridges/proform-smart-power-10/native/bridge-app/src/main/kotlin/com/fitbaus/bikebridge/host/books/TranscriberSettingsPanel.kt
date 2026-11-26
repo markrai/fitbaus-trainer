@@ -166,7 +166,14 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         active = true
         status.setTextColor(Color.WHITE)
         status.text = "Loading connection…"
-        request({ store.load() }, { connection ->
+        request({
+            val connection = store.load()
+            val readiness = connection?.let { paired ->
+                runCatching { TranscriberReadiness.fromCapabilities(paired.test()) }
+                    .getOrElse { TranscriberReadiness.Unverified }
+            }
+            connection to readiness
+        }, { (connection, readiness) ->
             saved = connection
             updateConnectionTitle()
             if (connection == null) {
@@ -179,8 +186,8 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
                 host.setText(uri.host)
                 port.setText(if (uri.port == -1) "" else uri.port.toString())
                 code.hint = "Paired (new code to replace)"
-                setStatus("Paired · readiness not yet checked")
-                setExpanded(false)
+                renderReadiness(requireNotNull(readiness))
+                setExpanded(readiness == TranscriberReadiness.Unverified)
             }
             renderTabs()
             renderContent()
@@ -252,7 +259,9 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
         when (selectedTab) {
             Tab.Models -> {
                 views.label(content, "Transcription models", 21f, Color.WHITE, true)
-                modelsPanel = TranscriberManagementDialog(context, connection).also { it.attach(content) }
+                modelsPanel = TranscriberManagementDialog(context, connection, onReadiness = { readiness ->
+                    if (active && saved === connection && selectedTab == Tab.Models) renderReadiness(readiness)
+                }).also { it.attach(content) }
             }
             Tab.Summarization -> {
                 views.label(content, "Summarization provider", 21f, Color.WHITE, true)
@@ -274,6 +283,10 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
 
     private fun updateConnectionTitle() {
         connectionTitle.text = saved?.address ?: "Transcriber server"
+    }
+
+    private fun renderReadiness(readiness: TranscriberReadiness) {
+        setStatus(readiness.message + " · last checked", readiness.ready)
     }
 
     private fun setStatus(message: String, ready: Boolean = false) {
@@ -309,7 +322,7 @@ internal class TranscriberSettingsPanel(context: Context) : LinearLayout(context
             updateConnectionTitle()
             code.text.clear()
             code.hint = "Paired (new code to replace)"
-            setStatus(if (capabilities.ready) "Connected · ready" else "Connected · service not ready", capabilities.ready)
+            renderReadiness(TranscriberReadiness.fromCapabilities(capabilities))
             setExpanded(false)
             renderTabs()
             renderContent()
