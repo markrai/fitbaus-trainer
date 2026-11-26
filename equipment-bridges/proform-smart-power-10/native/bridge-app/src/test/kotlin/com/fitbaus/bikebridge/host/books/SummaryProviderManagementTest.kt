@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -120,7 +121,7 @@ class SummaryProviderManagementTest {
         assertNull(actions.begin(actions.discover("https://example.test/v1", false, "", "")))
         assertEquals(1, requests.size)
         assertTrue(flow.choose(SummaryProviderChoice.LOBO))
-        assertTrue(flow.addressEdited(true))
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1"))
         runAction(actions, actions.authorize("ABCD-EFGH"))
         assertEquals(SummaryProviderChoice.LOBO, flow.state.choice)
         runAction(actions, actions.discover("https://192.168.1.200:7869/v1", false, "", "FMV3-14SR"))
@@ -135,6 +136,29 @@ class SummaryProviderManagementTest {
         assertFalse(flow.state.authorized)
         assertTrue(requests.last().third!!.getBoolean("confirm_egress"))
         assertNull(actions.begin(actions.save()))
+    }
+
+    @Test
+    fun currentLoboEndpointDiscoveryReusesOnlyServerStoredTrust() {
+        val flow = SummaryProviderWorkflow()
+        val actions = SummaryProviderActions(flow, client())
+        runAction(actions, actions.capabilities())
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1"))
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        assertTrue(flow.state.reusesCurrentLobo)
+        runAction(actions, actions.discover("https://192.168.1.200:7869/v1", false, "", ""))
+        val body = requests.last().third!!
+        assertEquals(1, body.length())
+        assertTrue(body.getBoolean("use_current"))
+        assertFalse(body.has("lobo_auth"))
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.addressEdited("https://192.168.1.201:7869/v1"))
+        val count = requests.size
+        val newDevice = actions.discover("https://192.168.1.201:7869/v1", false, "", "")
+        assertNotNull(actions.begin(newDevice))
+        assertThrows(IllegalArgumentException::class.java) { newDevice.execute() }
+        assertEquals(count, requests.size)
     }
 
     @Test

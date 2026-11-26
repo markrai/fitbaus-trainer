@@ -63,7 +63,8 @@ internal class SummaryProviderActions(
             discardClosedCompletion()
             return false
         }
-        if (lost || ticket.operation == SummaryProviderOperation.CANCEL || ticket.operation == SummaryProviderOperation.AUTHORIZE) {
+        if (lost || ticket.operation in setOf(SummaryProviderOperation.CANCEL, SummaryProviderOperation.AUTHORIZE,
+                SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE)) {
             api.forgetGrant()
         }
         return true

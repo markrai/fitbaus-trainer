@@ -555,6 +555,12 @@ internal class SummaryProviderDialog(
             candidateDetail.text = presentation.candidateDetail
             candidateDetail.setTextColor(if (snapshot.tested != null) SUCCESS else MUTED)
             val needsLoboAuth = snapshot.choice == SummaryProviderChoice.LOBO && !presentation.reuseTrust
+            if (presentation.reuseTrust && auth.text.isNotEmpty()) {
+                val previous = suppressChanges
+                suppressChanges = true
+                auth.text.clear()
+                suppressChanges = previous
+            }
             authLabel.visibility = if (needsLoboAuth) View.VISIBLE else View.GONE
             auth.visibility = authLabel.visibility
             if (snapshot.choice == SummaryProviderChoice.LOBO) {
@@ -614,7 +620,7 @@ internal class SummaryProviderDialog(
     private fun finish() {
         resetRows()
         if (state.screen == SummaryProviderScreen.RELOAD_REQUIRED) {
-            status.text = "Provider changed unexpectedly. Reopen to verify current settings."
+            status.text = "Save or disable could not be confirmed. Reload to verify the saved provider."
             button("RELOAD") { load() }
             return
         }
@@ -658,10 +664,12 @@ internal class SummaryProviderDialog(
                 }, { error ->
                     if (actions.fail(ticket, error)) {
                         enableRows(true)
-                        if (actions.authorizationLost(error) || ticket.operation == SummaryProviderOperation.CANCEL) {
+                        if (state.screen == SummaryProviderScreen.RELOAD_REQUIRED) {
+                            finish()
+                        } else if (actions.authorizationLost(error) || ticket.operation == SummaryProviderOperation.CANCEL) {
                             if (state.screen == SummaryProviderScreen.CONFIGURATION) showConfiguration()
                         } else onFailure()
-                        status.text = failureMessage(error)
+                        if (state.screen != SummaryProviderScreen.RELOAD_REQUIRED) status.text = failureMessage(error)
                         refreshControls()
                     }
                 })

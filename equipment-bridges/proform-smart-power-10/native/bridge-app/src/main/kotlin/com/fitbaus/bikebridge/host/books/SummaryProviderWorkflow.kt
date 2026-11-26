@@ -66,7 +66,9 @@ internal class SummaryProviderWorkflow {
 
     fun addressEdited(endpoint: String): Boolean {
         if (!state.editable || state.choice == SummaryProviderChoice.REUSE) return false
-        val value = endpoint.trim().trimEnd('/').takeIf { it.isNotBlank() }
+        val value = endpoint.trim().trimEnd('/').takeIf {
+            runCatching { SummaryProviderManagement.validateUrl(it) }.isSuccess
+        }
         state = state.withoutDiscovery().copy(draftEndpoint = value)
         return true
     }
@@ -181,7 +183,9 @@ internal class SummaryProviderWorkflow {
 
     fun failed(request: SummaryProviderRequest, authorizationLost: Boolean = false): Boolean {
         if (state.pending !== request) return false
-        state = if (authorizationLost || request.operation == SummaryProviderOperation.CANCEL) {
+        state = if (request.operation in setOf(SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE)) {
+            SummaryProviderWorkflowState(SummaryProviderScreen.RELOAD_REQUIRED)
+        } else if (authorizationLost || request.operation == SummaryProviderOperation.CANCEL) {
             SummaryProviderWorkflowState(SummaryProviderScreen.CONFIGURATION, activeModel = state.activeModel,
                 activeProvider = state.activeProvider)
         } else {

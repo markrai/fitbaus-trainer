@@ -25,6 +25,7 @@ internal data class SummaryProviderStatus(
             baseUrl?.trimEnd('/') != endpoint.trimEnd('/')) return false
         val uri = runCatching { URI(endpoint) }.getOrNull() ?: return false
         return uri.scheme == "https" && uri.port == 7869 && uri.path.trimEnd('/') == "/v1" &&
+            uri.host?.let(BooksServer::isPrivateIpv4) == true &&
             uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null
     }
 
