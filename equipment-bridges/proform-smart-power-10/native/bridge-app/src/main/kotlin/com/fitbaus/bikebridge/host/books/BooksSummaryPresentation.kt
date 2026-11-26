@@ -6,6 +6,11 @@ import java.util.Locale
 
 internal data class BooksSummaryPresentation(val text: String, val retry: Boolean = false) {
     companion object {
+        fun inlineText(state: BooksSummaryState?, visible: Boolean): String? =
+            if (visible && state is BooksSummaryState.Ready) state.summary.trim().takeIf { it.isNotEmpty() } else null
+
+        fun inlineSizeSp(narrationSizeSp: Int): Float = (narrationSizeSp * 0.60f).coerceIn(17f, 26f)
+
         fun resolve(state: BooksSummaryState, recap: Boolean = false,
                     cumulative: Boolean = false): BooksSummaryPresentation = when (state) {
             BooksSummaryState.Preparing -> BooksSummaryPresentation(if (cumulative) "Preparing book recap…"

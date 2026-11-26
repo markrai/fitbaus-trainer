@@ -2,11 +2,11 @@
 
 package com.fitbaus.bikebridge.host.books
 
-import android.app.AlertDialog
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
@@ -42,12 +42,14 @@ internal class BooksReadAlong(
     private val worker = Executors.newSingleThreadExecutor()
     private val summaryWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1))
     private val summaryScope = BooksSummaryScope()
+    private val inlineAttempt = BooksInlineSummaryAttempt()
     private val sectionPlans = BooksSectionPlans()
     private var planningSelection: BooksSummarySelection? = null
     private var planGeneration = 0L
     private var summaryFuture: Future<*>? = null
     private var summaryCallback: ((BooksSummaryState) -> Unit)? = null
     private val narration = label("", 36f)
+    private val inlineSummary = label("", 22f)
     private val details = label("", 14f)
     private val scroll = ScrollView(context)
     private val reload = flatAction("Retry narration")
@@ -55,28 +57,7 @@ internal class BooksReadAlong(
     private val readingControls = LinearLayout(context)
     private val footer = LinearLayout(context)
     private val actions = LinearLayout(context)
-    private var summaryHelp: AlertDialog? = null
     private val fullscreenButton = NarrationFullscreenButton(context)
-    private val summaryToggle = flatAction("Summary").apply {
-        setAllCaps(false)
-        setTextColor(Color.WHITE)
-        setBackgroundColor(Color.TRANSPARENT)
-        textSize = 16f
-    }
-    private val recapToggle = flatAction("Recap").apply {
-        setAllCaps(false)
-        setTextColor(Color.WHITE)
-        setBackgroundColor(Color.TRANSPARENT)
-        textSize = 16f
-        contentDescription = "Recap up to ten minutes before the current playback position"
-    }
-    private val bookRecapToggle = flatAction("Book recap").apply {
-        setAllCaps(false)
-        setTextColor(Color.WHITE)
-        setBackgroundColor(Color.TRANSPARENT)
-        textSize = 16f
-        contentDescription = "Recap from the beginning of the book to the current playback position"
-    }
     private var recapSelection: BooksRecapSelection? = null
     private val summaryPanel = LinearLayout(context)
     private val summaryTitle = label("Section summary", 26f)
@@ -111,6 +92,7 @@ internal class BooksReadAlong(
         fontSizeLabel.gravity = Gravity.CENTER
         fontSizeLabel.text = "Text: $textSizeSp"
         narration.textSize = textSizeSp.toFloat()
+        inlineSummary.textSize = BooksSummaryPresentation.inlineSizeSp(textSizeSp)
         fontSlider.max = 24
         fontSlider.progress = textSizeSp - 28
         fontSlider.contentDescription = "Narration text size"
@@ -119,6 +101,7 @@ internal class BooksReadAlong(
                 if (!fromUser) return
                 textSizeSp = progress + 28
                 narration.textSize = textSizeSp.toFloat()
+                inlineSummary.textSize = BooksSummaryPresentation.inlineSizeSp(textSizeSp)
                 fontSizeLabel.text = "Text: $textSizeSp"
                 scroll.scrollTo(0, 0)
                 readingPrefs.edit().putInt("text_size_sp", textSizeSp).apply()
@@ -134,7 +117,22 @@ internal class BooksReadAlong(
         narration.setPadding(dp(12), dp(6), dp(12), dp(6))
         narration.setLineSpacing(dp(4).toFloat(), 1.12f)
         scroll.isFillViewport = true
-        scroll.addView(narration, FrameLayout.LayoutParams(MATCH, WRAP))
+        val narrationStack = LinearLayout(context).apply {
+            orientation = VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        narrationStack.addView(narration, LayoutParams(MATCH, WRAP))
+        inlineSummary.apply {
+            gravity = Gravity.CENTER
+            setTypeface(Typeface.DEFAULT, Typeface.ITALIC)
+            setTextColor(0xffb8b8b8.toInt())
+            setLineSpacing(dp(2).toFloat(), 1.08f)
+            visibility = GONE
+        }
+        narrationStack.addView(inlineSummary, LayoutParams(MATCH, WRAP).apply {
+            setMargins(dp(48), dp(18), dp(48), dp(12))
+        })
+        scroll.addView(narrationStack, FrameLayout.LayoutParams(MATCH, WRAP))
         cover.scaleType = ImageView.ScaleType.FIT_CENTER
         cover.contentDescription = "Audiobook cover"
         val stage = FrameLayout(context)
@@ -142,17 +140,6 @@ internal class BooksReadAlong(
         stage.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
         buildSummaryPanel()
         stage.addView(summaryPanel, FrameLayout.LayoutParams(MATCH, MATCH))
-        summaryToggle.visibility = GONE
-        summaryToggle.contentDescription = "Show current section summary; may reveal upcoming narration"
-        summaryToggle.setOnClickListener {
-            if (summarySection != null || recapSelection != null) dismissSummary()
-            else if (canShowSummary()) showSummary(false)
-            else showSummaryHelp()
-        }
-        recapToggle.visibility = GONE
-        recapToggle.setOnClickListener { showRecap(false) }
-        bookRecapToggle.visibility = GONE
-        bookRecapToggle.setOnClickListener { showRecap(false, cumulative = true) }
         fullscreenButton.visibility = GONE
         fullscreenButton.contentDescription = "Enter fullscreen narration"
         fullscreenButton.setOnClickListener { onFullscreenRequested() }
@@ -160,12 +147,6 @@ internal class BooksReadAlong(
         addView(stage, LayoutParams(MATCH, 0, 1f))
         actions.orientation = HORIZONTAL
         actions.gravity = Gravity.CENTER_VERTICAL
-        for (action in listOf(summaryToggle, recapToggle, bookRecapToggle)) {
-            action.minWidth = 0
-            action.minimumWidth = 0
-            action.setPadding(dp(6), 0, dp(6), 0)
-            actions.addView(action, LayoutParams(WRAP, dp(44)))
-        }
         actions.addView(android.view.View(context), LayoutParams(0, 1, 1f))
         actions.addView(fullscreenButton, LayoutParams(dp(48), dp(44)))
         addView(actions, LayoutParams(MATCH, WRAP))
@@ -189,13 +170,17 @@ internal class BooksReadAlong(
     fun setFullscreen(value: Boolean) {
         if (fullscreen == value) return
         fullscreen = value
-        if (!value) dismissSummary()
+        if (!value) {
+            inlineAttempt.reset()
+            dismissSummary()
+        }
         fullscreenButton.expanded = value
         fullscreenButton.contentDescription = if (value) "Exit fullscreen narration" else "Enter fullscreen narration"
         fullscreenButton.invalidate()
         setPadding(if (value) 0 else dp(16), if (value) 0 else dp(4),
             if (value) 0 else dp(16), if (value) 0 else dp(8))
         updateReadingChrome()
+        if (value) maybeStartInlineSummary()
     }
 
     private fun updateReadingChrome() {
@@ -252,17 +237,6 @@ internal class BooksReadAlong(
     private fun canShowSummary(): Boolean = fullscreen && !localMode && windows.summaryAvailable &&
         summarySelection() != null
 
-    private fun showSummaryHelp() {
-        if (!fullscreen) return
-        summaryHelp?.dismiss()
-        val paired = runCatching { transcriberStore.load() }
-        val reason = if (paired.isFailure) "The saved Transcriber connection could not be read. Pair it again in Transcription Models."
-            else BooksPlayerPresentation.summaryUnavailable(
-                paired.getOrNull() != null, localMode, windows.revision != null, windows.summaryAvailable)
-        summaryHelp = AlertDialog.Builder(context).setTitle("Summary unavailable")
-            .setMessage(reason).setPositiveButton("OK", null).show()
-    }
-
     private fun livePosition(): Long = playbackPosition?.invoke() ?: currentState.positionMs
 
     private fun recapContextAvailable(): Boolean = fullscreen && visibility == VISIBLE && !destroyed &&
@@ -280,28 +254,25 @@ internal class BooksReadAlong(
                 currentState.seekGeneration, livePosition())
 
     private fun updateSummaryChrome() {
-        val recentAvailable = canShowRecap()
-        val chrome = BooksPlayerPresentation.summaryChrome(
-            fullscreen, visibility == VISIBLE && request != null && !destroyed && !currentState.failed,
-            summarySection != null || recapSelection != null, recentAvailable, canShowBookRecap())
-        val showing = chrome.panel
+        val showing = BooksPlayerPresentation.recapPanelVisible(fullscreen, recapSelection != null)
         summaryPanel.visibility = if (showing) VISIBLE else GONE
-        summaryToggle.visibility = if (chrome.summary) VISIBLE else GONE
-        recapToggle.visibility = if (chrome.recap) VISIBLE else GONE
-        bookRecapToggle.visibility = if (chrome.bookRecap) VISIBLE else GONE
-        actions.visibility = if (chrome.summary || chrome.recap || chrome.bookRecap ||
-            fullscreenButton.visibility == VISIBLE) VISIBLE else GONE
+        actions.visibility = if (fullscreenButton.visibility == VISIBLE) VISIBLE else GONE
         if (summaryState is BooksSummaryState.MissingCoverage) {
-            summaryRetry.visibility = if (recentAvailable) VISIBLE else GONE
-        }
-        val toggleText = if (showing) "Narration" else "Summary"
-        if (summaryToggle.text != toggleText) {
-            summaryToggle.text = toggleText
-            summaryToggle.contentDescription = if (showing) "Return to live narration" else
-                "Show current section summary; may reveal upcoming narration"
+            summaryRetry.visibility = if (canShowRecap()) VISIBLE else GONE
         }
         cover.visibility = if (!showing && !hasNarration) VISIBLE else GONE
         scroll.visibility = if (!showing && hasNarration) VISIBLE else GONE
+        val text = BooksSummaryPresentation.inlineText(summaryState,
+            fullscreen && hasNarration && !showing && summarySection != null && canShowSummary())
+        if (inlineSummary.text.toString() != text.orEmpty()) inlineSummary.text = text.orEmpty()
+        inlineSummary.visibility = if (text == null) GONE else VISIBLE
+    }
+
+    private fun maybeStartInlineSummary() {
+        if (!fullscreen || !hasNarration || recapSelection != null || summarySection != null || !canShowSummary()) return
+        val selection = summarySelection() ?: return
+        if (!inlineAttempt.begin(selection)) return
+        showSummary(false)
     }
 
     private fun showSummary(retryTranscript: Boolean) {
@@ -310,10 +281,6 @@ internal class BooksReadAlong(
         val connection = books ?: return
         dismissSummary()
         summarySection = selection.section
-        summaryTitle.text = "Section summary"
-        summaryNotice.text = "AI-generated · May reveal upcoming narration"
-        summaryRetry.text = "Retry summary"
-        summaryRange.text = BooksSummaryPresentation.range(selection.section)
         presentSummary(BooksSummaryState.Preparing)
         val block = sectionPlans.pendingBlock(selection.session, currentState.positionMs)
         val revision = selection.expectedRevision
@@ -328,7 +295,6 @@ internal class BooksReadAlong(
         }
         planningSelection = selection
         val ticket = ++planGeneration
-        summaryRange.text = "Finding narration boundaries…"
         summaryFuture = summaryWorker.submit {
             val cuts = try {
                 val paired = transcriberStore.load() ?: throw BooksSummaryException(BooksSummaryFailure.UNAVAILABLE)
@@ -408,13 +374,13 @@ internal class BooksReadAlong(
     }
 
     private fun startSelectedSummary(retryTranscript: Boolean) {
-        val section = summarySelection()?.section
-        if (section == null) {
+        val selection = summarySelection()
+        if (selection == null) {
             dismissSummary()
             return
         }
-        summarySection = section
-        summaryRange.text = BooksSummaryPresentation.range(section)
+        inlineAttempt.mark(selection)
+        summarySection = selection.section
         if (!requestCurrentSummary(retryTranscript, ::presentSummary)) dismissSummary()
     }
 
@@ -425,6 +391,10 @@ internal class BooksReadAlong(
         }
         if (!fullscreen || (summarySection == null && recapSelection == null)) return
         summaryState = state
+        if (recapSelection == null) {
+            updateSummaryChrome()
+            return
+        }
         val presentation = BooksSummaryPresentation.resolve(state, recap = recapSelection != null,
             cumulative = recapSelection?.cumulative == true)
         summaryText.text = presentation.text
@@ -449,8 +419,6 @@ internal class BooksReadAlong(
     }
 
     fun dismissSummary() {
-        summaryHelp?.dismiss()
-        summaryHelp = null
         clearSummaryPanel()
         cancelSummary()
     }
@@ -531,6 +499,7 @@ internal class BooksReadAlong(
     }
 
     fun close() {
+        inlineAttempt.reset()
         dismissSummary()
         generation++
         pending?.cancel(true)
@@ -595,6 +564,7 @@ internal class BooksReadAlong(
             narration.text = text.orEmpty()
             scroll.scrollTo(0, 0)
         }
+        maybeStartInlineSummary()
     }
 
     private fun reloadCurrent() {
