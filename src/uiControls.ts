@@ -11,10 +11,6 @@ import {
   resumeWorkout,
   requestEarlyCooldown,
   planEarlyCooldownTransition,
-  lastPersistedElapsedFromHrSamples,
-  workoutRelativeHrSample,
-  recordVo2ActiveBikeTelemetry,
-  ordinaryActiveBikeTelemetrySample,
   restoreBikeBridgeBindingForActiveSession,
   startWorkout,
   todayName,
@@ -29,7 +25,6 @@ import {
   deleteWorkoutSummary,
   getHrSamples,
   getOrdinaryBikeTelemetrySamples,
-  queueOrdinaryBikeTelemetrySample,
 } from "./workoutStorage.js";
 import { sendWorkoutToSisu } from "./sisuSync.js";
 import {
@@ -92,7 +87,6 @@ import {
 } from "./platform/bikeBridgeRuntime.js";
 import { getEquipmentSelection, setSelectedMachine } from "./machines/selection.js";
 import {
-  recordMachineHeartRateSample,
   updateMachineGuidanceRuntime,
   type MachineGuidanceRuntimeUpdate,
 } from "./machines/runtime.js";
@@ -156,6 +150,7 @@ import {
 } from "./workoutPrescription.js";
 import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
 import { BPM_TIMEOUT_MS, deriveWorkoutState, type WorkoutDisplayState } from "./workoutDisplayState.js";
+import { createWorkoutTelemetryIngestion } from "./workoutTelemetryIngestion.js";
 
 let selectedDay: string | null = null;
 let liveBpm: number | null = null;
@@ -809,59 +804,6 @@ function renderBikeBridgeHud() {
       ? `${watts} W`
       : `<span class="machine-guidance-power">${watts} W</span>`;
   live.innerHTML = `${statusPrefix} observed ${observedHtml} · ${rpmHtml} · ${wattsHtml}${stale}`;
-}
-
-function recordVo2BikeTelemetryIfActive(): void {
-  const day = resolveOwnedWorkoutDay();
-  if (!isVo2WorkoutSelector(day)) return;
-  const session = getSession(day);
-  if (!session.sessionId || !session.startTime) return;
-  const state = getBikeBridgeSession().getViewState();
-  if (state.telemetryStale) return;
-  const metrics: { rpm?: number; watts?: number; observed_resistance?: number } = {};
-  if (typeof state.rpm === "number" && Number.isFinite(state.rpm) && state.rpm > 0) metrics.rpm = state.rpm;
-  if (typeof state.watts === "number" && Number.isFinite(state.watts) && state.watts > 0) {
-    metrics.watts = state.watts;
-  }
-  if (
-    typeof state.observedResistance === "number" &&
-    Number.isFinite(state.observedResistance) &&
-    state.observedResistance > 0
-  ) {
-    metrics.observed_resistance = state.observedResistance;
-  }
-  recordVo2ActiveBikeTelemetry(session, metrics);
-}
-
-function recordOrdinaryBikeTelemetryIfActive(): void {
-  const day = resolveOwnedWorkoutDay();
-  if (isVo2WorkoutSelector(day)) return;
-  const session = getSession(day);
-  if (
-    !session.sessionId ||
-    !session.startTime ||
-    !session.athleteId ||
-    session.activity !== "bike"
-  ) {
-    return;
-  }
-  if (readSessionFinalization(day)) return;
-  if (readFreestyleAuthorityFault(day)) return;
-  const state = getBikeBridgeSession().getViewState();
-  const sample = ordinaryActiveBikeTelemetrySample(session, {
-    telemetryStale: state.telemetryStale,
-    telemetryReceivedAtMs: state.telemetryReceivedAtMs,
-    telemetrySnapshotAt: state.telemetrySnapshotAt,
-    watts: { value: state.watts, current: state.wattsCurrent },
-    cadenceRpm: { value: state.rpm, current: state.rpmCurrent },
-    observedResistance: {
-      value: state.observedResistance,
-      current: state.observedResistanceCurrent,
-    },
-    desiredResistance: state.desiredResistance,
-    commandedResistance: state.commandedResistance,
-  });
-  if (sample) queueOrdinaryBikeTelemetrySample(sample);
 }
 
 function escapeBikeBridgeHudText(value: string): string {
@@ -2442,57 +2384,7 @@ function displayWorkoutSummaries(workouts: any[]) {
   });
 }
 
-let lastPersistedWorkoutHrElapsed: number | undefined;
-let lastPersistedWorkoutHrSessionId: string | null = null;
-let lastPersistedHydratedSessionId: string | null = null;
-let lastPersistedHydrate: { sessionId: string; promise: Promise<void> } | null = null;
-
-async function ensureLastPersistedHydrated(sessionId: string): Promise<void> {
-  if (lastPersistedHydratedSessionId === sessionId) return;
-  if (lastPersistedHydrate?.sessionId === sessionId) {
-    await lastPersistedHydrate.promise;
-    return;
-  }
-  const promise = getHrSamples(sessionId)
-    .then((samples) => {
-      if (lastPersistedHydrate?.sessionId !== sessionId) return;
-      const max = lastPersistedElapsedFromHrSamples(samples);
-      if (lastPersistedWorkoutHrSessionId !== sessionId) {
-        lastPersistedWorkoutHrSessionId = sessionId;
-        lastPersistedWorkoutHrElapsed = max;
-      } else if (
-        max !== undefined &&
-        (lastPersistedWorkoutHrElapsed === undefined || max > lastPersistedWorkoutHrElapsed)
-      ) {
-        lastPersistedWorkoutHrElapsed = max;
-      }
-      lastPersistedHydratedSessionId = sessionId;
-    })
-    .catch((err: unknown) => console.error("Error hydrating persisted HR elapsed:", err));
-  lastPersistedHydrate = { sessionId, promise };
-  await promise;
-}
-
-async function persistWorkoutRelativeHr(
-  session: ReturnType<typeof getSession>,
-  bpm: number
-): Promise<void> {
-  if (!session.sessionId) return;
-  await ensureLastPersistedHydrated(session.sessionId);
-  const latest = getSession(resolveOwnedWorkoutDay());
-  if (latest.sessionId !== session.sessionId) return;
-  if (latest.sessionId && readSessionFinalization(resolveOwnedWorkoutDay())) return;
-  const lastElapsed =
-    latest.sessionId === lastPersistedWorkoutHrSessionId ? lastPersistedWorkoutHrElapsed : undefined;
-  const sample = workoutRelativeHrSample(latest, Date.now(), lastElapsed);
-  if (!sample || !latest.sessionId) return;
-  lastPersistedWorkoutHrSessionId = latest.sessionId;
-  lastPersistedWorkoutHrElapsed = sample.elapsedSec;
-  recordMachineHeartRateSample(latest.sessionId, sample.elapsedSec, bpm);
-  if (typeof (window as any).storeHrSample === "function") {
-    (window as any).storeHrSample(latest.sessionId, sample.elapsedSec, bpm).catch((err: any) => console.error("Error storing HR sample:", err));
-  }
-}
+const workoutTelemetry = createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay);
 
 function registerUiGlobals(phaseBoxEl: HTMLElement | null) {
   phaseDisplayEl = phaseBoxEl;
@@ -2507,9 +2399,7 @@ function registerUiGlobals(phaseBoxEl: HTMLElement | null) {
     updateHrDisplay(bpm);
     updateHeartPulse(bpm);
     updateHeartColor(bpm, currentExpectedHeartRate);
-    const day = resolveOwnedWorkoutDay();
-    const session = getSession(day);
-    void persistWorkoutRelativeHr(session, bpm);
+    void workoutTelemetry.persistWorkoutRelativeHr(bpm);
   });
 
   onHrvUpdate((snapshot) => {
@@ -2605,8 +2495,7 @@ function registerUiGlobals(phaseBoxEl: HTMLElement | null) {
   (window as any).updateDisplay = updateDisplay;
   getBikeBridgeSession().subscribe(() => {
     renderLiveBikeTelemetryHud();
-    recordVo2BikeTelemetryIfActive();
-    recordOrdinaryBikeTelemetryIfActive();
+    workoutTelemetry.recordBikeTelemetry();
     const equipmentTab = document.getElementById("equipmentTab");
     if (equipmentTab?.classList.contains("active")) renderBikeBridgeSettingsStatus();
   });

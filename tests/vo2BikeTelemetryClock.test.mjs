@@ -155,12 +155,12 @@ test("stage workload window sees post-resume telemetry on the active clock", () 
 });
 
 test("VO2 bike telemetry capture uses the canonical active clock helper", async () => {
-  const src = await readFile(new URL("../src/uiControls.ts", import.meta.url), "utf8");
+  const src = await readFile(new URL("../src/workoutTelemetryIngestion.ts", import.meta.url), "utf8");
   assert.equal(src.includes("recordVo2ActiveBikeTelemetry"), true);
   assert.equal(src.includes("workoutRelativeHrSample"), true);
   const fn = src.slice(
     src.indexOf("function recordVo2BikeTelemetryIfActive"),
-    src.indexOf("function renderBikeBridgeSettingsStatus")
+    src.indexOf("function recordOrdinaryBikeTelemetryIfActive")
   );
   assert.equal(fn.includes("Date.now() - parseInt(session.startTime"), false);
   assert.equal(fn.includes("recordVo2ActiveBikeTelemetry(session, metrics)"), true);
