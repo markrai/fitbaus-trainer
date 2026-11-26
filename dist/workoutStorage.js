@@ -226,8 +226,11 @@ export async function deleteHrSamplesForSessionStrict(sessionId) {
  * Queued writes are flushed and sealed first so they cannot recreate rows.
  */
 async function deleteFreestyleSessionEvidenceAtomic(sessionId) {
+    await deleteUnpersistedWorkoutEvidenceAtomic(sessionId, false);
+}
+export async function deleteUnpersistedWorkoutEvidenceAtomic(sessionId, allowRetryableFailures) {
     await withWorkoutHrDeletion(sessionId, () => withOrdinaryTelemetryDeletion(sessionId, async (flush) => {
-        if (!flush.ok && flush.retryableFailures > 0) {
+        if (!allowRetryableFailures && !flush.ok && flush.retryableFailures > 0) {
             throw new Error("cannot discard while telemetry flush has retryable failures");
         }
         const database = await openCurrentDatabase();
@@ -399,14 +402,18 @@ async function storeWorkoutSummary(summary) {
         return false;
     }
 }
+export async function getWorkoutSummaryBySessionIdStrict(sessionId) {
+    const [entry] = await getWorkoutRowsBySessionId([sessionId]);
+    if (!entry || entry.row === undefined)
+        return null;
+    const row = entry.row;
+    if (!row || !row.summary || row.summary.external_session_id !== sessionId)
+        throw new Error("Invalid saved workout identity");
+    return reconstructWorkoutRow({ ...row, session_id: sessionId }).summary;
+}
 async function getWorkoutSummaryBySessionId(sessionId) {
-    var _a;
     try {
-        const [entry] = await getWorkoutRowsBySessionId([sessionId]);
-        const row = entry === null || entry === void 0 ? void 0 : entry.row;
-        if (!(row === null || row === void 0 ? void 0 : row.summary) || row.summary.external_session_id !== sessionId)
-            return null;
-        return (_a = reconstructWorkoutRow({ ...row, session_id: sessionId }).summary) !== null && _a !== void 0 ? _a : null;
+        return await getWorkoutSummaryBySessionIdStrict(sessionId);
     }
     catch (error) {
         console.error("Error reading workout summary by session:", error);

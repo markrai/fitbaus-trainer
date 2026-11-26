@@ -295,6 +295,7 @@ export function startSession(
     // Validate a same-session retry before any session-owned state is cleared.
     freezeSessionControlMode(day, sessionId, controlMode, store);
   }
+  store.removeItem("completed_elapsed_" + day);
   store.removeItem(earlyCooldownKey(day));
   store.removeItem(pausedDurationKey(day));
   store.removeItem(pauseWallStartKey(day));
@@ -385,6 +386,7 @@ export function clearSession(
   store.removeItem("session_id_" + day);
   store.removeItem("session_start_" + day);
   store.removeItem("summary_emitted_" + day);
+  store.removeItem("completed_elapsed_" + day);
   store.removeItem("paused_" + day);
   store.removeItem("paused_elapsed_" + day);
   store.removeItem(pausedDurationKey(day));
@@ -421,8 +423,16 @@ export function persistVo2ProtocolRuntime(
   storageOrBrowser(storage).setItem(vo2ProtocolRuntimeKey(day), JSON.stringify(runtime));
 }
 
-export function markSummaryEmitted(day: string, storage?: SessionStorage): void {
-  storageOrBrowser(storage).setItem("summary_emitted_" + day, "true");
+export function markSummaryEmitted(day: string, storage?: SessionStorage, elapsedSec?: number): void {
+  const store = storageOrBrowser(storage);
+  if (typeof elapsedSec === "number" && Number.isFinite(elapsedSec) && elapsedSec >= 0) {
+    store.setItem("completed_elapsed_" + day, String(Math.floor(elapsedSec)));
+  }
+  store.setItem("summary_emitted_" + day, "true");
+}
+
+export function getCompletedWorkoutElapsed(day: string, storage?: SessionStorage): number {
+  return parseNonNegativeInt(storageOrBrowser(storage).getItem("completed_elapsed_" + day));
 }
 
 export function isSessionStale(day: string, storage?: SessionStorage): boolean {
