@@ -1,23 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-@file:Suppress("DEPRECATION")
-
 package com.fitbaus.bikebridge.host.youtube
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.os.Build
-import android.security.KeyPairGeneratorSpec
 import android.util.Base64
-import java.math.BigInteger
-import java.security.KeyPairGenerator
-import java.security.KeyStore
-import java.security.PrivateKey
+import com.fitbaus.bikebridge.host.credentials.AndroidCredentialKeys
 import java.security.SecureRandom
-import java.util.Date
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
-import javax.security.auth.x500.X500Principal
 
 internal interface GoogleAccountStore {
     fun hasAccount(): Boolean
@@ -32,6 +23,7 @@ internal interface GoogleAccountStore {
 internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore {
     private val app = context.applicationContext
     private val prefs: SharedPreferences = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val keys = AndroidCredentialKeys(app, KEY_ALIAS, "CN=FitBaus YouTube Account")
 
     override fun hasAccount(): Boolean = prefs.contains(KEY_REFRESH)
 
@@ -85,9 +77,9 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
     private fun aesKey(): SecretKeySpec {
         val wrapped = prefs.getString(KEY_WRAPPED_AES, null)
         if (wrapped != null) {
-            val privateKey = guarded(GoogleCredentialFailurePoint.Keystore) { privateKey() }
+            val privateKey = guarded(GoogleCredentialFailurePoint.Keystore) { keys.privateKey(createIfMissing = true) }
             val bytes = guarded(GoogleCredentialFailurePoint.RsaUnwrap) {
-                val cipher = rsaCipher()
+                val cipher = keys.rsaCipher()
                 cipher.init(Cipher.DECRYPT_MODE, privateKey)
                 cipher.doFinal(Base64.decode(wrapped, Base64.NO_WRAP))
             }
@@ -96,9 +88,9 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
         }
         val generated = ByteArray(16)
         SecureRandom().nextBytes(generated)
-        val publicKey = guarded(GoogleCredentialFailurePoint.Keystore) { publicKey() }
+        val publicKey = guarded(GoogleCredentialFailurePoint.Keystore) { keys.publicKey() }
         val encrypted = guarded(GoogleCredentialFailurePoint.RsaWrap) {
-            val rsa = rsaCipher()
+            val rsa = keys.rsaCipher()
             rsa.init(Cipher.ENCRYPT_MODE, publicKey)
             rsa.doFinal(generated)
         }
@@ -123,38 +115,6 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
         }
     }
 
-    private fun rsaCipher(): Cipher =
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.LOLLIPOP_MR1) {
-            Cipher.getInstance(RSA_TRANSFORM, "AndroidOpenSSL")
-        } else {
-            Cipher.getInstance(RSA_TRANSFORM)
-        }
-
-    private fun keyStore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-
-    private fun ensureKey(): KeyStore {
-        val store = keyStore()
-        if (!store.containsAlias(KEY_ALIAS)) {
-            val now = System.currentTimeMillis()
-            val generator = KeyPairGenerator.getInstance("RSA", "AndroidKeyStore")
-            val spec = KeyPairGeneratorSpec.Builder(app)
-                .setAlias(KEY_ALIAS)
-                .setSubject(X500Principal("CN=FitBaus YouTube Account"))
-                .setSerialNumber(BigInteger.ONE)
-                .setStartDate(Date(now - 60_000))
-                .setEndDate(Date(now + 20L * 365 * 24 * 60 * 60 * 1000))
-                .build()
-            generator.initialize(spec)
-            generator.generateKeyPair()
-            return keyStore()
-        }
-        return store
-    }
-
-    private fun privateKey(): PrivateKey = ensureKey().getKey(KEY_ALIAS, null) as PrivateKey
-
-    private fun publicKey() = ensureKey().getCertificate(KEY_ALIAS).publicKey
-
     private inline fun <T> guarded(point: GoogleCredentialFailurePoint, block: () -> T): T {
         try {
             return block()
@@ -172,6 +132,5 @@ internal class AndroidGoogleAccountStore(context: Context) : GoogleAccountStore 
         const val KEY_CLIENT_SECRET = "client_secret_encrypted"
         const val KEY_REFRESH = "refresh_token_encrypted"
         const val KEY_WRAPPED_AES = "wrapped_aes"
-        const val RSA_TRANSFORM = "RSA/ECB/PKCS1Padding"
     }
 }
