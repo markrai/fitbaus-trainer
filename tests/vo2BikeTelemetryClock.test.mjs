@@ -19,6 +19,8 @@ import {
   recordBikeTelemetrySample,
 } from "../dist/bikeTelemetryTrace.js";
 import { summarizeVo2StageWorkload, VO2_WORKLOAD_MIN_SAMPLES } from "../dist/vo2Workload.js";
+import { readSessionFinalization, writeActiveSessionOwner } from "../dist/freestyleRide.js";
+import { restartWorkout } from "../dist/workoutLogic.js";
 import {
   discardWorkoutSession,
   handleWorkoutCancellation,
@@ -182,9 +184,9 @@ test("transient telemetry survives until assessment finalization, then is releas
     globalThis.window.generateWorkoutSummary = async () => {
       assert.ok(getBikeTelemetrySamples(sessionId).length > 0);
       generateSawSamples = true;
-      return { vo2_assessment: { status: "estimated" } };
+      return { external_session_id: sessionId, vo2_assessment: { status: "estimated" } };
     };
-    globalThis.window.emitWorkoutSummary = async () => {};
+    globalThis.window.emitWorkoutSummary = async () => true;
     await handleWorkoutCompletion(day);
     assert.equal(generateSawSamples, true);
     assert.equal(getBikeTelemetrySamples(sessionId, storage).length, 0);
@@ -246,9 +248,9 @@ test("cancellation persists assessment before releasing telemetry", async () => 
     globalThis.window.generateWorkoutSummary = async () => {
       assert.ok(getBikeTelemetrySamples(sessionId).length > 0);
       generateSawSamples = true;
-      return { vo2_assessment: { status: "insufficient_evidence" } };
+      return { external_session_id: sessionId, vo2_assessment: { status: "insufficient_evidence" } };
     };
-    globalThis.window.emitWorkoutSummary = async () => {};
+    globalThis.window.emitWorkoutSummary = async () => true;
     await handleWorkoutCancellation(day);
     assert.equal(generateSawSamples, true);
     assert.equal(getBikeTelemetrySamples(sessionId, storage).length, 0);
@@ -258,4 +260,138 @@ test("cancellation persists assessment before releasing telemetry", async () => 
     globalThis.localStorage = previous;
     globalThis.window = previousWindow;
   }
+});
+
+function endFixture(day, id) {
+  const previousStorage = globalThis.localStorage;
+  const previousWindow = globalThis.window;
+  const storage = memoryStorage();
+  globalThis.localStorage = storage;
+  const events = [];
+  globalThis.window = {
+    getSelectedDay: () => day,
+    generateWorkoutSummary: async (sessionId, start, end, selector, options) => {
+      events.push(["generate", sessionId, start, end, selector, options.cancelled]);
+      return { external_session_id: sessionId };
+    },
+    emitWorkoutSummary: async summary => {
+      events.push(["emit", summary.external_session_id]);
+      return true;
+    },
+    releaseWakeLock: async () => {},
+    updateDisplay: () => {},
+  };
+  startSession(day, Date.now() - 60_000, id, "bike", storage);
+  writeActiveSessionOwner({ selector: day, sessionId: id }, storage);
+  recordBikeTelemetrySample(id, { timestamp_sec: 10, rpm: 70, watts: 140 }, storage);
+  return { storage, events, restore() {
+    clearBikeTelemetrySamples(id, storage);
+    globalThis.localStorage = previousStorage;
+    globalThis.window = previousWindow;
+  } };
+}
+
+test("completion false or rejected save preserves raw evidence and retries the frozen end", async () => {
+  for (const failure of [async () => false, async () => { throw new Error("storage failed"); }]) {
+    const day = "Monday";
+    const id = "end-failed";
+    const f = endFixture(day, id);
+    try {
+      const emit = window.emitWorkoutSummary;
+      window.emitWorkoutSummary = failure;
+      assert.equal(await handleWorkoutCompletion(day), "failed");
+      assert.equal(getSession(day, f.storage).summaryEmitted, "false");
+      assert.equal(readSessionFinalization(day, f.storage).status, "save_failed");
+      assert.equal(getBikeTelemetrySamples(id, f.storage).length, 1);
+      const frozen = readSessionFinalization(day, f.storage);
+      window.emitWorkoutSummary = emit;
+      assert.equal(await handleWorkoutCancellation(day), "saved");
+      assert.equal(f.events[1][3], frozen.endedAtMs);
+      assert.equal(f.events[1][5], false);
+      assert.equal(getSession(day, f.storage).summaryEmitted, "true");
+      assert.equal(readSessionFinalization(day, f.storage), null);
+      assert.equal(getBikeTelemetrySamples(id, f.storage).length, 0);
+    } finally { f.restore(); }
+  }
+});
+
+test("completion and cancellation share one in-flight operation and first intent", async () => {
+  const day = "Tuesday";
+  const id = "end-single-flight";
+  const f = endFixture(day, id);
+  try {
+    let release;
+    window.emitWorkoutSummary = () => new Promise(resolve => { release = resolve; });
+    const first = handleWorkoutCompletion(day);
+    const second = handleWorkoutCompletion(day);
+    const cancel = handleWorkoutCancellation(day);
+    assert.equal(first, second);
+    assert.equal(first, cancel);
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(f.events.length, 1);
+    assert.equal(readSessionFinalization(day, f.storage).cancelled, false);
+    release(true);
+    assert.deepEqual(await Promise.all([first, second, cancel]), ["saved", "saved", "saved"]);
+    assert.equal(await handleWorkoutCompletion(day), "already_saved");
+    assert.equal(f.events.length, 1);
+  } finally { f.restore(); }
+});
+
+test("late generation cannot emit against a replaced session", async () => {
+  const day = "Wednesday";
+  const id = "end-replaced";
+  const f = endFixture(day, id);
+  try {
+    let release;
+    window.generateWorkoutSummary = () => new Promise(resolve => { release = resolve; });
+    const pending = handleWorkoutCompletion(day);
+    await Promise.resolve();
+    startSession(day, Date.now(), "new-session", "bike", f.storage);
+    writeActiveSessionOwner({ selector: day, sessionId: "new-session" }, f.storage);
+    release({ external_session_id: id });
+    assert.equal(await pending, "superseded");
+    assert.equal(getSession(day, f.storage).sessionId, "new-session");
+    assert.equal(getSession(day, f.storage).summaryEmitted, "false");
+    assert.equal(getBikeTelemetrySamples(id, f.storage).length, 1);
+    assert.deepEqual(f.events, []);
+  } finally { f.restore(); }
+});
+
+test("late save cannot mark a replacement or release its evidence", async () => {
+  const day = "Thursday";
+  const id = "end-late-save";
+  const f = endFixture(day, id);
+  try {
+    let release;
+    window.emitWorkoutSummary = () => new Promise(resolve => { release = resolve; });
+    const pending = handleWorkoutCompletion(day);
+    await Promise.resolve();
+    await Promise.resolve();
+    startSession(day, Date.now(), "replacement", "bike", f.storage);
+    writeActiveSessionOwner({ selector: day, sessionId: "replacement" }, f.storage);
+    recordBikeTelemetrySample("replacement", { timestamp_sec: 1, rpm: 60 }, f.storage);
+    release(true);
+    assert.equal(await pending, "superseded");
+    assert.equal(getSession(day, f.storage).summaryEmitted, "false");
+    assert.equal(getBikeTelemetrySamples("replacement", f.storage).length, 1);
+  } finally { clearBikeTelemetrySamples("replacement", f.storage); f.restore(); }
+});
+
+test("restart does not delete evidence when cancellation persistence fails", async () => {
+  const day = "Friday";
+  const id = "end-restart-failed";
+  const f = endFixture(day, id);
+  try {
+    let deleted = 0;
+    window.clearHrSamples = async () => { deleted++; };
+    window.emitWorkoutSummary = async () => false;
+    await restartWorkout();
+    assert.equal(getSession(day, f.storage).sessionId, id);
+    assert.equal(getSession(day, f.storage).summaryEmitted, "false");
+    assert.equal(readSessionFinalization(day, f.storage).cancelled, true);
+    assert.equal(readSessionFinalization(day, f.storage).status, "save_failed");
+    assert.equal(getBikeTelemetrySamples(id, f.storage).length, 1);
+    assert.equal(deleted, 0);
+  } finally { f.restore(); }
 });

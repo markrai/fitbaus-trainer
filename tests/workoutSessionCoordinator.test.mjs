@@ -166,3 +166,11 @@ test("invalid Freestyle authority disarms before marking and valid authority cle
   assert.deepEqual(f.coordinator.checkFreestyleAuthority(day, session), { status: "restored" });
   assert.deepEqual(f.events.at(-1), ["clear", day]);
 });
+
+test("stale cleanup preserves an ordinary workout with a durable finalization", () => {
+  const f = fixture();
+  f.sessions.Monday = { sessionStart: "1", sessionId: "ending" };
+  f.setFinalization({ sessionId: "ending", status: "save_failed" });
+  cleanupStaleWorkoutSessions(f.dependencies);
+  assert.deepEqual(f.events, []);
+});

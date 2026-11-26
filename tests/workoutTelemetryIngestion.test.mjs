@@ -121,3 +121,18 @@ test("HR hydration state is scoped to ingestion owner and new session", async ()
     ["machine", "ride-1", 5], ["store", "ride-1", 5], ["machine", "ride-2", 5], ["store", "ride-2", 5],
   ]);
 });
+
+test("ending and emitted sessions reject all HR and bike evidence", async () => {
+  for (const day of ["Monday", VO2_WORKOUT_SELECTOR_ID]) {
+    const f = fixture();
+    f.setDay(day);
+    f.setFinalization({ sessionId: "ride-1" });
+    f.ingestion.recordBikeTelemetry();
+    await f.ingestion.persistWorkoutRelativeHr(150);
+    f.setFinalization(null);
+    f.setSession({ summaryEmitted: "true" });
+    f.ingestion.recordBikeTelemetry();
+    await f.ingestion.persistWorkoutRelativeHr(151);
+    assert.deepEqual(f.events, []);
+  }
+});

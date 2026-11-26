@@ -911,6 +911,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     if (typeof (window as any).resetVoiceState === "function") (window as any).resetVoiceState();
     if (startButtonRowEl) startButtonRowEl.style.display = "flex";
     if (startBtnEl) {
+      startBtnEl.disabled = false;
       startBtnEl.innerText = isFreestyleWorkoutSelector(state.day) ? "Start Freestyle Ride" : "Start Workout";
       startBtnEl.onclick = workoutSession.startWorkout;
       startBtnEl.style.display = "block";
@@ -937,6 +938,7 @@ function renderWorkout(state: WorkoutDisplayState) {
     }
     if (startButtonRowEl) startButtonRowEl.style.display = "flex";
     if (startBtnEl) {
+      startBtnEl.disabled = false;
       startBtnEl.innerText = "Restart Test";
       startBtnEl.onclick = workoutSession.restartWorkout;
       startBtnEl.style.display = "block";
@@ -964,7 +966,7 @@ function renderWorkout(state: WorkoutDisplayState) {
         : '<span class="phase-name">Completed</span>';
       phaseDisplayEl.dataset.phaseState = "completed";
     }
-    const completedPhrase = isVo2WorkoutSelector(state.day) ? "Test complete" : "Completed";
+    const completedPhrase = ending && ending.cancelled ? "Workout ended" : isVo2WorkoutSelector(state.day) ? "Test complete" : "Completed";
     if (typeof (window as any).announceWorkoutGuidance === "function") {
       (window as any).announceWorkoutGuidance(completedPhrase, null, pendingVo2Cues);
     } else if (typeof (window as any).announcePhaseIfChanged === "function") {

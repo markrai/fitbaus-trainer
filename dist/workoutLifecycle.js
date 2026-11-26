@@ -178,10 +178,15 @@ function endOrdinaryWorkout(day, cancelled, prepare) {
             if (saved !== true)
                 throw new Error("Workout summary was not persisted");
             markSummaryEmitted(day, storage);
-            clearSessionFinalization(day, storage);
             releaseTransientSessionTelemetry(sessionId, storage);
+            clearSessionFinalization(day, storage);
             clearActiveSessionOwner({ selector: day, sessionId }, storage);
-            presentVo2AssessmentIfAny(summary);
+            try {
+                presentVo2AssessmentIfAny(summary);
+            }
+            catch (error) {
+                console.error("Could not present saved workout assessment:", error);
+            }
             return "saved";
         }
         catch (error) {
