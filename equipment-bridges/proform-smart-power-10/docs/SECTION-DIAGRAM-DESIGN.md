@@ -160,3 +160,12 @@ Unit regressions cover deterministic TD/LR geometry, branching/merging and long 
 ## Phase 4 repository hardening and qualification
 
 See [section diagram qualification](SECTION-DIAGRAM-QUALIFICATION.md) for baseline CI evidence, additional automated regressions, and the outstanding physical console/LOBO/Ollama acceptance matrix. The visible-draw gate, live playback position checks and loading indicator are hardened without changing provider or narration behavior. Physical qualification is not complete.
+
+
+## Concept Canvas (additive visualization)
+
+When Transcriber advertises literal `summary_concept_api: true`, the current bike defaults to Concept Canvas instead of a flowchart. The exact same visible-summary draw gate, summary identity, single-worker prefetch, pairing/source authorization, bounded deferred polling, stale-completion rejection, long press, full-screen ownership and close/Back behavior apply. Only one visualization is requested for each visible summary. A failed concept request does not trigger an additional flowchart request. With a legacy server that supports only flowcharts, the existing flowchart remains available.
+
+The new endpoint is POST `/v1/section-concepts`, using the existing nine identity fields, with response schema `fitbaus.section-concepts/v1`, `concept_prompt_version: concepts-v1` and `concept_input_version: plain-lines-v1`. Ready responses contain 1–10 snippets (each at most 140 Unicode code points), no graph or Mermaid. The client independently validates identity, versions, response bounds and plain text. The server's graph endpoint, graph parser, native graph layout and renderer remain intact for later explicit format selection, including future frontier-model integrations.
+
+`BooksConceptLayout` packs measured rectangular bubbles by descending width into the first row with sufficient free space, centers each row, and retains all accepted concepts. `BooksConceptView` measures and wraps actual text using native StaticLayout, varies font size by snippet length, and uses mustard accents on shorter snippets as a stylistic distinction, not model-assigned importance. The viewport centers content when it fits, scrolls vertically when it does not, and retains the fixed close control. No WebView, dependency, invented relationship or implicit causal arrow is introduced. Explicit format selection and multi-provider frontier-model routing are future work. Physical-console readability, latency and actual LOBO output quality remain to be qualified.
