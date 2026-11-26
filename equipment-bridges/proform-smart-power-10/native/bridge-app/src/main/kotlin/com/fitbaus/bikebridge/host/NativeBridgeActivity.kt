@@ -42,6 +42,8 @@ import com.fitbaus.arcade.HandPositionInput
 import com.fitbaus.arcade.RateMeter
 import com.fitbaus.bikebridge.host.arcade.ArcadeContent
 import com.fitbaus.bikebridge.host.arcade.ArcadeConfiguration
+import com.fitbaus.bikebridge.host.arcade.ArcadeLifecycle
+import com.fitbaus.bikebridge.host.arcade.AndroidArcadeLifecycleEffects
 import com.fitbaus.bikebridge.host.arcade.AndroidArcadeConfigurationPersistence
 import com.fitbaus.bikebridge.host.arcade.ArcadeTrackerPicker
 import com.fitbaus.bikebridge.host.arcade.ArcadeMode
@@ -110,6 +112,15 @@ class NativeBridgeActivity : Activity() {
         )
     }
     private val arcadeClock by lazy { ArcadeClock(handler) { arcadeTick() } }
+    private val arcadeLifecycle by lazy {
+        ArcadeLifecycle(
+            arcadeConfiguration,
+            AndroidArcadeLifecycleEffects(cameraSession, arcadeClock, gameController, bikeMotion, arcadeContent) {
+                trackerRate.reset()
+                arcadeDiagnostics = ""
+            },
+        )
+    }
 
     // Mode switches only swap content views, the arcade's own camera/clock, and the YouTube player.
     // They never start, stop, or restart NativeBridgeService or its USB session.
@@ -119,24 +130,11 @@ class NativeBridgeActivity : Activity() {
         }
 
         override fun activateArcade(game: ArcadeMode) {
-            trackerRate.reset()
-            arcadeDiagnostics = ""
-            bikeMotion.reset()
-            gameController.refresh()
-            gameController.resetTransient()
-            cameraSession.updateSettings(arcadeConfiguration.settingsFor(game))
-            cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)
-            cameraSession.start()
-            arcadeClock.start()
+            arcadeLifecycle.activate(game)
         }
 
         override fun deactivateArcade(reason: ArcadeStopReason) {
-            gameController.resetTransient()
-            arcadeClock.stop()
-            cameraSession.stop(reason)
-            arcadeContent.trail.pause()
-            arcadeContent.ghoul.pause()
-            arcadeContent.biketris.pause()
+            arcadeLifecycle.deactivate(reason)
         }
 
         override fun startMedia(mode: ArcadeMode) {
@@ -725,16 +723,7 @@ class NativeBridgeActivity : Activity() {
     }
 
     private fun applyTrackerSettings(game: ArcadeMode, next: ArcadeTrackerSettings) {
-        arcadeConfiguration.saveTracker(game, next)
-        if (game == ArcadeMode.Bricks) arcadeContent.playground.faceControl = next.mode == ArcadeTrackerMode.Face
-        if (game != modeController.mode || next == cameraSession.settings) return
-        cameraSession.updateSettings(next)
-        trackerRate.reset()
-        arcadeDiagnostics = ""
-        if (modeController.isActive) {
-            cameraSession.stop(ArcadeStopReason.HostPaused)
-            cameraSession.start()
-        }
+        arcadeLifecycle.applyTrackerSettings(game, modeController.mode, modeController.isActive, next)
     }
 
     private fun label(text: String, sizeSp: Float, color: Int): TextView {
