@@ -79,6 +79,7 @@ internal class BooksNarrationViewport(
     fun setSummaryLongPress(action: (() -> Boolean)?) {
         inlineSummary.setOnLongClickListener(if (action == null) null else View.OnLongClickListener { action() })
         inlineSummary.isLongClickable = action != null
+        inlineSummary.isClickable = false
     }
 
     override fun dispatchDraw(canvas: Canvas) {
