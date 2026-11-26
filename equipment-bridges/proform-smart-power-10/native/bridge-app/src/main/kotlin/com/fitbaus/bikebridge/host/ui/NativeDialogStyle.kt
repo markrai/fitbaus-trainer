@@ -18,8 +18,8 @@ internal enum class NativeDialogStyle(
         0xff455368.toInt(), false, 1f, 0, 4,
     ),
     TRANSCRIPTION_MODELS(
-        0xff58d5a5.toInt(), 10, 5, 3, 15f, 0xff2c3b4d.toInt(),
-        0xff425166.toInt(), true, 0.45f, 3, 0,
+        0xffffce1b.toInt(), 8, 5, 3, 15f, 0xff263341.toInt(),
+        0xff455368.toInt(), true, 0.45f, 3, 0,
     );
 
     fun buttonLayout(horizontal: Boolean): DialogButtonLayout {

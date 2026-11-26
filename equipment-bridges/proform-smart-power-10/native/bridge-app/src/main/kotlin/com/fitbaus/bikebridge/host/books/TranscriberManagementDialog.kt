@@ -41,13 +41,14 @@ internal class TranscriberManagementDialog(
         setTextColor(MUTED)
         setPadding(dp(20), dp(8), dp(20), dp(8))
     }
-    private val scroll = ScrollView(context).apply { addView(rows) }
+    private val scroll by lazy { ScrollView(context).apply { addView(rows) } }
+    private var embedded = false
     private val refresh = Button(context).apply {
         text = "REFRESH"
         setTextColor(Color.WHITE)
-        background = surface(0xff263342.toInt(), 0xff425166.toInt())
+        background = surface(NativeDialogStyle.TRANSCRIPTION_MODELS.buttonFill, NativeDialogStyle.TRANSCRIPTION_MODELS.buttonBorder)
     }
-    private val dialog = AlertDialog.Builder(context)
+    private val dialog by lazy { AlertDialog.Builder(context)
         .setTitle("Transcription Models")
         .setView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -59,7 +60,7 @@ internal class TranscriberManagementDialog(
             })
         })
         .setNegativeButton("CLOSE", null)
-        .create()
+        .create() }
     private var login: AlertDialog? = null
     private var pending: Future<*>? = null
     private var closed = false
@@ -69,19 +70,35 @@ internal class TranscriberManagementDialog(
     private val poll = Runnable { if (login == null) load() }
 
     fun show(): AlertDialog {
-        dialog.setOnDismissListener {
-            closed = true
-            main.removeCallbacks(poll)
-            login?.dismiss()
-            login = null
-            pending?.cancel(true)
-            worker.shutdownNow()
-        }
+        dialog.setOnDismissListener { close() }
         refresh.setOnClickListener { load() }
         dialog.show()
         dialog.window?.setLayout(-1, -1)
         load()
         return dialog
+    }
+
+    fun attach(parent: LinearLayout) {
+        check(!closed && !embedded)
+        embedded = true
+        rows.setPadding(0, dp(4), 0, dp(8))
+        status.setPadding(dp(4), dp(8), dp(4), dp(8))
+        parent.addView(status)
+        parent.addView(rows, LinearLayout.LayoutParams(-1, -2))
+        parent.addView(refresh, LinearLayout.LayoutParams(-1, dp(48)))
+        refresh.setOnClickListener { load() }
+        load()
+    }
+
+    fun close() {
+        if (closed) return
+        closed = true
+        main.removeCallbacks(poll)
+        login?.dismiss()
+        login = null
+        pending?.cancel(true)
+        pending = null
+        worker.shutdownNow()
     }
 
     private fun load() = request {
@@ -148,7 +165,7 @@ internal class TranscriberManagementDialog(
     }
 
     private fun renderRows(snapshot: PreparationSnapshot, enabled: Boolean) {
-        val position = scroll.scrollY
+        val position = if (embedded) 0 else scroll.scrollY
         rows.removeAllViews()
         heading("Choose a model")
         val models = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -182,7 +199,7 @@ internal class TranscriberManagementDialog(
                 !model.memoryAllowed -> "Installed · waiting for memory"
                 else -> "Ready"
             }
-            label(description, 15f, card, if (model.installed && model.qualified) ACCENT else MUTED, true)
+            label(description, 15f, card, if (model.installed && model.qualified && model.memoryAllowed) SUCCESS else MUTED, true)
             card.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
             if (model.downloading) {
                 progress(model.received, model.total, card)
@@ -248,7 +265,7 @@ internal class TranscriberManagementDialog(
                 }
             }
         }
-        scroll.post { if (!closed) scroll.scrollTo(0, position) }
+        if (!embedded) scroll.post { if (!closed) scroll.scrollTo(0, position) }
     }
 
     private fun shouldPoll(): Boolean = last?.let { snapshot ->
@@ -276,8 +293,8 @@ internal class TranscriberManagementDialog(
     private fun panel(selected: Boolean) = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(12), dp(12), dp(12), dp(12))
-        background = surface(if (selected) 0xff16372e.toInt() else 0xff1c2633.toInt(),
-            if (selected) ACCENT else 0xff344356.toInt())
+        background = surface(if (selected) 0xff342f1c.toInt() else 0xff1a2330.toInt(),
+            if (selected) ACCENT else NativeDialogStyle.TRANSCRIPTION_MODELS.buttonBorder)
     }
 
     private fun heading(value: String) = label(value, 21f, rows, Color.WHITE, true)
@@ -307,6 +324,7 @@ internal class TranscriberManagementDialog(
     private companion object {
         val ACCENT = NativeDialogStyle.TRANSCRIPTION_MODELS.accent
         val MUTED = 0xffc1cbd7.toInt()
+        val SUCCESS = 0xff58d5a5.toInt()
     }
 
     private fun megabytes(bytes: Long) = String.format(Locale.US, "%.0f MB", bytes / 1_000_000.0)

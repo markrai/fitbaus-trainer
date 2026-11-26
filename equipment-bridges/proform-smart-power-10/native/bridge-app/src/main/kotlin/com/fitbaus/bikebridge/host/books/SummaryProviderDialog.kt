@@ -52,11 +52,12 @@ internal class SummaryProviderDialog(
         setTextColor(MUTED)
         setPadding(dp(20), dp(4), dp(20), dp(6))
     }
-    private val scroll = ScrollView(context).apply {
+    private var embedded = false
+    private val scroll by lazy { ScrollView(context).apply {
         isFillViewport = true
         addView(rows)
-    }
-    private val dialog = AlertDialog.Builder(context)
+    } }
+    private val dialog by lazy { AlertDialog.Builder(context)
         .setView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(BACKGROUND)
@@ -81,31 +82,44 @@ internal class SummaryProviderDialog(
             addView(status)
             addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         })
-        .create()
+        .create() }
     private var pendingWork: Future<*>? = null
     private val closed get() = state.screen == SummaryProviderScreen.CLOSED
     private var formGeneration = 0
     private val secretFields = mutableListOf<EditText>()
 
-    private fun closeDialog() { if (!closed) dialog.dismiss() }
+    private fun closeDialog() { if (!closed && !embedded) dialog.dismiss() }
 
     fun show(): AlertDialog {
-        dialog.setOnDismissListener {
-            actions.close()
-            formGeneration++
-            loboDiscovery.stop()
-            hideKeyboard()
-            clearSecrets()
-            secretFields.clear()
-            renderConfiguration = null
-            pendingWork?.cancel(true)
-            pendingWork = null
-            worker.shutdownNow()
-        }
+        dialog.setOnDismissListener { close() }
         dialog.show()
         configureInputWindow()
         load()
         return dialog
+    }
+
+    fun attach(parent: LinearLayout) {
+        check(!closed && !embedded)
+        embedded = true
+        rows.setPadding(0, dp(4), 0, dp(8))
+        status.setPadding(dp(4), dp(4), dp(4), dp(6))
+        parent.addView(status)
+        parent.addView(rows, LinearLayout.LayoutParams(-1, -2))
+        load()
+    }
+
+    fun close() {
+        if (closed) return
+        actions.close()
+        formGeneration++
+        loboDiscovery.stop()
+        hideKeyboard()
+        clearSecrets()
+        secretFields.clear()
+        renderConfiguration = null
+        pendingWork?.cancel(true)
+        pendingWork = null
+        worker.shutdownNow()
     }
 
     @Suppress("DEPRECATION")
@@ -566,8 +580,8 @@ internal class SummaryProviderDialog(
         }
         status.text = state.activeModel?.let { "Saved · $it" } ?: "Summarization disabled"
         label("Changes are active on Transcriber. Reopen an audiobook to refresh its provider information.", 18f, ACCENT)
-        button("DONE", true) { dialog.dismiss() }
-        button("MANAGE AGAIN") { load() }
+        if (!embedded) button("DONE", true) { dialog.dismiss() }
+        button("MANAGE AGAIN", primary = embedded) { load() }
     }
 
     private fun <T> request(
@@ -636,14 +650,14 @@ internal class SummaryProviderDialog(
         context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
 
     private fun hideKeyboard() {
-        val focused = dialog.currentFocus as? EditText ?: return
+        val focused = rows.findFocus() as? EditText ?: return
         focused.windowToken?.let { inputMethod()?.hideSoftInputFromWindow(it, 0) }
         focused.clearFocus()
     }
 
     private fun showKeyboard(editor: EditText) {
         if (closed || !editor.isEnabled || !editor.isShown) return
-        dialog.window?.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
+        if (!embedded) dialog.window?.clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM or
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         if (!editor.requestFocus()) return
         editor.post {
@@ -662,7 +676,7 @@ internal class SummaryProviderDialog(
         clearSecrets()
         secretFields.clear()
         rows.removeAllViews()
-        scroll.scrollTo(0, 0)
+        if (!embedded) scroll.scrollTo(0, 0)
     }
 
     private fun enableRows(enabled: Boolean) = setDialogTreeEnabled(rows, enabled)
