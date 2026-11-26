@@ -254,6 +254,44 @@ class SummaryProviderWorkflowTest {
     }
 
     @Test
+    fun rememberedInactiveEndpointReusesTrustAndExplicitReverificationInvalidatesDraft() {
+        val inactive = "https://192.168.1.201:7869/v1"
+        val flow = authorized(configured.copy(trustedLoboEndpoints = listOf(inactive)))
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(inactive))
+        assertFalse(flow.state.reusesCurrentLobo)
+        assertTrue(flow.state.reusesRememberedLobo)
+        assertTrue(summaryProviderPresentation(flow.state).reuseTrust)
+        val candidate = configured.copy(baseUrl = inactive)
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER),
+            SummaryProviderDiscovery(listOf("lobo-nano"), candidate)))
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 10))
+        assertTrue(flow.setConsent(true))
+        assertTrue(flow.state.canSave)
+        assertTrue(flow.setVerifyLoboAgain(true))
+        assertFalse(flow.state.usesStoredLoboTrust)
+        assertTrue(flow.state.hasStoredLoboTrust)
+        assertNull(flow.state.discovery)
+        assertFalse(flow.state.canSave)
+        assertTrue(flow.setVerifyLoboAgain(false))
+        assertTrue(flow.state.usesStoredLoboTrust)
+        assertTrue(flow.addressEdited("https://192.168.1.202:7869/v1"))
+        assertFalse(flow.state.hasStoredLoboTrust)
+        assertFalse(flow.setVerifyLoboAgain(true))
+    }
+
+    @Test
+    fun disabledProviderCanStillRememberADevice() {
+        val endpoint = "https://192.168.1.201:7869/v1"
+        val flow = authorized(disabled.copy(trustedLoboEndpoints = listOf(endpoint)))
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(endpoint))
+        assertTrue(flow.state.reusesRememberedLobo)
+        assertFalse(flow.state.reusesCurrentLobo)
+        assertNull(flow.state.activeModel)
+    }
+
+    @Test
     fun failedSaveRequiresReloadRatherThanClaimingOldProviderIsStillActive() {
         val flow = testedFlow()
         assertTrue(flow.failed(begin(flow, SummaryProviderOperation.SAVE)))

@@ -187,12 +187,15 @@ internal class SummaryProviderDialog(
         val lanStatus = label("Finding LOBO devices…", 15f, MUTED, loboPanel)
         val lanDevices = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         loboPanel.addView(lanDevices, LinearLayout.LayoutParams(-1, -2))
+        val rememberedRows = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        loboPanel.addView(rememberedRows, LinearLayout.LayoutParams(-1, -2))
         val manualAddress = button("ENTER ADDRESS MANUALLY", parent = loboPanel) {}
         val endpointLabel = label("Provider address", 15f, MUTED, form)
         val endpoint = field("Provider base URL ending in /v1", 2048, parent = form)
         endpoint.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         val authLabel = label("Verify device identity · LOBO AUTH code", 15f, MUTED, form)
         val auth = field("XXXX-XXXX", 9, secret = true, parent = form)
+        val verifyAgain = button("VERIFY DEVICE AGAIN", parent = form) {}
         val keyLabel = label("Provider API key (optional)", 15f, MUTED, form)
         val key = field("API key", 2048, secret = true, parent = form)
         val allowHttp = CheckBox(context).apply {
@@ -260,6 +263,7 @@ internal class SummaryProviderDialog(
         var manualLobo = false
         val lanSelection = LoboLanPickerState()
         val lanButtons = linkedMapOf<String, Button>()
+        val rememberedButtons = linkedMapOf<String, Button>()
         var scanningLan = false
         var failedLan = false
         val authorizationLabel = TextView(context).apply {
@@ -300,12 +304,12 @@ internal class SummaryProviderDialog(
             val picked = lanSelection.selected
             lanStatus.text = when {
                 picked != null -> if (lanSelection.isAvailable(picked.address))
-                    "Selected: ${picked.name} · " + (if (state.reusesCurrentLobo) "Stored trust" else "Identity not verified")
+                    "Selected: ${picked.name} · " + (if (state.usesStoredLoboTrust) "Stored trust" else "Identity not verified")
                     else "Selected: ${picked.name} · Last seen, not currently advertised"
                 scanningLan -> "Finding LOBO devices…"
                 failedLan -> "Discovery unavailable"
                 lanSelection.devices.isEmpty() -> "No LOBO devices found. Check the LAN or enter the address manually."
-                else -> "${lanSelection.devices.size} LOBO device(s) found · Unverified"
+                else -> "${lanSelection.devices.size} LOBO device(s) found · Identity checked on connection"
             }
             val visible = lanSelection.rows()
             val addresses = visible.map { it.address }.toSet()
@@ -316,7 +320,7 @@ internal class SummaryProviderDialog(
             }
             visible.forEach { device ->
                 val address = device.address
-                val chosen = picked?.address == address
+                val chosen = picked?.address == address || (manualLobo && state.draftEndpoint == device.endpoint)
                 val row = lanButtons.getOrPut(address) {
                     button("", parent = lanDevices) {
                         if (formCurrent() && state.editable && state.choice == SummaryProviderChoice.LOBO &&
@@ -333,7 +337,7 @@ internal class SummaryProviderDialog(
                                 endpointLabel.visibility = View.GONE
                                 manualAddress.text = "ENTER ADDRESS MANUALLY"
                                 renderLanDevices()
-                                if (state.reusesCurrentLobo) discoverDraft?.invoke()
+                                if (state.usesStoredLoboTrust) discoverDraft?.invoke()
                             }
                         }
                     }.apply {
@@ -341,8 +345,43 @@ internal class SummaryProviderDialog(
                         backgroundTintList = null
                     }
                 }
-                row.text = if (chosen) "${device.name}  ·  ${device.address}  ·  SELECTED"
-                    else "${device.name}  ·  ${device.address}"
+                val stored = state.authorization?.let { it.remembersLobo(device.endpoint) || it.matchesTrustedLobo(device.endpoint) } == true
+                row.text = "${device.name}  ·  ${device.address}" +
+                    (if (stored) "  ·  REMEMBERED" else "") + (if (chosen) "  ·  SELECTED" else "")
+                row.isSelected = chosen
+                row.isEnabled = state.editable
+                row.setTextColor(if (chosen) ACCENT else Color.WHITE)
+                row.background = surface(if (chosen) 0xff342f1c.toInt() else FIELD,
+                    if (chosen) ACCENT else BORDER, if (chosen) 2 else 1)
+            }
+            val advertisedEndpoints = visible.map { it.endpoint }.toSet()
+            val remembered = state.authorization?.takeUnless { it.storageError }?.trustedLoboEndpoints.orEmpty()
+                .filterNot { it in advertisedEndpoints }
+            for (value in rememberedButtons.keys.toList()) {
+                if (value !in remembered) rememberedButtons.remove(value)?.let { rememberedRows.removeView(it) }
+            }
+            remembered.forEach { value ->
+                val chosen = manualLobo && state.draftEndpoint == value
+                val row = rememberedButtons.getOrPut(value) {
+                    button("", parent = rememberedRows) {
+                        if (formCurrent() && state.editable && state.choice == SummaryProviderChoice.LOBO) {
+                            lanSelection.clearSelection()
+                            manualLobo = true
+                            suppressChanges = true
+                            endpoint.setText(value)
+                            auth.text.clear()
+                            suppressChanges = false
+                            if (workflow.addressEdited(value)) clearModelPanel()
+                            endpoint.visibility = View.VISIBLE
+                            endpointLabel.visibility = View.VISIBLE
+                            manualAddress.text = "CHOOSE DISCOVERED DEVICE"
+                            renderLanDevices()
+                            if (state.usesStoredLoboTrust) discoverDraft?.invoke()
+                        }
+                    }.apply { isAllCaps = false }
+                }
+                row.text = value.removePrefix("https://").removeSuffix("/v1") +
+                    "  ·  REMEMBERED · NOT ADVERTISED" + (if (chosen) "  ·  SELECTED" else "")
                 row.isSelected = chosen
                 row.isEnabled = state.editable
                 row.setTextColor(if (chosen) ACCENT else Color.WHITE)
@@ -372,6 +411,8 @@ internal class SummaryProviderDialog(
             lanSelection.reset()
             lanButtons.clear()
             lanDevices.removeAllViews()
+            rememberedButtons.clear()
+            rememberedRows.removeAllViews()
             scanningLan = false
             failedLan = false
             manualLobo = false
@@ -406,7 +447,10 @@ internal class SummaryProviderDialog(
             discoverButton.text = if (reuse) "DISCOVER CURRENT MODELS" else "DISCOVER MODELS"
             renderChoices()
             suppressChanges = false
-            if (showAuth) scanLan()
+            if (showAuth) {
+                renderLanDevices()
+                scanLan()
+            }
             refreshControls()
         }
 
@@ -515,8 +559,25 @@ internal class SummaryProviderDialog(
             manualAddress.text = if (manualLobo) "CHOOSE DISCOVERED DEVICE" else "ENTER ADDRESS MANUALLY"
             renderLanDevices()
         }
+        verifyAgain.setOnClickListener {
+            if (formCurrent() && workflow.setVerifyLoboAgain(!state.verifyLoboAgain)) {
+                suppressChanges = true
+                auth.text.clear()
+                suppressChanges = false
+                clearModelPanel()
+                renderLanDevices()
+            }
+        }
         watch(endpoint) {
-            if (formCurrent() && !suppressChanges && workflow.addressEdited(endpoint.text.toString())) clearModelPanel()
+            if (formCurrent() && !suppressChanges && workflow.addressEdited(endpoint.text.toString())) {
+                if (state.choice == SummaryProviderChoice.LOBO) {
+                    suppressChanges = true
+                    auth.text.clear()
+                    suppressChanges = false
+                    renderLanDevices()
+                }
+                clearModelPanel()
+            }
         }
         fun credentialsEdited() {
             if (formCurrent() && !suppressChanges && workflow.credentialsOrTrustEdited()) clearModelPanel()
@@ -561,11 +622,14 @@ internal class SummaryProviderDialog(
                 auth.text.clear()
                 suppressChanges = previous
             }
+            verifyAgain.visibility = if (snapshot.hasStoredLoboTrust) View.VISIBLE else View.GONE
+            verifyAgain.isEnabled = snapshot.editable
+            verifyAgain.text = if (snapshot.verifyLoboAgain) "USE REMEMBERED CERTIFICATE" else "VERIFY DEVICE AGAIN"
             authLabel.visibility = if (needsLoboAuth) View.VISIBLE else View.GONE
             auth.visibility = authLabel.visibility
             if (snapshot.choice == SummaryProviderChoice.LOBO) {
                 hint.text = if (presentation.reuseTrust) "Reuse the saved certificate trust. Transcriber still verifies HTTPS during discovery and inference."
-                    else "Select a phone and verify its identity using the AUTH code shown on that phone."
+                    else "Verify device identity using the AUTH code shown on the selected phone. This is not an inference password."
                 discoverButton.text = if (presentation.reuseTrust) "DISCOVER TRUSTED DEVICE MODELS" else "DISCOVER MODELS"
             }
             endpoint.isEnabled = snapshot.editable && snapshot.choice != SummaryProviderChoice.REUSE
@@ -600,7 +664,7 @@ internal class SummaryProviderDialog(
                 if (state.choice != previousChoice) configure()
                 refreshControls()
                 if (state.choice == SummaryProviderChoice.LOBO) renderLanDevices()
-                if (state.reusesCurrentLobo || state.choice == SummaryProviderChoice.REUSE) discoverDraft?.invoke()
+                if (state.usesStoredLoboTrust || state.choice == SummaryProviderChoice.REUSE) discoverDraft?.invoke()
             }
         }
         configure()
@@ -679,6 +743,8 @@ internal class SummaryProviderDialog(
 
     private fun failureMessage(error: Throwable): String = when (error) {
         is SummaryManagementFailure -> when (error.code) {
+            "lobo_identity_verification_required" -> "This endpoint is not remembered by Transcriber. Verify device identity again."
+            "lobo_trust_registry_full_or_invalid" -> "Remembered device storage is full or invalid. Remove an inactive device on Transcriber."
             "lobo_auth_mismatch" -> "LOBO AUTH code does not match this phone."
             "lobo_certificate_unavailable" -> "Unable to retrieve LOBO's certificate. Check its address."
             "lobo_private_ipv4_required" -> "LOBO requires a private IPv4 HTTPS address on port 7869 ending in /v1."
@@ -687,7 +753,9 @@ internal class SummaryProviderDialog(
             "summary_busy" -> "Transcriber is busy with another summary. Retry."
             "provider_authentication" -> "Provider rejected its credentials."
             "provider_timeout" -> "Provider inference timed out."
-            "provider_unavailable" -> "Cannot reach or verify the provider. Check address and TLS trust."
+            "provider_unavailable" -> if (state.usesStoredLoboTrust)
+                "Cannot reach or verify the remembered device. If its certificate changed, choose Verify device again."
+                else "Cannot reach or verify the provider. Check address and TLS trust."
             "provider_http_error" -> "Provider rejected the request. Check endpoint and model."
             "provider_rate_limited" -> "Provider rate limited the request. Retry."
             "invalid_completion", "invalid_response" -> "Provider returned an incompatible response."

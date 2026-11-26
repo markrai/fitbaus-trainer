@@ -14,6 +14,7 @@ internal data class SummaryProviderStatus(
     val customCa: Boolean,
     val allowHttp: Boolean,
     val storageError: Boolean,
+    val trustedLoboEndpoints: List<String> = emptyList(),
 ) {
     fun sameEndpointAndTrust(other: SummaryProviderStatus): Boolean =
         configured && other.configured && !storageError && !other.storageError &&
@@ -23,11 +24,11 @@ internal data class SummaryProviderStatus(
     fun matchesTrustedLobo(endpoint: String?): Boolean {
         if (!configured || storageError || !customCa || hasKey || allowHttp || endpoint == null ||
             baseUrl?.trimEnd('/') != endpoint.trimEnd('/')) return false
-        val uri = runCatching { URI(endpoint) }.getOrNull() ?: return false
-        return uri.scheme == "https" && uri.port == 7869 && uri.path.trimEnd('/') == "/v1" &&
-            uri.host?.let { BooksServer.isPrivateIpv4(it) } == true &&
-            uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null
+        return SummaryProviderManagement.canonicalLoboEndpoint(endpoint) != null
     }
+
+    fun remembersLobo(endpoint: String?): Boolean =
+        !storageError && SummaryProviderManagement.canonicalLoboEndpoint(endpoint)?.let { it in trustedLoboEndpoints } == true
 
     companion object {
         fun parse(json: JSONObject): SummaryProviderStatus {
@@ -37,9 +38,18 @@ internal data class SummaryProviderStatus(
             require(if (configured) url != null && model != null else url == null && model == null)
             if (url != null) SummaryProviderManagement.validateUrl(url)
             if (model != null) require(SummaryProviderManagement.MODEL.matches(model))
+            val trusted = if (!json.has("trusted_lobo_endpoints")) emptyList() else {
+                val values = json.getJSONArray("trusted_lobo_endpoints")
+                require(values.length() <= 16)
+                (0 until values.length()).map { index ->
+                    val value = values.get(index) as? String ?: error("Invalid remembered LOBO endpoint")
+                    require(SummaryProviderManagement.canonicalLoboEndpoint(value) == value)
+                    value
+                }.also { require(it.distinct().size == it.size) }
+            }
             return SummaryProviderStatus(configured, url, model,
                 json.opt("has_api_key") == true, json.opt("custom_ca") == true,
-                json.opt("allow_http") == true, json.opt("storage_error") == true)
+                json.opt("allow_http") == true, json.opt("storage_error") == true, trusted)
         }
     }
 }
@@ -91,6 +101,11 @@ internal class SummaryProviderManagement(
             body.put("lobo_auth", raw.take(4) + "-" + raw.drop(4))
         }
         return discover(body)
+    }
+
+    fun discoverRememberedLobo(baseUrl: String): SummaryProviderDiscovery {
+        val endpoint = requireNotNull(canonicalLoboEndpoint(baseUrl))
+        return discover(JSONObject().put("kind", "lobo").put("base_url", endpoint).put("allow_http", false))
     }
 
     private fun discover(body: JSONObject): SummaryProviderDiscovery {
@@ -155,6 +170,15 @@ internal class SummaryProviderManagement(
     companion object {
         private const val ROOT = "/v1/admin/summary-provider"
         val MODEL = Regex("[A-Za-z0-9][A-Za-z0-9._:/@-]{0,159}")
+
+        fun canonicalLoboEndpoint(value: String?): String? {
+            if (value == null) return null
+            val endpoint = value.trim().trimEnd('/')
+            val uri = runCatching { URI(endpoint) }.getOrNull() ?: return null
+            val host = uri.host ?: return null
+            if (!BooksServer.isPrivateIpv4(host) || endpoint != "https://$host:7869/v1") return null
+            return endpoint
+        }
 
         fun validateUrl(value: String) {
             val uri = URI(value)

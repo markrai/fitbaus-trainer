@@ -25,9 +25,10 @@ internal fun summaryProviderPresentation(state: SummaryProviderWorkflowState): S
     val candidateDetail = when {
         state.tested != null -> "Inference test passed · not saved"
         state.discovery != null -> "Models discovered · test inference before saving"
-        state.reusesCurrentLobo -> "Stored certificate trust · model discovery required"
+        state.usesStoredLoboTrust -> "Stored certificate trust · model discovery required"
+        state.verifyLoboAgain -> "Verify the replacement certificate before discovery"
         state.choice == SummaryProviderChoice.LOBO && state.addressEntered -> "Device identity must be verified"
         else -> "Not saved"
     }
-    return SummaryProviderPresentation(activeTitle, activeDetail, candidateTitle, candidateDetail, state.reusesCurrentLobo)
+    return SummaryProviderPresentation(activeTitle, activeDetail, candidateTitle, candidateDetail, state.usesStoredLoboTrust)
 }
