@@ -8,6 +8,7 @@ function fixture() {
   const events = [];
   let owner = null;
   let finalization = null;
+  let fault = null;
   let startTime = null;
   let tick = async () => null;
   const sessions = {};
@@ -16,6 +17,10 @@ function fixture() {
     getSession: day => sessions[day] ?? {},
     readActiveSessionOwner: () => owner,
     readSessionFinalization: () => finalization,
+    readFreestyleAuthorityFault: () => fault,
+    markFreestyleAuthorityFault: (day, id) => { events.push(["mark", day, id]); fault = id; return true; },
+    clearFreestyleAuthorityFault: day => { events.push(["clear", day]); fault = null; },
+    getBikeBridgeSession: () => ({ bindSession: value => events.push(["bind", value]) }),
     getPlan: () => ({}), getWorkoutMetadata: () => ({}),
     getStartTime: () => startTime, isPaused: () => false, getPausedElapsed: () => 0,
     vo2TickSessionKey: s => s.sessionId,
@@ -149,4 +154,15 @@ test("stale cleanup deliberately excludes Freestyle evidence", () => {
   f.sessions[FREESTYLE_WORKOUT_SELECTOR_ID] = { sessionStart: "1" };
   cleanupStaleWorkoutSessions(f.dependencies);
   assert.deepEqual(f.events, [["discardStale", "Monday"]]);
+});
+
+test("invalid Freestyle authority disarms before marking and valid authority clears the fault", () => {
+  const f = fixture();
+  const day = FREESTYLE_WORKOUT_SELECTOR_ID;
+  const session = { sessionId: "ride" };
+  assert.deepEqual(f.coordinator.checkFreestyleAuthority(day, session), { status: "invalid", newlyMarked: true });
+  assert.deepEqual(f.events, [["bind", null], ["mark", day, "ride"]]);
+  session.controlAuthority = { source: "frozen", mode: "manual_freestyle_ride", sessionId: "ride" };
+  assert.deepEqual(f.coordinator.checkFreestyleAuthority(day, session), { status: "restored" });
+  assert.deepEqual(f.events.at(-1), ["clear", day]);
 });

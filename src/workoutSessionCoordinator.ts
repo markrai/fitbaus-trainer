@@ -2,7 +2,8 @@ import { beginWorkout, getPausedElapsed, getStartTime, isPaused, pauseWorkout, r
 import { discardFreestyleRide, finishFreestyleRide, handleWorkoutCompletion, retryFreestyleSave, discardWorkoutSession } from "./workoutLifecycle.js";
 import { getPlan, getWorkoutMetadata } from "./workoutData.js";
 import { getSession, isSessionStale } from "./sessionStore.js";
-import { FREESTYLE_WORKOUT_SELECTOR_ID, isFreestyleWorkoutSelector, readActiveSessionOwner, readSessionFinalization } from "./freestyleRide.js";
+import { FREESTYLE_WORKOUT_SELECTOR_ID, isFreestyleWorkoutSelector, readActiveSessionOwner, readSessionFinalization, readFreestyleAuthorityFault, markFreestyleAuthorityFault, clearFreestyleAuthorityFault } from "./freestyleRide.js";
+import { getBikeBridgeSession } from "./platform/bikeBridgeRuntime.js";
 import { isVo2WorkoutSelector, VO2_WORKOUT_SELECTOR_ID } from "./vo2Protocol.js";
 import { deriveWorkoutState, type WorkoutDisplayState } from "./workoutDisplayState.js";
 
@@ -28,6 +29,10 @@ const defaultDependencies = {
   discardWorkoutSession,
   readActiveSessionOwner,
   readSessionFinalization,
+  readFreestyleAuthorityFault,
+  markFreestyleAuthorityFault,
+  clearFreestyleAuthorityFault,
+  getBikeBridgeSession,
   getPlan,
   getWorkoutMetadata,
   getSession,
@@ -46,7 +51,7 @@ interface WorkoutSessionEffects {
 }
 
 export function createWorkoutSessionCoordinator(effects: WorkoutSessionEffects, overrides: Partial<typeof defaultDependencies> = {}) {
-  const { beginWorkout, getPausedElapsed, getStartTime, isPaused, pauseWorkout, restartWorkout, resumeWorkout, requestEarlyCooldown, restoreBikeBridgeBindingForActiveSession, startWorkout, todayName, tickVo2ProtocolWithCanonicalHr, vo2TickSessionKey, requestVo2LimitReached, discardFreestyleRide, finishFreestyleRide, handleWorkoutCompletion, retryFreestyleSave, readActiveSessionOwner, readSessionFinalization, getPlan, getWorkoutMetadata, getSession, deriveWorkoutState } = { ...defaultDependencies, ...overrides };
+  const { beginWorkout, getPausedElapsed, getStartTime, isPaused, pauseWorkout, restartWorkout, resumeWorkout, requestEarlyCooldown, restoreBikeBridgeBindingForActiveSession, startWorkout, todayName, tickVo2ProtocolWithCanonicalHr, vo2TickSessionKey, requestVo2LimitReached, discardFreestyleRide, finishFreestyleRide, handleWorkoutCompletion, retryFreestyleSave, readActiveSessionOwner, readSessionFinalization, readFreestyleAuthorityFault, markFreestyleAuthorityFault, clearFreestyleAuthorityFault, getBikeBridgeSession, getPlan, getWorkoutMetadata, getSession, deriveWorkoutState } = { ...defaultDependencies, ...overrides };
   let selectedDay: string | null = null;
   let updateDisplaySeq = 0;
 
@@ -168,7 +173,29 @@ export function createWorkoutSessionCoordinator(effects: WorkoutSessionEffects, 
     );
   }
 
-  return { getSelectedDay, setSelectedDay, resolveOwnedWorkoutDay, selectWorkoutDay, refresh, startWorkout, beginWorkout, restartWorkout, requestEarlyCooldown, requestVo2LimitReached, pause, resume, complete, finishOwnedFreestyleRide, discardOwnedFreestyleRide, retryOwnedFreestyleSave, restoreBikeBridgeBindingForActiveSession };
+  function checkFreestyleAuthority(day: string, session: ReturnType<typeof getSession>): { status: "valid" | "invalid" | "restored"; newlyMarked?: boolean } {
+    if (!isFreestyleWorkoutSelector(day) || !session.sessionId) return { status: "valid" };
+    const authorityOk =
+      !!session.controlAuthority &&
+      session.controlAuthority.source === "frozen" &&
+      session.controlAuthority.mode === "manual_freestyle_ride" &&
+      session.controlAuthority.sessionId === session.sessionId;
+    if (!authorityOk) {
+      try {
+        getBikeBridgeSession().bindSession(null);
+      } catch (error) {
+        console.error("Failed to disarm Bike Bridge after authority fault:", error);
+      }
+      return { status: "invalid", newlyMarked: markFreestyleAuthorityFault(day, session.sessionId) };
+    }
+    if (readFreestyleAuthorityFault(day)) {
+      clearFreestyleAuthorityFault(day);
+      return { status: "restored" };
+    }
+    return { status: "valid" };
+  }
+
+  return { getSelectedDay, setSelectedDay, resolveOwnedWorkoutDay, selectWorkoutDay, refresh, startWorkout, beginWorkout, restartWorkout, requestEarlyCooldown, requestVo2LimitReached, pause, resume, complete, finishOwnedFreestyleRide, discardOwnedFreestyleRide, retryOwnedFreestyleSave, checkFreestyleAuthority, restoreBikeBridgeBindingForActiveSession };
 }
 
 export function cleanupStaleWorkoutSessions(overrides: Partial<typeof defaultDependencies> = {}) {

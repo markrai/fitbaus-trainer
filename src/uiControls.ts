@@ -31,9 +31,7 @@ import {
 import {
   FREESTYLE_WORKOUT_LABEL,
   FREESTYLE_WORKOUT_SELECTOR_ID,
-  clearFreestyleAuthorityFault,
   isFreestyleWorkoutSelector,
-  markFreestyleAuthorityFault,
   readActiveSessionOwner,
   readFreestyleAuthorityFault,
   readSessionFinalization,
@@ -1084,39 +1082,24 @@ function renderWorkout(state: WorkoutDisplayState) {
     updateHeartColor(null, currentExpectedHeartRate);
   }
   const session = getSession(active.day);
-  if (isFreestyleActive && session.sessionId) {
-    const authorityOk =
-      !!session.controlAuthority &&
-      session.controlAuthority.source === "frozen" &&
-      session.controlAuthority.mode === "manual_freestyle_ride" &&
-      session.controlAuthority.sessionId === session.sessionId;
-    if (!authorityOk) {
-      try {
-        getBikeBridgeSession().bindSession(null);
-      } catch (error) {
-        console.error("Failed to disarm Bike Bridge after authority fault:", error);
-      }
-      const newlyMarked = markFreestyleAuthorityFault(active.day, session.sessionId);
-      if (newlyMarked && typeof (window as any).showToast === "function") {
-        (window as any).showToast(
-          "Freestyle control authority is invalid. Ride evidence is preserved. Use Discard only if you want to delete it.",
-          "error"
-        );
-      }
-      if (hrTargetEl) {
-        hrTargetEl.textContent =
-          "Authority fault - resistance control disarmed. Evidence preserved.";
-      }
-      renderActiveFreestyleObservationHud();
-      applyPhaseStyle(active.phase.phase);
-      return;
+  const authority = workoutSession.checkFreestyleAuthority(active.day, session);
+  if (authority.status === "invalid") {
+    if (authority.newlyMarked && typeof (window as any).showToast === "function") {
+      (window as any).showToast(
+        "Freestyle control authority is invalid. Ride evidence is preserved. Use Discard only if you want to delete it.",
+        "error"
+      );
     }
-    if (readFreestyleAuthorityFault(active.day)) {
-      clearFreestyleAuthorityFault(active.day);
-      if (typeof (window as any).showToast === "function") {
-        (window as any).showToast("Freestyle authority restored.", "success");
-      }
+    if (hrTargetEl) {
+      hrTargetEl.textContent =
+        "Authority fault - resistance control disarmed. Evidence preserved.";
     }
+    renderActiveFreestyleObservationHud();
+    applyPhaseStyle(active.phase.phase);
+    return;
+  }
+  if (authority.status === "restored" && typeof (window as any).showToast === "function") {
+    (window as any).showToast("Freestyle authority restored.", "success");
   }
   if (!finalizingLocked && !authorityFaultSessionId) {
     workoutSession.restoreBikeBridgeBindingForActiveSession(active.day);
