@@ -269,7 +269,7 @@ internal class RemoteBooksSummary(
                         require(result.opt("cache_hit") is Boolean)
                         result.getBoolean("cache_hit")
                     } else null
-                    return BooksSummaryState.Ready(revision, summary, model, prompt, digest, cacheHit, sourceId)
+                    return BooksSummaryState.Ready(revision, summary, model, prompt, digest, cacheHit, sourceId.takeUnless { recap })
                 }
                 else -> throw BooksSummaryException(BooksSummaryFailure.NETWORK_OR_RESPONSE)
             }
