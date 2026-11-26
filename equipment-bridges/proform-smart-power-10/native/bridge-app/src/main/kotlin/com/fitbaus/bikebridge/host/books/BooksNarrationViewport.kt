@@ -26,6 +26,7 @@ internal class BooksNarrationViewport(
     }
     var onSummaryDrawn: (() -> Unit)? = null
     private var drawCallbackPending = false
+    private var summaryGeneration = 0L
     private val horizontalInset = dp(48)
     private val gap = dp(12)
     private val bottomInset = dp(8)
@@ -37,6 +38,7 @@ internal class BooksNarrationViewport(
 
     fun setSummary(text: String?) {
         if (inlineSummary.text.toString() != text.orEmpty()) {
+            summaryGeneration++
             inlineSummary.text = text.orEmpty()
             summaryScroll.scrollTo(0, 0)
             requestLayout()
@@ -86,9 +88,10 @@ internal class BooksNarrationViewport(
         super.dispatchDraw(canvas)
         if (onSummaryDrawn != null && summaryIsVisible() && !drawCallbackPending) {
             drawCallbackPending = true
+            val drawnGeneration = summaryGeneration
             post {
                 drawCallbackPending = false
-                if (summaryIsVisible()) onSummaryDrawn?.invoke()
+                if (drawnGeneration == summaryGeneration && summaryIsVisible()) onSummaryDrawn?.invoke()
             }
         }
     }
