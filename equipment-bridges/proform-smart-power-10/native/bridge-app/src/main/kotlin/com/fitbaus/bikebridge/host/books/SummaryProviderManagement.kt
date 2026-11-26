@@ -86,9 +86,10 @@ internal class SummaryProviderManagement(
         val model = SummaryProviderCapability.parse(caps.optJSONObject("summary_provider"))?.model
         if (!supported || caps.opt("summary_provider_selection_api") != true)
             return SummaryProviderCapabilities(supported, model)
-        val selection = SummaryProviderStatus.parse(caps.getJSONObject("summary_provider_selection"))
-        val required = caps.opt("summary_provider_admin_required") as? Boolean ?: error("Invalid administrator policy")
-        return SummaryProviderCapabilities(supported, model, selection, required)
+        val metadata = call("$ROOT/selection", admin = false)
+        val selection = SummaryProviderStatus.parse(metadata)
+        val required = metadata.opt("admin_required") as? Boolean ?: error("Invalid administrator policy")
+        return SummaryProviderCapabilities(supported, selection.model, selection, required)
     }
 
     fun openSession(): SummaryProviderStatus = establish("$ROOT/open", JSONObject())
