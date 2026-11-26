@@ -19,11 +19,14 @@ internal object BooksConceptLayout {
         for ((rank, index) in order.withIndex()) {
             val size = sizes[index]
             val free = width - size.width
-            val bias = if (stagger == 0 || sizes.size == 1) 0.5 else {
-                val edge = random.nextDouble(0.10, 0.28)
-                if ((rank % 2 == 0) == startRight) 1.0 - edge else edge
+            val preferred = if (stagger == 0 || sizes.size == 1) {
+                free / 2
+            } else {
+                val nextWidth = order.getOrNull(rank + 1)?.let { sizes[it].width }
+                val slack = if (nextWidth != null && nextWidth + gap <= free) free - nextWidth - gap else free
+                val edge = (slack * random.nextDouble(0.10, 0.28)).toInt()
+                if ((rank % 2 == 0) == startRight) free - edge else edge
             }
-            val preferred = (free * bias).toInt()
             val offset = if (stagger > 0 && sizes.size > 1) random.nextInt(0, stagger + 1) else 0
             val candidates = linkedSetOf(preferred, 0, free, free / 2, free / 4, free * 3 / 4)
             for (other in placed) {
