@@ -50,7 +50,7 @@ export async function requestSisu(request: SisuHttpRequest): Promise<SisuHttpRes
   if (!isNativeRuntime()) return webSisuRequest(request);
   if (request.url.toLowerCase().startsWith("http://")) {
     throw new Error(
-      "Native HTTP SISU endpoints are blocked by the app's secure transport configuration. Use HTTPS; FitBaus Trainer does not enable broad cleartext exceptions."
+      "Native SISU requests require an HTTPS endpoint. Android permits cleartext for Bike Bridge connectivity, but FitBaus Trainer rejects HTTP SISU endpoints in application code."
     );
   }
   const { nativeSisuRequest } = await import("./nativeHttp.js");

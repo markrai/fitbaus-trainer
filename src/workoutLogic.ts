@@ -31,10 +31,12 @@ import {
   isStaleVo2ProtocolTick,
   VO2_HR_FRESHNESS_MS,
   VO2_EVAL_RELATIVE_SECONDS,
+  VO2_WORKOUT_SELECTOR_ID,
   type Vo2ProtocolRuntime,
 } from "./vo2Protocol.js";
 import {
   claimActiveSessionOwner,
+  FREESTYLE_WORKOUT_SELECTOR_ID,
   clearActiveSessionOwner,
   freestylePhaseState,
   isFreestyleWorkoutSelector,
@@ -338,42 +340,69 @@ function requestVo2LimitReached(day?: string, options?: EarlyCooldownRequestOpti
   }
 }
 
-function competingActiveSessionBlocksStart(day: string): boolean {
-  const owner = readActiveSessionOwner();
-  if (!owner) return false;
-  if (owner.selector === day) {
-    const existing = getSession(day);
-    if (existing.sessionId === owner.sessionId && existing.startTime) return true;
+function workoutStartBlockReason(day: string, storage?: SessionStorage): "pending" | "active" | null {
+  const owner = readActiveSessionOwner(storage);
+  const selectors = new Set(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID, FREESTYLE_WORKOUT_SELECTOR_ID, day, ...Object.keys(getWorkoutMetadata())]);
+  if (owner)
+    selectors.add(owner.selector);
+  for (const selector of selectors) {
+    if (readSessionFinalization(selector, storage))
+      return "pending";
+    if (readFreestyleAuthorityFault(selector, storage))
+      return "active";
+    const session = getSession(selector, storage);
+    if ((session.startTime || session.sessionId) &&
+      (isFreestyleWorkoutSelector(selector) || session.summaryEmitted !== "true"))
+      return "active";
+    if (owner && owner.selector === selector && (session.sessionId || session.startTime))
+      return "active";
+  }
+  return null;
+}
+function freestyleStartBlocked(day: string, storage?: SessionStorage): boolean {
+  return workoutStartBlockReason(day, storage) !== null;
+}
+function showWorkoutStartError(message: string): void {
+  if (typeof (window as any).showToast === "function") {
+    (window as any).showToast(message, "error");
+  }
+}
+function canStartWorkout(day: string): boolean {
+  const blocked = workoutStartBlockReason(day);
+  if (!blocked)
+    return true;
+  showWorkoutStartError(blocked === "pending" ? "Finish save is pending. Use Retry Save." : "A workout is already in progress or requires recovery.");
+  return false;
+}
+function claimWorkoutStart(day: string, sessionId: string): boolean {
+  if (typeof sessionId !== "string" || !sessionId.trim() || getSession(day).sessionId === sessionId) {
+    showWorkoutStartError("Workout requires a new session identity.");
     return false;
   }
-  const other = getSession(owner.selector);
-  return Boolean(other.sessionId === owner.sessionId && other.startTime);
+  if (!canStartWorkout(day))
+    return false;
+  const owner = readActiveSessionOwner();
+  if (owner)
+    clearActiveSessionOwner(owner);
+  const claim = claimActiveSessionOwner({ selector: day, sessionId });
+  if (!claim.ok) {
+    showWorkoutStartError("A workout is already in progress.");
+    return false;
+  }
+  return true;
 }
-
-/** Freestyle start must inspect live session + finalization, not owner alone. */
-function freestyleStartBlocked(day: string, storage?: SessionStorage): boolean {
-  if (!isFreestyleWorkoutSelector(day)) return competingActiveSessionBlocksStart(day);
-  const existing = getSession(day, storage);
-  if (existing.sessionId && existing.startTime) return true;
-  if (readSessionFinalization(day, storage)) return true;
-  if (readFreestyleAuthorityFault(day, storage)) return true;
-  return competingActiveSessionBlocksStart(day);
+function refreshWorkoutStartOwner(day: string, sessionId: string): boolean {
+  const session = getSession(day);
+  const owner = readActiveSessionOwner();
+  if (!owner || owner.selector !== day || owner.sessionId !== sessionId || session.sessionId !== sessionId)
+    return false;
+  const claim = claimActiveSessionOwner({ selector: day, sessionId, athleteId: session.athleteId });
+  return claim.ok;
 }
 
 function startWorkout() {
   const day = typeof (window as any).getSelectedDay === "function" ? (window as any).getSelectedDay() : todayName();
-  if (readSessionFinalization(day)?.status === "save_failed" || readSessionFinalization(day)?.status === "finalizing") {
-    if (typeof (window as any).showToast === "function") {
-      (window as any).showToast("Finish save is pending. Use Retry Save.", "error");
-    }
-    return;
-  }
-  if (isFreestyleWorkoutSelector(day) ? freestyleStartBlocked(day) : competingActiveSessionBlocksStart(day)) {
-    if (typeof (window as any).showToast === "function") {
-      (window as any).showToast("A workout is already in progress.", "error");
-    }
-    return;
-  }
+  if (!canStartWorkout(day)) return;
   const allowed = getWorkoutMetadata()[day]?.activities ?? [];
   const automatic = getActiveWorkoutActivity(allowed);
   if (automatic) {
@@ -510,14 +539,8 @@ function captureWorkoutStartContext(
 
 function beginWorkout(activity?: Activity) {
   const day = typeof (window as any).getSelectedDay === "function" ? (window as any).getSelectedDay() : todayName();
-  if (!isFreestyleWorkoutSelector(day) && readSessionFinalization(day)) return;
+  if (!canStartWorkout(day)) return;
   if (isFreestyleWorkoutSelector(day)) {
-    if (freestyleStartBlocked(day)) {
-      if (typeof (window as any).showToast === "function") {
-        (window as any).showToast("A workout is already in progress.", "error");
-      }
-      return;
-    }
     const allowed = getWorkoutMetadata()[day]?.activities ?? [];
     const resolved = activity !== undefined
       ? requireAllowedActivity(allowed, activity)
@@ -535,25 +558,7 @@ function beginWorkout(activity?: Activity) {
       return;
     }
     const sessionId = (window as any).generateUUID() as string;
-    const provisionalAthleteId = getSession(day).athleteId;
-    const claim = claimActiveSessionOwner({
-      selector: day,
-      sessionId,
-      athleteId: provisionalAthleteId,
-    });
-    if (!claim.ok) {
-      if (typeof (window as any).showToast === "function") {
-        (window as any).showToast("A workout is already in progress.", "error");
-      }
-      return;
-    }
-    if (freestyleStartBlocked(day)) {
-      clearActiveSessionOwner({ selector: day, sessionId });
-      if (typeof (window as any).showToast === "function") {
-        (window as any).showToast("A workout is already in progress.", "error");
-      }
-      return;
-    }
+    if (!claimWorkoutStart(day, sessionId)) return;
     const startTime = Date.now();
     startSession(day, startTime, sessionId, "bike", undefined, null, undefined, undefined, "manual_freestyle_ride");
     const session = getSession(day);
@@ -578,14 +583,7 @@ function beginWorkout(activity?: Activity) {
       if (typeof (window as any).updateDisplay === "function") (window as any).updateDisplay();
       return;
     }
-    if (session.athleteId) {
-      claimActiveSessionOwner({
-        selector: day,
-        sessionId,
-        athleteId: session.athleteId,
-      });
-    }
-    if (!bindBikeBridgeForStartedSession(day, sessionId)) {
+    if (!refreshWorkoutStartOwner(day, sessionId) || !bindBikeBridgeForStartedSession(day, sessionId)) {
       clearSession(day);
       resetMachineGuidanceRuntime();
       try {
@@ -625,27 +623,21 @@ function beginWorkout(activity?: Activity) {
     const startTime = Date.now();
     const startContext = captureWorkoutStartContext(day, resolved as Activity, new Date(startTime).toISOString());
     const runtime = createVo2ProtocolRuntimeV3(preflight.plan, preflight.assessmentProfile);
-    let sessionId: string | null = null;
-    if (typeof (window as any).generateUUID === "function") {
-      sessionId = (window as any).generateUUID();
-      void releaseReplacedSessionTelemetry(day, sessionId);
-      startSession(day, startTime, sessionId, resolved, undefined, startContext.phasePlan,
-        startContext.athleteFitnessSnapshot, undefined, controlModeForUserFacingWorkout(day));
-    } else {
-      void releaseReplacedSessionTelemetry(day, null);
-      startSession(day, startTime, null, resolved, undefined, startContext.phasePlan,
-        startContext.athleteFitnessSnapshot, undefined, controlModeForUserFacingWorkout(day));
+    if (typeof (window as any).generateUUID !== "function") {
+      showWorkoutStartError("Workout requires a session identity.");
+      return;
     }
+    const sessionId = (window as any).generateUUID() as string;
+    if (!claimWorkoutStart(day, sessionId))
+      return;
+    void releaseReplacedSessionTelemetry(day, sessionId);
+    startSession(day, startTime, sessionId, resolved, undefined, startContext.phasePlan, startContext.athleteFitnessSnapshot, undefined, controlModeForUserFacingWorkout(day));
     persistVo2ProtocolRuntime(day, runtime);
-    if (sessionId) {
-      const vo2Session = getSession(day);
-      claimActiveSessionOwner({
-        selector: day,
-        sessionId,
-        athleteId: vo2Session.athleteId,
-      });
-      bindBikeBridgeForStartedSession(day, sessionId);
+    if (!refreshWorkoutStartOwner(day, sessionId)) {
+      showWorkoutStartError("Workout ownership changed; control not armed.");
+      return;
     }
+    bindBikeBridgeForStartedSession(day, sessionId);
     resetMachineGuidanceRuntime(sessionId);
     if (typeof (window as any).initDB === "function") {
       (window as any).initDB().catch((err: any) => console.error("Failed to init DB:", err));
@@ -656,12 +648,6 @@ function beginWorkout(activity?: Activity) {
     if (typeof (window as any).updateDisplay === "function") (window as any).updateDisplay();
     return;
   }
-  if (competingActiveSessionBlocksStart(day)) {
-    if (typeof (window as any).showToast === "function") {
-      (window as any).showToast("A workout is already in progress.", "error");
-    }
-    return;
-  }
   const allowed = getWorkoutMetadata()[day]?.activities ?? [];
   const resolved = activity !== undefined
     ? requireAllowedActivity(allowed, activity)
@@ -669,28 +655,22 @@ function beginWorkout(activity?: Activity) {
   if (allowed.length > 1 && resolved === undefined) return;
   const startTime = Date.now();
   const startContext = captureWorkoutStartContext(day, resolved as Activity, new Date(startTime).toISOString());
-  let sessionId: string | null = null;
-  if (typeof (window as any).generateUUID === "function") {
-    sessionId = (window as any).generateUUID();
-    void releaseReplacedSessionTelemetry(day, sessionId);
-    startSession(day, startTime, sessionId, resolved, undefined, startContext.phasePlan,
-      startContext.athleteFitnessSnapshot, undefined, controlModeForUserFacingWorkout(day));
-    if (typeof (window as any).initDB === "function") {
-      (window as any).initDB().catch((err: any) => console.error("Failed to init DB:", err));
-    }
-  } else {
-    void releaseReplacedSessionTelemetry(day, null);
-    startSession(day, startTime, null, resolved, undefined, startContext.phasePlan,
-      startContext.athleteFitnessSnapshot, undefined, controlModeForUserFacingWorkout(day));
+  if (typeof (window as any).generateUUID !== "function") {
+    showWorkoutStartError("Workout requires a session identity.");
+    return;
   }
-  if (sessionId) {
-    const ordinarySession = getSession(day);
-    claimActiveSessionOwner({
-      selector: day,
-      sessionId,
-      athleteId: ordinarySession.athleteId,
-    });
-    bindBikeBridgeForStartedSession(day, sessionId);
+  const sessionId = (window as any).generateUUID() as string;
+  if (!claimWorkoutStart(day, sessionId))
+    return;
+  void releaseReplacedSessionTelemetry(day, sessionId);
+  startSession(day, startTime, sessionId, resolved, undefined, startContext.phasePlan, startContext.athleteFitnessSnapshot, undefined, controlModeForUserFacingWorkout(day));
+  if (!refreshWorkoutStartOwner(day, sessionId)) {
+    showWorkoutStartError("Workout ownership changed; control not armed.");
+    return;
+  }
+  bindBikeBridgeForStartedSession(day, sessionId);
+  if (typeof (window as any).initDB === "function") {
+    (window as any).initDB().catch((err: any) => console.error("Failed to init DB:", err));
   }
   resetMachineGuidanceRuntime(sessionId);
 
