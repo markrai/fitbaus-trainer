@@ -14,82 +14,18 @@ import "./hrMonitor.js";
 import { registerUiGlobals, updateDisplay } from "./uiControls.js";
 import { registerPwaGlobals } from "./pwaInstall.js";
 import { registerDataMigrationGlobals } from "./dataMigration.js";
-import { getSession, isSessionStale } from "./sessionStore.js";
-import { discardWorkoutSession, finishFreestyleRide } from "./workoutLifecycle.js";
+import { getSession } from "./sessionStore.js";
 import { applyRuntimeDocumentState } from "./platform/runtime.js";
 import { startBikeBridgeRuntime } from "./platform/bikeBridgeRuntime.js";
 import { getEquipmentSelection, setSelectedMachine } from "./machines/selection.js";
-import { VO2_WORKOUT_SELECTOR_ID } from "./vo2Protocol.js";
 import {
   FREESTYLE_WORKOUT_SELECTOR_ID,
   collectProtectedFreestyleSessionIds,
-  isFreestyleWorkoutSelector,
-  readActiveSessionOwner,
-  readSessionFinalization,
 } from "./freestyleRide.js";
-import { restoreBikeBridgeBindingForActiveSession } from "./workoutLogic.js";
+import { cleanupStaleWorkoutSessions, recoverActiveOrFinalizingSession } from "./workoutSessionCoordinator.js";
 import { setSelectedDay } from "./uiControls.js";
 
 applyRuntimeDocumentState();
-
-function cleanupStaleWorkoutSessions() {
-  const days = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-    VO2_WORKOUT_SELECTOR_ID,
-  ];
-  days.forEach((day) => {
-    const session = getSession(day);
-    if (session.sessionStart && isSessionStale(day)) {
-      const hours = Math.round((Date.now() - parseInt(session.sessionStart)) / (1000 * 60 * 60));
-      console.warn(
-        `Cleaning up stale workout session for ${day} (age: ${hours} hours)`
-      );
-      discardWorkoutSession(day);
-    }
-  });
-}
-
-async function recoverActiveOrFinalizingSession(): Promise<void> {
-  const freestyleFinalization = readSessionFinalization(FREESTYLE_WORKOUT_SELECTOR_ID);
-  if (freestyleFinalization) {
-    setSelectedDay(FREESTYLE_WORKOUT_SELECTOR_ID);
-    try {
-      if (
-        freestyleFinalization.status === "finalizing" ||
-        freestyleFinalization.status === "save_failed"
-      ) {
-        await finishFreestyleRide(FREESTYLE_WORKOUT_SELECTOR_ID);
-      }
-    } catch (error) {
-      console.error("Freestyle recovery failed; preserving ride evidence:", error);
-    }
-    return;
-  }
-
-  const freestyleSession = getSession(FREESTYLE_WORKOUT_SELECTOR_ID);
-  if (freestyleSession.sessionId && freestyleSession.startTime) {
-    setSelectedDay(FREESTYLE_WORKOUT_SELECTOR_ID);
-    restoreBikeBridgeBindingForActiveSession(FREESTYLE_WORKOUT_SELECTOR_ID);
-    return;
-  }
-
-  const owner = readActiveSessionOwner();
-  if (!owner) return;
-  const session = getSession(owner.selector);
-  if (!session.sessionId || session.sessionId !== owner.sessionId || !session.startTime) {
-    return;
-  }
-  setSelectedDay(owner.selector);
-  if (isFreestyleWorkoutSelector(owner.selector)) {
-    restoreBikeBridgeBindingForActiveSession(owner.selector);
-  }
-}
 
 async function bootstrap() {
   registerProfileGlobals();
@@ -128,7 +64,7 @@ async function bootstrap() {
   }
   startBikeBridgeRuntime();
   try {
-    await recoverActiveOrFinalizingSession();
+    await recoverActiveOrFinalizingSession(setSelectedDay);
   } catch (error) {
     console.error("Active session recovery failed; continuing bootstrap:", error);
   }

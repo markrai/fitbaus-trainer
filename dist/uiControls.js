@@ -1,15 +1,15 @@
-import { adjustedBlockLengths, beginWorkout, formatTime, getPausedElapsed, getStartTime, isPaused, pauseWorkout, restartWorkout, resumeWorkout, requestEarlyCooldown, planEarlyCooldownTransition, restoreBikeBridgeBindingForActiveSession, startWorkout, todayName, updateRing, tickVo2ProtocolWithCanonicalHr, vo2TickSessionKey, requestVo2LimitReached, } from "./workoutLogic.js";
+import { adjustedBlockLengths, formatTime, planEarlyCooldownTransition, updateRing, } from "./workoutLogic.js";
 import { getPlan, getWorkoutMetadata, getHrTargets } from "./workoutData.js";
 import { getAllWorkoutSummaries, deleteWorkoutSummary, getHrSamples, getOrdinaryBikeTelemetrySamples, } from "./workoutStorage.js";
 import { sendWorkoutToSisu } from "./sisuSync.js";
-import { discardFreestyleRide, finishFreestyleRide, handleWorkoutCompletion, isFreestyleFinishInFlight, retryFreestyleSave, } from "./workoutLifecycle.js";
+import { discardFreestyleRide, finishFreestyleRide, isFreestyleFinishInFlight, retryFreestyleSave, } from "./workoutLifecycle.js";
 import { connect as hrConnect, disconnect as hrDisconnect, onBpm, onHrvUpdate } from "./hrMonitor.js";
 import { formatHrvDisplay } from "./platform/hrvDisplay.js";
 import { getSession } from "./sessionStore.js";
 import { createActuationProvenanceObserver } from "./actuationProvenanceObserver.js";
 import { buildScientificSessionEvidenceV2Contexts } from "./scientificSessionEvidence.js";
 import { isVo2WorkoutSelector, VO2_WORKOUT_SELECTOR_ID, } from "./vo2Protocol.js";
-import { FREESTYLE_WORKOUT_LABEL, FREESTYLE_WORKOUT_SELECTOR_ID, clearFreestyleAuthorityFault, isFreestyleWorkoutSelector, markFreestyleAuthorityFault, readActiveSessionOwner, readFreestyleAuthorityFault, readSessionFinalization, } from "./freestyleRide.js";
+import { FREESTYLE_WORKOUT_LABEL, FREESTYLE_WORKOUT_SELECTOR_ID, isFreestyleWorkoutSelector, readActiveSessionOwner, readFreestyleAuthorityFault, readSessionFinalization, } from "./freestyleRide.js";
 import { clearFreestyleObservationHudOwnership, freestyleObservationHudOwnsLiveElement, hideFreestyleObservationHud, renderFreestyleObservationHud, } from "./freestyleObservationHud.js";
 import { vo2ProtocolHoldForPhaseForRuntime, vo2ProtocolUiTargetsForRuntime } from "./vo2ProtocolV3.js";
 import { vo2AssessmentPresentation, vo2CancelModalBody, vo2CancelModalTitle, vo2EndWorkoutButtonLabel, vo2HistoryOutcomeText, vo2LimitReachedButtonVisible, vo2SelectorOptionText, } from "./vo2AssessmentView.js";
@@ -35,9 +35,9 @@ import { performedLoadDiagnosticsHtml } from "./performedLoadDiagnosticsView.js"
 import { ACTIVITY_LABELS, getActiveWorkoutActivity } from "./workoutActivity.js";
 import { machineHeartRateTargetFromResolved, resolveWorkoutPrescription, } from "./workoutPrescription.js";
 import { DURABLE_LOCAL_STORAGE_KEYS } from "./persistence/localStorageKeys.js";
-import { BPM_TIMEOUT_MS, deriveWorkoutState } from "./workoutDisplayState.js";
+import { BPM_TIMEOUT_MS } from "./workoutDisplayState.js";
 import { createWorkoutTelemetryIngestion } from "./workoutTelemetryIngestion.js";
-let selectedDay = null;
+import { createWorkoutSessionCoordinator } from "./workoutSessionCoordinator.js";
 let liveBpm = null;
 let lastBpmUpdateTime = null;
 let showElapsedInRing = false;
@@ -74,25 +74,6 @@ window.liveBpm = liveBpm;
 window.lastBpmUpdateTime = lastBpmUpdateTime;
 let phaseDisplayEl = null;
 let settingsModalEscHandler = null;
-function getSelectedDay() {
-    return selectedDay || todayName();
-}
-function setSelectedDay(day) {
-    selectedDay = day;
-}
-function resolveOwnedWorkoutDay() {
-    const owner = readActiveSessionOwner();
-    if (owner) {
-        const session = getSession(owner.selector);
-        if (session.sessionId === owner.sessionId && session.startTime) {
-            return owner.selector;
-        }
-    }
-    const finalization = readSessionFinalization(FREESTYLE_WORKOUT_SELECTOR_ID);
-    if (finalization)
-        return FREESTYLE_WORKOUT_SELECTOR_ID;
-    return getSelectedDay();
-}
 function ensureFreestyleDropdownOption(select) {
     const hasFreestyle = Array.from(select.options).some((o) => o.value === FREESTYLE_WORKOUT_SELECTOR_ID);
     if (hasFreestyle)
@@ -136,20 +117,13 @@ function ensureWorkoutDayDropdown() {
         downregOpt.textContent = "Downregulation";
         select.appendChild(downregOpt);
         select.addEventListener("change", function () {
-            const owner = readActiveSessionOwner();
-            if (owner) {
-                const session = getSession(owner.selector);
-                if (session.sessionId === owner.sessionId && session.startTime && this.value !== owner.selector) {
-                    this.value = owner.selector;
-                    selectedDay = owner.selector;
-                    if (typeof window.showToast === "function") {
-                        window.showToast("Finish or discard the active ride before switching workouts.", "error");
-                    }
-                    updateDisplay();
-                    return;
+            const selection = workoutSession.selectWorkoutDay(this.value);
+            if (selection.blocked) {
+                this.value = selection.day;
+                if (typeof window.showToast === "function") {
+                    window.showToast("Finish or discard the active ride before switching workouts.", "error");
                 }
             }
-            selectedDay = this.value;
             updateDisplay();
         });
     }
@@ -173,7 +147,7 @@ function ensureWorkoutDayDropdown() {
         select.appendChild(downregOpt);
     }
     const current = resolveOwnedWorkoutDay();
-    selectedDay = current;
+    setSelectedDay(current);
     if (select.value !== current)
         select.value = current;
 }
@@ -386,8 +360,7 @@ function openCancelModal() {
 }
 async function confirmFinishFreestyleRide() {
     closeCancelModal();
-    const day = resolveOwnedWorkoutDay();
-    const result = await finishFreestyleRide(day);
+    const result = await workoutSession.finishOwnedFreestyleRide();
     if (result.ok === true) {
         if (typeof window.showToast === "function") {
             window.showToast("Freestyle ride saved.", "success");
@@ -411,18 +384,11 @@ async function confirmFinishFreestyleRide() {
     updateDisplay();
 }
 async function confirmDiscardFreestyleRide() {
-    var _a, _b;
     const confirmed = window.confirm("Discard this Freestyle ride? Telemetry will be deleted and it will not appear in history.");
     if (!confirmed)
         return;
     closeCancelModal();
-    const day = resolveOwnedWorkoutDay();
-    const session = getSession(day);
-    const finalization = readSessionFinalization(day);
-    const targetSessionId = session.sessionId && (finalization === null || finalization === void 0 ? void 0 : finalization.sessionId) && session.sessionId !== finalization.sessionId
-        ? undefined
-        : (_b = (_a = session.sessionId) !== null && _a !== void 0 ? _a : finalization === null || finalization === void 0 ? void 0 : finalization.sessionId) !== null && _b !== void 0 ? _b : undefined;
-    const result = await discardFreestyleRide(day, undefined, targetSessionId ? { sessionId: targetSessionId } : undefined);
+    const result = await workoutSession.discardOwnedFreestyleRide();
     if (result.ok === false) {
         if (result.reason === "finalizing") {
             if (typeof window.showToast === "function") {
@@ -443,8 +409,7 @@ async function confirmDiscardFreestyleRide() {
     updateDisplay();
 }
 async function confirmRetryFreestyleSave() {
-    const day = FREESTYLE_WORKOUT_SELECTOR_ID;
-    const result = await retryFreestyleSave(day);
+    const result = await workoutSession.retryOwnedFreestyleSave();
     if (result.ok === true) {
         if (typeof window.showToast === "function") {
             window.showToast("Freestyle ride saved.", "success");
@@ -488,7 +453,7 @@ function promptWorkoutActivitySelection(activities) {
         button.textContent = ACTIVITY_LABELS[activity];
         button.addEventListener("click", () => {
             closeActivitySelectModal();
-            beginWorkout(activity);
+            workoutSession.beginWorkout(activity);
         });
         options.appendChild(button);
     }
@@ -500,7 +465,7 @@ function promptWorkoutActivitySelection(activities) {
     document.addEventListener("keydown", activitySelectEscHandler);
 }
 function confirmCancelWorkout() {
-    restartWorkout();
+    workoutSession.restartWorkout();
     closeCancelModal();
 }
 function confirmEarlyCooldownWorkout() {
@@ -510,7 +475,7 @@ function confirmEarlyCooldownWorkout() {
     if (btn)
         btn.disabled = true;
     closeCancelModal();
-    const decision = requestEarlyCooldown();
+    const decision = workoutSession.requestEarlyCooldown();
     if (decision.type === "unavailable" && btn)
         btn.disabled = false;
 }
@@ -521,7 +486,7 @@ function confirmVo2LimitReached() {
     if (btn)
         btn.disabled = true;
     closeCancelModal();
-    const decision = requestVo2LimitReached();
+    const decision = workoutSession.requestVo2LimitReached();
     if (decision.type !== "enter-limit-reached" && btn)
         btn.disabled = false;
 }
@@ -868,7 +833,7 @@ function renderWorkout(state) {
             startButtonRowEl.style.display = "flex";
         if (startBtnEl) {
             startBtnEl.innerText = isFreestyleWorkoutSelector(state.day) ? "Start Freestyle Ride" : "Start Workout";
-            startBtnEl.onclick = startWorkout;
+            startBtnEl.onclick = workoutSession.startWorkout;
             startBtnEl.style.display = "block";
         }
         if (cancelBtnEl) {
@@ -895,7 +860,7 @@ function renderWorkout(state) {
             startButtonRowEl.style.display = "flex";
         if (startBtnEl) {
             startBtnEl.innerText = "Restart Test";
-            startBtnEl.onclick = restartWorkout;
+            startBtnEl.onclick = workoutSession.restartWorkout;
             startBtnEl.style.display = "block";
         }
         if (cancelBtnEl)
@@ -913,9 +878,7 @@ function renderWorkout(state) {
         renderMachineGuidance(null);
         syncBikeBridgeGuidance(null, false, false);
         updateRing(state.elapsedSec, state.blocks);
-        if (typeof window.releaseWakeLock === "function")
-            window.releaseWakeLock();
-        handleWorkoutCompletion(state.day);
+        workoutSession.complete(state.day);
         if (phaseDisplayEl) {
             phaseDisplayEl.innerHTML = '<span class="phase-name">Completed</span>';
             phaseDisplayEl.dataset.phaseState = "completed";
@@ -932,7 +895,7 @@ function renderWorkout(state) {
             startButtonRowEl.style.display = "flex";
         if (startBtnEl) {
             startBtnEl.innerText = "Restart Workout";
-            startBtnEl.onclick = restartWorkout;
+            startBtnEl.onclick = workoutSession.restartWorkout;
             startBtnEl.style.display = "block";
         }
         if (cancelBtnEl)
@@ -980,10 +943,7 @@ function renderWorkout(state) {
             startBtnEl.disabled = false;
             startBtnEl.innerText = "Resume";
             startBtnEl.onclick = function () {
-                resumeWorkout(active.day);
-                if (typeof window.requestWakeLock === "function")
-                    window.requestWakeLock();
-                updateDisplay();
+                workoutSession.resume(active.day);
             };
             startBtnEl.style.display = "block";
         }
@@ -991,10 +951,7 @@ function renderWorkout(state) {
             startBtnEl.disabled = false;
             startBtnEl.innerText = "Pause";
             startBtnEl.onclick = function () {
-                pauseWorkout(active.day, active.elapsedSec);
-                if (typeof window.releaseWakeLock === "function")
-                    window.releaseWakeLock();
-                updateDisplay();
+                workoutSession.pause(active.day, active.elapsedSec);
             };
             startBtnEl.style.display = "block";
         }
@@ -1059,39 +1016,24 @@ function renderWorkout(state) {
         updateHeartColor(null, currentExpectedHeartRate);
     }
     const session = getSession(active.day);
-    if (isFreestyleActive && session.sessionId) {
-        const authorityOk = !!session.controlAuthority &&
-            session.controlAuthority.source === "frozen" &&
-            session.controlAuthority.mode === "manual_freestyle_ride" &&
-            session.controlAuthority.sessionId === session.sessionId;
-        if (!authorityOk) {
-            try {
-                getBikeBridgeSession().bindSession(null);
-            }
-            catch (error) {
-                console.error("Failed to disarm Bike Bridge after authority fault:", error);
-            }
-            const newlyMarked = markFreestyleAuthorityFault(active.day, session.sessionId);
-            if (newlyMarked && typeof window.showToast === "function") {
-                window.showToast("Freestyle control authority is invalid. Ride evidence is preserved. Use Discard only if you want to delete it.", "error");
-            }
-            if (hrTargetEl) {
-                hrTargetEl.textContent =
-                    "Authority fault - resistance control disarmed. Evidence preserved.";
-            }
-            renderActiveFreestyleObservationHud();
-            applyPhaseStyle(active.phase.phase);
-            return;
+    const authority = workoutSession.checkFreestyleAuthority(active.day, session);
+    if (authority.status === "invalid") {
+        if (authority.newlyMarked && typeof window.showToast === "function") {
+            window.showToast("Freestyle control authority is invalid. Ride evidence is preserved. Use Discard only if you want to delete it.", "error");
         }
-        if (readFreestyleAuthorityFault(active.day)) {
-            clearFreestyleAuthorityFault(active.day);
-            if (typeof window.showToast === "function") {
-                window.showToast("Freestyle authority restored.", "success");
-            }
+        if (hrTargetEl) {
+            hrTargetEl.textContent =
+                "Authority fault - resistance control disarmed. Evidence preserved.";
         }
+        renderActiveFreestyleObservationHud();
+        applyPhaseStyle(active.phase.phase);
+        return;
+    }
+    if (authority.status === "restored" && typeof window.showToast === "function") {
+        window.showToast("Freestyle authority restored.", "success");
     }
     if (!finalizingLocked && !authorityFaultSessionId) {
-        restoreBikeBridgeBindingForActiveSession(active.day);
+        workoutSession.restoreBikeBridgeBindingForActiveSession(active.day);
     }
     const vo2Targets = isVo2WorkoutSelector(active.day)
         ? vo2ProtocolUiTargetsForRuntime(session.vo2ProtocolRuntime, active.phase.phaseId)
@@ -1137,55 +1079,8 @@ function renderWorkout(state) {
     pendingVo2Cues = [];
     applyPhaseStyle(active.phase.phase);
 }
-let updateDisplaySeq = 0;
 function updateDisplay() {
-    void updateDisplayAsync();
-}
-async function updateDisplayAsync() {
-    var _a;
-    const seq = ++updateDisplaySeq;
-    try {
-        if (typeof getPlan !== "function" || typeof getWorkoutMetadata !== "function")
-            return;
-        const day = resolveOwnedWorkoutDay();
-        if (selectedDay !== day)
-            selectedDay = day;
-        const plan = getPlan();
-        const workoutMetadata = getWorkoutMetadata();
-        const base = plan[day];
-        const startTime = getStartTime(day);
-        const paused = typeof isPaused === "function" && isPaused(day);
-        const pausedElapsed = typeof getPausedElapsed === "function" ? getPausedElapsed(day) : 0;
-        const liveBpm = window.liveBpm;
-        const lastBpmUpdateTime = window.lastBpmUpdateTime;
-        // Live-HR guard contract: the v3 ceiling guard evaluates inside the tick below, so this
-        // call must stay unconditional (every refresh, any elapsed) -- never gate it on checkpoints.
-        if (startTime && isVo2WorkoutSelector(day)) {
-            const elapsedSec = paused ? pausedElapsed : Math.floor((Date.now() - parseInt(startTime, 10)) / 1000);
-            const sessionKey = vo2TickSessionKey(getSession(day));
-            const isCurrent = () => seq === updateDisplaySeq && resolveOwnedWorkoutDay() === day;
-            const tick = await tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, undefined, { isCurrent });
-            if (tick === undefined || !isCurrent() || vo2TickSessionKey(getSession(day)) !== sessionKey)
-                return;
-            pendingVo2Cues = (_a = tick === null || tick === void 0 ? void 0 : tick.cues) !== null && _a !== void 0 ? _a : [];
-        }
-        else {
-            pendingVo2Cues = [];
-        }
-        const state = deriveWorkoutState(day, plan, workoutMetadata, base, startTime, paused, pausedElapsed, liveBpm, lastBpmUpdateTime);
-        if (state.screen === "active" && state.liveBpmStale) {
-            updateHrDisplay(liveBpm, true);
-        }
-        renderWorkout(state);
-    }
-    catch (e) {
-        if (e instanceof TypeError && e.message && e.message.includes("null")) {
-            console.warn("updateDisplay: DOM element missing", e.message);
-        }
-        else {
-            throw e;
-        }
-    }
+    void workoutSession.refresh();
 }
 function switchTab(tabName) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
@@ -2231,6 +2126,37 @@ function displayWorkoutSummaries(workouts) {
         listContainer.appendChild(workoutItem);
     });
 }
+const workoutSession = createWorkoutSessionCoordinator({
+    readLiveHeartRate: () => ({
+        liveBpm: window.liveBpm,
+        lastBpmUpdateTime: window.lastBpmUpdateTime,
+    }),
+    setVo2Cues: (cues) => { pendingVo2Cues = cues; },
+    render: (state, liveBpm) => {
+        if (state.screen === "active" && state.liveBpmStale) {
+            updateHrDisplay(liveBpm, true);
+        }
+        renderWorkout(state);
+    },
+    onRefreshError: (error) => {
+        if (error instanceof TypeError && error.message && error.message.includes("null")) {
+            console.warn("updateDisplay: DOM element missing", error.message);
+        }
+        else {
+            throw error;
+        }
+    },
+    requestWakeLock: () => {
+        if (typeof window.requestWakeLock === "function")
+            window.requestWakeLock();
+    },
+    releaseWakeLock: () => {
+        if (typeof window.releaseWakeLock === "function")
+            window.releaseWakeLock();
+    },
+    updateDisplay,
+});
+const { getSelectedDay, setSelectedDay, resolveOwnedWorkoutDay } = workoutSession;
 const workoutTelemetry = createWorkoutTelemetryIngestion(resolveOwnedWorkoutDay);
 function registerUiGlobals(phaseBoxEl) {
     phaseDisplayEl = phaseBoxEl;
