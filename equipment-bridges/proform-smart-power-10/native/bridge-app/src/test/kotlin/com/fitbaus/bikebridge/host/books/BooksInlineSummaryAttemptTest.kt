@@ -45,12 +45,19 @@ class BooksInlineSummaryAttemptTest {
     }
 
     @Test
-    fun inlineTextSharesNarrationViewportAndDoesNotReserveSpaceWhenEmpty() {
+    fun inlineTextCannotJoinOrResizeTheOriginalNarrationScroll() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/books/BooksReadAlong.kt").readText()
-        assertTrue(source.contains("narrationStack.addView(narration, LayoutParams(MATCH, WRAP))"))
-        assertTrue(source.contains("narrationStack.addView(inlineSummary, LayoutParams(MATCH, WRAP)"))
-        assertTrue(source.contains("inlineSummary.visibility = if (text == null) GONE else VISIBLE"))
-        assertTrue(source.contains("stage.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))"))
+        val viewport = File("src/main/kotlin/com/fitbaus/bikebridge/host/books/BooksNarrationViewport.kt").readText()
+        assertTrue(source.contains("scroll.addView(narration, FrameLayout.LayoutParams(MATCH, WRAP))"))
+        assertTrue(source.contains("scroll.isFillViewport = true"))
+        assertTrue(source.contains("narration.gravity = Gravity.CENTER"))
+        assertTrue(source.contains("stage.addView(narrationViewport, FrameLayout.LayoutParams(MATCH, MATCH))"))
+        assertFalse(source.contains("narrationStack"))
+        assertTrue(viewport.contains("narrationScroll.measure(widthMeasureSpec, heightMeasureSpec)"))
+        assertTrue(viewport.contains("narrationScroll.layout(0, 0, width, height)"))
+        assertTrue(viewport.contains("narration.totalPaddingTop"))
+        assertTrue(viewport.contains("summaryScroll.visibility = if (text == null) GONE else VISIBLE"))
+        assertTrue(source.contains("narrationViewport.setSummary(text)"))
         assertTrue(source.contains("Typeface.ITALIC"))
         assertFalse(source.contains("flatAction(\"Summary\")"))
         assertFalse(source.contains("flatAction(\"Recap\")"))
