@@ -23,6 +23,7 @@ class SummaryProviderManagementTest {
     private var discoveryModels = JSONArray().put("lobo-nano")
     private var discoveryCandidate: JSONObject = configured
     private var failure: BooksHttpResponse? = null
+    private var forgetResult: JSONObject = configured
 
     private fun client() = SummaryProviderManagement(connection, TranscriberHttp { url, headers, body ->
         assertTrue(url.startsWith(connection.address + "/v1/"))
@@ -39,6 +40,7 @@ class SummaryProviderManagementTest {
             path.endsWith("/test-candidate") -> JSONObject().put("ok", true).put("model", "lobo-nano").put("elapsed_ms", 3260)
             path.endsWith("/save") -> configured
             path.endsWith("/disable") -> disabled
+            path.endsWith("/forget-lobo") -> forgetResult
             path.endsWith("/cancel") -> JSONObject().put("cancelled", true)
             else -> error("Unexpected request")
         }
@@ -239,6 +241,61 @@ class SummaryProviderManagementTest {
         assertTrue(actions.fail(ticket, error))
         assertFalse(flow.state.canTest)
         assertFalse(flow.state.canSave)
+    }
+
+    @Test
+    fun forgetLoboUsesScopedGrantConfirmedExactEndpointAndRejectsStaleAction() {
+        val inactive = "https://192.168.1.201:7869/v1"
+        val other = "https://192.168.1.202:7869/v1"
+        configured.put("trusted_lobo_endpoints", JSONArray().put(inactive).put(other))
+        forgetResult = JSONObject(configured.toString()).put("trusted_lobo_endpoints", JSONArray().put(other))
+        val flow = SummaryProviderWorkflow()
+        val api = client()
+        val actions = SummaryProviderActions(flow, api)
+        runAction(actions, actions.capabilities())
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(inactive))
+        assertNull(actions.begin(actions.forgetLobo()))
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        val stale = actions.forgetLobo()
+        assertTrue(flow.addressEdited(other))
+        assertNull(actions.begin(stale))
+        assertTrue(flow.addressEdited(inactive))
+        runAction(actions, actions.forgetLobo())
+        val (path, headers, body) = requests.last()
+        assertTrue(path.endsWith("/forget-lobo"))
+        assertEquals(grant, headers["X-FitBaus-Summary-Admin"])
+        assertEquals(inactive, body!!.getString("base_url"))
+        assertTrue(body.getBoolean("confirm"))
+        assertEquals(2, body.length())
+        assertEquals(listOf(other), flow.state.authorization?.trustedLoboEndpoints)
+        assertFalse(flow.state.canSave)
+    }
+
+    @Test
+    fun ambiguousForgetDiscardsGrantAndCannotRetryBlindly() {
+        val inactive = "https://192.168.1.201:7869/v1"
+        configured.put("trusted_lobo_endpoints", JSONArray().put(inactive))
+        val flow = SummaryProviderWorkflow()
+        val api = client()
+        val actions = SummaryProviderActions(flow, api)
+        runAction(actions, actions.capabilities())
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(inactive))
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        runAction(actions, actions.forgetLobo())
+        assertEquals(SummaryProviderScreen.RELOAD_REQUIRED, flow.state.screen)
+        assertThrows(IllegalArgumentException::class.java) { api.status() }
+        assertNull(actions.begin(actions.forgetLobo()))
+    }
+
+    @Test
+    fun loboAuthNormalizationRejectsPartialAndMisplacedSeparators() {
+        assertEquals("FMV3-14SR", SummaryProviderManagement.normalizeLoboAuth("fmv314sr"))
+        assertEquals("FMV3-14SR", SummaryProviderManagement.normalizeLoboAuth("fmv3-14sr"))
+        for (invalid in listOf("", "FMV3", "F-MV314SR", "FMV3--14SR", "FMV3-14SU")) {
+            assertNull(SummaryProviderManagement.normalizeLoboAuth(invalid))
+        }
     }
 
     @Test

@@ -49,7 +49,7 @@ internal data class SummaryProviderWorkflowState(
     val canSave: Boolean get() = canTest && tested != null && tested.model == model && consent
     val canDisable: Boolean get() = editable && authorization?.configured == true
     val canForgetLobo: Boolean get() = editable && choice == SummaryProviderChoice.LOBO &&
-        authorization?.remembersLobo(draftEndpoint) == true && !authorization.matchesTrustedLobo(draftEndpoint)
+        authorization?.let { it.remembersLobo(draftEndpoint) && !it.matchesTrustedLobo(draftEndpoint) } == true
     val canCancel: Boolean get() = editable && authorized
 
     fun withoutTest(): SummaryProviderWorkflowState = copy(tested = null, consent = false)
