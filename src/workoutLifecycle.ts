@@ -174,13 +174,20 @@ function endOrdinaryWorkout(day: string, cancelled: boolean, prepare?: (endedAtM
   const storage = localStorage;
   const session = getSession(day, storage);
   if (!session.sessionId || !session.sessionStart || !session.startTime) {
-    return Promise.resolve("no_session");
+    return Promise.resolve(session.sessionId ? "failed" : "no_session");
   }
   const sessionId = session.sessionId;
   if (!matchingOrdinaryEnd(day, sessionId, storage))
     return Promise.resolve("superseded");
-  if (session.summaryEmitted === "true")
+  if (session.summaryEmitted === "true") {
+    const finalization = readSessionFinalization(day, storage);
+    if (finalization && finalization.sessionId === sessionId) {
+      releaseTransientSessionTelemetry(sessionId, storage);
+      clearSessionFinalization(day, storage);
+      clearActiveSessionOwner({ selector: day, sessionId }, storage);
+    }
     return Promise.resolve("already_saved");
+  }
   if (session.summaryEmitted !== "false")
     return Promise.resolve("failed");
   let pending = ordinaryEnds.get(storage);

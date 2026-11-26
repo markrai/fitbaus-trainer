@@ -829,6 +829,8 @@ function vo2CheckpointKey(session, elapsedSec) {
 async function tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, storage, options = {}) {
     var _a, _b, _c;
     const store = storage !== null && storage !== void 0 ? storage : localStorage;
+    if (readSessionFinalization(day, store))
+        return undefined;
     let pending = pendingVo2Checkpoints.get(store);
     if (!pending) {
         pending = new Map();
@@ -862,6 +864,8 @@ async function tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, storage, 
     }
     try {
         const samples = await checkpoint.samples;
+        if (readSessionFinalization(day, store))
+            return undefined;
         if (pending.get(day) !== checkpoint || checkpoint.latest !== ticket || ((_c = options.isCurrent) === null || _c === void 0 ? void 0 : _c.call(options)) === false) {
             return undefined;
         }

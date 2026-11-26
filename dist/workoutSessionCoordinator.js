@@ -217,8 +217,17 @@ export async function recoverActiveOrFinalizingSession(setSelectedDay, overrides
         return;
     }
     const owner = readActiveSessionOwner();
-    if (!owner)
+    if (!owner) {
+        for (const day of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID]) {
+            const finalization = readSessionFinalization(day);
+            const session = getSession(day);
+            if (finalization && session.sessionId === finalization.sessionId && session.startTime) {
+                setSelectedDay(day);
+                break;
+            }
+        }
         return;
+    }
     const session = getSession(owner.selector);
     if (!session.sessionId || session.sessionId !== owner.sessionId || !session.startTime) {
         return;

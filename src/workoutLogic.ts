@@ -978,6 +978,7 @@ async function tickVo2ProtocolWithCanonicalHr(
   options: CanonicalVo2TickOptions = {}
 ): Promise<CanonicalVo2TickResult> {
   const store = storage ?? localStorage;
+  if (readSessionFinalization(day, store)) return undefined;
   let pending = pendingVo2Checkpoints.get(store);
   if (!pending) {
     pending = new Map();
@@ -1009,6 +1010,7 @@ async function tickVo2ProtocolWithCanonicalHr(
   }
   try {
     const samples = await checkpoint.samples;
+    if (readSessionFinalization(day, store)) return undefined;
     if (pending.get(day) !== checkpoint || checkpoint.latest !== ticket || options.isCurrent?.() === false) {
       return undefined;
     }
