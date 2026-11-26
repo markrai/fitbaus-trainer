@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.random.Random
 
 class BooksDiagramLayoutTest {
     private fun graph(direction: String) = BooksDiagramGraph(direction,
@@ -93,6 +94,53 @@ class BooksDiagramLayoutTest {
             val layout = place(graph)
             assertGeometry(layout, graph)
             assertTrue(layout.size.width < 6000f && layout.size.height < 6000f)
+        }
+    }
+
+    @Test
+    fun seededConnectedDagsWithMixedDimensionsRemainDeterministicAndUnobstructed() {
+        val random = Random(42022)
+        repeat(128) {
+            val count = random.nextInt(2, 11)
+            val ids = (0 until count).map { "N$it" }
+            val pairs = mutableSetOf<Pair<String, String>>()
+            for (index in 1 until count) {
+                val parent = random.nextInt(index)
+                pairs.add(ids[parent] to ids[index])
+            }
+            val candidates = ids.flatMapIndexed { index, from ->
+                ids.drop(index + 1).map { to -> from to to }
+            }.filterNot { it in pairs }.shuffled(random)
+            pairs.addAll(candidates.take(random.nextInt(0, minOf(16 - pairs.size, candidates.size) + 1)))
+            val nodes = ids.shuffled(random).map { BooksDiagramNode(it, "Concept $it") }
+            val edges = pairs.shuffled(random).map { (from, to) ->
+                BooksDiagramEdge(from, to, if (random.nextBoolean()) "Relationship" else null)
+            }
+            val sizes = nodes.associate { node ->
+                node.id to DiagramSize(random.nextInt(112, 233).toFloat(), random.nextInt(56, 180).toFloat())
+            }
+            val labels = edges.mapIndexedNotNull { index, edge ->
+                edge.label?.let { index to DiagramSize(random.nextInt(32, 158).toFloat(), random.nextInt(24, 80).toFloat()) }
+            }.toMap()
+            for (direction in listOf("TD", "LR")) {
+                val graph = BooksDiagramGraph(direction, nodes, edges)
+                val layout = BooksDiagramLayout.place(graph, sizes, labels)
+                assertEquals(layout, BooksDiagramLayout.place(graph, sizes, labels))
+                assertGeometry(layout, graph)
+            }
+        }
+    }
+
+    @Test
+    fun multipleRootsAndOneMergeDoNotRequireArtificialNodesInTheRenderedGraph() {
+        val nodes = listOf("A", "B", "C", "D").map { BooksDiagramNode(it, it) }
+        val edges = listOf(BooksDiagramEdge("A", "C", "first"), BooksDiagramEdge("B", "C", "second"),
+            BooksDiagramEdge("C", "D", null))
+        for (direction in listOf("TD", "LR")) {
+            val graph = BooksDiagramGraph(direction, nodes, edges)
+            val layout = place(graph)
+            assertGeometry(layout, graph)
+            assertEquals(setOf("A", "B", "D"), layout.nodes.filter { it.terminal }.map { it.node.id }.toSet())
         }
     }
 

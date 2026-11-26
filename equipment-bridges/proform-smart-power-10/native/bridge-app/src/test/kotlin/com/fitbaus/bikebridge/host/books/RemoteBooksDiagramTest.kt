@@ -142,15 +142,109 @@ class RemoteBooksDiagramTest {
     }
 
     @Test
+    fun expiredBudgetAndProviderFailuresDoNotTriggerFurtherDiagramRequests() {
+        var now = 0L
+        var calls = 0
+        assertThrows(IOException::class.java) {
+            client(clock = { now }, pause = { now += 180_000_000_000L }) {
+                calls++
+                BooksHttpResponse(202, response("deferred").put("retry_after_seconds", 3).toString())
+            }.load(identity)
+        }
+        assertEquals(1, calls)
+        for (status in listOf(401, 403, 409, 429, 502, 503, 504)) {
+            calls = 0
+            assertThrows(IOException::class.java) {
+                client {
+                    calls++
+                    BooksHttpResponse(status, "")
+                }.load(identity)
+            }
+            assertEquals(1, calls)
+        }
+    }
+
+    @Test
+    fun cachedGraphStillRequiresExactIdentityAndValidStructure() {
+        val cached = ready().put("cache_hit", true)
+        val graph = client { BooksHttpResponse(200, cached.toString()) }.load(identity)
+        assertEquals("Concept", graph.nodes.first().label)
+        for (field in listOf("source_id", "item_id", "audio_revision", "transcript_digest",
+            "summary_model", "summary_prompt_version", "summary_digest", "diagram_prompt_version", "parser_version")) {
+            val bad = JSONObject(cached.toString()).put(field, "incorrect")
+            assertThrows(IllegalArgumentException::class.java) {
+                client { BooksHttpResponse(200, bad.toString()) }.load(identity)
+            }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            client { BooksHttpResponse(200, JSONObject(cached.toString()).put("end_ms", 300001).toString()) }.load(identity)
+        }
+        val oversized = JSONObject(cached.toString()).put("mermaid", "x".repeat(8193))
+        assertThrows(IllegalArgumentException::class.java) {
+            client { BooksHttpResponse(200, oversized.toString()) }.load(identity)
+        }
+    }
+
+    @Test
+    fun changedSectionOrSummaryCannotReuseTheCurrentGraph() {
+        val scope = BooksDiagramScope()
+        val ticket = requireNotNull(scope.begin(identity))
+        val graph = BooksDiagramValidation.parse(ready())
+        assertTrue(scope.complete(ticket, BooksDiagramState.Ready(graph)))
+        assertTrue(scope.show())
+        assertFalse(scope.matches(selection.copy(section = BooksSection(300_000, 600_000, null, 2, 2)), summary))
+        assertFalse(scope.matches(selection, summary.copy(summary = "Replacement")))
+        assertFalse(scope.matches(selection.copy(expectedRevision = "d".repeat(64)), summary))
+        scope.clear()
+        assertFalse(scope.open)
+        assertNull(scope.state)
+        assertFalse(scope.complete(ticket, BooksDiagramState.Ready(graph)))
+    }
+
+    @Test
+    fun drawGateConsumesOnlyVisibleCurrentSummaryOnce() {
+        val gate = BooksSummaryDrawGate()
+        var deliveries = 0
+        assertNull(gate.begin(false))
+        val hidden = requireNotNull(gate.begin(true))
+        gate.finish(hidden, false) { deliveries++; true }
+        assertEquals(0, deliveries)
+        val stale = requireNotNull(gate.begin(true))
+        gate.changed()
+        gate.finish(stale, true) { deliveries++; true }
+        assertEquals(0, deliveries)
+        val declined = requireNotNull(gate.begin(true))
+        gate.finish(declined, true) { false }
+        val ready = requireNotNull(gate.begin(true))
+        assertNull(gate.begin(true))
+        gate.finish(ready, true) { deliveries++; true }
+        repeat(1000) {
+            assertNull(gate.begin(true))
+            assertNull(gate.begin(false))
+        }
+        assertEquals(1, deliveries)
+        gate.changed()
+        val cancelled = requireNotNull(gate.begin(true))
+        gate.cancel(cancelled)
+        val replacement = requireNotNull(gate.begin(true))
+        gate.finish(cancelled, true) { deliveries++; true }
+        assertEquals(1, deliveries)
+        gate.finish(replacement, true) { deliveries++; true }
+        assertEquals(2, deliveries)
+    }
+
+    @Test
     fun visibleDrawAndFullscreenOwnershipAreExplicit() {
         val root = "src/main/kotlin/com/fitbaus/bikebridge/host/"
         val viewport = File(root + "books/BooksNarrationViewport.kt").readText()
         val readAlong = File(root + "books/BooksReadAlong.kt").readText()
         val content = File(root + "books/BooksContent.kt").readText()
         assertTrue(viewport.contains("super.dispatchDraw(canvas)"))
-        assertTrue(viewport.contains("if (drawnGeneration == summaryGeneration && summaryIsVisible()) onSummaryDrawn?.invoke()"))
+        assertTrue(viewport.contains("drawGate.finish(ticket, summaryIsVisible() && longPressAction != null)"))
         assertTrue(readAlong.contains("narrationViewport.onSummaryDrawn = ::prefetchVisibleDiagram"))
         assertTrue(readAlong.contains("if (diagramScope.ticket !== ticket) return@post"))
+        assertTrue(readAlong.contains("summarySelection(livePosition())"))
+        assertTrue(readAlong.contains("diagramScope.matches(liveSelection, diagramSummary(liveSelection))"))
         assertTrue(content.contains("hud.visibility = if (diagram) GONE else VISIBLE"))
         assertTrue(content.contains("presentationMode != BooksPresentationMode.DIAGRAM"))
     }
