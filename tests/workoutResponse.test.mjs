@@ -24,6 +24,9 @@ import {
   getOrdinaryBikeTelemetrySamples,
   initDB,
   queueOrdinaryBikeTelemetrySample,
+  queueWorkoutHrSample,
+  setWorkoutHrPersistenceHooksForTests,
+  setOrdinaryTelemetryWriteFailureInjectorForTests,
   resetWorkoutStorageForTests,
   storeHrSample,
   storeOrdinaryBikeTelemetrySample,
@@ -33,7 +36,9 @@ import { emitWorkoutSummary, generateWorkoutSummary } from "../dist/workoutSumma
 import { buildSisuWorkoutPayload } from "../dist/sisuSync.js";
 import { FITNESS_STATE_STORAGE_KEY } from "../dist/fitnessState.js";
 import { ATHLETE_PROFILE_STORAGE_KEY, migrateLegacyProfile } from "../dist/profile.js";
-import { startSession } from "../dist/sessionStore.js";
+import { startSession, getSession } from "../dist/sessionStore.js";
+import { handleWorkoutCompletion } from "../dist/workoutLifecycle.js";
+import { readSessionFinalization } from "../dist/freestyleRide.js";
 import { transformWorkoutData } from "../dist/workoutData.js";
 import {
   ORDINARY_BIKE_TELEMETRY_SCHEMA_VERSION_V1,
@@ -688,4 +693,60 @@ test("SISU payload strips WorkoutResponse while preserving the local summary", (
   assert.equal(payload.workout_response, undefined);
   assert.ok(local.workout_response);
   assert.equal(local.workout_response.schemaVersion, WORKOUT_RESPONSE_SCHEMA_VERSION_V1);
+});
+
+test("real summary finalization waits for pending HR and preserves evidence when either persistence stream fails", async () => {
+  await resetWorkoutStorageForTests();
+  const previousStorage = globalThis.localStorage;
+  const previousWindow = globalThis.window;
+  const storage = memoryStorage();
+  globalThis.localStorage = storage;
+  globalThis.window = { generateWorkoutSummary, emitWorkoutSummary };
+  let release;
+  try {
+    const id = "strict-end";
+    startSession("Tuesday", Date.now() - 60_000, id, "bike", storage);
+    const gate = new Promise(resolve => { release = resolve; });
+    let entered;
+    const started = new Promise(resolve => { entered = resolve; });
+    setWorkoutHrPersistenceHooksForTests(async () => { entered(); await gate; throw new Error("HR failure"); });
+    queueWorkoutHrSample(id, 5, 141);
+    await started;
+    const end = handleWorkoutCompletion("Tuesday");
+    await Promise.resolve();
+    assert.equal(readSessionFinalization("Tuesday", storage).status, "finalizing");
+    assert.equal(getSession("Tuesday", storage).summaryEmitted, "false");
+    release();
+    assert.equal(await end, "failed");
+    assert.equal(readSessionFinalization("Tuesday", storage).status, "save_failed");
+    assert.equal((await getAllWorkoutSummaries()).length, 0);
+
+    setWorkoutHrPersistenceHooksForTests(null);
+    setOrdinaryTelemetryWriteFailureInjectorForTests(() => true);
+    queueOrdinaryBikeTelemetrySample(rawSample({ sessionId: id, sourceSampleId: "strict-end-bike" }));
+    assert.equal(await handleWorkoutCompletion("Tuesday"), "failed");
+    assert.equal((await getAllWorkoutSummaries()).length, 0);
+
+    setOrdinaryTelemetryWriteFailureInjectorForTests(null);
+    setWorkoutHrPersistenceHooksForTests(null, () => true);
+    assert.equal(await handleWorkoutCompletion("Tuesday"), "failed");
+    assert.equal((await getAllWorkoutSummaries()).length, 0);
+
+    setWorkoutHrPersistenceHooksForTests(null);
+    assert.equal(await handleWorkoutCompletion("Tuesday"), "saved");
+    assert.equal(getSession("Tuesday", storage).summaryEmitted, "true");
+    assert.equal(readSessionFinalization("Tuesday", storage), null);
+    assert.equal((await getHrSamples(id))[0].hr, 141);
+    assert.equal((await getOrdinaryBikeTelemetrySamples(id)).length, 1);
+    const rows = await getAllWorkoutSummaries();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].summary.hr_trace.samples[0].hr, 141);
+  } finally {
+    if (release) release();
+    setWorkoutHrPersistenceHooksForTests(null);
+    setOrdinaryTelemetryWriteFailureInjectorForTests(null);
+    globalThis.localStorage = previousStorage;
+    globalThis.window = previousWindow;
+    await resetWorkoutStorageForTests();
+  }
 });
