@@ -124,7 +124,9 @@ test("legacy VO2 session requires restart without writing persisted runtime", t 
 
 test("current VO2 runtime supplies protocol phase and never ordinary target advice", t => {
   const selector = VO2_WORKOUT_SELECTOR_ID;
-  const runtime = createVo2ProtocolRuntime(buildVo2ProtocolPlan());
+  const plan = buildVo2ProtocolPlan();
+  assert.ok(plan);
+  const runtime = createVo2ProtocolRuntime(plan, { age_years: 40, weight_kg: 80 });
   const map = withSession(t, selector, { ["vo2_protocol_runtime_" + selector]: JSON.stringify(runtime) });
   const before = [...map];
   const state = display(selector, vo2PlanBlocks(), start, true, 90);
