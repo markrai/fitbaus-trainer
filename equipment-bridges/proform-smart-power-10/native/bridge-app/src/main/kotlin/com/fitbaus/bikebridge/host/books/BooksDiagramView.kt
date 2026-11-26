@@ -12,6 +12,7 @@ import android.graphics.Typeface
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -19,7 +20,6 @@ import kotlin.math.hypot
 
 internal class BooksDiagramView(context: Context) : View(context) {
     private val density = resources.displayMetrics.density
-    private val scaledDensity = resources.displayMetrics.scaledDensity
     private val accent = 0xffffce1b.toInt()
     private val nodePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val edgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -30,12 +30,12 @@ internal class BooksDiagramView(context: Context) : View(context) {
     }
     private val nodeText = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xfff5f5f5.toInt()
-        textSize = 20f * scaledDensity
+        textSize = sp(20f)
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
     private val edgeText = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0xffd1c6a1.toInt()
-        textSize = 16f * scaledDensity
+        textSize = sp(16f)
     }
     private var graph: BooksDiagramGraph? = null
     private var geometry: DiagramLayout? = null
@@ -122,8 +122,8 @@ internal class BooksDiagramView(context: Context) : View(context) {
         val size = geometry?.size ?: return
         if (width <= 0 || height <= 0) return
         zoom = BooksDiagramViewport.initialScale(size, width.toFloat(), height.toFloat())
-        offsetX = (width - size.width * zoom) / 2f
-        offsetY = (height - size.height * zoom) / 2f
+        offsetX = if (graph?.direction == "LR" && size.width * zoom > width) 0f else (width - size.width * zoom) / 2f
+        offsetY = if (graph?.direction == "TD" && size.height * zoom > height) 0f else (height - size.height * zoom) / 2f
         clamp()
     }
 
@@ -195,9 +195,9 @@ internal class BooksDiagramView(context: Context) : View(context) {
         canvas.restore()
     }
 
-    private fun DiagramRect.rect() = RectF(left, top, right, bottom)
+    private fun sp(value: Float): Float = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value, resources.displayMetrics)
 
-    override fun performClick(): Boolean = super.performClick()
+    private fun DiagramRect.rect() = RectF(left, top, right, bottom)
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (geometry == null) return false
