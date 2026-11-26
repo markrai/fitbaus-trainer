@@ -1,4 +1,6 @@
 import { isNativeRuntime } from "./platform/runtime.js";
+import { getSession } from "./sessionStore.js";
+import { readActiveSessionOwner, readSessionFinalization } from "./freestyleRide.js";
 
 /** Callers that may hold the shared screen wake lock. */
 export type WakeLockOwner = "workout" | "restingHr";
@@ -188,9 +190,11 @@ export function registerWakeLockGlobals() {
 
     // Preserve ordinary-workout resume: if a workout is mid-session, reclaim as workout.
     if (typeof (window as any).getSelectedDay === "function" && typeof (window as any).getStartTime === "function") {
-      const day = (window as any).getSelectedDay();
-      const startTime = (window as any).getStartTime(day);
-      if (startTime) {
+      const owner = readActiveSessionOwner();
+      const day = owner ? owner.selector : (window as any).getSelectedDay();
+      const session = getSession(day);
+      if (session.startTime && !session.paused && session.summaryEmitted !== "true" && !readSessionFinalization(day) &&
+        (!owner || owner.sessionId === session.sessionId)) {
         await requestWakeLock("workout");
       }
     }

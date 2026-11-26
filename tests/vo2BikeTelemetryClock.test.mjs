@@ -19,9 +19,11 @@ import {
   recordBikeTelemetrySample,
 } from "../dist/bikeTelemetryTrace.js";
 import { summarizeVo2StageWorkload, VO2_WORKLOAD_MIN_SAMPLES } from "../dist/vo2Workload.js";
-import { readSessionFinalization, writeActiveSessionOwner } from "../dist/freestyleRide.js";
+import { clearActiveSessionOwner, readSessionFinalization, writeActiveSessionOwner } from "../dist/freestyleRide.js";
 import { restartWorkout } from "../dist/workoutLogic.js";
+import { setBikeBridgeSessionForTests } from "../dist/platform/bikeBridgeRuntime.js";
 import {
+  canApplyWorkoutSessionEffects,
   discardWorkoutSession,
   handleWorkoutCancellation,
   handleWorkoutCompletion,
@@ -394,4 +396,53 @@ test("restart does not delete evidence when cancellation persistence fails", asy
     assert.equal(getBikeTelemetrySamples(id, f.storage).length, 1);
     assert.equal(deleted, 0);
   } finally { f.restore(); }
+});
+
+test("stale discard and superseded completion leave the current bridge and wake lock alone", async () => {
+  const f = endFixture("Tuesday", "current-owner");
+  const events = [];
+  let binding = { sessionId: "current-owner", controlMode: "legacy_hr_control" };
+  setBikeBridgeSessionForTests({
+    getSessionBinding: () => binding,
+    bindSession: value => { events.push(["bind", value]); binding = value; },
+  });
+  window.releaseWakeLock = async () => { events.push(["release"]); };
+  try {
+    startSession("Monday", Date.now() - 25 * 60 * 60 * 1000, "stale", "bike", f.storage);
+    recordBikeTelemetrySample("stale", { timestamp_sec: 2, rpm: 70 }, f.storage);
+    assert.equal(canApplyWorkoutSessionEffects("Monday", "stale", f.storage), false);
+    assert.equal(await handleWorkoutCompletion("Monday"), "superseded");
+    discardWorkoutSession("Monday", f.storage);
+    assert.equal(getSession("Monday", f.storage).sessionId, null);
+    assert.equal(getBikeTelemetrySamples("stale", f.storage).length, 0);
+    assert.equal(getSession("Tuesday", f.storage).sessionId, "current-owner");
+    assert.equal(binding.sessionId, "current-owner");
+    assert.deepEqual(events, []);
+    assert.equal(await handleWorkoutCompletion("Tuesday"), "saved");
+    assert.deepEqual(events, [["bind", null], ["release"]]);
+    assert.equal(await handleWorkoutCompletion("Tuesday"), "already_saved");
+    assert.deepEqual(events, [["bind", null], ["release"]]);
+  } finally {
+    setBikeBridgeSessionForTests(null);
+    f.restore();
+  }
+});
+
+test("an ownerless old selector cannot disarm a different live binding", () => {
+  const f = endFixture("Tuesday", "current-ownerless");
+  const events = [];
+  clearActiveSessionOwner(undefined, f.storage);
+  setBikeBridgeSessionForTests({
+    getSessionBinding: () => ({ sessionId: "current-ownerless", controlMode: "legacy_hr_control" }),
+    bindSession: value => events.push(value),
+  });
+  try {
+    startSession("Monday", Date.now(), "old-ownerless", "bike", f.storage);
+    discardWorkoutSession("Monday", f.storage);
+    assert.deepEqual(events, []);
+    assert.equal(getSession("Tuesday", f.storage).sessionId, "current-ownerless");
+  } finally {
+    setBikeBridgeSessionForTests(null);
+    f.restore();
+  }
 });

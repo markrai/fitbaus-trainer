@@ -110,6 +110,7 @@ interface PendingOrdinaryWriteChain {
 
 const pendingOrdinaryWrites = new Map<string, PendingOrdinaryWriteChain>();
 const sealedOrdinaryTelemetrySessions = new Set<string>();
+const ordinaryFlushes = new Map<string, Promise<OrdinaryTelemetryFlushResult>>();
 
 /** Serialize per-session writes so finalization can reliably flush the last observed second. */
 export function queueOrdinaryBikeTelemetrySample(sample: OrdinaryBikeTelemetrySample): void {
@@ -151,93 +152,69 @@ export function queueOrdinaryBikeTelemetrySample(sample: OrdinaryBikeTelemetrySa
   });
 }
 
-export async function flushOrdinaryBikeTelemetryWrites(
-  sessionId: string
-): Promise<OrdinaryTelemetryFlushResult> {
+export function flushOrdinaryBikeTelemetryWrites(sessionId: string): Promise<OrdinaryTelemetryFlushResult> {
+  if (sealedOrdinaryTelemetrySessions.has(sessionId)) return Promise.resolve({ ok: false, failedCount: 0, retriedCount: 0, unresolvedFailures: 1, rejectedCount: 0, retryableFailures: 1 });
+  return joinOrdinaryTelemetryDrain(sessionId);
+}
+function joinOrdinaryTelemetryDrain(sessionId: string): Promise<OrdinaryTelemetryFlushResult> {
+  const existing = ordinaryFlushes.get(sessionId);
+  if (existing)
+    return existing;
+  const chain = pendingOrdinaryWrites.get(sessionId);
+  if (!chain) return Promise.resolve({ ok: true, failedCount: 0, retriedCount: 0, unresolvedFailures: 0, rejectedCount: 0, retryableFailures: 0 });
+  const task = drainOrdinaryBikeTelemetryWrites(sessionId, chain);
+  ordinaryFlushes.set(sessionId, task);
+  return task;
+}
+async function drainOrdinaryBikeTelemetryWrites(sessionId: string, chain: PendingOrdinaryWriteChain): Promise<OrdinaryTelemetryFlushResult> {
   let failedCount = 0;
   let retriedCount = 0;
-
-  for (;;) {
-    const chain = pendingOrdinaryWrites.get(sessionId);
-    if (!chain) {
-      return {
-        ok: true,
-        failedCount,
-        retriedCount,
-        unresolvedFailures: 0,
-        rejectedCount: 0,
-        retryableFailures: 0,
-      };
-    }
-
-    chain.flushing = true;
-    const awaited = chain.promise;
-    try {
-      await awaited.catch(() => undefined);
-    } finally {
-      const current = pendingOrdinaryWrites.get(sessionId);
-      if (current) current.flushing = false;
-    }
-
-    const afterAwait = pendingOrdinaryWrites.get(sessionId);
-    if (!afterAwait) {
-      return {
-        ok: true,
-        failedCount,
-        retriedCount,
-        unresolvedFailures: 0,
-        rejectedCount: 0,
-        retryableFailures: 0,
-      };
-    }
-    if (afterAwait.promise !== awaited) {
-      continue;
-    }
-
-    failedCount += afterAwait.failedCount;
-
-    const retryQueue = afterAwait.failedSamples.splice(0, afterAwait.failedSamples.length);
-    afterAwait.failedCount = 0;
-    retriedCount += retryQueue.length;
-    afterAwait.flushing = true;
-    let stillFailed = 0;
-    try {
-      for (const sample of retryQueue) {
-        const result = await storeOrdinaryBikeTelemetrySample(sample);
-        if (result === "failed") {
-          stillFailed += 1;
-          afterAwait.failedSamples.push(sample);
-        } else if (result === "rejected") {
-          afterAwait.rejectedCount += 1;
+  chain.flushing = true;
+  try {
+    for (;;) {
+      const task = chain.promise.then(async () => {
+        failedCount += chain.failedCount;
+        const retryQueue = chain.failedSamples.splice(0);
+        chain.failedCount = 0;
+        retriedCount += retryQueue.length;
+        for (const sample of retryQueue) {
+          const result = await storeOrdinaryBikeTelemetrySample(sample);
+          if (result === "failed") {
+            chain.failedCount += 1;
+            chain.failedSamples.push(sample);
+          }
+          else if (result === "rejected") {
+            chain.rejectedCount += 1;
+          }
         }
-      }
-    } finally {
-      afterAwait.flushing = false;
-      afterAwait.failedCount = stillFailed;
+      });
+      chain.promise = task;
+      await task;
+      if (chain.promise !== task)
+        continue;
+      const rejectedCount = chain.rejectedCount;
+      const retryableFailures = chain.failedSamples.length;
+      if (retryableFailures === 0 && rejectedCount === 0 && pendingOrdinaryWrites.get(sessionId) === chain)
+        pendingOrdinaryWrites.delete(sessionId);
+      return {
+        ok: retryableFailures === 0 && rejectedCount === 0,
+        failedCount,
+        retriedCount,
+        unresolvedFailures: retryableFailures + rejectedCount,
+        rejectedCount,
+        retryableFailures,
+      };
     }
-
-    const latest = pendingOrdinaryWrites.get(sessionId);
-    if (latest && latest.promise !== awaited) {
-      continue;
-    }
-    const rejectedCount = latest?.rejectedCount ?? afterAwait.rejectedCount;
-    const retryableFailures = stillFailed;
-    if (retryableFailures === 0 && rejectedCount === 0 && latest && latest.promise === awaited) {
-      pendingOrdinaryWrites.delete(sessionId);
-    }
-    return {
-      ok: retryableFailures === 0 && rejectedCount === 0,
-      failedCount,
-      retriedCount,
-      unresolvedFailures: retryableFailures + rejectedCount,
-      rejectedCount,
-      retryableFailures,
-    };
+  }
+  finally {
+    chain.flushing = false;
+    ordinaryFlushes.delete(sessionId);
   }
 }
 
 /** Drop pending queue state after incomplete Freestyle evidence has been explicitly accepted. */
 function clearOrdinaryBikeTelemetryQueue(sessionId: string): void {
+  if (ordinaryFlushes.has(sessionId)) return;
   pendingOrdinaryWrites.delete(sessionId);
 }
 
@@ -273,10 +250,21 @@ async function getOrdinaryBikeTelemetrySamples(sessionId: string): Promise<Ordin
   }
 }
 
+async function withOrdinaryTelemetryDeletion(sessionId: string, remove: (flush: OrdinaryTelemetryFlushResult) => Promise<void>): Promise<void> {
+  if (sealedOrdinaryTelemetrySessions.has(sessionId)) throw new Error("Bike evidence deletion already in progress");
+  sealedOrdinaryTelemetrySessions.add(sessionId);
+  try {
+    const flush = await joinOrdinaryTelemetryDrain(sessionId);
+    await remove(flush);
+    pendingOrdinaryWrites.delete(sessionId);
+  } finally {
+    sealedOrdinaryTelemetrySessions.delete(sessionId);
+  }
+}
+
 async function clearOrdinaryBikeTelemetry(sessionId: string): Promise<void> {
   try {
-    await flushOrdinaryBikeTelemetryWrites(sessionId);
-    await deleteOrdinaryBikeTelemetryRowsForSession(sessionId);
+    await withOrdinaryTelemetryDeletion(sessionId, () => deleteOrdinaryBikeTelemetryRowsForSession(sessionId));
   } catch (error) {
     console.error("Error clearing ordinary bike telemetry:", error);
   }
@@ -300,8 +288,7 @@ function setOrdinaryTelemetryDeleteFailureInjectorForTests(
 export async function deleteOrdinaryBikeTelemetryForSessionStrict(
   sessionId: string
 ): Promise<void> {
-  await flushOrdinaryBikeTelemetryWrites(sessionId);
-  await deleteOrdinaryBikeTelemetryRowsForSession(sessionId);
+  await withOrdinaryTelemetryDeletion(sessionId, () => deleteOrdinaryBikeTelemetryRowsForSession(sessionId));
 }
 
 export async function deleteHrSamplesForSessionStrict(sessionId: string): Promise<void> {
@@ -313,41 +300,35 @@ export async function deleteHrSamplesForSessionStrict(sessionId: string): Promis
  * Queued writes are flushed and sealed first so they cannot recreate rows.
  */
 async function deleteFreestyleSessionEvidenceAtomic(sessionId: string): Promise<void> {
-  await withWorkoutHrDeletion(sessionId, async () => {
-    const flush = await flushOrdinaryBikeTelemetryWrites(sessionId);
+  await withWorkoutHrDeletion(sessionId, () => withOrdinaryTelemetryDeletion(sessionId, async (flush) => {
     if (!flush.ok && flush.retryableFailures > 0) {
       throw new Error("cannot discard while telemetry flush has retryable failures");
     }
-    sealedOrdinaryTelemetrySessions.add(sessionId);
-    pendingOrdinaryWrites.delete(sessionId);
-    try {
-      const database = await openCurrentDatabase();
-      const tx = database.transaction(
-        [STORE_WORKOUTS, STORE_HR_SAMPLES, STORE_ORDINARY_BIKE_TELEMETRY],
-        "readwrite"
-      );
-      const completed = transactionComplete(tx);
-      const work = (async () => {
-        const workout = await getWorkoutRowInTransaction(tx, sessionId);
-        if (workout !== undefined) {
-          throw new Error("cannot delete evidence owned by a persisted workout");
+
+    const database = await openCurrentDatabase();
+    const tx = database.transaction(
+      [STORE_WORKOUTS, STORE_HR_SAMPLES, STORE_ORDINARY_BIKE_TELEMETRY],
+      "readwrite"
+    );
+    const completed = transactionComplete(tx);
+    const work = (async () => {
+      const workout = await getWorkoutRowInTransaction(tx, sessionId);
+      if (workout !== undefined) {
+        throw new Error("cannot delete evidence owned by a persisted workout");
+      }
+      await deleteOrdinaryBikeTelemetryRowsInTransaction(tx, sessionId);
+      if (freestyleEvidenceDeleteFailureInjectorForTests?.()) {
+        try {
+          tx.abort();
+        } catch {
+          // Already aborting or finished.
         }
-        await deleteOrdinaryBikeTelemetryRowsInTransaction(tx, sessionId);
-        if (freestyleEvidenceDeleteFailureInjectorForTests?.()) {
-          try {
-            tx.abort();
-          } catch {
-            // Already aborting or finished.
-          }
-          throw new Error("injected freestyle evidence delete failure");
-        }
-        await deleteHrSampleRowsInTransaction(tx, sessionId);
-      })();
-      await untilTransactionComplete(work, completed);
-    } finally {
-      sealedOrdinaryTelemetrySessions.delete(sessionId);
-    }
-  });
+        throw new Error("injected freestyle evidence delete failure");
+      }
+      await deleteHrSampleRowsInTransaction(tx, sessionId);
+    })();
+    await untilTransactionComplete(work, completed);
+  }));
 }
 
 /** Delete old raw traces only when no immutable workout summary owns the session. */
@@ -381,6 +362,7 @@ interface PendingWorkoutHrWrites {
 }
 const pendingWorkoutHrWrites = new Map<string, PendingWorkoutHrWrites>();
 const sealedWorkoutHrSessions = new Set<string>();
+const workoutHrFlushes = new Map<string, Promise<boolean>>();
 async function writeWorkoutHrSample(sample: HrSample): Promise<void> {
   if (hrWriteGateForTests)
     await hrWriteGateForTests();
@@ -410,29 +392,43 @@ export function queueWorkoutHrSample(sessionId: string, elapsedSec: number, bpm:
   });
   chain.tail = task;
   void task.then(() => {
-    if (pendingWorkoutHrWrites.get(sessionId) === chain && chain.tail === task && chain.failed.size === 0)
+    if (pendingWorkoutHrWrites.get(sessionId) === chain && chain.tail === task && chain.failed.size === 0 && !workoutHrFlushes.has(sessionId))
       pendingWorkoutHrWrites.delete(sessionId);
   });
   return true;
 }
-export async function flushWorkoutHrWrites(sessionId: string): Promise<boolean> {
-  if (sealedWorkoutHrSessions.has(sessionId)) return false;
+export function flushWorkoutHrWrites(sessionId: string): Promise<boolean> {
+  if (sealedWorkoutHrSessions.has(sessionId))
+    return Promise.resolve(false);
+  const existing = workoutHrFlushes.get(sessionId);
+  if (existing)
+    return existing;
   const chain = pendingWorkoutHrWrites.get(sessionId);
-  if (!chain)
-    return true;
-  const task = chain.tail.then(async () => {
-    for (const sample of Array.from(chain.failed.values())) {
-      await attemptWorkoutHrWrite(chain, sample);
+  if (!chain) return Promise.resolve(true);
+  const task = drainWorkoutHrWrites(sessionId, chain);
+  workoutHrFlushes.set(sessionId, task);
+  return task;
+}
+async function drainWorkoutHrWrites(sessionId: string, chain: PendingWorkoutHrWrites): Promise<boolean> {
+  try {
+    for (;;) {
+      const task = chain.tail.then(async () => {
+        for (const sample of Array.from(chain.failed.values())) {
+          await attemptWorkoutHrWrite(chain, sample);
+        }
+      });
+      chain.tail = task;
+      await task;
+      if (chain.tail !== task)
+        continue;
+      const ok = chain.failed.size === 0;
+      if (ok && pendingWorkoutHrWrites.get(sessionId) === chain)
+        pendingWorkoutHrWrites.delete(sessionId);
+      return ok;
     }
-  });
-  chain.tail = task;
-  await task;
-  if (chain.tail !== task)
-    return flushWorkoutHrWrites(sessionId);
-  const ok = chain.failed.size === 0;
-  if (ok && pendingWorkoutHrWrites.get(sessionId) === chain)
-    pendingWorkoutHrWrites.delete(sessionId);
-  return ok;
+  } finally {
+    workoutHrFlushes.delete(sessionId);
+  }
 }
 export async function getHrSamplesStrict(sessionId: string): Promise<HrSample[]> {
   if (hrReadFailureForTests && hrReadFailureForTests())
@@ -448,6 +444,8 @@ async function withWorkoutHrDeletion(sessionId: string, remove: () => Promise<vo
   if (sealedWorkoutHrSessions.has(sessionId)) throw new Error("HR evidence deletion already in progress");
   sealedWorkoutHrSessions.add(sessionId);
   try {
+    const draining = workoutHrFlushes.get(sessionId);
+    if (draining) await draining;
     const chain = pendingWorkoutHrWrites.get(sessionId);
     if (chain)
       await chain.tail;
@@ -612,8 +610,7 @@ async function getAllWorkoutSummaries(): Promise<Array<{ summary: WorkoutSummary
 
 async function deleteWorkoutSummary(sessionId: string) {
   try {
-    await flushOrdinaryBikeTelemetryWrites(sessionId);
-    await withWorkoutHrDeletion(sessionId, async () => {
+    await withWorkoutHrDeletion(sessionId, () => withOrdinaryTelemetryDeletion(sessionId, async () => {
       const database = await initDB();
       // One readwrite transaction across all three stores: a workout and its HR
       // samples and telemetry are deleted together or not at all.
@@ -630,7 +627,7 @@ async function deleteWorkoutSummary(sessionId: string) {
         ]),
         completed
       );
-    });
+    }));
     try {
       const history = await getAllWorkoutSummaries();
       rebuildStoredPassiveFitnessProjection(history.map((row) => row.summary));

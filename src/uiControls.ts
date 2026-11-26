@@ -14,6 +14,7 @@ import {
 } from "./workoutStorage.js";
 import { sendWorkoutToSisu } from "./sisuSync.js";
 import {
+  canApplyWorkoutSessionEffects,
   discardFreestyleRide,
   finishFreestyleRide,
   isFreestyleFinishInFlight,
@@ -812,6 +813,12 @@ function syncBikeBridgeGuidance(
   if (equipmentTab?.classList.contains("active")) renderBikeBridgeSettingsStatus();
 }
 
+function syncInactiveWorkoutGuidance(day: string) {
+  if (canApplyWorkoutSessionEffects(day, getSession(day).sessionId)) {
+    syncBikeBridgeGuidance(null, false, false);
+  }
+}
+
 function renderWorkout(state: WorkoutDisplayState) {
   const downregEl = document.getElementById("downregulationContainer");
   const workoutMainContent = document.getElementById("workoutMainContent");
@@ -833,7 +840,7 @@ function renderWorkout(state: WorkoutDisplayState) {
         startDownregulationView(downregEl as HTMLElement, canvas);
       }
     }
-    syncBikeBridgeGuidance(null, false, false);
+    syncInactiveWorkoutGuidance(state.day);
     return;
   }
 
@@ -882,7 +889,7 @@ function renderWorkout(state: WorkoutDisplayState) {
 
   if (state.screen === "rest") {
     renderMachineGuidance(null);
-    syncBikeBridgeGuidance(null, false, false);
+    syncInactiveWorkoutGuidance(state.day);
     if (workoutBlocksEl) workoutBlocksEl.textContent = "Rest Day";
     if (phaseDisplayEl) {
       phaseDisplayEl.innerHTML = '<span class="phase-name">Rest Day</span>';
@@ -903,7 +910,7 @@ function renderWorkout(state: WorkoutDisplayState) {
 
   if (state.screen === "idle") {
     renderMachineGuidance(null);
-    syncBikeBridgeGuidance(null, false, false);
+    syncInactiveWorkoutGuidance(state.day);
     if (phaseDisplayEl) {
       phaseDisplayEl.innerHTML = '<span class="phase-name">Not Started</span>';
       phaseDisplayEl.dataset.phaseState = "idle";
@@ -931,7 +938,7 @@ function renderWorkout(state: WorkoutDisplayState) {
 
   if (state.screen === "vo2_restart_required") {
     renderMachineGuidance(null);
-    syncBikeBridgeGuidance(null, false, false);
+    syncInactiveWorkoutGuidance(state.day);
     if (phaseDisplayEl) {
       phaseDisplayEl.innerHTML = '<span class="phase-name">Assessment update requires restart</span>';
       phaseDisplayEl.dataset.phaseState = "completed";
@@ -956,11 +963,12 @@ function renderWorkout(state: WorkoutDisplayState) {
 
   if (state.screen === "completed") {
     renderMachineGuidance(null);
-    syncBikeBridgeGuidance(null, false, false);
+    syncInactiveWorkoutGuidance(state.day);
     updateRing(state.elapsedSec, state.blocks as any);
     const ending = readSessionFinalization(state.day);
-    const saving = ending ? ending.status === "finalizing" : getSession(state.day).summaryEmitted === "false";
-    if (!ending || ending.status === "finalizing") workoutSession.complete(state.day);
+    const emitted = getSession(state.day).summaryEmitted === "true";
+    const saving = ending ? ending.status === "finalizing" : !emitted && getSession(state.day).summaryEmitted === "false";
+    if ((!emitted || ending) && (!ending || ending.status === "finalizing")) workoutSession.complete(state.day);
     if (phaseDisplayEl) {
       phaseDisplayEl.innerHTML = ending && ending.status === "save_failed"
         ? '<span class="phase-name">Save failed</span>'

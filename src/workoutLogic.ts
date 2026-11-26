@@ -21,7 +21,7 @@ import {
   type SessionData,
   type SessionStorage,
 } from "./sessionStore.js";
-import { discardFreestyleRide, handleWorkoutCancellation } from "./workoutLifecycle.js";
+import { canApplyWorkoutSessionEffects, discardFreestyleRide, handleWorkoutCancellation } from "./workoutLifecycle.js";
 import { resetMachineGuidanceRuntime } from "./machines/runtime.js";
 import type { SessionControlMode } from "./sessionControlMode.js";
 import { getActiveWorkoutActivity, requireAllowedActivity } from "./workoutActivity.js";
@@ -725,7 +725,7 @@ async function restartWorkout() {
   if (current.sessionId !== session.sessionId || current.sessionStart !== session.sessionStart ||
     (owner && (owner.selector !== day || owner.sessionId !== session.sessionId)))
     return;
-  if (typeof (window as any).releaseWakeLock === "function") {
+  if (outcome !== "saved" && canApplyWorkoutSessionEffects(day, session.sessionId) && typeof (window as any).releaseWakeLock === "function") {
     await (window as any).releaseWakeLock();
   }
   const latest = getSession(day);
@@ -734,11 +734,13 @@ async function restartWorkout() {
     (latestOwner && (latestOwner.selector !== day || latestOwner.sessionId !== session.sessionId)))
     return;
   clearSession(day);
-  resetMachineGuidanceRuntime();
-  try {
-    getBikeBridgeSession().bindSession(null);
-  } catch (error) {
-    console.error("Failed to disarm Bike Bridge after restart:", error);
+  if (canApplyWorkoutSessionEffects(day, session.sessionId)) {
+    try {
+      getBikeBridgeSession().bindSession(null);
+    } catch (error) {
+      console.error("Failed to disarm Bike Bridge after restart:", error);
+    }
+    if (canApplyWorkoutSessionEffects(day, session.sessionId)) resetMachineGuidanceRuntime();
   }
 
   if (session.sessionId) {

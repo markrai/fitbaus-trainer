@@ -17,6 +17,7 @@ import {
 import { getBikeBridgeSession } from "./platform/bikeBridgeRuntime.js";
 import { resetMachineGuidanceRuntime } from "./machines/runtime.js";
 import {
+  FREESTYLE_WORKOUT_SELECTOR_ID,
   clearActiveSessionOwner,
   clearFreestyleAuthorityFault,
   clearSessionFinalization,
@@ -30,6 +31,8 @@ import {
   readSessionFinalization,
   type SessionFinalizationV1,
 } from "./freestyleRide.js";
+
+import { VO2_WORKOUT_SELECTOR_ID } from "./vo2Protocol.js";
 
 const MAX_SESSION_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FREESTYLE_ACTIVE_DURATION_SEC = 24 * 60 * 60;
@@ -66,6 +69,41 @@ function disarmBikeBridge(): void {
   } catch (error) {
     console.error("Failed to disarm Bike Bridge:", error);
   }
+}
+
+export function canApplyWorkoutSessionEffects(day: string, sessionId: string | null, storage?: SessionStorage): boolean {
+  const owner = readActiveSessionOwner(storage);
+  if (owner && (owner.selector !== day || owner.sessionId !== sessionId))
+    return false;
+  const current = getSession(day, storage);
+  if (current.sessionId && current.sessionId !== sessionId)
+    return false;
+  try {
+    const binding = getBikeBridgeSession().getSessionBinding();
+    if (binding && binding.sessionId !== sessionId)
+      return false;
+    if (owner || binding)
+      return true;
+  }
+  catch (error) {
+    console.error("Cannot verify workout control binding:", error);
+    return false;
+  }
+  for (const selector of ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", VO2_WORKOUT_SELECTOR_ID, FREESTYLE_WORKOUT_SELECTOR_ID]) {
+    if (selector === day)
+      continue;
+    const other = getSession(selector, storage);
+    if (other.startTime && other.summaryEmitted !== "true")
+      return false;
+  }
+  return true;
+}
+function stopOwnedWorkoutControl(day: string, sessionId: string | null, storage?: SessionStorage): void {
+  if (!canApplyWorkoutSessionEffects(day, sessionId, storage))
+    return;
+  disarmBikeBridge();
+  if (canApplyWorkoutSessionEffects(day, sessionId, storage))
+    resetMachineGuidanceRuntime();
 }
 
 function summaryMatchesFinalization(
@@ -152,8 +190,7 @@ export function discardWorkoutSession(day: string, storage?: SessionStorage): vo
   clearSession(day, storage);
   clearFreestyleAuthorityFault(day, storage);
   releaseTransientSessionTelemetry(sessionId, storage);
-  disarmBikeBridge();
-  resetMachineGuidanceRuntime();
+  stopOwnedWorkoutControl(day, sessionId, storage);
   if (sessionId && session.summaryEmitted !== "true" && typeof indexedDB !== "undefined") {
     void clearOrdinaryBikeTelemetry(sessionId);
   }
@@ -225,10 +262,13 @@ function endOrdinaryWorkout(day: string, cancelled: boolean, prepare?: (endedAtM
         return "superseded";
       const record = freeze.record;
       markSessionFinalizationInProgress(day, storage);
-      disarmBikeBridge();
-      if (typeof (window as any).releaseWakeLock === "function") {
-        void (window as any).releaseWakeLock();
+      if (canApplyWorkoutSessionEffects(day, sessionId, storage)) {
+        disarmBikeBridge();
+        if (canApplyWorkoutSessionEffects(day, sessionId, storage) && typeof (window as any).releaseWakeLock === "function") {
+          void Promise.resolve((window as any).releaseWakeLock()).catch(error => console.error("Wake lock release failed:", error));
+        }
       }
+      if (!matchingOrdinaryEnd(day, sessionId, storage)) return "superseded";
       if (!prior && prepare)
         prepare(record.endedAtMs);
       if (typeof (window as any).generateWorkoutSummary !== "function" ||
@@ -333,8 +373,7 @@ async function completeFreestyleCleanupAfterSave(
   }
   throwIfCleanupInjected("after_clear_session");
 
-  disarmBikeBridge();
-  resetMachineGuidanceRuntime();
+  stopOwnedWorkoutControl(day, finalization.sessionId, storage);
   throwIfCleanupInjected("before_clear_finalization");
 
   const remaining = readSessionFinalization(day, storage);
@@ -343,7 +382,7 @@ async function completeFreestyleCleanupAfterSave(
   }
 
   try {
-    if (typeof (window as any).releaseWakeLock === "function") {
+    if (canApplyWorkoutSessionEffects(day, finalization.sessionId, storage) && typeof (window as any).releaseWakeLock === "function") {
       await (window as any).releaseWakeLock();
     }
   } catch (error) {
@@ -678,16 +717,17 @@ export async function discardFreestyleRide(
     }
   }
 
-  releaseTransientSessionTelemetry(targetId);
+  releaseTransientSessionTelemetry(targetId, storage);
 
-  if (finalId === targetId) {
+  const latestFinalization = readSessionFinalization(day, storage);
+  if (latestFinalization && latestFinalization.sessionId === targetId) {
     clearSessionFinalization(day, storage);
   }
   const fault = readFreestyleAuthorityFault(day, storage);
   if (fault === targetId) {
     clearFreestyleAuthorityFault(day, storage);
   }
-  if (liveId === targetId) {
+  if (getSession(day, storage).sessionId === targetId) {
     clearSession(day, storage, { preserveFinalization: true });
   }
 
@@ -698,10 +738,10 @@ export async function discardFreestyleRide(
   }
 
   if (!stillLive.sessionId) {
-    disarmBikeBridge();
-    resetMachineGuidanceRuntime();
+    stopOwnedWorkoutControl(day, targetId, storage);
   }
   if (
+    canApplyWorkoutSessionEffects(day, targetId, storage) &&
     typeof globalThis !== "undefined" &&
     typeof (globalThis as any).window !== "undefined" &&
     typeof (globalThis as any).window.releaseWakeLock === "function"

@@ -1,7 +1,7 @@
 import { getHrTargets, getPlan, getWorkoutMetadata } from "./workoutData.js";
 import { todayName } from "./utils/dateTime.js";
 import { getSession, startSession, pauseSession, resumeSession, clearSession, getEarlyCooldownElapsed, setEarlyCooldownElapsed, persistVo2ProtocolRuntime, } from "./sessionStore.js";
-import { discardFreestyleRide, handleWorkoutCancellation } from "./workoutLifecycle.js";
+import { canApplyWorkoutSessionEffects, discardFreestyleRide, handleWorkoutCancellation } from "./workoutLifecycle.js";
 import { resetMachineGuidanceRuntime } from "./machines/runtime.js";
 import { getActiveWorkoutActivity, requireAllowedActivity } from "./workoutActivity.js";
 import { isVo2WorkoutSelector, vo2ProtocolVoiceCues, isStaleVo2ProtocolTick, VO2_HR_FRESHNESS_MS, VO2_EVAL_RELATIVE_SECONDS, VO2_WORKOUT_SELECTOR_ID, } from "./vo2Protocol.js";
@@ -623,7 +623,7 @@ async function restartWorkout() {
     if (current.sessionId !== session.sessionId || current.sessionStart !== session.sessionStart ||
         (owner && (owner.selector !== day || owner.sessionId !== session.sessionId)))
         return;
-    if (typeof window.releaseWakeLock === "function") {
+    if (outcome !== "saved" && canApplyWorkoutSessionEffects(day, session.sessionId) && typeof window.releaseWakeLock === "function") {
         await window.releaseWakeLock();
     }
     const latest = getSession(day);
@@ -632,12 +632,15 @@ async function restartWorkout() {
         (latestOwner && (latestOwner.selector !== day || latestOwner.sessionId !== session.sessionId)))
         return;
     clearSession(day);
-    resetMachineGuidanceRuntime();
-    try {
-        getBikeBridgeSession().bindSession(null);
-    }
-    catch (error) {
-        console.error("Failed to disarm Bike Bridge after restart:", error);
+    if (canApplyWorkoutSessionEffects(day, session.sessionId)) {
+        try {
+            getBikeBridgeSession().bindSession(null);
+        }
+        catch (error) {
+            console.error("Failed to disarm Bike Bridge after restart:", error);
+        }
+        if (canApplyWorkoutSessionEffects(day, session.sessionId))
+            resetMachineGuidanceRuntime();
     }
     if (session.sessionId) {
         clearBikeTelemetrySamples(session.sessionId);

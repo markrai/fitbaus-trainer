@@ -146,7 +146,8 @@ export function createWorkoutSessionCoordinator(effects: WorkoutSessionEffects, 
   }
 
   function complete(day: string) {
-    effects.releaseWakeLock();
+    const session = getSession(day);
+    if (session.summaryEmitted === "true" && !readSessionFinalization(day)) return;
     handleWorkoutCompletion(day);
   }
 

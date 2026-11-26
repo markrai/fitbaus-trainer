@@ -121,7 +121,9 @@ export function createWorkoutSessionCoordinator(effects, overrides = {}) {
         effects.updateDisplay();
     }
     function complete(day) {
-        effects.releaseWakeLock();
+        const session = getSession(day);
+        if (session.summaryEmitted === "true" && !readSessionFinalization(day))
+            return;
         handleWorkoutCompletion(day);
     }
     function finishOwnedFreestyleRide() {

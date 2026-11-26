@@ -109,7 +109,7 @@ test("workout actions delegate to canonical owners and preserve wake-lock order"
   f.coordinator.complete("Monday");
   f.coordinator.restartWorkout();
   assert.deepEqual(f.events, [["start"], ["begin", "bike"], ["pause", "Monday", 42], ["releaseWake"], ["refresh"],
-    ["resume", "Monday"], ["requestWake"], ["refresh"], ["releaseWake"], ["complete", "Monday"], ["restart"]]);
+    ["resume", "Monday"], ["requestWake"], ["refresh"], ["complete", "Monday"], ["restart"]]);
   assert.equal(f.coordinator.requestEarlyCooldown().type, "enter-early-cooldown");
   assert.equal(f.coordinator.requestVo2LimitReached().type, "enter-limit-reached");
 });
@@ -173,4 +173,16 @@ test("stale cleanup preserves an ordinary workout with a durable finalization", 
   f.setFinalization({ sessionId: "ending", status: "save_failed" });
   cleanupStaleWorkoutSessions(f.dependencies);
   assert.deepEqual(f.events, []);
+});
+
+test("completed render does not release a wake lock or reenter already saved lifecycle", () => {
+  const f = fixture();
+  f.sessions.Monday = { sessionId: "old", summaryEmitted: "true" };
+  f.sessions.Tuesday = { sessionId: "current", startTime: "1" };
+  f.setOwner({ selector: "Tuesday", sessionId: "current" });
+  f.coordinator.complete("Monday");
+  assert.deepEqual(f.events, []);
+  f.setFinalization({ sessionId: "old" });
+  f.coordinator.complete("Monday");
+  assert.deepEqual(f.events, [["complete", "Monday"]]);
 });
