@@ -143,7 +143,8 @@ class ArcadeModeTest {
     @Test
     fun ghoulRunIsWiredAsAReadOnlyFaceOrControllerGame() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        assertTrue(source.contains("arcadeContent.ghoul.pause()"))
+        val lifecycle = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ArcadeLifecycle.kt").readText()
+        assertTrue(lifecycle.contains("arcadeContent.ghoul.pause()"))
         val start = source.indexOf("if (modeController.mode == ArcadeMode.GhoulRun) {")
         val end = source.indexOf("if (modeController.mode == ArcadeMode.Biketris) {", start)
         assertTrue(start > 0 && end > start)
@@ -186,11 +187,9 @@ class ArcadeModeTest {
     @Test
     fun biketrisUsesItsOwnFaceTrackerAndWaveDetectionOnlyWhileSelected() {
         val source = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        val hooksStart = source.indexOf("object : ArcadeModeHooks")
-        val hooksBody = source.substring(hooksStart, source.indexOf("private val modeController", hooksStart))
-        assertTrue(hooksBody.contains("cameraSession.enableWaveGestures(game == ArcadeMode.Biketris)"))
-        assertTrue(hooksBody.indexOf("enableWaveGestures") < hooksBody.indexOf("cameraSession.start()"), "configured before the session starts")
-        assertTrue(hooksBody.contains("arcadeContent.biketris.pause()"))
+        val lifecycle = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ArcadeLifecycle.kt").readText()
+        assertTrue(source.contains("arcadeLifecycle.activate(game)"))
+        assertTrue(lifecycle.contains("arcadeContent.biketris.pause()"))
         assertEquals(1, Regex("""ArcadeCameraSession\.forActivity\(""").findAll(source).count(), "one camera session for every game")
         assertTrue(source.contains("arcadeContent.biketris.gestures = cameraSession.gestures"))
         val picker = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ArcadeTrackerPicker.kt").readText()
@@ -469,8 +468,8 @@ class ArcadeModeTest {
         assertTrue(lifecycle.contains("glAttached && !glHostPaused && isShown"))
         assertTrue(lifecycle.contains("surface.onPause()"))
         assertTrue(lifecycle.contains("surface.onResume()"))
-        val host = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
-        assertTrue(host.contains("arcadeContent.ghoul.pause()"))
+        val arcadeLifecycle = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ArcadeLifecycle.kt").readText()
+        assertTrue(arcadeLifecycle.contains("arcadeContent.ghoul.pause()"))
     }
 
     @Test

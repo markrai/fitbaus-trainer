@@ -13,10 +13,12 @@ class BricksInputSourceIntegrationTest {
 
     @Test
     fun gameActivationStartsTheCameraRegardlessOfControllerAvailability() {
-        val activation = host.substringAfter("override fun activateArcade(game: ArcadeMode)")
-            .substringBefore("override fun deactivateArcade")
-        assertTrue(activation.contains("cameraSession.start()"))
-        assertTrue(activation.contains("gameController.refresh()"))
+        val lifecycle = File("src/main/kotlin/com/fitbaus/bikebridge/host/arcade/ArcadeLifecycle.kt").readText()
+        val activation = lifecycle.substringAfter("fun activate(game: ArcadeMode)")
+            .substringBefore("fun deactivate(")
+        assertTrue(host.contains("arcadeLifecycle.activate(game)"))
+        assertTrue(activation.contains("effects.startCamera()"))
+        assertTrue(activation.contains("effects.refreshController()"))
         assertFalse(activation.contains("BricksInputSource.Controller"))
     }
 
