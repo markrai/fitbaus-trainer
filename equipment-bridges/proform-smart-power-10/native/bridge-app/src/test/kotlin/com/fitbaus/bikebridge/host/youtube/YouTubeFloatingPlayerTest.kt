@@ -59,13 +59,15 @@ class YouTubeFloatingPlayerTest {
     fun switchingTabsRetainsVideoButHostPauseAndCloseReleaseIt() {
         val activity = File("src/main/kotlin/com/fitbaus/bikebridge/host/NativeBridgeActivity.kt").readText()
         val content = File("src/main/kotlin/com/fitbaus/bikebridge/host/youtube/YouTubeContent.kt").readText()
+        val media = File("src/main/kotlin/com/fitbaus/bikebridge/host/media/MediaLifecycle.kt").readText()
         val modeSwitch = activity.substringAfter("override fun stopMedia(reason: ArcadeStopReason)")
             .substringBefore("private val modeController")
-        assertTrue(modeSwitch.contains("reason == ArcadeStopReason.ExitArcade && youtubeContent.minimizeInto(floatingVideoSlot)"))
-        assertTrue(modeSwitch.contains("floatingPlayer.visibility = View.VISIBLE"))
+        assertTrue(modeSwitch.contains("mediaLifecycle.stop(modeController.mode, reason)"))
+        assertTrue(media.contains("youtubeContent.minimizeInto(floatingVideoSlot)"))
+        assertTrue(media.contains("floatingPlayer.visibility = if (visible) View.VISIBLE else View.GONE"))
         val hostPause = activity.substringAfter("override fun onPause()").substringBefore("private fun queueYouTubeImport")
-        assertTrue(hostPause.contains("youtubeContent.stop()"))
-        assertTrue(hostPause.contains("floatingPlayer.visibility = View.GONE"))
+        assertTrue(hostPause.contains("mediaLifecycle.afterHostPause()"))
+        assertTrue(media.contains("override fun stopYouTube() = youtubeContent.stop()"))
         assertTrue(activity.contains("close.contentDescription = \"Close YouTube floating player\""))
         assertTrue(activity.contains("onRestoreRequested = { modeController.select(ArcadeMode.YouTube) }"))
         assertTrue(content.contains("fun minimizeInto(floatingSlot: FrameLayout): Boolean"))
@@ -84,7 +86,7 @@ class YouTubeFloatingPlayerTest {
         assertTrue(builder.contains("floatingVideoSlot,"))
         assertTrue(builder.contains("FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END)"))
         assertTrue(builder.contains("close.background = GradientDrawable().apply"))
-        assertTrue(builder.contains("youtubeContent.stop()"))
+        assertTrue(builder.contains("mediaLifecycle.closeYouTubeFloating()"))
         assertTrue(activity.contains("FrameLayout.LayoutParams(dp(296), dp(167), Gravity.TOP or Gravity.END)"))
     }
 

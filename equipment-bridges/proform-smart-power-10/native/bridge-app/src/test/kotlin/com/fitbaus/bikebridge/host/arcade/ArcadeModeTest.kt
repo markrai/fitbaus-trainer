@@ -375,11 +375,15 @@ class ArcadeModeTest {
         val hooksBody = source.substring(hooksStart, source.indexOf("private val modeController", hooksStart))
         val start = hooksBody.substring(hooksBody.indexOf("override fun startMedia"), hooksBody.indexOf("override fun stopMedia"))
         val stop = hooksBody.substring(hooksBody.indexOf("override fun stopMedia"))
-        assertTrue(start.contains("youtubeContent.start()"))
-        assertTrue(stop.contains("youtubeContent.stop()"))
+        val media = File("src/main/kotlin/com/fitbaus/bikebridge/host/media/MediaLifecycle.kt").readText()
+        assertTrue(start.contains("mediaLifecycle.start(mode)"))
+        assertTrue(stop.contains("mediaLifecycle.stop(modeController.mode, reason)"))
+        assertTrue(media.contains("override fun startYouTube() = youtubeContent.start()"))
+        assertTrue(media.contains("override fun stopYouTube() = youtubeContent.stop()"))
         for (forbidden in listOf("cameraSession", "arcadeClock", "requestPermissions", "NativeBridgeService", "startService", "session()", "Usb")) {
             assertFalse(start.contains(forbidden), forbidden)
             assertFalse(stop.contains(forbidden), forbidden)
+            assertFalse(media.contains(forbidden), forbidden)
         }
         assertTrue(header.contains("tabGroup(ArcadeMode.YouTube, ArcadeMode.Books)"))
         assertTrue(
@@ -392,7 +396,8 @@ class ArcadeModeTest {
         val tab = header.substring(header.indexOf("private fun modeTab("), header.indexOf("private fun label("))
         assertTrue(tab.contains("if (mode.isGame) {"), "only game tabs open the tracker developer menu")
         val destroy = source.substring(source.indexOf("override fun onDestroy()"), source.indexOf("override fun onRequestPermissionsResult"))
-        assertTrue(destroy.indexOf("modeController.onHostDestroy()") < destroy.indexOf("youtubeContent.destroy()"))
+        assertTrue(destroy.contains("mediaLifecycle.afterHostDestroy()"))
+        assertTrue(destroy.indexOf("modeController.onHostDestroy()") < destroy.indexOf("mediaLifecycle.afterHostDestroy()"))
     }
 
     @Test
