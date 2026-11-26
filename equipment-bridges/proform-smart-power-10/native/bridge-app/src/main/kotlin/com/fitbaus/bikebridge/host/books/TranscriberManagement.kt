@@ -60,7 +60,7 @@ internal class TranscriberManagement(
     init {
         require((books == null) == (item == null))
         require(books == null || books.server.isCleartext || !transcriber.address.startsWith("http://", true))
-        require(item == null || item.id.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(item == null || BooksIdentifier.isValid(item.id))
     }
 
     private fun call(path: String, body: JSONObject? = null, token: String? = null): JSONObject {
