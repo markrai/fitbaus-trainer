@@ -8,6 +8,7 @@ internal sealed class BooksDiagramState {
     object Loading : BooksDiagramState()
     object Unavailable : BooksDiagramState()
     data class Ready(val graph: BooksDiagramGraph) : BooksDiagramState()
+    data class Concepts(val snippets: List<String>) : BooksDiagramState()
 }
 
 internal class BooksDiagramScope {
