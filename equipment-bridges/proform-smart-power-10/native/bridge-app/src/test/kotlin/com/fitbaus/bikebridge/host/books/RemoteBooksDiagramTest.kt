@@ -36,14 +36,15 @@ class RemoteBooksDiagramTest {
         .put("graph", JSONObject("""{"direction":"TD","nodes":[{"id":"A","label":"Concept"},{"id":"B","label":"Result"}],"edges":[{"from":"A","to":"B"}]}"""))
 
     private fun client(caps: JSONObject = capabilities, pause: (Long) -> Unit = {},
-                       clock: () -> Long = { 0L }, request: (JSONObject) -> BooksHttpResponse): RemoteBooksDiagram =
+                       clock: () -> Long = { 0L }, expectedPath: String = "/v1/section-diagrams",
+                       request: (JSONObject) -> BooksHttpResponse): RemoteBooksDiagram =
         RemoteBooksDiagram(paired, books, TranscriberHttp { url, headers, body ->
             assertEquals("Bearer ${paired.token}", headers["Authorization"])
             if (url.endsWith("/v1/capabilities")) {
                 assertNull(headers["X-Audiobookshelf-Token"])
                 BooksHttpResponse(200, caps.toString())
             } else {
-                assertEquals(paired.address + "/v1/section-diagrams", url)
+                assertEquals(paired.address + expectedPath, url)
                 assertEquals("source-token", headers["X-Audiobookshelf-Token"])
                 val value = JSONObject(requireNotNull(body))
                 assertEquals(identity.body().keys().asSequence().toSet(), value.keys().asSequence().toSet())
@@ -69,6 +70,47 @@ class RemoteBooksDiagramTest {
         assertFalse(identity.body().has("summary"))
         assertFalse(identity.body().has("prompt"))
         assertFalse(identity.summaryDigest == BooksDiagramIdentity(selection, summary.copy(summary = summary.summary.trim())).summaryDigest)
+    }
+
+    private fun conceptResponse(state: String) = identity.body().put("schema", "fitbaus.section-concepts/v1")
+        .put("concept_prompt_version", "concepts-v1").put("concept_input_version", "plain-lines-v1")
+        .put("state", state)
+
+    @Test
+    fun conceptCanvasIsPreferredWithoutGeneratingBothFormats() {
+        val caps = JSONObject(capabilities.toString()).put("summary_concept_api", true)
+        var calls = 0
+        val result = client(caps = caps, expectedPath = "/v1/section-concepts") {
+            calls++
+            if (calls == 1) BooksHttpResponse(202, conceptResponse("deferred").put("retry_after_seconds", 3).toString())
+            else BooksHttpResponse(200, conceptResponse("ready").put("cache_hit", false)
+                .put("concepts", JSONArray(listOf("Dopamine", "Desire can exceed pleasure"))).toString())
+        }.loadVisualization(identity)
+        assertEquals(BooksDiagramState.Concepts(listOf("Dopamine", "Desire can exceed pleasure")), result)
+        assertEquals(2, calls)
+        val graph = client(caps = caps) { BooksHttpResponse(200, ready().toString()) }.load(identity)
+        assertEquals("Concept", graph.nodes.first().label)
+        assertTrue(client { BooksHttpResponse(200, ready().toString()) }.loadVisualization(identity) is BooksDiagramState.Ready)
+    }
+
+    @Test
+    fun conceptFailureNeverDispatchesAnAdditionalFlowchartRequest() {
+        val caps = JSONObject(capabilities.toString()).put("summary_concept_api", true)
+        var calls = 0
+        assertThrows(IOException::class.java) {
+            client(caps = caps, expectedPath = "/v1/section-concepts") {
+                calls++
+                BooksHttpResponse(502, "{}")
+            }.loadVisualization(identity)
+        }
+        assertEquals(1, calls)
+        val bad = conceptResponse("ready").put("cache_hit", false).put("summary_digest", "d".repeat(64))
+            .put("concepts", JSONArray(listOf("One")))
+        assertThrows(IllegalArgumentException::class.java) {
+            client(caps = caps, expectedPath = "/v1/section-concepts") {
+                BooksHttpResponse(200, bad.toString())
+            }.loadVisualization(identity)
+        }
     }
 
     @Test
