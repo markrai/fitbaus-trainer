@@ -21,6 +21,7 @@ class SummaryProviderManagementTest {
         .put("model", JSONObject.NULL)
     private var supported = true
     private var discoveryModels = JSONArray().put("lobo-nano")
+    private var discoveryCandidate: JSONObject = configured
     private var failure: BooksHttpResponse? = null
 
     private fun client() = SummaryProviderManagement(connection, TranscriberHttp { url, headers, body ->
@@ -34,7 +35,7 @@ class SummaryProviderManagementTest {
                 .put("summary_provider_management_api", supported)
             path.endsWith("/redeem") -> JSONObject().put("token", grant).put("expires_in", 600)
             path.endsWith("/session") -> configured
-            path.endsWith("/discover") -> JSONObject().put("candidate", configured).put("models", discoveryModels)
+            path.endsWith("/discover") -> JSONObject().put("candidate", discoveryCandidate).put("models", discoveryModels)
             path.endsWith("/test-candidate") -> JSONObject().put("ok", true).put("model", "lobo-nano").put("elapsed_ms", 3260)
             path.endsWith("/save") -> configured
             path.endsWith("/disable") -> disabled
@@ -159,6 +160,22 @@ class SummaryProviderManagementTest {
         assertNotNull(actions.begin(newDevice))
         assertThrows(IllegalArgumentException::class.java) { newDevice.execute() }
         assertEquals(count, requests.size)
+    }
+
+    @Test
+    fun currentProviderDiscoveryRejectsUnexpectedEndpointAndCannotTestOrSave() {
+        val flow = SummaryProviderWorkflow()
+        val actions = SummaryProviderActions(flow, client())
+        runAction(actions, actions.capabilities())
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        discoveryCandidate = JSONObject(configured.toString()).put("base_url", "https://192.168.1.201:7869/v1")
+        val action = actions.discover("", false, "", "")
+        val ticket = requireNotNull(actions.begin(action))
+        val error = assertThrows(IllegalArgumentException::class.java) { action.execute() }
+        assertTrue(actions.fail(ticket, error))
+        assertFalse(flow.state.canTest)
+        assertFalse(flow.state.canSave)
+        assertEquals("https://192.168.1.200:7869/v1", flow.state.activeProvider?.baseUrl)
     }
 
     @Test

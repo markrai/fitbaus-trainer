@@ -300,7 +300,7 @@ internal class SummaryProviderDialog(
             val picked = lanSelection.selected
             lanStatus.text = when {
                 picked != null -> if (lanSelection.isAvailable(picked.address))
-                    "Selected: ${picked.name} · " + if (state.reusesCurrentLobo) "Stored trust" else "Identity not verified"
+                    "Selected: ${picked.name} · " + (if (state.reusesCurrentLobo) "Stored trust" else "Identity not verified")
                     else "Selected: ${picked.name} · Last seen, not currently advertised"
                 scanningLan -> "Finding LOBO devices…"
                 failedLan -> "Discovery unavailable"
@@ -596,7 +596,7 @@ internal class SummaryProviderDialog(
             val previousChoice = state.choice
             request(actions.authorize(adminCode.text.toString()), "Authorizing…") {
                 adminCode.text.clear()
-                status.text = activeStatus()
+                status.text = "Administrator authorized"
                 if (state.choice != previousChoice) configure()
                 refreshControls()
                 if (state.choice == SummaryProviderChoice.LOBO) renderLanDevices()
