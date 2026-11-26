@@ -10,10 +10,17 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.TextView
 
 internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : FrameLayout(context) {
     private val diagram = BooksDiagramView(context).apply { visibility = GONE }
+    private val conceptView = BooksConceptView(context)
+    private val canvas = ScrollView(context).apply {
+        isFillViewport = true
+        visibility = GONE
+        addView(conceptView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    }
     private val indicator = ProgressBar(context).apply {
         isIndeterminate = true
         indeterminateTintList = ColorStateList.valueOf(0xffffce1b.toInt())
@@ -41,6 +48,9 @@ internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : Frame
         addView(diagram, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
             bottomMargin = dp(56)
         })
+        addView(canvas, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
+            bottomMargin = dp(56)
+        })
         addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
             bottomMargin = dp(56)
         })
@@ -58,30 +68,47 @@ internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : Frame
     }
 
     fun render(state: BooksDiagramState) {
-        if (state is BooksDiagramState.Ready) {
-            val rendered = try {
-                diagram.showGraph(state.graph)
-                true
-            } catch (_: Exception) {
-                false
-            }
-            diagram.visibility = if (rendered) VISIBLE else GONE
-            indicator.visibility = GONE
-            status.visibility = if (rendered) GONE else VISIBLE
-            message.text = if (rendered) "" else "Visual explanation unavailable"
-            if (!rendered) diagram.clearGraph()
-        } else {
+        if (state !is BooksDiagramState.Ready) {
             diagram.clearGraph()
             diagram.visibility = GONE
-            status.visibility = VISIBLE
-            indicator.visibility = if (state == BooksDiagramState.Loading) VISIBLE else GONE
-            message.text = if (state == BooksDiagramState.Loading) "Preparing visual explanation…" else "Visual explanation unavailable"
+        }
+        if (state !is BooksDiagramState.Concepts) {
+            conceptView.clearConcepts()
+            canvas.visibility = GONE
+        }
+        val rendered = when (state) {
+            is BooksDiagramState.Ready -> try {
+                diagram.showGraph(state.graph)
+                diagram.visibility = VISIBLE
+                true
+            } catch (_: Exception) {
+                diagram.clearGraph()
+                diagram.visibility = GONE
+                false
+            }
+            is BooksDiagramState.Concepts -> {
+                if (conceptView.showConcepts(state.snippets)) canvas.scrollTo(0, 0)
+                canvas.visibility = VISIBLE
+                true
+            }
+            else -> false
+        }
+        val loading = state == BooksDiagramState.Loading
+        indicator.visibility = if (loading) VISIBLE else GONE
+        status.visibility = if (rendered) GONE else VISIBLE
+        message.text = when {
+            rendered -> ""
+            loading -> "Preparing visual explanation…"
+            else -> "Visual explanation unavailable"
         }
     }
 
     fun clear() {
         diagram.clearGraph()
         diagram.visibility = GONE
+        conceptView.clearConcepts()
+        canvas.visibility = GONE
+        canvas.scrollTo(0, 0)
         message.text = ""
         indicator.visibility = GONE
         status.visibility = VISIBLE
