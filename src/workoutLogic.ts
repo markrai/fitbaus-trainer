@@ -98,12 +98,14 @@ function getPausedElapsed(day?: string) {
 
 function pauseWorkout(day?: string, elapsedSec?: number) {
   const dayToUse = day || todayName();
+  if (readSessionFinalization(dayToUse)) return;
   pauseSession(dayToUse, elapsedSec ?? 0);
   if (typeof (window as any).updateDisplay === "function") (window as any).updateDisplay();
 }
 
 function resumeWorkout(day?: string) {
   const dayToUse = day || todayName();
+  if (readSessionFinalization(dayToUse)) return;
   resumeSession(dayToUse);
   if (typeof (window as any).updateDisplay === "function") (window as any).updateDisplay();
 }
@@ -275,6 +277,7 @@ function requestEarlyCooldown(day?: string, options?: EarlyCooldownRequestOption
   try {
     const dayToUse = day || (typeof (window as any).getSelectedDay === "function" ? (window as any).getSelectedDay() : todayName());
     const storage = options?.storage;
+    if (readSessionFinalization(dayToUse, storage)) return { type: "unavailable" };
     const now = options?.now ?? Date.now();
     const session = getSession(dayToUse, storage);
     const blocks = resolveEarlyCooldownBlocks(dayToUse, options?.blocks);
@@ -310,6 +313,7 @@ function requestVo2LimitReached(day?: string, options?: EarlyCooldownRequestOpti
     const dayToUse = day || (typeof (window as any).getSelectedDay === "function" ? (window as any).getSelectedDay() : todayName());
     if (!isVo2WorkoutSelector(dayToUse)) return { type: "unavailable" };
     const storage = options?.storage;
+    if (readSessionFinalization(dayToUse, storage)) return { type: "unavailable" };
     const now = options?.now ?? Date.now();
     const session = getSession(dayToUse, storage);
     const blocks = resolveEarlyCooldownBlocks(dayToUse, options?.blocks);
@@ -506,6 +510,7 @@ function captureWorkoutStartContext(
 
 function beginWorkout(activity?: Activity) {
   const day = typeof (window as any).getSelectedDay === "function" ? (window as any).getSelectedDay() : todayName();
+  if (!isFreestyleWorkoutSelector(day) && readSessionFinalization(day)) return;
   if (isFreestyleWorkoutSelector(day)) {
     if (freestyleStartBlocked(day)) {
       if (typeof (window as any).showToast === "function") {
@@ -719,15 +724,25 @@ async function restartWorkout() {
     return;
   }
   const session = getSession(day);
-  const elapsedSec = actualElapsedSeconds(session.startTime, session.paused, session.pausedElapsed, Date.now());
-  markVo2ProtocolCancelled(day, elapsedSec);
-
-  await handleWorkoutCancellation(day);
-
+  const outcome = await handleWorkoutCancellation(day, (endedAtMs) => {
+    const elapsedSec = actualElapsedSeconds(session.startTime, session.paused, session.pausedElapsed, endedAtMs);
+    markVo2ProtocolCancelled(day, elapsedSec);
+  });
+  if (outcome !== "saved" && outcome !== "already_saved" && outcome !== "no_session")
+    return;
+  const current = getSession(day);
+  const owner = readActiveSessionOwner();
+  if (current.sessionId !== session.sessionId || current.sessionStart !== session.sessionStart ||
+    (owner && (owner.selector !== day || owner.sessionId !== session.sessionId)))
+    return;
   if (typeof (window as any).releaseWakeLock === "function") {
     await (window as any).releaseWakeLock();
   }
-
+  const latest = getSession(day);
+  const latestOwner = readActiveSessionOwner();
+  if (latest.sessionId !== session.sessionId || latest.sessionStart !== session.sessionStart ||
+    (latestOwner && (latestOwner.selector !== day || latestOwner.sessionId !== session.sessionId)))
+    return;
   clearSession(day);
   resetMachineGuidanceRuntime();
   try {
