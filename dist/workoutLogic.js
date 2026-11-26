@@ -281,8 +281,14 @@ function claimWorkoutStart(day, sessionId) {
     if (!canStartWorkout(day))
         return false;
     const owner = readActiveSessionOwner();
-    if (owner)
+    if (owner) {
+        const existing = getSession(owner.selector);
+        if (existing.sessionId || existing.startTime || readSessionFinalization(owner.selector) || readFreestyleAuthorityFault(owner.selector)) {
+            showWorkoutStartError("A workout is already in progress or requires recovery.");
+            return false;
+        }
         clearActiveSessionOwner(owner);
+    }
     const claim = claimActiveSessionOwner({ selector: day, sessionId });
     if (!claim.ok) {
         showWorkoutStartError("A workout is already in progress.");
@@ -352,7 +358,7 @@ function restoreBikeBridgeBindingForActiveSession(day) {
         (owner === null || owner === void 0 ? void 0 : owner.selector) ||
         (typeof window.getSelectedDay === "function" ? window.getSelectedDay() : todayName());
     const session = getSession(dayToUse);
-    if (!session.sessionId || !session.startTime || !session.controlAuthority)
+    if (!session.sessionId || !session.startTime || !session.controlAuthority || session.summaryEmitted === "true" || readSessionFinalization(dayToUse))
         return false;
     if (owner && (owner.selector !== dayToUse || owner.sessionId !== session.sessionId))
         return false;
@@ -481,7 +487,11 @@ function beginWorkout(activity) {
                 window.updateDisplay();
             return;
         }
-        if (!refreshWorkoutStartOwner(day, sessionId) || !bindBikeBridgeForStartedSession(day, sessionId)) {
+        if (!refreshWorkoutStartOwner(day, sessionId)) {
+            showWorkoutStartError("Workout ownership changed; control not armed.");
+            return;
+        }
+        if (!bindBikeBridgeForStartedSession(day, sessionId)) {
             clearSession(day);
             resetMachineGuidanceRuntime();
             try {

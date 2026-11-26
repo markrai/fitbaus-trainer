@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import * as types from "../dist/types.js";
+import { requestSisu } from "../dist/platform/sisuHttp.js";
 
 const contractsDir = new URL("../dist/contracts/", import.meta.url);
 const contractFiles = readdirSync(contractsDir).filter((name) => name.endsWith(".js"));
@@ -122,4 +123,26 @@ test("contract modules never import the types.js facade, and the facade only re-
     .replace(/export \{[^}]*\} from "\.\/contracts\/[A-Za-z0-9]+\.js";/g, "")
     .trim();
   assert.equal(facade, "", "dist/types.js should contain only re-exports from ./contracts/");
+});
+
+test("native HTTP SISU rejection accurately describes the app-level restriction", async () => {
+  const previous = globalThis.Capacitor;
+  globalThis.Capacitor = { isNativePlatform: () => true };
+  try {
+    await assert.rejects(
+      requestSisu({ url: "http://192.168.1.10/ingest", method: "POST", timeoutMs: 1000 }),
+      error => {
+        assert.match(error.message, /require an HTTPS endpoint/);
+        assert.match(error.message, /app-wide cleartext allowance/);
+        assert.match(error.message, /rejects HTTP SISU endpoints in application code/);
+        assert.doesNotMatch(error.message, /does not enable broad cleartext/);
+        return true;
+      }
+    );
+    const config = readFileSync(new URL("../android/app/src/main/res/xml/network_security_config.xml", import.meta.url), "utf8");
+    assert.match(config, /<base-config cleartextTrafficPermitted="true">/);
+  } finally {
+    if (previous === undefined) delete globalThis.Capacitor;
+    else globalThis.Capacitor = previous;
+  }
 });

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getPhase, startWorkout, tickVo2Protocol, tickVo2ProtocolWithCanonicalHr } from "../dist/workoutLogic.js";
-import { getSession, persistVo2ProtocolRuntime } from "../dist/sessionStore.js";
-import { getPlan, installStandaloneVo2Workout } from "../dist/workoutData.js";
+import { beginWorkout, getPhase, startWorkout, tickVo2Protocol, tickVo2ProtocolWithCanonicalHr, restoreBikeBridgeBindingForActiveSession } from "../dist/workoutLogic.js";
+import { getSession, persistVo2ProtocolRuntime, startSession, markSummaryEmitted } from "../dist/sessionStore.js";
+import { getPlan, installStandaloneVo2Workout, installStandaloneFreestyleWorkout } from "../dist/workoutData.js";
+import { readActiveSessionOwner, writeActiveSessionOwner, writeSessionFinalization } from "../dist/freestyleRide.js";
+import { recordBikeTelemetrySample, getBikeTelemetrySamples, clearBikeTelemetrySamples } from "../dist/bikeTelemetryTrace.js";
 import {
   VO2_WORKOUT_SELECTOR_ID,
   buildVo2ProtocolPlan,
@@ -393,6 +395,136 @@ test("live ceiling remains higher priority when a checkpoint read rejects", asyn
     const tick = await pending;
     assert.equal(tick.runtime.segment, "cooldown");
     assert.equal(tick.runtime.termination.reason, "submax_hr_ceiling");
+  } finally {
+    restore();
+  }
+});
+
+test("direct VO2 and normal start cannot overwrite a competing live ordinary session", () => {
+  const restore = installStartFakes();
+  const day = "Monday";
+  const id = "ordinary-owner";
+  try {
+    startSession(day, Date.now() - 1000, id, "bike");
+    writeActiveSessionOwner({ selector: day, sessionId: id });
+    recordBikeTelemetrySample(id, { timestamp_sec: 1, rpm: 70, watts: 120 });
+    const before = getSession(day);
+    let ids = 0;
+    let wake = 0;
+    window.generateUUID = () => { ids++; return "blocked"; };
+    window.requestWakeLock = () => { wake++; };
+    beginWorkout("bike");
+    startWorkout();
+    assert.equal(ids, 0);
+    assert.equal(wake, 0);
+    assert.deepEqual(getSession(day), before);
+    assert.equal(getSession(VO2_WORKOUT_SELECTOR_ID).sessionId, null);
+    assert.equal(readActiveSessionOwner().sessionId, id);
+    assert.equal(getBikeTelemetrySamples(id).length, 1);
+  } finally {
+    clearBikeTelemetrySamples(id);
+    restore();
+  }
+});
+
+test("a second direct VO2 start and other workout types cannot replace the current VO2 runtime", () => {
+  const restore = installStartFakes();
+  try {
+    installStandaloneFreestyleWorkout();
+    beginWorkout("bike");
+    const before = getSession(VO2_WORKOUT_SELECTOR_ID);
+    assert.equal(before.sessionId, "session-v3-start");
+    let ids = 0;
+    window.generateUUID = () => { ids++; return "replacement"; };
+    beginWorkout("bike");
+    for (const day of ["Monday", "Freestyle"]) {
+      window.getSelectedDay = () => day;
+      beginWorkout();
+      startWorkout();
+      assert.equal(getSession(day).sessionId, null);
+    }
+    assert.equal(ids, 0);
+    assert.deepEqual(getSession(VO2_WORKOUT_SELECTOR_ID), before);
+    assert.equal(readActiveSessionOwner().sessionId, before.sessionId);
+  } finally {
+    restore();
+  }
+});
+
+test("ownerless live workout and pending finalization on another selector block every start entry", () => {
+  const restore = installStartFakes();
+  try {
+    const start = Date.now() - 60_000;
+    startSession("Tuesday", start, "ownerless", "bike");
+    let ids = 0;
+    window.generateUUID = () => { ids++; return "blocked"; };
+    beginWorkout("bike");
+    markSummaryEmitted("Tuesday");
+    writeSessionFinalization({
+      schemaVersion: 1, selector: "Tuesday", sessionId: "ownerless",
+      startedAtMs: start, endedAtMs: start + 60_000, activeDurationSec: 60,
+      pausedDurationSec: 0, status: "save_failed",
+    });
+    beginWorkout("bike");
+    startWorkout();
+    assert.equal(ids, 0);
+    assert.equal(getSession(VO2_WORKOUT_SELECTOR_ID).sessionId, null);
+    assert.equal(readActiveSessionOwner(), null);
+    assert.equal(restoreBikeBridgeBindingForActiveSession("Tuesday"), false);
+  } finally {
+    restore();
+  }
+});
+
+test("VO2 start claims identity before writing session state and recovers a truly empty stale owner", () => {
+  const restore = installStartFakes();
+  try {
+    writeActiveSessionOwner({ selector: "Monday", sessionId: "empty-stale-owner" });
+    const original = localStorage.setItem;
+    let observed = false;
+    localStorage.setItem = function(key, value) {
+      if (key === "start_" + VO2_WORKOUT_SELECTOR_ID) {
+        assert.deepEqual(readActiveSessionOwner(), { selector: VO2_WORKOUT_SELECTOR_ID, sessionId: "session-v3-start" });
+        observed = true;
+      }
+      original.call(this, key, value);
+    };
+    beginWorkout("bike");
+    assert.equal(observed, true);
+    assert.equal(getSession(VO2_WORKOUT_SELECTOR_ID).sessionId, "session-v3-start");
+    assert.equal(readActiveSessionOwner().athleteId, "athlete-v3");
+  } finally {
+    restore();
+  }
+});
+
+test("missing or empty workout identity fails closed before mutation", () => {
+  const restore = installStartFakes();
+  try {
+    delete window.generateUUID;
+    beginWorkout("bike");
+    window.generateUUID = () => "";
+    beginWorkout("bike");
+    assert.equal(getSession(VO2_WORKOUT_SELECTOR_ID).sessionId, null);
+    assert.equal(getSession(VO2_WORKOUT_SELECTOR_ID).startTime, null);
+    assert.equal(readActiveSessionOwner(), null);
+  } finally {
+    restore();
+  }
+});
+
+test("a competing session created during identity generation is rechecked before claim or mutation", () => {
+  const restore = installStartFakes();
+  try {
+    window.generateUUID = () => {
+      startSession("Friday", Date.now(), "late-owner", "bike");
+      writeActiveSessionOwner({ selector: "Friday", sessionId: "late-owner" });
+      return "blocked-vo2";
+    };
+    beginWorkout("bike");
+    assert.equal(getSession(VO2_WORKOUT_SELECTOR_ID).sessionId, null);
+    assert.equal(readActiveSessionOwner().sessionId, "late-owner");
+    assert.equal(getSession("Friday").sessionId, "late-owner");
   } finally {
     restore();
   }
