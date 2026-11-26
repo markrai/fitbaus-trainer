@@ -84,6 +84,7 @@ internal class SummaryProviderDialog(
         })
         .create() }
     private var pendingWork: Future<*>? = null
+    private var confirmation: AlertDialog? = null
     private val closed get() = state.screen == SummaryProviderScreen.CLOSED
     private var formGeneration = 0
     private val secretFields = mutableListOf<EditText>()
@@ -112,6 +113,8 @@ internal class SummaryProviderDialog(
         if (closed) return
         actions.close()
         formGeneration++
+        confirmation?.dismiss()
+        confirmation = null
         loboDiscovery.stop()
         hideKeyboard()
         clearSecrets()
@@ -148,9 +151,9 @@ internal class SummaryProviderDialog(
 
     private fun activeStatus(): String = "Saved provider · " + summaryProviderPresentation(state).activeTitle
 
-    private fun showConfiguration() {
+    private fun showConfiguration(openAuthorization: Boolean = false) {
         resetRows()
-        status.text = "Configure the summarization provider on Transcriber."
+        status.text = "Choose a provider and unlock changes when ready."
         val activeCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = surface(CARD, BORDER)
@@ -196,6 +199,7 @@ internal class SummaryProviderDialog(
         val authLabel = label("Verify device identity · LOBO AUTH code", 15f, MUTED, form)
         val auth = field("XXXX-XXXX", 9, secret = true, parent = form)
         val verifyAgain = button("VERIFY DEVICE AGAIN", parent = form) {}
+        val forgetDevice = button("FORGET REMEMBERED DEVICE", parent = form) {}
         val keyLabel = label("Provider API key (optional)", 15f, MUTED, form)
         val key = field("API key", 2048, secret = true, parent = form)
         val allowHttp = CheckBox(context).apply {
@@ -210,17 +214,22 @@ internal class SummaryProviderDialog(
             setPadding(dp(12), dp(6), dp(12), dp(8))
             background = surface(BACKGROUND, BORDER)
         }
-        form.addView(authorization, LinearLayout.LayoutParams(-1, -2).apply {
+        form.addView(authorization, form.indexOfChild(authLabel), LinearLayout.LayoutParams(-1, -2).apply {
             setMargins(0, dp(8), 0, dp(4))
         })
-        label("Administrator authorization", 16f, Color.WHITE, authorization)
-        label("Generate a one-time code on your Transcriber server.", 14f, MUTED, authorization)
-        label("docker compose exec transcriber python -m transcriber summary-admin", 14f, ACCENT, authorization)
+        label("Provider changes are locked", 16f, Color.WHITE, authorization)
+        label("Unlock once to manage this server's summarization settings.", 14f, MUTED, authorization)
+        val unlock = button("UNLOCK CHANGES", primary = true, parent = authorization) {}
+        val codePanel = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        authorization.addView(codePanel, LinearLayout.LayoutParams(-1, -2))
+        var authorizationOpen = openAuthorization
+        label("Generate a one-time administrator code on Transcriber:", 14f, MUTED, codePanel)
+        label("docker compose exec transcriber python -m transcriber summary-admin", 14f, ACCENT, codePanel)
         if (connection.address.startsWith("http://")) {
-            label("HTTP connection: use a trusted private network. New provider API keys require HTTPS.", 13f, MUTED, authorization)
+            label("HTTP connection: use a trusted private network. New provider API keys require HTTPS.", 13f, MUTED, codePanel)
         }
-        val adminCode = field("Administrator code (XXXX-XXXX)", 9, secret = true, parent = authorization)
-        val authorizeButton = button("AUTHORIZE", true, authorization) {}
+        val adminCode = field("Administrator code (XXXX-XXXX)", 9, secret = true, parent = codePanel)
+        val authorizeButton = button("UNLOCK", true, codePanel) {}
         val candidateCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = surface(BACKGROUND, BORDER)
@@ -238,15 +247,7 @@ internal class SummaryProviderDialog(
         form.addView(modelPanel, LinearLayout.LayoutParams(-1, -2))
         val placeholder = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         form.addView(placeholder, LinearLayout.LayoutParams(-1, -2))
-        label("Model", 15f, MUTED, placeholder)
-        label("Discover models to select one", 16f, MUTED, placeholder).apply {
-            background = surface(FIELD, BORDER)
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-        }
-        val placeholderTest = button("TEST INFERENCE", parent = placeholder) {}
-        val placeholderSave = button("SAVE PROVIDER", true, placeholder) {}
-        placeholderTest.alpha = 0.4f
-        placeholderSave.alpha = 0.4f
+        val placeholderMessage = label("Unlock changes to discover models.", 14f, MUTED, placeholder)
         val consent = CheckBox(context).apply {
             text = "Allow requested audiobook excerpts to be sent to this provider"
             setTextColor(Color.WHITE)
@@ -559,6 +560,17 @@ internal class SummaryProviderDialog(
             manualAddress.text = if (manualLobo) "CHOOSE DISCOVERED DEVICE" else "ENTER ADDRESS MANUALLY"
             renderLanDevices()
         }
+        unlock.setOnClickListener {
+            if (formCurrent() && state.canAuthorize) {
+                authorizationOpen = !authorizationOpen
+                if (!authorizationOpen) {
+                    hideKeyboard()
+                    adminCode.text.clear()
+                }
+                refreshControls()
+            }
+        }
+        watch(adminCode) { if (formCurrent()) refreshControls() }
         verifyAgain.setOnClickListener {
             if (formCurrent() && workflow.setVerifyLoboAgain(!state.verifyLoboAgain)) {
                 suppressChanges = true
@@ -586,25 +598,55 @@ internal class SummaryProviderDialog(
         allowHttp.setOnCheckedChangeListener { _, _ -> credentialsEdited() }
         discoverDraft = {
             if (formCurrent() && state.canDiscover) {
-                request(actions.discover(endpoint.text.toString(), allowHttp.isChecked, key.text.toString(), auth.text.toString()),
-                    "Discovering models…", onStart = { clearModelPanel() }) {
-                    state.discovery?.let { showDiscovered(it) }
+                if (state.choice == SummaryProviderChoice.LOBO && !state.usesStoredLoboTrust && state.discovery != null) {
+                    workflow.credentialsOrTrustEdited()
+                    clearModelPanel()
+                } else if (!summaryProviderPresentation(state).showLoboVerification ||
+                    SummaryProviderManagement.normalizeLoboAuth(auth.text.toString()) != null) {
+                    request(actions.discover(endpoint.text.toString(), allowHttp.isChecked, key.text.toString(), auth.text.toString()),
+                        if (summaryProviderPresentation(state).showLoboVerification) "Verifying identity and discovering models…" else "Discovering models…",
+                        onStart = { clearModelPanel() }, onFailure = {
+                            suppressChanges = true
+                            auth.text.clear()
+                            suppressChanges = false
+                        }) {
+                        suppressChanges = true
+                        auth.text.clear()
+                        suppressChanges = false
+                        state.discovery?.let { showDiscovered(it) }
+                    }
                 }
             }
         }
         discoverButton.setOnClickListener { discoverDraft?.invoke() }
-        val disableButton = button("DISABLE SUMMARIZATION") {
-            if (formCurrent() && state.canDisable) {
-                AlertDialog.Builder(context).setTitle("Disable summarization?")
-                    .setMessage("Summary and recap generation will be disabled for all connected bikes. Transcription and playback remain available.")
-                    .setNegativeButton("CANCEL", null)
-                    .setPositiveButton("DISABLE") { _, _ ->
-                        if (formCurrent() && state.canDisable) request(actions.disable(), "Disabling…") { finish() }
+        forgetDevice.setOnClickListener {
+            val selected = state.draftEndpoint
+            if (formCurrent() && state.canForgetLobo && selected != null) {
+                confirmChange("Forget remembered device?", "Remove stored certificate trust for $selected? You will need the phone's AUTH code to use it again.", "FORGET") {
+                    if (formCurrent() && state.canForgetLobo && state.draftEndpoint == selected) {
+                        request(actions.forgetLobo(), "Removing stored certificate trust…", onStart = { clearModelPanel() }) {
+                            if (state.screen == SummaryProviderScreen.RELOAD_REQUIRED) finish()
+                            else {
+                                suppressChanges = true
+                                auth.text.clear()
+                                suppressChanges = false
+                                status.text = "Device forgotten · Verify identity to use it again"
+                                renderLanDevices()
+                                clearModelPanel()
+                            }
+                        }
                     }
-                    .show()
+                }
             }
         }
-        val cancelButton = button("CANCEL ADMIN SESSION") {
+        val disableButton = button("DISABLE SUMMARIZATION") {
+            if (formCurrent() && state.canDisable) {
+                confirmChange("Disable summarization?", "Summary and recap generation will be disabled for all connected bikes. Transcription and playback remain available.", "DISABLE") {
+                    if (formCurrent() && state.canDisable) request(actions.disable(), "Disabling…") { finish() }
+                }
+            }
+        }
+        val cancelButton = button("LOCK CHANGES") {
             if (formCurrent() && state.canCancel) request(actions.cancel(), "Closing administrator session…") { load() }
         }
         renderConfiguration = {
@@ -615,30 +657,50 @@ internal class SummaryProviderDialog(
             candidateTitle.text = presentation.candidateTitle
             candidateDetail.text = presentation.candidateDetail
             candidateDetail.setTextColor(if (snapshot.tested != null) SUCCESS else MUTED)
-            val needsLoboAuth = snapshot.choice == SummaryProviderChoice.LOBO && !presentation.reuseTrust
+            val needsLoboAuth = presentation.showLoboVerification
             if (presentation.reuseTrust && auth.text.isNotEmpty()) {
                 val previous = suppressChanges
                 suppressChanges = true
                 auth.text.clear()
                 suppressChanges = previous
             }
+            forgetDevice.visibility = if (snapshot.choice == SummaryProviderChoice.LOBO &&
+                snapshot.authorization?.remembersLobo(snapshot.draftEndpoint) == true &&
+                snapshot.authorization?.matchesTrustedLobo(snapshot.draftEndpoint) != true) View.VISIBLE else View.GONE
+            forgetDevice.isEnabled = snapshot.canForgetLobo
             verifyAgain.visibility = if (snapshot.hasStoredLoboTrust) View.VISIBLE else View.GONE
             verifyAgain.isEnabled = snapshot.editable
             verifyAgain.text = if (snapshot.verifyLoboAgain) "USE REMEMBERED CERTIFICATE" else "VERIFY DEVICE AGAIN"
             authLabel.visibility = if (needsLoboAuth) View.VISIBLE else View.GONE
             auth.visibility = authLabel.visibility
             if (snapshot.choice == SummaryProviderChoice.LOBO) {
-                hint.text = if (presentation.reuseTrust) "Reuse the saved certificate trust. Transcriber still verifies HTTPS during discovery and inference."
-                    else "Verify device identity using the AUTH code shown on the selected phone. This is not an inference password."
-                discoverButton.text = if (presentation.reuseTrust) "DISCOVER TRUSTED DEVICE MODELS" else "DISCOVER MODELS"
+                hint.text = when {
+                    !snapshot.addressEntered -> "Select a phone or enter its address."
+                    !snapshot.authorized -> "Unlock changes to check whether the phone is remembered."
+                    snapshot.discovery != null -> "Identity verified for this proposed provider. Test inference and save to activate it."
+                    presentation.reuseTrust -> "Stored certificate trust · HTTPS is still verified."
+                    else -> "Use the AUTH code shown on the phone to verify its identity. This is not an inference password."
+                }
             }
             endpoint.isEnabled = snapshot.editable && snapshot.choice != SummaryProviderChoice.REUSE
-            discoverButton.isEnabled = snapshot.canDiscover
-            discoverButton.alpha = if (snapshot.canDiscover) 1f else 0.4f
+            discoverButton.text = presentation.discoveryLabel
+            discoverButton.visibility = if (snapshot.authorized) View.VISIBLE else View.GONE
+            val discoveryReady = snapshot.canDiscover && (!needsLoboAuth ||
+                SummaryProviderManagement.normalizeLoboAuth(auth.text.toString()) != null)
+            discoverButton.isEnabled = discoveryReady
+            discoverButton.alpha = if (discoveryReady) 1f else 0.4f
             currentChoice?.isEnabled = snapshot.canReuse
-            authorizeButton.isEnabled = snapshot.canAuthorize
-            placeholderTest.isEnabled = false
-            placeholderSave.isEnabled = false
+            codePanel.visibility = if (authorizationOpen) View.VISIBLE else View.GONE
+            unlock.text = if (authorizationOpen) "HIDE CODE ENTRY" else "UNLOCK CHANGES"
+            unlock.isEnabled = snapshot.canAuthorize
+            authorizeButton.isEnabled = snapshot.canAuthorize && runCatching {
+                TranscriberConnection.normalizeCode(adminCode.text.toString())
+            }.isSuccess
+            placeholderMessage.text = when {
+                !snapshot.authorized -> "Unlock changes to discover models."
+                needsLoboAuth -> "Verify the device to discover its models."
+                else -> "Discover models to choose one."
+            }
             testButton?.isEnabled = snapshot.canTest
             consent.isEnabled = snapshot.canTest
             consent.isChecked = snapshot.consent
@@ -656,11 +718,13 @@ internal class SummaryProviderDialog(
             cancelButton.isEnabled = snapshot.canCancel
         }
         authorizeButton.setOnClickListener {
-            if (!formCurrent() || !state.canAuthorize) return@setOnClickListener
+            if (!formCurrent() || !state.canAuthorize || !authorizationOpen) return@setOnClickListener
+            val code = runCatching { TranscriberConnection.normalizeCode(adminCode.text.toString()) }.getOrNull() ?: return@setOnClickListener
             val previousChoice = state.choice
-            request(actions.authorize(adminCode.text.toString()), "Authorizing…") {
+            request(actions.authorize(code), "Unlocking changes…", onFailure = { adminCode.text.clear() }) {
                 adminCode.text.clear()
-                status.text = "Administrator authorized"
+                authorizationOpen = false
+                status.text = "Changes unlocked"
                 if (state.choice != previousChoice) configure()
                 refreshControls()
                 if (state.choice == SummaryProviderChoice.LOBO) renderLanDevices()
@@ -684,7 +748,7 @@ internal class SummaryProviderDialog(
     private fun finish() {
         resetRows()
         if (state.screen == SummaryProviderScreen.RELOAD_REQUIRED) {
-            status.text = "Save or disable could not be confirmed. Reload to verify the saved provider."
+            status.text = "Change could not be confirmed. Reload to verify provider settings and remembered devices."
             button("RELOAD") { load() }
             return
         }
@@ -731,7 +795,7 @@ internal class SummaryProviderDialog(
                         if (state.screen == SummaryProviderScreen.RELOAD_REQUIRED) {
                             finish()
                         } else if (actions.authorizationLost(error) || ticket.operation == SummaryProviderOperation.CANCEL) {
-                            if (state.screen == SummaryProviderScreen.CONFIGURATION) showConfiguration()
+                            if (state.screen == SummaryProviderScreen.CONFIGURATION) showConfiguration(openAuthorization = true)
                         } else onFailure()
                         if (state.screen != SummaryProviderScreen.RELOAD_REQUIRED) status.text = failureMessage(error)
                         refreshControls()
@@ -744,7 +808,9 @@ internal class SummaryProviderDialog(
     private fun failureMessage(error: Throwable): String = when (error) {
         is SummaryManagementFailure -> when (error.code) {
             "lobo_identity_verification_required" -> "This endpoint is not remembered by Transcriber. Verify device identity again."
-            "lobo_trust_registry_full_or_invalid" -> "Remembered device storage is full or invalid. Remove an inactive device on Transcriber."
+            "lobo_trust_registry_full_or_invalid" -> "Remembered device storage is full or invalid. Forget an inactive device before adding another."
+            "lobo_trust_active" -> "Switch away from this active provider before forgetting it."
+            "lobo_trust_not_found" -> "The device is no longer remembered. Reload settings."
             "lobo_auth_mismatch" -> "LOBO AUTH code does not match this phone."
             "lobo_certificate_unavailable" -> "Unable to retrieve LOBO's certificate. Check its address."
             "lobo_private_ipv4_required" -> "LOBO requires a private IPv4 HTTPS address on port 7869 ending in /v1."
@@ -789,8 +855,19 @@ internal class SummaryProviderDialog(
 
     private fun clearSecrets() { secretFields.forEach { it.text.clear() } }
 
+    private fun confirmChange(title: String, message: String, actionLabel: String, action: () -> Unit) {
+        confirmation?.dismiss()
+        val prompt = AlertDialog.Builder(context).setTitle(title).setMessage(message)
+            .setNegativeButton("CANCEL", null).setPositiveButton(actionLabel) { _, _ -> action() }.create()
+        confirmation = prompt
+        prompt.setOnDismissListener { if (confirmation === prompt) confirmation = null }
+        prompt.show()
+    }
+
     private fun resetRows() {
         formGeneration++
+        confirmation?.dismiss()
+        confirmation = null
         loboDiscovery.stop()
         renderConfiguration = null
         clearSecrets()

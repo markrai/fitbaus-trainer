@@ -4,15 +4,16 @@ internal class SummaryProviderAction<T>(
     val operation: SummaryProviderOperation,
     val execute: () -> T,
     val complete: (SummaryProviderRequest, T) -> Boolean,
+    val expectedState: SummaryProviderWorkflowState? = null,
 )
 
 internal class SummaryProviderActions(
     private val workflow: SummaryProviderWorkflow,
     private val api: SummaryProviderManagement,
 ) {
-    fun capabilities() = SummaryProviderAction(SummaryProviderOperation.CAPABILITIES, api::capabilities) { ticket, value ->
+    fun capabilities() = SummaryProviderAction(SummaryProviderOperation.CAPABILITIES, api::capabilities, { ticket, value ->
         workflow.capabilities(ticket, value.first, value.second)
-    }
+    })
 
     fun authorize(code: String) = SummaryProviderAction(SummaryProviderOperation.AUTHORIZE, { api.authorize(code) }, workflow::authorized)
 
@@ -44,18 +45,29 @@ internal class SummaryProviderActions(
 
     fun disable() = SummaryProviderAction(SummaryProviderOperation.DISABLE, api::disable, workflow::disabled)
 
-    fun cancel() = SummaryProviderAction(SummaryProviderOperation.CANCEL, api::cancel) { ticket, _ ->
-        workflow.cancelled(ticket)
+    fun forgetLobo(): SummaryProviderAction<SummaryProviderStatus> {
+        val state = workflow.state
+        val endpoint = state.draftEndpoint.orEmpty()
+        return SummaryProviderAction(SummaryProviderOperation.FORGET_LOBO, { api.forgetLobo(endpoint) }, workflow::forgotten, state)
     }
 
-    fun begin(action: SummaryProviderAction<*>): SummaryProviderRequest? = workflow.begin(action.operation)
+    fun cancel() = SummaryProviderAction(SummaryProviderOperation.CANCEL, api::cancel, { ticket, _ ->
+        workflow.cancelled(ticket)
+    })
+
+    fun begin(action: SummaryProviderAction<*>): SummaryProviderRequest? {
+        if (action.expectedState != null && action.expectedState !== workflow.state) return null
+        return workflow.begin(action.operation)
+    }
 
     fun <T> complete(action: SummaryProviderAction<T>, ticket: SummaryProviderRequest, value: T): Boolean {
         if (workflow.state.pending !== ticket || ticket.operation != action.operation) {
             discardClosedCompletion()
             return false
         }
-        return action.complete(ticket, value)
+        val accepted = action.complete(ticket, value)
+        if (accepted && workflow.state.screen == SummaryProviderScreen.RELOAD_REQUIRED) api.forgetGrant()
+        return accepted
     }
 
     fun authorizationLost(error: Throwable): Boolean =
@@ -68,7 +80,7 @@ internal class SummaryProviderActions(
             return false
         }
         if (lost || ticket.operation in setOf(SummaryProviderOperation.CANCEL, SummaryProviderOperation.AUTHORIZE,
-                SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE)) {
+                SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE, SummaryProviderOperation.FORGET_LOBO)) {
             api.forgetGrant()
         }
         return true

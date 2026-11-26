@@ -96,9 +96,8 @@ internal class SummaryProviderManagement(
         val body = JSONObject().put("kind", kind).put("base_url", url).put("allow_http", allowHttp)
         if (key.isNotEmpty()) body.put("api_key", key)
         if (kind == "lobo") {
-            val raw = auth.trim().uppercase(Locale.US).replace("-", "")
-            require(raw.matches(Regex("[0-9A-HJKMNP-TV-Z]{8}")) && !allowHttp && key.isEmpty())
-            body.put("lobo_auth", raw.take(4) + "-" + raw.drop(4))
+            require(!allowHttp && key.isEmpty())
+            body.put("lobo_auth", requireNotNull(normalizeLoboAuth(auth)))
         }
         return discover(body)
     }
@@ -142,6 +141,12 @@ internal class SummaryProviderManagement(
         return result
     }
 
+    fun forgetLobo(baseUrl: String): SummaryProviderStatus {
+        val endpoint = requireNotNull(canonicalLoboEndpoint(baseUrl))
+        return SummaryProviderStatus.parse(call("$ROOT/forget-lobo",
+            JSONObject().put("base_url", endpoint).put("confirm", true)))
+    }
+
     fun cancel() {
         try {
             if (grant != null) call("$ROOT/cancel", JSONObject())
@@ -170,6 +175,13 @@ internal class SummaryProviderManagement(
     companion object {
         private const val ROOT = "/v1/admin/summary-provider"
         val MODEL = Regex("[A-Za-z0-9][A-Za-z0-9._:/@-]{0,159}")
+
+        fun normalizeLoboAuth(value: String): String? {
+            val code = value.trim().uppercase(Locale.US)
+            if (!code.matches(Regex("[0-9A-HJKMNP-TV-Z]{4}-?[0-9A-HJKMNP-TV-Z]{4}"))) return null
+            val raw = code.replace("-", "")
+            return raw.take(4) + "-" + raw.drop(4)
+        }
 
         fun canonicalLoboEndpoint(value: String?): String? {
             if (value == null) return null

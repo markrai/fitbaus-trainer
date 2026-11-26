@@ -292,6 +292,70 @@ class SummaryProviderWorkflowTest {
     }
 
     @Test
+    fun verificationIsOnlyShownAfterUnlockForSelectedUnrememberedDevice() {
+        val flow = configuration()
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertFalse(summaryProviderPresentation(flow.state).showLoboVerification)
+        assertTrue(flow.addressEdited("https://192.168.1.202:7869/v1"))
+        assertFalse(summaryProviderPresentation(flow.state).showLoboVerification)
+        assertTrue(flow.authorized(begin(flow, SummaryProviderOperation.AUTHORIZE), configured))
+        assertTrue(summaryProviderPresentation(flow.state).showLoboVerification)
+        assertEquals("VERIFY & DISCOVER MODELS", summaryProviderPresentation(flow.state).discoveryLabel)
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER),
+            SummaryProviderDiscovery(listOf("lobo-nano"), configured.copy(baseUrl = "https://192.168.1.202:7869/v1"))))
+        assertFalse(summaryProviderPresentation(flow.state).showLoboVerification)
+        assertTrue(flow.credentialsOrTrustEdited())
+        assertTrue(summaryProviderPresentation(flow.state).showLoboVerification)
+        assertFalse(flow.state.canSave)
+    }
+
+    @Test
+    fun forgettingInactiveDeviceClearsDraftAndPreservesActiveProvider() {
+        val inactive = "https://192.168.1.201:7869/v1"
+        val active = requireNotNull(configured.baseUrl)
+        val status = configured.copy(trustedLoboEndpoints = listOf(active, inactive))
+        val flow = authorized(status)
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited(active))
+        assertFalse(flow.state.canForgetLobo)
+        assertNull(flow.begin(SummaryProviderOperation.FORGET_LOBO))
+        assertTrue(flow.addressEdited(inactive))
+        assertTrue(flow.discovered(begin(flow, SummaryProviderOperation.DISCOVER),
+            SummaryProviderDiscovery(listOf("lobo-nano"), configured.copy(baseUrl = inactive))))
+        assertTrue(flow.tested(begin(flow, SummaryProviderOperation.TEST), 10))
+        assertTrue(flow.setConsent(true))
+        assertTrue(flow.state.canForgetLobo)
+        val ticket = begin(flow, SummaryProviderOperation.FORGET_LOBO)
+        assertFalse(flow.state.canSave)
+        assertFalse(flow.addressEdited(active))
+        assertNull(flow.state.discovery)
+        assertTrue(flow.forgotten(ticket, status.copy(trustedLoboEndpoints = listOf(active))))
+        assertEquals(active, flow.state.activeProvider?.baseUrl)
+        assertEquals(inactive, flow.state.draftEndpoint)
+        assertFalse(flow.state.hasStoredLoboTrust)
+        assertFalse(flow.state.canForgetLobo)
+        assertTrue(flow.state.authorized)
+        assertTrue(summaryProviderPresentation(flow.state).showLoboVerification)
+    }
+
+    @Test
+    fun forgetMismatchOrUncertainResultRequiresReload() {
+        val inactive = "https://192.168.1.201:7869/v1"
+        val status = configured.copy(trustedLoboEndpoints = listOf(inactive))
+        fun selected() = authorized(status).also {
+            assertTrue(it.choose(SummaryProviderChoice.LOBO))
+            assertTrue(it.addressEdited(inactive))
+        }
+        val flow = selected()
+        assertTrue(flow.forgotten(begin(flow, SummaryProviderOperation.FORGET_LOBO), status))
+        assertEquals(SummaryProviderScreen.RELOAD_REQUIRED, flow.state.screen)
+        val failed = selected()
+        assertTrue(failed.failed(begin(failed, SummaryProviderOperation.FORGET_LOBO)))
+        assertEquals(SummaryProviderScreen.RELOAD_REQUIRED, failed.state.screen)
+        assertFalse(failed.state.authorized)
+    }
+
+    @Test
     fun failedSaveRequiresReloadRatherThanClaimingOldProviderIsStillActive() {
         val flow = testedFlow()
         assertTrue(flow.failed(begin(flow, SummaryProviderOperation.SAVE)))
