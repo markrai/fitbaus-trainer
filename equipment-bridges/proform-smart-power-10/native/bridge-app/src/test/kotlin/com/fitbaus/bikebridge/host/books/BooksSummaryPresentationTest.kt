@@ -68,14 +68,23 @@ class BooksSummaryPresentationTest {
     }
 
     @Test
-    fun summaryUsesOnlySpaceBelowTheUnchangedNarration() {
-        assertEquals(312, BooksSummaryPresentation.inlineTopPx(600, 300, 12, 8, 20))
-        assertEquals(462, BooksSummaryPresentation.inlineTopPx(600, 450, 12, 8, 20))
-        assertEquals(572, BooksSummaryPresentation.inlineTopPx(600, 560, 12, 8, 20))
-        assertEquals(null, BooksSummaryPresentation.inlineTopPx(600, 561, 12, 8, 20))
-        assertEquals(null, BooksSummaryPresentation.inlineTopPx(600, 600, 12, 8, 20))
-        assertEquals(null, BooksSummaryPresentation.inlineTopPx(600, 900, 12, 8, 20))
-        assertEquals(null, BooksSummaryPresentation.inlineTopPx(0, 0, 12, 8, 20))
+    fun summaryAnchorDependsOnlyOnViewportHeight() {
+        assertEquals(450, BooksSummaryPresentation.inlineTopPx(600))
+        assertEquals(451, BooksSummaryPresentation.inlineTopPx(601))
+        assertEquals(300, BooksSummaryPresentation.inlineTopPx(400))
+        assertEquals(0, BooksSummaryPresentation.inlineTopPx(0))
+    }
+
+    @Test
+    fun narrationCollisionHidesSummaryWithoutMovingItsAnchor() {
+        for (bottom in listOf(200, 300, 400, 438, 439, 450, 560, 600, 900, 300)) {
+            assertEquals(bottom <= 438, BooksSummaryPresentation.inlineFits(600, bottom, 12, 8, 20))
+            assertEquals(450, BooksSummaryPresentation.inlineTopPx(600))
+        }
+        assertFalse(BooksSummaryPresentation.inlineFits(100, 30, 12, 8, 20))
+        assertFalse(BooksSummaryPresentation.inlineFits(0, 0, 12, 8, 20))
+        assertFalse(BooksSummaryPresentation.inlineFits(600, -1, 12, 8, 20))
+        assertFalse(BooksSummaryPresentation.inlineFits(600, 300, 12, 8, 0))
     }
 
 }
