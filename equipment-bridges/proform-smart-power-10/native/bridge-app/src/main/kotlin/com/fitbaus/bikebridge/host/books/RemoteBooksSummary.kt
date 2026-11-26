@@ -16,7 +16,7 @@ internal data class BooksSummarySelection(
     val expectedRevision: String?,
 ) {
     init {
-        require(itemId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(BooksIdentifier.isValid(itemId))
         require(section.endMs <= session.durationMs)
         require(expectedRevision == null || expectedRevision.matches(Regex("[0-9a-f]{64}")))
     }
@@ -31,7 +31,7 @@ internal data class BooksRecapSelection(
     val cumulative: Boolean = false,
 ) {
     init {
-        require(itemId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
+        require(BooksIdentifier.isValid(itemId))
         require(positionMs in 0..session.durationMs)
         require(!cumulative || positionMs <= TranscriberConnection.MAX_CUMULATIVE_RECAP_MS)
         require(expectedRevision.matches(Regex("[0-9a-f]{64}")))
