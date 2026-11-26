@@ -30,6 +30,7 @@ import {
   vo2ProtocolVoiceCues,
   isStaleVo2ProtocolTick,
   VO2_HR_FRESHNESS_MS,
+  VO2_EVAL_RELATIVE_SECONDS,
   type Vo2ProtocolRuntime,
 } from "./vo2Protocol.js";
 import {
@@ -49,6 +50,8 @@ import {
   resolveVo2PreflightPolicyOverride,
   getVo2ProtocolPhaseForRuntime,
   vo2ProtocolNeedsHrEvaluationForRuntime,
+  isVo2ProtocolRuntimeV3,
+  vo2LiveHrBreachCeilingV3,
   type Vo2ProtocolRuntimeV3,
 } from "./vo2ProtocolV3.js";
 import { clearOrdinaryBikeTelemetry, getHrSamples } from "./workoutStorage.js";
@@ -917,24 +920,90 @@ function tickVo2Protocol(
   return { runtime: next, cues: vo2ProtocolVoiceCues(before, next, elapsedSec) };
 }
 
+type CanonicalVo2TickResult =
+  | { runtime: Vo2ProtocolRuntime | Vo2ProtocolRuntimeV3; cues: string[] }
+  | null
+  | undefined;
+
+interface CanonicalVo2TickOptions {
+  isCurrent?: () => boolean;
+  readHrSamples?: typeof getHrSamples;
+}
+
+interface PendingVo2Checkpoint {
+  key: string;
+  read: typeof getHrSamples;
+  samples: ReturnType<typeof getHrSamples>;
+  latest: object;
+}
+
+const pendingVo2Checkpoints = new WeakMap<SessionStorage, Map<string, PendingVo2Checkpoint>>();
+
+function vo2TickSessionKey(session: SessionData): string {
+  return JSON.stringify([
+    session.sessionId, session.sessionStart, session.startTime, session.summaryEmitted,
+    session.paused, session.pausedElapsed, session.pausedDurationSec, session.pauseWallStart,
+    session.earlyCooldownElapsed,
+  ]);
+}
+
+function vo2CheckpointKey(session: SessionData, elapsedSec: number): string {
+  const runtime = session.vo2ProtocolRuntime!;
+  const open = runtime.stages.find(stage => stage.status === "open");
+  const relative = Math.floor(elapsedSec) - (open?.active_start_sec ?? 0);
+  const checkpoint = [...VO2_EVAL_RELATIVE_SECONDS].reverse().find(value => relative >= value);
+  return JSON.stringify([vo2TickSessionKey(session), runtime, checkpoint]);
+}
+
 async function tickVo2ProtocolWithCanonicalHr(
   day: string,
   elapsedSec: number,
   paused: boolean,
-  storage?: SessionStorage
-): Promise<{ runtime: Vo2ProtocolRuntime | Vo2ProtocolRuntimeV3; cues: string[] } | null> {
-  const session = getSession(day, storage);
-  if (!session.vo2ProtocolRuntime) return null;
-  let samples: { timestamp_sec: number; hr: number }[] = [];
-  let telemetrySamples: BikeTelemetrySample[] = [];
-  if (
-    session.sessionId &&
-    vo2ProtocolNeedsHrEvaluationForRuntime(session.vo2ProtocolRuntime, elapsedSec, paused)
-  ) {
-    samples = await getHrSamples(session.sessionId);
-    telemetrySamples = getBikeTelemetrySamples(session.sessionId, storage);
+  storage?: SessionStorage,
+  options: CanonicalVo2TickOptions = {}
+): Promise<CanonicalVo2TickResult> {
+  const store = storage ?? localStorage;
+  let pending = pendingVo2Checkpoints.get(store);
+  if (!pending) {
+    pending = new Map();
+    pendingVo2Checkpoints.set(store, pending);
   }
-  return tickVo2Protocol(day, elapsedSec, paused, storage, samples, telemetrySamples, readFreshLiveHrBpm());
+  const session = getSession(day, store);
+  const runtime = session.vo2ProtocolRuntime;
+  if (options.isCurrent?.() === false) return undefined;
+  if (!runtime) {
+    pending.delete(day);
+    return null;
+  }
+  const liveHrBpm = readFreshLiveHrBpm();
+  const immediateSafety = !paused && isVo2ProtocolRuntimeV3(runtime) &&
+    vo2LiveHrBreachCeilingV3(runtime, liveHrBpm) != null;
+  if (immediateSafety || !session.sessionId || !vo2ProtocolNeedsHrEvaluationForRuntime(runtime, elapsedSec, paused)) {
+    pending.delete(day);
+    return tickVo2Protocol(day, elapsedSec, paused, store, [], [], liveHrBpm);
+  }
+  const key = vo2CheckpointKey(session, elapsedSec);
+  const read = options.readHrSamples ?? getHrSamples;
+  const ticket = {};
+  let checkpoint = pending.get(day);
+  if (!checkpoint || checkpoint.key !== key || checkpoint.read !== read) {
+    checkpoint = { key, read, samples: read(session.sessionId), latest: ticket };
+    pending.set(day, checkpoint);
+  } else {
+    checkpoint.latest = ticket;
+  }
+  try {
+    const samples = await checkpoint.samples;
+    if (pending.get(day) !== checkpoint || checkpoint.latest !== ticket || options.isCurrent?.() === false) {
+      return undefined;
+    }
+    const current = getSession(day, store);
+    if (!current.vo2ProtocolRuntime || vo2CheckpointKey(current, elapsedSec) !== key) return undefined;
+    const telemetrySamples = getBikeTelemetrySamples(session.sessionId, store);
+    return tickVo2Protocol(day, elapsedSec, paused, store, samples, telemetrySamples, readFreshLiveHrBpm());
+  } finally {
+    if (pending.get(day) === checkpoint && checkpoint.latest === ticket) pending.delete(day);
+  }
 }
 
 function markVo2ProtocolCancelled(
@@ -1123,6 +1192,7 @@ export {
   parseHrTargetRange,
   tickVo2Protocol,
   tickVo2ProtocolWithCanonicalHr,
+  vo2TickSessionKey,
   markVo2ProtocolCancelled,
   markVo2ProtocolLimitReached,
   restoreBikeBridgeBindingForActiveSession,

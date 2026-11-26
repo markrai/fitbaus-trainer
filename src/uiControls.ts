@@ -21,6 +21,7 @@ import {
   todayName,
   updateRing,
   tickVo2ProtocolWithCanonicalHr,
+  vo2TickSessionKey,
   requestVo2LimitReached,
 } from "./workoutLogic.js";
 import { getPlan, getWorkoutMetadata, getHrTargets } from "./workoutData.js";
@@ -1493,8 +1494,10 @@ async function updateDisplayAsync() {
     // call must stay unconditional (every refresh, any elapsed) -- never gate it on checkpoints.
     if (startTime && isVo2WorkoutSelector(day)) {
       const elapsedSec = paused ? pausedElapsed : Math.floor((Date.now() - parseInt(startTime, 10)) / 1000);
-      const tick = await tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused);
-      if (seq !== updateDisplaySeq) return;
+      const sessionKey = vo2TickSessionKey(getSession(day));
+      const isCurrent = () => seq === updateDisplaySeq && resolveOwnedWorkoutDay() === day;
+      const tick = await tickVo2ProtocolWithCanonicalHr(day, elapsedSec, paused, undefined, { isCurrent });
+      if (tick === undefined || !isCurrent() || vo2TickSessionKey(getSession(day)) !== sessionKey) return;
       pendingVo2Cues = tick?.cues ?? [];
     } else {
       pendingVo2Cues = [];

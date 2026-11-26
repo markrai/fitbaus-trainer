@@ -57,6 +57,9 @@ import {
   getSession,
   persistVo2ProtocolRuntime,
   startSession,
+  pauseSession,
+  resumeSession,
+  clearSession,
 } from "../dist/sessionStore.js";
 import { getEstimatedWattsAt70Rpm, AUTOMATIC_RESISTANCE_MAX } from "../dist/machines/proformSmartPower10.js";
 import { toBridgeResistanceLevel } from "../dist/platform/bikeBridgeClient.js";
@@ -1279,4 +1282,119 @@ test("requestVo2LimitReached is VO2-only and does not set early_cooldown elapsed
 
   markVo2ProtocolLimitReached(VO2_WORKOUT_SELECTOR_ID, 400, storage);
   assert.equal(getSession(VO2_WORKOUT_SELECTOR_ID, storage).vo2ProtocolRuntime.termination.reason, "limit_reached");
+});
+
+function deferredCanonicalHr() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  const calls = [];
+  const readHrSamples = sessionId => {
+    calls.push(sessionId);
+    return promise;
+  };
+  return { calls, readHrSamples, resolve };
+}
+
+function activeCanonicalTickStorage(sessionId = "pending-vo2", start = 1_000_000) {
+  const storage = memoryStorage();
+  const day = VO2_WORKOUT_SELECTOR_ID;
+  startSession(day, start, sessionId, "bike", storage);
+  const runtime = advanceVo2Protocol(createVo2ProtocolRuntime(buildVo2ProtocolPlan()), {
+    elapsedSec: 300, paused: false, samples: [],
+  });
+  persistVo2ProtocolRuntime(day, runtime, storage);
+  return { day, storage, runtime };
+}
+
+test("only the latest refresh commits a shared checkpoint, even when the read spans multiple ticks", async () => {
+  const { day, storage, runtime } = activeCanonicalTickStorage();
+  const hr = deferredCanonicalHr();
+  const first = tickVo2ProtocolWithCanonicalHr(day, 480, false, storage, hr);
+  const second = tickVo2ProtocolWithCanonicalHr(day, 481, false, storage, hr);
+  const third = tickVo2ProtocolWithCanonicalHr(day, 482, false, storage, hr);
+  assert.deepEqual(hr.calls, ["pending-vo2"]);
+  assert.deepEqual(getSession(day, storage).vo2ProtocolRuntime, runtime);
+  hr.resolve(stageHr(300, 120, 121));
+  assert.equal(await first, undefined);
+  assert.equal(await second, undefined);
+  const latest = await third;
+  assert.ok(latest);
+  assert.equal(latest.runtime.stages[0].status, "accepted");
+  assert.equal(latest.runtime.stages[1].active_start_sec, 482);
+  assert.deepEqual(getSession(day, storage).vo2ProtocolRuntime, latest.runtime);
+});
+
+test("a later checkpoint does not reuse evidence from an earlier outstanding read", async () => {
+  const { day, storage } = activeCanonicalTickStorage();
+  const firstRead = deferredCanonicalHr();
+  const secondRead = deferredCanonicalHr();
+  const reads = [firstRead, secondRead];
+  let count = 0;
+  const options = { readHrSamples: id => reads[count++].readHrSamples(id) };
+  const first = tickVo2ProtocolWithCanonicalHr(day, 480, false, storage, options);
+  const second = tickVo2ProtocolWithCanonicalHr(day, 540, false, storage, options);
+  assert.equal(count, 2);
+  secondRead.resolve(stageHr(360, 120, 121));
+  const latest = await second;
+  assert.ok(latest);
+  const saved = getSession(day, storage).vo2ProtocolRuntime;
+  firstRead.resolve(stageHr(300, 120, 121));
+  assert.equal(await first, undefined);
+  assert.deepEqual(getSession(day, storage).vo2ProtocolRuntime, saved);
+});
+
+test("a pending checkpoint cannot mutate a replacement workout using the previous workout's evidence", async () => {
+  await resetWorkoutStorageForTests();
+  try {
+    const { day, storage } = activeCanonicalTickStorage("old-vo2");
+    await persistRange("old-vo2", 360, 479, 122);
+    const pending = tickVo2ProtocolWithCanonicalHr(day, 480, false, storage);
+    startSession(day, 2_000_000, "replacement-vo2", "bike", storage);
+    const replacement = createVo2ProtocolRuntime(buildVo2ProtocolPlan());
+    persistVo2ProtocolRuntime(day, replacement, storage);
+    assert.equal(await pending, undefined);
+    assert.equal(getSession(day, storage).sessionId, "replacement-vo2");
+    assert.deepEqual(getSession(day, storage).vo2ProtocolRuntime, replacement);
+  } finally {
+    await resetWorkoutStorageForTests();
+  }
+});
+
+test("pending HR evidence is discarded after cancellation, pause, resume, cooldown or a limit transition", async () => {
+  const actions = [
+    ["cancelled", (day, storage) => markVo2ProtocolCancelled(day, 481, storage)],
+    ["cleared", (day, storage) => clearSession(day, storage)],
+    ["paused", (day, storage) => pauseSession(day, 481, storage, 1_481_000)],
+    ["pause-resume", (day, storage) => {
+      pauseSession(day, 481, storage, 1_481_000);
+      resumeSession(day, storage, 1_491_000);
+    }],
+    ["early cooldown", (day, storage) => requestEarlyCooldown(day, {
+      storage, now: 1_481_000, blocks: vo2PlanBlocks(),
+    })],
+    ["limit", (day, storage) => markVo2ProtocolLimitReached(day, 481, storage)],
+  ];
+  for (const [name, transition] of actions) {
+    const { day, storage } = activeCanonicalTickStorage();
+    const hr = deferredCanonicalHr();
+    const pending = tickVo2ProtocolWithCanonicalHr(day, 480, false, storage, hr);
+    transition(day, storage);
+    const expected = getSession(day, storage);
+    hr.resolve(stageHr(300, 120, 121));
+    assert.equal(await pending, undefined, name);
+    assert.deepEqual(getSession(day, storage), expected, name);
+  }
+});
+
+test("a superseded display intent cannot write or produce guidance cues", async () => {
+  const { day, storage, runtime } = activeCanonicalTickStorage();
+  const hr = deferredCanonicalHr();
+  let current = true;
+  const pending = tickVo2ProtocolWithCanonicalHr(day, 480, false, storage, {
+    ...hr, isCurrent: () => current,
+  });
+  current = false;
+  hr.resolve(stageHr(300, 120, 121));
+  assert.equal(await pending, undefined);
+  assert.deepEqual(getSession(day, storage).vo2ProtocolRuntime, runtime);
 });

@@ -370,6 +370,17 @@ function runtimePredictedHrMaxV3(runtime: Vo2ProtocolRuntimeV3): number | undefi
   return predictedHrMaxBpm(age);
 }
 
+export function vo2LiveHrBreachCeilingV3(
+  runtime: Vo2ProtocolRuntimeV3,
+  liveHrBpm: number | null | undefined
+): number | undefined {
+  if (runtime.segment !== "work" || liveHrBpm == null) return undefined;
+  const hrMax = runtimePredictedHrMaxV3(runtime);
+  if (hrMax == null) return undefined;
+  const ceiling = estimatorSubmaxHrCeilingBpm(hrMax);
+  return liveHrBpm >= ceiling ? ceiling : undefined;
+}
+
 function eligibleObservationsV3(runtime: Vo2ProtocolRuntimeV3): Vo2EligibleObservation[] {
   const predictedHrMax = runtimePredictedHrMaxV3(runtime);
   const out: Vo2EligibleObservation[] = [];
@@ -597,9 +608,8 @@ export function advanceVo2ProtocolV3(
   // own termination reasons. Engages once the work segment is established.
   if (input.liveHrBpm != null && next.segment === "work") {
     next.live_hr_guard_armed = true;
-    const breachHrMax = runtimePredictedHrMaxV3(next);
-    if (breachHrMax != null && input.liveHrBpm >= estimatorSubmaxHrCeilingBpm(breachHrMax)) {
-      const hard = estimatorSubmaxHrCeilingBpm(breachHrMax);
+    const hard = vo2LiveHrBreachCeilingV3(next, input.liveHrBpm);
+    if (hard != null) {
       enterCooldownV3(next, elapsed, "submax_hr_ceiling", {
         provenance_version: 1,
         eligible_stage_count: eligibleObservationsV3(next).length,
