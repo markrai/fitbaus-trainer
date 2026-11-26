@@ -1,4 +1,6 @@
 import { isNativeRuntime } from "./platform/runtime.js";
+import { getSession } from "./sessionStore.js";
+import { readActiveSessionOwner, readSessionFinalization } from "./freestyleRide.js";
 let wakeLock = null;
 let nativeWakeLockActive = false;
 let nativeWakeLockOperation = Promise.resolve();
@@ -183,9 +185,11 @@ export function registerWakeLockGlobals() {
         }
         // Preserve ordinary-workout resume: if a workout is mid-session, reclaim as workout.
         if (typeof window.getSelectedDay === "function" && typeof window.getStartTime === "function") {
-            const day = window.getSelectedDay();
-            const startTime = window.getStartTime(day);
-            if (startTime) {
+            const owner = readActiveSessionOwner();
+            const day = owner ? owner.selector : window.getSelectedDay();
+            const session = getSession(day);
+            if (session.startTime && !session.paused && session.summaryEmitted !== "true" && !readSessionFinalization(day) &&
+                (!owner || owner.sessionId === session.sessionId)) {
                 await requestWakeLock("workout");
             }
         }

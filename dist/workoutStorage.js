@@ -230,7 +230,6 @@ async function deleteFreestyleSessionEvidenceAtomic(sessionId) {
         if (!flush.ok && flush.retryableFailures > 0) {
             throw new Error("cannot discard while telemetry flush has retryable failures");
         }
-
         const database = await openCurrentDatabase();
         const tx = database.transaction([STORE_WORKOUTS, STORE_HR_SAMPLES, STORE_ORDINARY_BIKE_TELEMETRY], "readwrite");
         const completed = transactionComplete(tx);

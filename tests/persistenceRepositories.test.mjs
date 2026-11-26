@@ -718,3 +718,99 @@ test("HR deletion seals the session and waits for an already admitted write", as
     await workoutStorage.resetWorkoutStorageForTests();
   }
 });
+
+test("overlapping HR drains share a single retry owner and include later accepted samples", async () => {
+  await freshDatabase();
+  let release;
+  let entered;
+  let fail = true;
+  let attempts = 0;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  try {
+    workoutStorage.setWorkoutHrPersistenceHooksForTests(async () => {
+      attempts++;
+      if (attempts === 1) { entered(); await gate; }
+      if (fail) throw new Error("injected HR failure");
+    });
+    workoutStorage.queueWorkoutHrSample("shared-hr", 5, 121);
+    await started;
+    const first = workoutStorage.flushWorkoutHrWrites("shared-hr");
+    const second = workoutStorage.flushWorkoutHrWrites("shared-hr");
+    assert.equal(first, second);
+    workoutStorage.queueWorkoutHrSample("shared-hr", 6, 122);
+    release();
+    assert.deepEqual(await Promise.all([first, second]), [false, false]);
+    assert.ok(attempts <= 5);
+    fail = false;
+    const recovery = workoutStorage.flushWorkoutHrWrites("shared-hr");
+    assert.equal(recovery, workoutStorage.flushWorkoutHrWrites("shared-hr"));
+    assert.equal(await recovery, true);
+    assert.deepEqual((await workoutStorage.getHrSamplesStrict("shared-hr")).map(row => [row.timestamp_sec, row.hr]), [[5, 121], [6, 122]]);
+  } finally {
+    release();
+    await workoutStorage.resetWorkoutStorageForTests();
+  }
+});
+
+test("overlapping bike drains cannot report success while a retry is gated", async () => {
+  await freshDatabase();
+  let release;
+  let entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  try {
+    workoutStorage.setOrdinaryTelemetryWriteFailureInjectorForTests(() => true);
+    workoutStorage.queueOrdinaryBikeTelemetrySample(telemetrySample({ session: "shared-bike", sec: 1 }));
+    assert.equal((await workoutStorage.flushOrdinaryBikeTelemetryWrites("shared-bike")).ok, false);
+    workoutStorage.setOrdinaryTelemetryWriteFailureInjectorForTests(null);
+    workoutStorage.setOrdinaryTelemetryWriteGateForTests(async () => {
+      entered();
+      await gate;
+      throw new Error("retry write fails");
+    });
+    const first = workoutStorage.flushOrdinaryBikeTelemetryWrites("shared-bike");
+    await started;
+    const second = workoutStorage.flushOrdinaryBikeTelemetryWrites("shared-bike");
+    assert.equal(first, second);
+    workoutStorage.queueOrdinaryBikeTelemetrySample(telemetrySample({ session: "shared-bike", sec: 2 }));
+    release();
+    const results = await Promise.all([first, second]);
+    assert.equal(results[0].ok, false);
+    assert.equal(results[0].retryableFailures, 2);
+    assert.deepEqual(results[0], results[1]);
+    workoutStorage.setOrdinaryTelemetryWriteGateForTests(null);
+    assert.equal((await workoutStorage.flushOrdinaryBikeTelemetryWrites("shared-bike")).ok, true);
+    assert.deepEqual((await workoutStorage.getOrdinaryBikeTelemetrySamplesStrict("shared-bike")).map(row => row.activeSec), [1, 2]);
+  } finally {
+    release();
+    workoutStorage.setOrdinaryTelemetryWriteFailureInjectorForTests(null);
+    workoutStorage.setOrdinaryTelemetryWriteGateForTests(null);
+    await workoutStorage.resetWorkoutStorageForTests();
+  }
+});
+
+test("bike evidence deletion waits for the shared drain and rejects newly queued evidence", async () => {
+  await freshDatabase();
+  let release;
+  let entered;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { entered = resolve; });
+  try {
+    workoutStorage.setOrdinaryTelemetryWriteGateForTests(async () => { entered(); await gate; });
+    workoutStorage.queueOrdinaryBikeTelemetrySample(telemetrySample({ session: "delete-bike", sec: 1 }));
+    await started;
+    const flush = workoutStorage.flushOrdinaryBikeTelemetryWrites("delete-bike");
+    const deleting = workoutStorage.deleteOrdinaryBikeTelemetryForSessionStrict("delete-bike");
+    workoutStorage.queueOrdinaryBikeTelemetrySample(telemetrySample({ session: "delete-bike", sec: 2 }));
+    assert.equal((await workoutStorage.flushOrdinaryBikeTelemetryWrites("delete-bike")).ok, false);
+    release();
+    assert.equal((await flush).ok, true);
+    await deleting;
+    assert.deepEqual(await workoutStorage.getOrdinaryBikeTelemetrySamplesStrict("delete-bike"), []);
+  } finally {
+    release();
+    workoutStorage.setOrdinaryTelemetryWriteGateForTests(null);
+    await workoutStorage.resetWorkoutStorageForTests();
+  }
+});
