@@ -3,6 +3,8 @@
 package com.fitbaus.bikebridge.host.books
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Rect
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -22,6 +24,8 @@ internal class BooksNarrationViewport(
         overScrollMode = View.OVER_SCROLL_NEVER
         addView(inlineSummary, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
+    var onSummaryDrawn: (() -> Unit)? = null
+    private var drawCallbackPending = false
     private val horizontalInset = dp(48)
     private val gap = dp(12)
     private val bottomInset = dp(8)
@@ -67,6 +71,25 @@ internal class BooksNarrationViewport(
             inlineSummary.lineHeight + dp(4))
         summaryScroll.visibility = if (inlineSummary.text.isNotBlank() && summaryScroll.measuredWidth > 0 && fits)
             VISIBLE else INVISIBLE
+    }
+
+    fun summaryIsVisible(): Boolean = summaryScroll.visibility == VISIBLE && inlineSummary.isShown &&
+        inlineSummary.getGlobalVisibleRect(Rect())
+
+    fun setSummaryLongPress(action: (() -> Boolean)?) {
+        inlineSummary.setOnLongClickListener(if (action == null) null else View.OnLongClickListener { action() })
+        inlineSummary.isLongClickable = action != null
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        if (onSummaryDrawn != null && summaryIsVisible() && !drawCallbackPending) {
+            drawCallbackPending = true
+            post {
+                drawCallbackPending = false
+                if (summaryIsVisible()) onSummaryDrawn?.invoke()
+            }
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
