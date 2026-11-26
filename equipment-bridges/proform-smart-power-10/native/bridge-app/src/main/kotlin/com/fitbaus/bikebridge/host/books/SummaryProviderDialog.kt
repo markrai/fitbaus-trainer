@@ -145,6 +145,11 @@ internal class SummaryProviderDialog(
                 resetRows()
                 label("Update FitBaus Transcriber to manage providers from the bike.")
                 button("RETRY") { load() }
+            } else if (state.canOpen) {
+                showConfiguration()
+                request(actions.open(), "Connecting to Transcriber…", onFailure = { showConfiguration() }) {
+                    showConfiguration()
+                }
             } else showConfiguration()
         }
     }
@@ -153,7 +158,7 @@ internal class SummaryProviderDialog(
 
     private fun showConfiguration(openAuthorization: Boolean = false) {
         resetRows()
-        status.text = "Choose a provider and unlock changes when ready."
+        status.text = if (state.automaticActivation) "Choose a provider to activate." else "Choose a provider and unlock changes when ready."
         val activeCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = surface(CARD, BORDER)
@@ -166,6 +171,7 @@ internal class SummaryProviderDialog(
         val generation = formGeneration
         fun formCurrent() = generation == formGeneration && state.screen == SummaryProviderScreen.CONFIGURATION
 
+        var advanced = openAuthorization
         val form = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(10), dp(16), dp(12))
@@ -173,6 +179,7 @@ internal class SummaryProviderDialog(
         }
         rows.addView(form, LinearLayout.LayoutParams(-1, -2))
         label("Provider", 15f, MUTED, form)
+        if (state.automaticActivation) label("Selecting a provider and model tests and activates it for audiobook summaries on this server. First-use LOBO certificate trust is for trusted LANs only.", 13f, MUTED, form)
         val kinds = listOf(SummaryProviderChoice.OLLAMA, SummaryProviderChoice.LOBO, SummaryProviderChoice.CUSTOM)
         val names = listOf("Ollama", "LOBO", "Custom")
         val providerRow = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
@@ -217,7 +224,7 @@ internal class SummaryProviderDialog(
         form.addView(authorization, form.indexOfChild(authLabel), LinearLayout.LayoutParams(-1, -2).apply {
             setMargins(0, dp(8), 0, dp(4))
         })
-        label("Provider changes are locked", 16f, Color.WHITE, authorization)
+        val authorizationTitle = label("Provider changes are locked", 16f, Color.WHITE, authorization)
         label("Unlock once to manage this server's summarization settings.", 14f, MUTED, authorization)
         val unlock = button("UNLOCK CHANGES", primary = true, parent = authorization) {}
         val codePanel = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -230,6 +237,21 @@ internal class SummaryProviderDialog(
         }
         val adminCode = field("Administrator code (XXXX-XXXX)", 9, secret = true, parent = codePanel)
         val authorizeButton = button("UNLOCK", true, codePanel) {}
+        val retryOpen = button("RETRY CONNECTION", parent = authorization) {
+            if (state.canOpen) request(actions.open(), "Connecting to Transcriber…") { showConfiguration() }
+        }
+        val policyButton = button("REQUIRE ADMINISTRATOR CODE", parent = form) {
+            if (state.canSetPolicy) request(actions.policy(!state.adminRequired), "Saving security policy…") { load() }
+        }
+        val advancedButton = button("ADVANCED SECURITY & CONNECTION SETTINGS", parent = form) {
+            advanced = !advanced
+            if (!advanced) {
+                authorizationOpen = false
+                hideKeyboard()
+                adminCode.text.clear()
+            }
+            refreshControls()
+        }
         val candidateCard = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             background = surface(BACKGROUND, BORDER)
@@ -321,7 +343,7 @@ internal class SummaryProviderDialog(
             }
             visible.forEach { device ->
                 val address = device.address
-                val chosen = picked?.address == address || (manualLobo && state.draftEndpoint == device.endpoint)
+                val chosen = picked?.address == address || state.draftEndpoint == device.endpoint
                 val row = lanButtons.getOrPut(address) {
                     button("", parent = lanDevices) {
                         if (formCurrent() && state.editable && state.choice == SummaryProviderChoice.LOBO &&
@@ -362,7 +384,7 @@ internal class SummaryProviderDialog(
                 if (value !in remembered) rememberedButtons.remove(value)?.let { rememberedRows.removeView(it) }
             }
             remembered.forEach { value ->
-                val chosen = manualLobo && state.draftEndpoint == value
+                val chosen = state.draftEndpoint == value
                 val row = rememberedButtons.getOrPut(value) {
                     button("", parent = rememberedRows) {
                         if (formCurrent() && state.editable && state.choice == SummaryProviderChoice.LOBO) {
@@ -416,12 +438,12 @@ internal class SummaryProviderDialog(
             rememberedRows.removeAllViews()
             scanningLan = false
             failedLan = false
-            manualLobo = false
+            manualLobo = lobo && state.draftEndpoint != null
             clearModelPanel()
             auth.text.clear()
             key.text.clear()
             endpoint.isEnabled = !reuse
-            endpoint.setText(if (reuse) state.authorization?.baseUrl.orEmpty() else "")
+            endpoint.setText(state.draftEndpoint.orEmpty())
             endpoint.hint = when (choice) {
                 SummaryProviderChoice.OLLAMA -> "http://ollama-host:11434/v1"
                 SummaryProviderChoice.LOBO -> "https://192.168.1.200:7869/v1"
@@ -429,16 +451,17 @@ internal class SummaryProviderDialog(
             }
             val showAuth = lobo
             loboPanel.visibility = if (showAuth) View.VISIBLE else View.GONE
-            endpointLabel.visibility = if (showAuth) View.GONE else View.VISIBLE
+            endpointLabel.visibility = if (showAuth && !manualLobo) View.GONE else View.VISIBLE
             endpoint.visibility = endpointLabel.visibility
-            manualAddress.text = "ENTER ADDRESS MANUALLY"
+            manualAddress.text = if (manualLobo) "CHOOSE DISCOVERED DEVICE" else "ENTER ADDRESS MANUALLY"
             authLabel.visibility = if (showAuth) View.VISIBLE else View.GONE
             auth.visibility = authLabel.visibility
             val showKey = !reuse && !lobo && connection.address.startsWith("https://")
             keyLabel.visibility = if (showKey) View.VISIBLE else View.GONE
             key.visibility = keyLabel.visibility
             allowHttp.visibility = if (!reuse && !lobo) View.VISIBLE else View.GONE
-            allowHttp.isChecked = reuse && state.authorization?.allowHttp == true
+            allowHttp.isChecked = if (state.automaticActivation && choice == SummaryProviderChoice.OLLAMA) true
+                else (reuse || state.draftEndpoint == state.authorization?.baseUrl) && state.authorization?.allowHttp == true
             hint.text = when {
                 reuse -> "Reuse the active endpoint, credentials and certificate trust."
                 choice == SummaryProviderChoice.OLLAMA -> "Address must be reachable from Transcriber."
@@ -480,7 +503,7 @@ internal class SummaryProviderDialog(
                     result.text = "Not tested"
                     result.setTextColor(MUTED)
                     refreshControls()
-                    if (state.choice == SummaryProviderChoice.LOBO && discoveryForPanel.models.isNotEmpty() && state.model != null) {
+                    if ((state.automaticActivation || state.choice == SummaryProviderChoice.LOBO) && discoveryForPanel.models.isNotEmpty() && state.model != null) {
                         testButton?.performClick()
                     }
                 }
@@ -489,17 +512,19 @@ internal class SummaryProviderDialog(
                 val manual = field("Model identifier", 160, parent = modelPanel)
                 watch(manual) { changed(manual.text.toString().trim()) }
             } else {
-                val models = spinner(value.models, modelPanel)
-                val index = value.models.indexOf(state.model).coerceAtLeast(0)
+                val chooseModel = state.automaticActivation && state.model == null
+                val options = if (chooseModel) listOf("Choose a model") + value.models else value.models
+                val models = spinner(options, modelPanel)
+                val index = value.models.indexOf(state.model).let { if (chooseModel) 0 else it.coerceAtLeast(0) }
                 models.setSelection(index)
                 models.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                     override fun onNothingSelected(parent: AdapterView<*>?) = changed(null)
                     override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                        changed(value.models.getOrNull(position))
+                        changed(value.models.getOrNull(if (chooseModel) position - 1 else position))
                     }
                 }
             }
-            testButton = button("TEST INFERENCE", parent = modelPanel) {
+            testButton = button(if (state.automaticActivation) "ACTIVATE MODEL" else "TEST INFERENCE", parent = modelPanel) {
                 if (formCurrent() && state.discovery === discoveryForPanel && state.canTest) {
                     request(actions.test(), "Running inference…", onStart = {
                         result.text = "Testing…"
@@ -512,7 +537,9 @@ internal class SummaryProviderDialog(
                         if (tested != null) {
                             result.text = "Test passed · " + String.format(Locale.US, "%.2f s", tested.elapsedMs / 1000.0)
                             result.setTextColor(SUCCESS)
-                            status.text = "Ready to save"
+                            if (state.automaticActivation && state.canSave) {
+                                request(actions.save(), "Activating provider…") { finish() }
+                            } else status.text = "Ready to save"
                         } else {
                             result.text = "Test failed. Retry or choose another model."
                             result.setTextColor(MUTED)
@@ -521,12 +548,14 @@ internal class SummaryProviderDialog(
                 }
             }
             modelPanel.addView(result)
-            modelPanel.addView(consent)
-            modelPanel.addView(save, LinearLayout.LayoutParams(-1, dp(48)).apply {
-                setMargins(0, dp(6), 0, dp(2))
-            })
+            if (!state.automaticActivation) {
+                modelPanel.addView(consent)
+                modelPanel.addView(save, LinearLayout.LayoutParams(-1, dp(48)).apply {
+                    setMargins(0, dp(6), 0, dp(2))
+                })
+            }
             refreshControls()
-            if (state.choice == SummaryProviderChoice.LOBO && state.model != null) testButton?.performClick()
+            if ((state.automaticActivation || state.choice == SummaryProviderChoice.LOBO) && state.model != null) testButton?.performClick()
         }
 
         consent.setOnCheckedChangeListener { _, checked ->
@@ -621,12 +650,16 @@ internal class SummaryProviderDialog(
         discoverDraft = {
             if (formCurrent() && state.canDiscover) {
                 if (state.canUseLoboTofu) {
+                    if (state.automaticActivation && !advanced) {
+                        connectDraft(true)
+                    } else {
                     val selected = state.draftEndpoint
                     confirmChange("Trust this LOBO device?",
                         "Use first-use trust only on your trusted LAN. The first connection to $selected is not independently authenticated. " +
                             "Its certificate will be remembered after Save; future connections must match. For stronger identity verification, cancel and choose Verify with AUTH.",
                         "TRUST & CONNECT") {
                         if (formCurrent() && state.canUseLoboTofu && state.draftEndpoint == selected) connectDraft(true)
+                    }
                     }
                 } else if (state.choice == SummaryProviderChoice.LOBO && !state.usesStoredLoboTrust &&
                     state.discovery != null) {
@@ -666,7 +699,7 @@ internal class SummaryProviderDialog(
                 }
             }
         }
-        val cancelButton = button("LOCK CHANGES") {
+        val cancelButton = button("CLOSE CONFIGURATION SESSION") {
             if (formCurrent() && state.canCancel) request(actions.cancel(), "Closing administrator session…") { load() }
         }
         renderConfiguration = {
@@ -684,11 +717,11 @@ internal class SummaryProviderDialog(
                 auth.text.clear()
                 suppressChanges = previous
             }
-            forgetDevice.visibility = if (snapshot.choice == SummaryProviderChoice.LOBO &&
+            forgetDevice.visibility = if ((!snapshot.automaticActivation || advanced) && snapshot.choice == SummaryProviderChoice.LOBO &&
                 snapshot.authorization?.remembersLobo(snapshot.draftEndpoint) == true &&
                 snapshot.authorization?.matchesTrustedLobo(snapshot.draftEndpoint) != true) View.VISIBLE else View.GONE
             forgetDevice.isEnabled = snapshot.canForgetLobo
-            verifyAgain.visibility = if (snapshot.authorized && snapshot.choice == SummaryProviderChoice.LOBO &&
+            verifyAgain.visibility = if ((!snapshot.automaticActivation || advanced) && snapshot.authorized && snapshot.choice == SummaryProviderChoice.LOBO &&
                 snapshot.addressEntered && (snapshot.hasStoredLoboTrust || snapshot.canUseLoboTofu || snapshot.verifyLoboAgain))
                 View.VISIBLE else View.GONE
             verifyAgain.isEnabled = snapshot.editable
@@ -700,6 +733,19 @@ internal class SummaryProviderDialog(
             }
             authLabel.visibility = if (needsLoboAuth) View.VISIBLE else View.GONE
             auth.visibility = authLabel.visibility
+            val showKey = snapshot.choice != SummaryProviderChoice.REUSE && snapshot.choice != SummaryProviderChoice.LOBO &&
+                connection.address.startsWith("https://") && (!snapshot.automaticActivation || advanced)
+            keyLabel.visibility = if (showKey) View.VISIBLE else View.GONE
+            key.visibility = keyLabel.visibility
+            allowHttp.visibility = if (snapshot.choice != SummaryProviderChoice.REUSE && snapshot.choice != SummaryProviderChoice.LOBO &&
+                (!snapshot.automaticActivation || advanced)) View.VISIBLE else View.GONE
+            advancedButton.visibility = if (snapshot.automaticActivation) View.VISIBLE else View.GONE
+            advancedButton.text = if (advanced) "HIDE ADVANCED SETTINGS" else "ADVANCED SECURITY & CONNECTION SETTINGS"
+            policyButton.visibility = if (snapshot.automaticActivation && advanced) View.VISIBLE else View.GONE
+            policyButton.text = if (snapshot.adminRequired) "REMOVE ADMINISTRATOR CODE REQUIREMENT" else "REQUIRE ADMINISTRATOR CODE"
+            policyButton.isEnabled = snapshot.canSetPolicy
+            authorizationTitle.text = if (snapshot.adminRequired) "Provider changes are locked" else "Administrator authorization (optional)"
+            retryOpen.visibility = if (snapshot.canOpen) View.VISIBLE else View.GONE
             if (snapshot.choice == SummaryProviderChoice.LOBO) {
                 hint.text = when {
                     !snapshot.addressEntered -> "Select a phone or enter its address."
@@ -737,15 +783,16 @@ internal class SummaryProviderDialog(
             consent.isChecked = snapshot.consent
             save.isEnabled = snapshot.canSave
             save.alpha = if (snapshot.canSave) 1f else 0.4f
-            authorization.visibility = if (snapshot.authorized) View.GONE else View.VISIBLE
+            authorization.visibility = if ((!snapshot.authorized && (snapshot.adminRequired || snapshot.canOpen)) ||
+                (advanced && snapshot.canAuthorize)) View.VISIBLE else View.GONE
             authorizationLabel.visibility = if (snapshot.authorized) View.VISIBLE else View.GONE
             authorizationLabel.text = if (snapshot.authorization?.storageError == true)
                 "Authorized · Saved settings could not be loaded. Save a provider to recover."
-                else "Administrator authorized"
+                else if (snapshot.authorization?.administrator == true) "Administrator authorized" else "Paired device · ready"
             currentChoice?.visibility = if (snapshot.authorization?.configured == true) View.VISIBLE else View.GONE
             disableButton.visibility = if (snapshot.authorization?.configured == true) View.VISIBLE else View.GONE
             disableButton.isEnabled = snapshot.canDisable
-            cancelButton.visibility = if (snapshot.authorized) View.VISIBLE else View.GONE
+            cancelButton.visibility = if (snapshot.authorized && (!snapshot.automaticActivation || advanced)) View.VISIBLE else View.GONE
             cancelButton.isEnabled = snapshot.canCancel
         }
         authorizeButton.setOnClickListener {
@@ -759,7 +806,7 @@ internal class SummaryProviderDialog(
                 if (state.choice != previousChoice) configure()
                 refreshControls()
                 if (state.choice == SummaryProviderChoice.LOBO) renderLanDevices()
-                if (state.usesStoredLoboTrust || state.canUseLoboTofu || state.choice == SummaryProviderChoice.REUSE) discoverDraft?.invoke()
+                if (!state.automaticActivation && (state.usesStoredLoboTrust || state.canUseLoboTofu || state.choice == SummaryProviderChoice.REUSE)) discoverDraft?.invoke()
             }
         }
         configure()
@@ -783,7 +830,7 @@ internal class SummaryProviderDialog(
             button("RELOAD") { load() }
             return
         }
-        status.text = state.activeModel?.let { "Saved · $it" } ?: "Summarization disabled"
+        status.text = state.activeModel?.let { "Active · $it" } ?: "Summarization disabled"
         val presentation = summaryProviderPresentation(state)
         label("CURRENTLY SAVED", 13f, MUTED)
         label(presentation.activeTitle, 22f, Color.WHITE)
@@ -826,7 +873,7 @@ internal class SummaryProviderDialog(
                         if (state.screen == SummaryProviderScreen.RELOAD_REQUIRED) {
                             finish()
                         } else if (actions.authorizationLost(error) || ticket.operation == SummaryProviderOperation.CANCEL) {
-                            if (state.screen == SummaryProviderScreen.CONFIGURATION) showConfiguration(openAuthorization = true)
+                            if (state.screen == SummaryProviderScreen.CONFIGURATION) showConfiguration(openAuthorization = state.adminRequired)
                         } else onFailure()
                         if (state.screen != SummaryProviderScreen.RELOAD_REQUIRED) status.text = failureMessage(error)
                         refreshControls()

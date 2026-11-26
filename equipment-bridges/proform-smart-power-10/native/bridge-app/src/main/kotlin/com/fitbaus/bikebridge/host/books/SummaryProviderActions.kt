@@ -11,9 +11,14 @@ internal class SummaryProviderActions(
     private val workflow: SummaryProviderWorkflow,
     private val api: SummaryProviderManagement,
 ) {
-    fun capabilities() = SummaryProviderAction(SummaryProviderOperation.CAPABILITIES, api::capabilities, { ticket, value ->
-        workflow.capabilities(ticket, value.first, value.second)
+    fun capabilities() = SummaryProviderAction(SummaryProviderOperation.CAPABILITIES, api::providerCapabilities, { ticket, value ->
+        workflow.capabilities(ticket, value)
     }, workflow.state)
+
+    fun open() = SummaryProviderAction(SummaryProviderOperation.AUTHORIZE, api::openSession, workflow::authorized, workflow.state)
+
+    fun policy(required: Boolean) = SummaryProviderAction(SummaryProviderOperation.POLICY,
+        { api.setAdminRequired(required) }, workflow::policyChanged, workflow.state)
 
     fun authorize(code: String) = SummaryProviderAction(SummaryProviderOperation.AUTHORIZE, { api.authorize(code) }, workflow::authorized, workflow.state)
 
@@ -22,6 +27,8 @@ internal class SummaryProviderActions(
         val state = workflow.state
         val choice = state.choice
         val reuse = choice == SummaryProviderChoice.REUSE ||
+            (state.automaticActivation && choice != SummaryProviderChoice.LOBO && state.authorization?.configured == true &&
+                state.authorization.baseUrl == url.trim().trimEnd('/') && state.authorization.allowHttp == allowHttp && key.isEmpty()) ||
             (state.reusesCurrentLobo && state.draftEndpoint == url.trim().trimEnd('/') && auth.isBlank() && key.isEmpty() && !allowHttp)
         val remembered = state.reusesRememberedLobo && state.draftEndpoint == url.trim().trimEnd('/') &&
             auth.isBlank() && key.isEmpty() && !allowHttp
@@ -91,7 +98,7 @@ internal class SummaryProviderActions(
             return false
         }
         if (lost || ticket.operation in setOf(SummaryProviderOperation.CANCEL, SummaryProviderOperation.AUTHORIZE,
-                SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE, SummaryProviderOperation.FORGET_LOBO)) {
+                SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE, SummaryProviderOperation.FORGET_LOBO, SummaryProviderOperation.POLICY)) {
             api.forgetGrant()
         }
         return true

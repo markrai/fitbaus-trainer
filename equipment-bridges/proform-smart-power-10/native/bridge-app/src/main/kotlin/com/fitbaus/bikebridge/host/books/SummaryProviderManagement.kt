@@ -16,6 +16,8 @@ internal data class SummaryProviderStatus(
     val storageError: Boolean,
     val trustedLoboEndpoints: List<String> = emptyList(),
     val loboTofuSupported: Boolean = false,
+    val adminRequired: Boolean = true,
+    val administrator: Boolean = true,
 ) {
     fun sameEndpointAndTrust(other: SummaryProviderStatus): Boolean =
         configured && other.configured && !storageError && !other.storageError &&
@@ -50,10 +52,18 @@ internal data class SummaryProviderStatus(
             }
             return SummaryProviderStatus(configured, url, model,
                 json.opt("has_api_key") == true, json.opt("custom_ca") == true,
-                json.opt("allow_http") == true, json.opt("storage_error") == true, trusted, json.opt("lobo_tofu_supported") == true)
+                json.opt("allow_http") == true, json.opt("storage_error") == true, trusted, json.opt("lobo_tofu_supported") == true,
+                json.opt("admin_required") != false, json.opt("administrator") != false)
         }
     }
 }
+
+internal data class SummaryProviderCapabilities(
+    val supported: Boolean,
+    val model: String?,
+    val selection: SummaryProviderStatus? = null,
+    val adminRequired: Boolean = true,
+)
 
 internal data class SummaryProviderDiscovery(val models: List<String>, val candidate: SummaryProviderStatus)
 internal class SummaryManagementFailure(val status: Int, val code: String?) : IOException("Provider management request failed")
@@ -67,20 +77,42 @@ internal class SummaryProviderManagement(
 ) {
     @Volatile private var grant: String? = null
 
-    fun capabilities(): Pair<Boolean, String?> {
+    fun capabilities(): Pair<Boolean, String?> = providerCapabilities().let { it.supported to it.model }
+
+    fun providerCapabilities(): SummaryProviderCapabilities {
         val caps = call("/v1/capabilities", admin = false)
         require(caps.getInt("api_version") == 1)
-        return (caps.opt("summary_provider_management_api") == true) to
-            SummaryProviderCapability.parse(caps.optJSONObject("summary_provider"))?.model
+        val supported = caps.opt("summary_provider_management_api") == true
+        val model = SummaryProviderCapability.parse(caps.optJSONObject("summary_provider"))?.model
+        if (!supported || caps.opt("summary_provider_selection_api") != true)
+            return SummaryProviderCapabilities(supported, model)
+        val metadata = call("$ROOT/selection", admin = false)
+        val selection = SummaryProviderStatus.parse(metadata)
+        val required = metadata.opt("admin_required") as? Boolean ?: error("Invalid administrator policy")
+        return SummaryProviderCapabilities(supported, selection.model, selection, required)
     }
 
+    fun openSession(): SummaryProviderStatus = establish("$ROOT/open", JSONObject())
+
     fun authorize(code: String): SummaryProviderStatus {
+        return establish("$ROOT/redeem", JSONObject().put("code", TranscriberConnection.normalizeCode(code)))
+    }
+
+    private fun establish(path: String, body: JSONObject): SummaryProviderStatus {
         grant = null
-        val result = call("$ROOT/redeem", JSONObject().put("code", TranscriberConnection.normalizeCode(code)), false)
+        val result = call(path, body, false)
         val token = result.opt("token") as? String ?: error("Invalid administrator grant")
         require(token.matches(Regex("[A-Za-z0-9_-]{43}")))
         grant = token
         return status()
+    }
+
+    fun setAdminRequired(required: Boolean): Boolean {
+        val result = call("$ROOT/policy", JSONObject().put("admin_required", required))
+        grant = null
+        return (result.opt("admin_required") as? Boolean ?: error("Invalid administrator policy")).also {
+            require(it == required)
+        }
     }
 
     fun status(): SummaryProviderStatus = SummaryProviderStatus.parse(call("$ROOT/session"))

@@ -9,7 +9,7 @@ internal enum class SummaryProviderChoice(val kind: String?) {
 }
 
 internal enum class SummaryProviderOperation {
-    CAPABILITIES, AUTHORIZE, DISCOVER, TEST, SAVE, DISABLE, FORGET_LOBO, CANCEL
+    CAPABILITIES, AUTHORIZE, DISCOVER, TEST, SAVE, DISABLE, FORGET_LOBO, CANCEL, POLICY
 }
 
 internal class SummaryProviderRequest(val operation: SummaryProviderOperation)
@@ -29,11 +29,15 @@ internal data class SummaryProviderWorkflowState(
     val pending: SummaryProviderRequest? = null,
     val activeProvider: SummaryProviderStatus? = null,
     val verifyLoboAgain: Boolean = false,
+    val automaticActivation: Boolean = false,
+    val adminRequired: Boolean = true,
 ) {
     val idle: Boolean get() = pending == null
     val editable: Boolean get() = screen == SummaryProviderScreen.CONFIGURATION && idle
     val authorized: Boolean get() = authorization != null
-    val canAuthorize: Boolean get() = editable && !authorized
+    val canAuthorize: Boolean get() = editable && (!authorized || (automaticActivation && authorization?.administrator == false))
+    val canOpen: Boolean get() = editable && automaticActivation && !adminRequired && !authorized
+    val canSetPolicy: Boolean get() = editable && automaticActivation && authorization?.administrator == true
     val canReuse: Boolean get() = editable && authorization?.configured == true
     val addressEntered: Boolean get() = !draftEndpoint.isNullOrBlank()
     val hasStoredLoboTrust: Boolean get() = choice == SummaryProviderChoice.LOBO &&
@@ -124,6 +128,7 @@ internal class SummaryProviderWorkflow {
             SummaryProviderOperation.DISABLE -> state.canDisable
             SummaryProviderOperation.FORGET_LOBO -> state.canForgetLobo
             SummaryProviderOperation.CANCEL -> state.canCancel
+            SummaryProviderOperation.POLICY -> state.canSetPolicy
         }
         if (!allowed) return null
         val request = SummaryProviderRequest(operation)
@@ -136,19 +141,36 @@ internal class SummaryProviderWorkflow {
         return request
     }
 
-    fun capabilities(request: SummaryProviderRequest, supported: Boolean, activeModel: String?): Boolean {
+    fun capabilities(request: SummaryProviderRequest, supported: Boolean, activeModel: String?): Boolean =
+        capabilities(request, SummaryProviderCapabilities(supported, activeModel))
+
+    fun capabilities(request: SummaryProviderRequest, value: SummaryProviderCapabilities): Boolean {
         if (!accepts(request, SummaryProviderOperation.CAPABILITIES)) return false
+        val selection = value.selection
+        val choice = when {
+            selection?.configured != true -> SummaryProviderChoice.OLLAMA
+            SummaryProviderManagement.canonicalLoboEndpoint(selection.baseUrl) != null && selection.customCa ->
+                SummaryProviderChoice.LOBO
+            runCatching { java.net.URI(selection.baseUrl).port }.getOrNull() == 11434 -> SummaryProviderChoice.OLLAMA
+            else -> SummaryProviderChoice.CUSTOM
+        }
         state = SummaryProviderWorkflowState(
-            screen = if (supported) SummaryProviderScreen.CONFIGURATION else SummaryProviderScreen.UNSUPPORTED,
-            activeModel = activeModel,
+            screen = if (value.supported) SummaryProviderScreen.CONFIGURATION else SummaryProviderScreen.UNSUPPORTED,
+            activeModel = value.model,
+            activeProvider = selection,
+            choice = choice,
+            draftEndpoint = selection?.baseUrl,
+            automaticActivation = selection != null,
+            adminRequired = value.adminRequired,
         )
         return true
     }
 
     fun authorized(request: SummaryProviderRequest, status: SummaryProviderStatus): Boolean {
         if (!accepts(request, SummaryProviderOperation.AUTHORIZE)) return false
-        state = state.copy(authorization = status, activeModel = status.model, activeProvider = status, pending = null)
-        if (state.choice != SummaryProviderChoice.LOBO && !state.addressEntered && status.configured) {
+        state = state.withoutDiscovery().copy(authorization = status, activeModel = status.model, activeProvider = status,
+            adminRequired = status.adminRequired, pending = null)
+        if (!state.automaticActivation && state.choice != SummaryProviderChoice.LOBO && !state.addressEntered && status.configured) {
             choose(SummaryProviderChoice.REUSE)
         }
         return true
@@ -159,7 +181,8 @@ internal class SummaryProviderWorkflow {
         val value = discovery.copy(models = discovery.models.toList())
         state = state.withoutTest().copy(
             discovery = value,
-            model = value.models.firstOrNull { it == value.candidate.model } ?: value.models.firstOrNull(),
+            model = value.models.firstOrNull { it == value.candidate.model }
+                ?: if (state.automaticActivation && value.models.size != 1) null else value.models.firstOrNull(),
             pending = null,
         )
         return true
@@ -170,7 +193,7 @@ internal class SummaryProviderWorkflow {
         val model = state.model
         val result = if (model != null && SummaryProviderManagement.MODEL.matches(model) && elapsedMs >= 0)
             SummaryProviderTestResult(model, elapsedMs) else null
-        state = state.withoutTest().copy(tested = result, pending = null)
+        state = state.withoutTest().copy(tested = result, consent = state.automaticActivation && result != null, pending = null)
         return true
     }
 
@@ -207,6 +230,12 @@ internal class SummaryProviderWorkflow {
         return true
     }
 
+    fun policyChanged(request: SummaryProviderRequest, required: Boolean): Boolean {
+        if (!accepts(request, SummaryProviderOperation.POLICY)) return false
+        state = SummaryProviderWorkflowState(adminRequired = required)
+        return true
+    }
+
     fun cancelled(request: SummaryProviderRequest): Boolean {
         if (!accepts(request, SummaryProviderOperation.CANCEL)) return false
         state = SummaryProviderWorkflowState()
@@ -215,7 +244,7 @@ internal class SummaryProviderWorkflow {
 
     fun failed(request: SummaryProviderRequest, authorizationLost: Boolean = false): Boolean {
         if (state.pending !== request) return false
-        state = if (request.operation in setOf(SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE, SummaryProviderOperation.FORGET_LOBO)) {
+        state = if (request.operation in setOf(SummaryProviderOperation.SAVE, SummaryProviderOperation.DISABLE, SummaryProviderOperation.FORGET_LOBO, SummaryProviderOperation.POLICY)) {
             SummaryProviderWorkflowState(SummaryProviderScreen.RELOAD_REQUIRED)
         } else if (authorizationLost || request.operation == SummaryProviderOperation.CANCEL) {
             SummaryProviderWorkflowState(SummaryProviderScreen.CONFIGURATION, activeModel = state.activeModel,
