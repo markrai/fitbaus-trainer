@@ -50,6 +50,8 @@ import com.fitbaus.bikebridge.host.arcade.ArcadeMode
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeController
 import com.fitbaus.bikebridge.host.arcade.ArcadeModeHooks
 import com.fitbaus.bikebridge.host.books.BooksContent
+import com.fitbaus.bikebridge.host.media.MediaLifecycle
+import com.fitbaus.bikebridge.host.media.AndroidMediaLifecycleEffects
 import com.fitbaus.bikebridge.host.controller.ControllerDevices
 import com.fitbaus.bikebridge.host.controller.GameControllerInput
 import com.fitbaus.bikebridge.host.controller.GameControlBindings
@@ -72,6 +74,11 @@ class NativeBridgeActivity : Activity() {
     private lateinit var booksContent: BooksContent
     private lateinit var floatingPlayer: FrameLayout
     private lateinit var floatingVideoSlot: FrameLayout
+    private val mediaLifecycle by lazy {
+        MediaLifecycle(AndroidMediaLifecycleEffects(youtubeContent, booksContent, floatingPlayer, floatingVideoSlot) {
+            voiceSearch.cancel()
+        })
+    }
     private var resumed = false
     private var pendingYouTubeImport: String? = null
     private lateinit var navigationHeader: BridgeNavigationHeader
@@ -138,29 +145,11 @@ class NativeBridgeActivity : Activity() {
         }
 
         override fun startMedia(mode: ArcadeMode) {
-            if (mode == ArcadeMode.Books) {
-                if (floatingPlayer.visibility == View.VISIBLE) youtubeContent.stop()
-                floatingPlayer.visibility = View.GONE
-                booksContent.start()
-            } else {
-                if (booksContent.floatingPlayer.visibility == View.VISIBLE) booksContent.stop()
-                youtubeContent.start()
-                floatingPlayer.visibility = View.GONE
-            }
+            mediaLifecycle.start(mode)
         }
 
         override fun stopMedia(reason: ArcadeStopReason) {
-            if (modeController.mode == ArcadeMode.Books) {
-                if (reason != ArcadeStopReason.ExitArcade || !booksContent.minimize()) booksContent.stop()
-                return
-            }
-            voiceSearch.cancel()
-            if (reason == ArcadeStopReason.ExitArcade && youtubeContent.minimizeInto(floatingVideoSlot)) {
-                floatingPlayer.visibility = View.VISIBLE
-            } else {
-                youtubeContent.stop()
-                floatingPlayer.visibility = View.GONE
-            }
+            mediaLifecycle.stop(modeController.mode, reason)
         }
     }
     private val modeController: ArcadeModeController = ArcadeModeController(arcadeHooks)
@@ -236,9 +225,7 @@ class NativeBridgeActivity : Activity() {
         gameController.resetTransient()
         resumed = false
         modeController.onHostPause()
-        youtubeContent.stop()
-        floatingPlayer.visibility = View.GONE
-        if (booksContent.floatingPlayer.visibility == View.VISIBLE) booksContent.stop()
+        mediaLifecycle.afterHostPause()
         handler.removeCallbacks(refresh)
         super.onPause()
     }
@@ -275,8 +262,7 @@ class NativeBridgeActivity : Activity() {
         voiceSearch.cancel()
         controllerOwnership.onHostPause()
         modeController.onHostDestroy()
-        youtubeContent.destroy()
-        booksContent.destroy()
+        mediaLifecycle.afterHostDestroy()
         handler.removeCallbacks(refresh)
         UvcProcess.release(this)
         super.onDestroy()
@@ -697,10 +683,7 @@ class NativeBridgeActivity : Activity() {
             shape = GradientDrawable.OVAL
             setColor(Color.argb(195, 0, 0, 0))
         }
-        close.setOnClickListener {
-            youtubeContent.stop()
-            floatingPlayer.visibility = View.GONE
-        }
+        close.setOnClickListener { mediaLifecycle.closeYouTubeFloating() }
         floating.addView(
             close,
             FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP or Gravity.END).apply {
