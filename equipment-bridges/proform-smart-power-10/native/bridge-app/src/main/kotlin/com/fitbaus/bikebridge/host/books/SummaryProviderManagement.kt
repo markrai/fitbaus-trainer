@@ -96,7 +96,7 @@ internal class SummaryProviderManagement(
         val body = JSONObject().put("kind", kind).put("base_url", url).put("allow_http", allowHttp)
         if (key.isNotEmpty()) body.put("api_key", key)
         if (kind == "lobo") {
-            require(!allowHttp && key.isEmpty())
+            require(!allowHttp && key.isEmpty() && canonicalLoboEndpoint(url) == url)
             body.put("lobo_auth", requireNotNull(normalizeLoboAuth(auth)))
         }
         return discover(body)

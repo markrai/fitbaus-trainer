@@ -4,7 +4,7 @@ internal class SummaryProviderAction<T>(
     val operation: SummaryProviderOperation,
     val execute: () -> T,
     val complete: (SummaryProviderRequest, T) -> Boolean,
-    val expectedState: SummaryProviderWorkflowState? = null,
+    val expectedState: SummaryProviderWorkflowState,
 )
 
 internal class SummaryProviderActions(
@@ -13,9 +13,9 @@ internal class SummaryProviderActions(
 ) {
     fun capabilities() = SummaryProviderAction(SummaryProviderOperation.CAPABILITIES, api::capabilities, { ticket, value ->
         workflow.capabilities(ticket, value.first, value.second)
-    })
+    }, workflow.state)
 
-    fun authorize(code: String) = SummaryProviderAction(SummaryProviderOperation.AUTHORIZE, { api.authorize(code) }, workflow::authorized)
+    fun authorize(code: String) = SummaryProviderAction(SummaryProviderOperation.AUTHORIZE, { api.authorize(code) }, workflow::authorized, workflow.state)
 
     fun discover(url: String, allowHttp: Boolean, key: String, auth: String): SummaryProviderAction<SummaryProviderDiscovery> {
         val state = workflow.state
@@ -25,25 +25,30 @@ internal class SummaryProviderActions(
         val remembered = state.reusesRememberedLobo && state.draftEndpoint == url.trim().trimEnd('/') &&
             auth.isBlank() && key.isEmpty() && !allowHttp
         val expected = state.authorization
+        val normalizedUrl = url.trim().trimEnd('/')
         return SummaryProviderAction(SummaryProviderOperation.DISCOVER, {
+            if (choice == SummaryProviderChoice.LOBO) require(state.draftEndpoint == normalizedUrl &&
+                SummaryProviderManagement.canonicalLoboEndpoint(normalizedUrl) == normalizedUrl)
             if (reuse) api.discoverCurrent().also { result ->
                 require(expected != null && result.candidate.sameEndpointAndTrust(expected))
             } else if (remembered) api.discoverRememberedLobo(url).also { result ->
                 require(result.candidate.matchesTrustedLobo(url))
             } else api.discoverNew(requireNotNull(choice.kind), url, allowHttp, key, auth).also { result ->
-                require(result.candidate.baseUrl?.trimEnd('/') == url.trim().trimEnd('/'))
+                require(result.candidate.baseUrl?.trimEnd('/') == normalizedUrl)
+                if (choice == SummaryProviderChoice.LOBO) require(result.candidate.matchesTrustedLobo(normalizedUrl))
             }
-        }, workflow::discovered)
+        }, workflow::discovered, state)
     }
 
     fun test(): SummaryProviderAction<Long> {
-        val model = workflow.state.model.orEmpty()
-        return SummaryProviderAction(SummaryProviderOperation.TEST, { api.test(model) }, workflow::tested)
+        val state = workflow.state
+        val model = state.model.orEmpty()
+        return SummaryProviderAction(SummaryProviderOperation.TEST, { api.test(model) }, workflow::tested, state)
     }
 
-    fun save() = SummaryProviderAction(SummaryProviderOperation.SAVE, api::save, workflow::saved)
+    fun save() = SummaryProviderAction(SummaryProviderOperation.SAVE, api::save, workflow::saved, workflow.state)
 
-    fun disable() = SummaryProviderAction(SummaryProviderOperation.DISABLE, api::disable, workflow::disabled)
+    fun disable() = SummaryProviderAction(SummaryProviderOperation.DISABLE, api::disable, workflow::disabled, workflow.state)
 
     fun forgetLobo(): SummaryProviderAction<SummaryProviderStatus> {
         val state = workflow.state
@@ -53,10 +58,10 @@ internal class SummaryProviderActions(
 
     fun cancel() = SummaryProviderAction(SummaryProviderOperation.CANCEL, api::cancel, { ticket, _ ->
         workflow.cancelled(ticket)
-    })
+    }, workflow.state)
 
     fun begin(action: SummaryProviderAction<*>): SummaryProviderRequest? {
-        if (action.expectedState != null && action.expectedState !== workflow.state) return null
+        if (action.expectedState !== workflow.state) return null
         return workflow.begin(action.operation)
     }
 

@@ -44,7 +44,7 @@ internal data class SummaryProviderWorkflowState(
         authorization?.remembersLobo(draftEndpoint) == true
     val usesStoredLoboTrust: Boolean get() = reusesCurrentLobo || reusesRememberedLobo
     val canDiscover: Boolean get() = editable && authorized &&
-        (choice != SummaryProviderChoice.LOBO || addressEntered)
+        (choice != SummaryProviderChoice.LOBO || SummaryProviderManagement.canonicalLoboEndpoint(draftEndpoint) != null)
     val canTest: Boolean get() = editable && authorized && discovery != null
     val canSave: Boolean get() = canTest && tested != null && tested.model == model && consent
     val canDisable: Boolean get() = editable && authorization?.configured == true
@@ -75,7 +75,8 @@ internal class SummaryProviderWorkflow {
 
     fun addressEdited(endpoint: String): Boolean {
         if (!state.editable || state.choice == SummaryProviderChoice.REUSE) return false
-        val value = endpoint.trim().trimEnd('/').takeIf {
+        val value = if (state.choice == SummaryProviderChoice.LOBO) SummaryProviderManagement.canonicalLoboEndpoint(endpoint)
+        else endpoint.trim().trimEnd('/').takeIf {
             runCatching { SummaryProviderManagement.validateUrl(it) }.isSuccess
         }
         state = state.withoutDiscovery().copy(draftEndpoint = value, verifyLoboAgain = false)

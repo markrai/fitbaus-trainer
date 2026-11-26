@@ -342,4 +342,52 @@ class SummaryProviderManagementTest {
         assertEquals("lobo-nano", flow.state.model)
         assertTrue(flow.state.canTest)
     }
+
+    @Test
+    fun staleDiscoveryAndTestActionsCannotExecuteAgainstNewDraft() {
+        val flow = SummaryProviderWorkflow()
+        val actions = SummaryProviderActions(flow, client())
+        runAction(actions, actions.capabilities())
+        assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1"))
+        runAction(actions, actions.authorize("ABCD-EFGH"))
+        val stale = actions.discover("https://192.168.1.200:7869/v1", false, "", "")
+        assertTrue(flow.addressEdited("https://192.168.1.201:7869/v1"))
+        val count = requests.size
+        assertNull(actions.begin(stale))
+        val mismatched = actions.discover("https://192.168.1.200:7869/v1", false, "", "FMV3-14SR")
+        val ticket = requireNotNull(actions.begin(mismatched))
+        val error = assertThrows(IllegalArgumentException::class.java) { mismatched.execute() }
+        assertTrue(actions.fail(ticket, error))
+        assertEquals(count, requests.size)
+        assertTrue(flow.addressEdited("https://192.168.1.200:7869/v1"))
+        discoveryModels = JSONArray().put("lobo-nano").put("other")
+        runAction(actions, actions.discover("https://192.168.1.200:7869/v1", false, "", ""))
+        val test = actions.test()
+        assertTrue(flow.selectModel("other"))
+        assertNull(actions.begin(test))
+        assertFalse(flow.state.canSave)
+    }
+
+    @Test
+    fun firstTimeLoboDiscoveryRequiresMatchingPinnedTlsMetadata() {
+        val endpoint = "https://192.168.1.202:7869/v1"
+        for (field in listOf("custom_ca", "allow_http", "has_api_key")) {
+            val flow = SummaryProviderWorkflow()
+            val actions = SummaryProviderActions(flow, client())
+            runAction(actions, actions.capabilities())
+            assertTrue(flow.choose(SummaryProviderChoice.LOBO))
+            assertTrue(flow.addressEdited(endpoint))
+            runAction(actions, actions.authorize("ABCD-EFGH"))
+            discoveryCandidate = JSONObject(configured.toString()).put("base_url", endpoint)
+                .put(field, field != "custom_ca")
+            val action = actions.discover(endpoint, false, "", "FMV3-14SR")
+            val ticket = requireNotNull(actions.begin(action))
+            val error = assertThrows(IllegalArgumentException::class.java) { action.execute() }
+            assertTrue(actions.fail(ticket, error))
+            assertFalse(flow.state.canTest)
+            assertFalse(summaryProviderPresentation(flow.state).candidateDetail.contains("verified ·"))
+        }
+    }
+
 }
