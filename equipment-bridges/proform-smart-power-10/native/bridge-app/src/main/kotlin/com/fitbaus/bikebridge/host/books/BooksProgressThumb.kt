@@ -28,7 +28,7 @@ internal class BooksProgressThumb(resources: Resources) : Drawable() {
     }
     private var percent = 0
     private var percentageText = "0%"
-    private var opacity = 255
+    private var paintAlpha = 255
     private var enabled = true
 
     fun updateProgress(progress: Int, max: Int) {
@@ -46,10 +46,10 @@ internal class BooksProgressThumb(resources: Resources) : Drawable() {
         val x = bounds.exactCenterX()
         val y = bounds.exactCenterY()
         fill.color = if (enabled) 0xffffce1b.toInt() else 0xff42474e.toInt()
-        fill.alpha = opacity
+        fill.alpha = paintAlpha
         canvas.drawCircle(x, y, minOf(bounds.width(), bounds.height()) / 2f, fill)
         label.color = if (enabled) Color.BLACK else 0xffb0b5bd.toInt()
-        label.alpha = opacity
+        label.alpha = paintAlpha
         val metrics = label.fontMetrics
         canvas.drawText(percentageText, x, y - (metrics.ascent + metrics.descent) / 2f, label)
     }
@@ -65,7 +65,7 @@ internal class BooksProgressThumb(resources: Resources) : Drawable() {
     }
 
     override fun setAlpha(alpha: Int) {
-        opacity = alpha
+        paintAlpha = alpha
         invalidateSelf()
     }
 
