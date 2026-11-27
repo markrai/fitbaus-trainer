@@ -60,7 +60,14 @@ internal class BooksConceptExplanationView(context: Context, private val onDismi
         body.text = when (state) {
             ConceptExplanation.Loading -> "Preparing explanation…"
             ConceptExplanation.Unavailable -> "Explanation unavailable. Tap to return and double-tap the card to retry."
+            is ConceptExplanation.Streaming -> state.text
+            is ConceptExplanation.Incomplete -> state.text
             is ConceptExplanation.Ready -> state.text
+        }
+        notice.text = when (state) {
+            is ConceptExplanation.Streaming -> "Generating… · Tap anywhere to return"
+            is ConceptExplanation.Incomplete -> "Incomplete explanation · Return and double-tap to retry"
+            else -> "AI-generated explanation · Tap anywhere to return"
         }
         visibility = VISIBLE
         if (changed) scrollTo(0, 0)
