@@ -97,7 +97,7 @@ internal class NativeUsbSession(
     private val permissionPollMs: Long = HostConstants.PERMISSION_POLL_MS,
     private val resistanceQueueWaitMs: Long = HostConstants.RESISTANCE_QUEUE_WAIT_MS,
     private val resistanceTransmitWaitMs: Long = HostConstants.RESISTANCE_TRANSMIT_WAIT_MS,
-    private val onRpmReading: (Int?) -> Unit = {},
+    private val onCyclingReading: (Int?, Int?) -> Unit = { _, _ -> },
     private val workerOwnership: NativeUsbWorkerOwnership = NativeUsbWorkerOwnership.process,
 ) {
     private val running = AtomicBoolean(false)
@@ -204,7 +204,7 @@ internal class NativeUsbSession(
                 publishOffline()
             } finally {
                 try {
-                    onRpmReading(null)
+                    onCyclingReading(null, null)
                     failPendingResistance("usb session stopped")
                     if (!terminalFailure.get()) {
                         note("stopped")
@@ -325,7 +325,7 @@ internal class NativeUsbSession(
         maxReconnectAttempts >= 0 && attempts > maxReconnectAttempts
 
     private fun publishOffline() {
-        onRpmReading(null)
+        onCyclingReading(null, null)
         snapshot.set(ContinuousReadPlan.afterUnsuccessfulRead(snapshot.get(), connected = false))
     }
 
@@ -518,7 +518,7 @@ internal class NativeUsbSession(
             }
             consecutiveFailures = 0
             if (poll.securityBlocked) {
-                onRpmReading(null)
+                onCyclingReading(null, null)
                 when (handleSecurityBlock(transport, allowlist, primary, adopted.deviceInfo)) {
                     N1Resume.Stop -> return SessionOutcome.Stopped
                     N1Resume.Continue -> {
@@ -543,7 +543,9 @@ internal class NativeUsbSession(
             phase.set(UsbPhase.Streaming)
             val rpm = (poll.readings[BikeField.RPM] as? FieldValue.Number)?.value
                 ?.takeIf { it in 0L..250L }?.toInt()
-            onRpmReading(rpm)
+            val watts = (poll.readings[BikeField.WATTS] as? FieldValue.Number)?.value
+                ?.takeIf { it in 0L..65_535L }?.toInt()
+            onCyclingReading(rpm, watts)
             cycle += 1
         }
         if (!running.get()) return SessionOutcome.Stopped
