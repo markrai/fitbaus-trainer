@@ -10,8 +10,11 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.util.TypedValue
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 internal class BooksConceptView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -22,6 +25,13 @@ internal class BooksConceptView(context: Context) : View(context) {
     private var styles = emptyList<ConceptCardStyle>()
     private var metrics = emptyList<ConceptCardMetrics>()
     private var stroke = 0
+    private val positions = BooksConceptDragPositions()
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var pressedCard: ConceptPlacement? = null
+    private var pointerId = MotionEvent.INVALID_POINTER_ID
+    private var downX = 0f
+    private var downY = 0f
+    private var dragging = false
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -31,6 +41,8 @@ internal class BooksConceptView(context: Context) : View(context) {
 
     fun showConcepts(value: List<String>): Boolean {
         if (snippets == value) return false
+        finishDrag()
+        positions.clear()
         snippets = value.toList()
         styles = BooksConceptStyles.assign(snippets)
         labels = emptyList()
@@ -44,6 +56,8 @@ internal class BooksConceptView(context: Context) : View(context) {
     }
 
     fun clearConcepts() {
+        finishDrag()
+        positions.clear()
         snippets = emptyList()
         labels = emptyList()
         styles = emptyList()
@@ -99,11 +113,7 @@ internal class BooksConceptView(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val left = (width - (width - dp(40)).coerceAtLeast(1)) / 2f
-        val top = maxOf(dp(20).toFloat(), (height - geometry.height) / 2f)
-        canvas.save()
-        canvas.translate(left, top)
-        for (placed in geometry.placements) {
+        for (placed in displayedCards()) {
             val style = styles[placed.index]
             val card = metrics[placed.index]
             val centerX = placed.left + placed.width / 2f
@@ -126,7 +136,80 @@ internal class BooksConceptView(context: Context) : View(context) {
             label.draw(canvas)
             canvas.restore()
         }
-        canvas.restore()
+    }
+
+    private fun displayedCards(): List<ConceptPlacement> {
+        val left = (width - (width - dp(40)).coerceAtLeast(1)) / 2
+        val top = maxOf(dp(20), (height - geometry.height) / 2)
+        return positions.resolve(geometry.placements, left, top, width, height)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                finishDrag()
+                val card = positions.hitTest(displayedCards(), event.x, event.y) ?: return false
+                pressedCard = card
+                pointerId = event.getPointerId(0)
+                downX = event.x
+                downY = event.y
+                parent?.requestDisallowInterceptTouchEvent(true)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val card = pressedCard ?: return false
+                val index = event.findPointerIndex(pointerId)
+                if (index < 0) {
+                    finishDrag()
+                    return true
+                }
+                moveCard(card, event.getX(index), event.getY(index))
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val card = pressedCard ?: return false
+                val index = event.findPointerIndex(pointerId)
+                if (index >= 0) moveCard(card, event.getX(index), event.getY(index))
+                if (!dragging) performClick()
+                finishDrag()
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (event.getPointerId(event.actionIndex) == pointerId) finishDrag()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                finishDrag()
+                return true
+            }
+            else -> return pressedCard != null
+        }
+    }
+
+    private fun moveCard(card: ConceptPlacement, x: Float, y: Float) {
+        val dx = x - downX
+        val dy = y - downY
+        if (!dragging && dx * dx + dy * dy < touchSlop.toFloat() * touchSlop) return
+        dragging = true
+        positions.move(card, card.left + dx.roundToInt(), card.top + dy.roundToInt(), width, height)
+        invalidate()
+    }
+
+    fun finishDrag() {
+        if (pressedCard != null) parent?.requestDisallowInterceptTouchEvent(false)
+        pressedCard = null
+        pointerId = MotionEvent.INVALID_POINTER_ID
+        dragging = false
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
+    override fun onDetachedFromWindow() {
+        finishDrag()
+        super.onDetachedFromWindow()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
