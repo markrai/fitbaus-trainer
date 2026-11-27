@@ -10,6 +10,173 @@ support, is maintained on `lite/1.x`.
 
 ## [Unreleased]
 
+## [2.6.0]
+
+Full 2.6.0 (`versionCode 20600`) adds section diagrams and Concept Canvas to
+fullscreen audiobook reading, with mutually exclusive Narration, Summary and
+Concepts modes.
+
+### Added
+
+- **Section diagrams.** After a verified section summary draws, optionally
+  prefetch and present a native fullscreen flowchart for that summary. Touch
+  navigation, Android Back, and ordinary playback remain independent of the
+  diagram request lifecycle.
+- **Concept Canvas.** Prefer Concept Canvas when the paired Transcriber
+  advertises it, packing upright colored concept cards in response order while
+  preserving top-to-bottom reading order. Legacy flowchart servers keep the
+  existing diagram path.
+
+### Changed
+
+- **Fullscreen reading modes.** Use sticky, mutually exclusive Narration,
+  Summary and Concepts modes that share one fullscreen player container with
+  persistent bike telemetry. Mode selection is independent of content
+  readiness; Android Back exits the shared fullscreen presentation.
+- **Automatic provider activation.** Activate an explicitly selected
+  summarization provider and model automatically after successful inference,
+  while retaining advanced authentication controls.
+
+### Fixed
+
+- **Audiobook narration seek stability.** Keep Read Along identity stable
+  across repeated seek callbacks and degrade safely to audio-only playback
+  when narration identity fails.
+- **Concept Canvas packing.** Keep cards upright with solid fills, reserve
+  adjacent space for side-by-side long ideas, and preserve chronological
+  top ordering for mixed card widths.
+
+## [2.5.0]
+
+Full 2.5.0 (`versionCode 20500`) unifies Transcriber settings, simplifies
+provider authorization, and brings rolling summaries into fullscreen
+narration.
+
+### Added
+
+- **Transcriber workspace.** Replace separate Transcriber setup surfaces with
+  one scrollable Settings workspace: a compact pairing card plus inline
+  Transcription models and Summarization tabs that share the existing
+  management and authorization logic.
+- **Remembered LOBO devices.** Reuse previously trusted LOBO endpoints with
+  their saved certificates so returning devices can connect without repeating
+  first-use AUTH entry.
+- **Inline rolling summary.** Show the current-section rolling summary inline
+  in fullscreen narration at a fixed bottom anchor that does not disturb the
+  narration viewport.
+
+### Changed
+
+- **Simplified summary authorization.** Streamline administrator
+  authorization and active-provider draft handling inside the provider panel
+  without exposing stored credentials.
+- **Simplified LOBO selection.** Connect and test LOBO automatically after
+  device selection, with optional first-use trust on a supporting Transcriber.
+
+### Fixed
+
+- **Fullscreen narration position.** Preserve narration scroll position across
+  summary updates, and keep the rolling-summary overlay anchored independently
+  of changing narration length.
+
+## [2.4.1]
+
+### Fixed
+
+- **Workout finalization and recovery.** Finalize ordinary workouts reliably,
+  recover interrupted workout records without overwriting saved history, and
+  tighten start-admission checks before a new session begins.
+- **Telemetry integrity.** Keep telemetry drain ownership, persistence and
+  VO2 tick handling consistent across phone and console paths.
+- **USB worker ownership.** Ensure a single USB worker owns the bike interface
+  through stop/restart recovery without disturbing paired resistance control.
+
+## [2.4.0]
+
+Full 2.4.0 (`versionCode 20400`) adds optional current-section summarization
+and recap workflows through a paired FitBaus Transcriber, including LOBO and
+other OpenAI-compatible provider setup on the console.
+
+### Added
+
+- **Summary provider discovery.** Read optional summarization capability from
+  the paired Transcriber and configure Ollama, LOBO or a custom
+  OpenAI-compatible endpoint without sending provider credentials to
+  Audiobookshelf.
+- **Current-section summaries.** Request whole-section summaries automatically
+  in fullscreen Read Along when verified remote narration and a configured
+  provider are available. Loading and failure stay silent; section or session
+  changes cancel local delivery.
+- **Fullscreen summary presentation.** Show ready section summaries below
+  narration as smaller italic text in a fixed overlay that never steals the
+  original narration viewport.
+- **Recent and book recaps.** Support verified recent-recap and cumulative
+  book-recap workflows against the paired Transcriber. Capture the live
+  playback cutoff, validate identity and range, and suppress late results after
+  seeks or session changes.
+- **LOBO provider discovery.** Browse local `_lobo._tcp` devices, fill the
+  HTTPS `/v1` endpoint from discovery metadata, and keep manual address entry
+  available when multicast is blocked.
+
+### Changed
+
+- **Audiobook player chrome.** Clean up normal and fullscreen player actions so
+  chapter, speed and seek controls stay reachable without competing with
+  narration and summary surfaces.
+- **Fullscreen-only summaries.** Keep automatic section summaries in the
+  fullscreen reading experience rather than the compact player.
+
+### Fixed
+
+- **Summary provider console UX.** Fix provider-panel layout, soft-keyboard
+  focus and inline administrator authorization on the legacy bike console.
+- **Cumulative recap conflicts.** Distinguish missing-transcript conflicts from
+  partial recaps and keep retry tied to the original playback cutoff.
+- **LOBO discovery compatibility.** Accept API 22 NSD service-type variants and
+  hold a Wi-Fi multicast lock for the discovery window.
+
+## [2.3.0]
+
+Full 2.3.0 (`versionCode 20300`) introduces native Audiobookshelf Books, Read
+Along narration, optional FitBaus Transcriber pairing, and a YouTube
+subscriptions channel grid.
+
+### Added
+
+- **Books tab and Audiobookshelf library.** Connect to a self-hosted
+  Audiobookshelf server over HTTPS or private-network HTTP, store credentials
+  in the Android Keystore, browse a five-column cover grid with pagination and
+  title search, and open books in a native player.
+- **Native audiobook playback.** Direct-play with book-relative seeking,
+  chapter navigation, playback speed, 30-second skips, audio focus and
+  server progress sync. Leaving Books or pausing the activity releases
+  playback.
+- **Read Along narration.** Synchronize bounded WebVTT/SRT cues to the
+  playback clock in a large-print narration view with a persistent text-size
+  slider. Local transcript fixtures remain available for qualification.
+- **Remote FitBaus Transcriber.** Pair an optional self-hosted Transcriber with
+  short codes, fetch remote narration windows by playback position, and keep
+  transcription failures isolated from audio.
+- **Transcriber preparation.** Prepare and qualify transcription models from
+  the console, including automatic model qualification UI and hardened
+  preparation-session handling.
+- **Floating Books reader.** Keep a compact floating reader available while
+  riding, with fullscreen narration that retains live bike telemetry.
+- **Chapter timeline and sections.** Use Audiobookshelf chapter metadata as
+  structural anchors and resolve deterministic playback sections for later
+  summarization without changing ordinary listening.
+- **YouTube subscriptions grid.** Display subscribed channels in a
+  five-column grid with channel thumbnails and names, with initials as a
+  fallback when artwork is unavailable. Reuse subscription response data
+  without additional YouTube API calls.
+
+### Fixed
+
+- **Bike Bridge launcher icon.** Use the Trainer launcher icon for the Bike
+  Bridge package identity on the console.
+
+## [2.2.1]
+
 ### Fixed
 
 - **IT HEARS YOU webcam steering.** Use the same 3% horizontal dead zone,
@@ -1235,6 +1402,12 @@ records and are not renumbered.
   workout logic, and basic controls.
 
 [Unreleased]: https://github.com/markrai/fitbaus-trainer/commits/main/
+[2.6.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.4.1...v2.5.0
+[2.4.1]: https://github.com/markrai/fitbaus-trainer/compare/v2.4.0...v2.4.1
+[2.4.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.2.1...v2.3.0
+[2.2.1]: https://github.com/markrai/fitbaus-trainer/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/markrai/fitbaus-trainer/compare/v2.1.0...v2.2.0
 [1.0.1]: https://github.com/markrai/fitbaus-trainer/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/markrai/fitbaus-trainer/tree/v1.0.0
