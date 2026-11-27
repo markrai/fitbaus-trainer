@@ -20,6 +20,10 @@ internal class BooksReadingSelection {
     var selected = BooksReadingMode.NARRATION
         private set
 
+    fun reset() {
+        selected = BooksReadingMode.NARRATION
+    }
+
     fun select(mode: BooksReadingMode, availability: BooksReadingAvailability): Boolean {
         if (mode == selected || !availability.allows(mode)) return false
         selected = mode
