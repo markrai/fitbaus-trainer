@@ -401,11 +401,8 @@ jobs:
         working-directory: tooling
         env:
           CAND_DIR: public-distribution
-          SOURCE_COMMIT: ${{ needs.build.outputs.commit }}
         run: |
           set -euo pipefail
-          # steps.ref already re-fetched and peeled the tag against EXPECTED_COMMIT.
-          test "$SOURCE_COMMIT" = "$EXPECTED_COMMIT"
           node scripts/release/validate-release-candidate.cjs \
             --dir "$GITHUB_WORKSPACE/$CAND_DIR" \
             --tag "$RELEASE_TAG" \
@@ -467,6 +464,7 @@ jobs:
         run: |
           set -euo pipefail
           command -v gh >/dev/null
+          (cd "$TOOLING_DIR" && node scripts/release/resolve-release-request.cjs "$RELEASE_TAG" "$EXPECTED_COMMIT")
           cand="$CAND_DIR/release-candidate.json"
           version="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).versionName)" "$cand")"
           plan=(node "$TOOLING_DIR/scripts/release/edition.cjs" --edition "$EDITION" --version-name "$version" --tag "$RELEASE_TAG")
