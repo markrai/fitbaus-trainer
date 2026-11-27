@@ -13,6 +13,13 @@ support, is maintained on `lite/1.x`.
 
 Planned patch release: Full 2.6.1 (`versionCode 20601`).
 
+### Changed
+
+- **Audiobook transcription controls.** Rename Transcription Models to Transcribe
+  Book, restrict the book dialog to installed, qualified models and per-book
+  transcription jobs, and keep model management in Settings. Restyle the Library
+  and Transcribe Book player buttons.
+
 ### Fixed
 
 - **Fullscreen reading entry.** Always select narration when entering or
