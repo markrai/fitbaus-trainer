@@ -29,6 +29,8 @@ Planned patch release: Full 2.6.1 (`versionCode 20601`).
   AI-generated explanation using the configured Transcriber provider. Tap
   the explanation to return; explanations are retained only for the current
   card set. Existing dragging and chronological layout remain unchanged.
+  Stream LOBO explanation text as it arrives, retaining partial text while
+  generation continues and marking incomplete responses.
 
 ### Changed
 

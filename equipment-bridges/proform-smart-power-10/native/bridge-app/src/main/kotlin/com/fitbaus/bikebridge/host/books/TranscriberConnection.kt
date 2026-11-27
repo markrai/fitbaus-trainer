@@ -31,7 +31,7 @@ internal class TranscriberConnection(val address: String, val token: String) {
             SummaryProviderCapability.parse(json.optJSONObject("summary_provider")), json.opt("summary_api") == true,
             json.opt("section_plan_api") == true, json.opt("recap_api") == true,
             cumulativeRecapLimit(json), diagramSupported(json), json.opt("summary_concept_api") == true,
-            json.opt("concept_elaboration_api") == true)
+            json.opt("concept_elaboration_api") == true, json.opt("concept_elaboration_stream_api") == true)
     }
 
     companion object {
@@ -90,6 +90,7 @@ internal data class TranscriberCapabilities(
     val summaryDiagramApi: Boolean = false,
     val summaryConceptApi: Boolean = false,
     val conceptElaborationApi: Boolean = false,
+    val conceptElaborationStreamApi: Boolean = false,
 )
 
 internal data class SummaryProviderCapability(val model: String) {
