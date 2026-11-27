@@ -61,5 +61,11 @@ class BooksInlineSummaryAttemptTest {
         assertTrue(source.contains("remote.loadRecap(selection"))
         assertTrue(source.contains("remote.loadBookRecap(selection"))
         assertTrue(source.contains("if (value) maybeStartInlineSummary()"))
+        val entry = source.substringAfter("fun setFullscreen(value: Boolean) {").substringBefore("private fun updateReadingChrome()")
+        val reset = entry.indexOf("if (value) readingSelection.reset()")
+        assertTrue(reset > entry.indexOf("if (fullscreen == value) return"))
+        assertTrue(reset < entry.indexOf("updateReadingChrome()"))
+        assertTrue(reset < entry.indexOf("maybeStartInlineSummary()"))
+        assertFalse(source.substringAfter("fun render(state: BooksPlayerState)").contains("readingSelection.reset()"))
     }
 }
