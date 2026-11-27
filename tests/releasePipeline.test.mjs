@@ -11,6 +11,8 @@ const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const { resolveSourceRef } = require("../scripts/release/resolve-source-ref.cjs");
+const { releaseIdentity, resolveReleaseRequest } = require("../scripts/release/resolve-release-request.cjs");
+const { releaseNotes } = require("../scripts/release/release-notes.cjs");
 const { assertCertMatchesPolicy } = require("../scripts/release/check-signing-policy.cjs");
 const { assertBridgeQualified } = require("../scripts/release/check-physical-qualification.cjs");
 const { preparePublicArtifacts } = require("../scripts/release/prepare-public-artifacts.cjs");
@@ -2331,4 +2333,46 @@ test("release workflow uses a single trusted build and publish run", () => {
   assert.doesNotMatch(yml.slice(yml.indexOf("\n  publish:")), /gradlew|sign-apk\.cjs|SIGNING_STORE/);
   assert.doesNotMatch(yml, /--allow-unset|debug\.keystore|signingConfigs\.debug|candidate_run_id/);
   assert.match(yml, /^permissions:\n  contents: read$/m);
+});
+
+test("release identity derives the correct edition and canonical title from the tag", () => {
+  const full = releaseIdentity("v2.6.0");
+  assert.equal(full.edition, "full");
+  assert.equal(full.branch, "main");
+  assert.equal(full.versionCode, 20600);
+  assert.equal(full.title, "FitBaus Full 2.6.0");
+  assert.equal(releaseIdentity("v1.0.1").branch, "lite/1.x");
+  for (const tag of ["main", "v3.0.0", "v2.100.0", "v2.6.0-beta", "v2.6.0\ncommit=bad"]) {
+    assert.throws(() => releaseIdentity(tag));
+  }
+});
+
+test("automatic and manual release resolution trust only exact tags on edition branches", () => {
+  const fixture = makeAnnotatedTagFixture({ tag: "v2.6.0" });
+  const local = tempDir("fitbaus-release-resolution-");
+  gitOk(local, ["clone", "--no-tags", fixture.dir, "."]);
+  const resolve = (tag, expectedCommit = "") => resolveReleaseRequest({ tag, expectedCommit, repoDir: local });
+  assert.deepEqual(resolve("v2.6.0"), {
+    tag: "v2.6.0", edition: "full", title: "FitBaus Full 2.6.0", commit: fixture.commit,
+  });
+  assert.equal(resolve("v2.6.0", fixture.commit).commit, fixture.commit);
+  assert.throws(() => resolve("v2.6.0", "0".repeat(40)), /triggering CI commit/);
+  assert.throws(() => resolve("v2.6.1"));
+  gitOk(fixture.dir, ["switch", "-c", "lite/1.x"]);
+  gitOk(fixture.dir, ["commit", "--allow-empty", "-m", "Lite only"]);
+  const liteCommit = gitOk(fixture.dir, ["rev-parse", "HEAD"]);
+  gitOk(fixture.dir, ["tag", "-a", "v1.0.1", "-m", "Lite"]);
+  gitOk(fixture.dir, ["tag", "-a", "v2.6.1", "-m", "Wrong edition"]);
+  assert.equal(resolve("v1.0.1", liteCommit).edition, "lite");
+  assert.throws(() => resolve("v2.6.1"), /ancestor of main/);
+  gitOk(fixture.dir, ["tag", "-f", "-a", "v2.6.0", "-m", "Moved tag", liteCommit]);
+  assert.throws(() => resolve("v2.6.0", fixture.commit));
+});
+
+test("release notes select only the exact tagged changelog section", () => {
+  const changelog = "# Changelog\r\n\r\n## [2.7.0]\r\nLater\r\n## [2.6.0] - 2026-11-26\r\n### Added\r\nNew reading modes\r\n## [2.5.0]\r\nEarlier\r\n";
+  assert.equal(releaseNotes("2.6.0", changelog, "Installers"), "### Added\nNew reading modes\n\n---\n\nInstallers\n");
+  assert.throws(() => releaseNotes("2.6.1", changelog, "Installers"), /one changelog section/);
+  assert.throws(() => releaseNotes("2.6.0", changelog + "\n## [2.6.0]\nDuplicate", ""), /one changelog section/);
+  assert.throws(() => releaseNotes("2.6.0", "## [2.6.0]\n\n## [2.5.0]\nEarlier", ""), /Empty changelog section/);
 });
