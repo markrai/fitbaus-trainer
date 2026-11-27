@@ -8,7 +8,6 @@ FitBaus Full is developed on `main`. FitBaus Lite, a compact edition for
 storage-constrained ProForm Smart Power 10.0 consoles without external webcam
 support, is maintained on `lite/1.x`.
 
-## [Unreleased]
 
 ## [2.6.0]
 
