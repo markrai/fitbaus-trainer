@@ -78,6 +78,7 @@ internal class BooksReadAlong(
     private var summaryState: BooksSummaryState? = null
     private var fullscreen = false
     private var hasNarration = false
+    private var narrationPresentation = BooksNarrationPresentation.COVER
     private val readingPrefs = context.applicationContext.getSharedPreferences("fitbaus_books_read_along", Context.MODE_PRIVATE)
     private var textSizeSp = readingPrefs.getInt("text_size_sp", 36).coerceIn(28, 52)
     private val fontSizeLabel = label("", 14f)
@@ -268,8 +269,7 @@ internal class BooksReadAlong(
             selection.matches(request?.itemId, currentState.session, windows.revision,
                 currentState.seekGeneration, livePosition())
 
-    private fun currentSummaryReady(): Boolean {
-        val selection = summarySelection(livePosition())
+    private fun currentSummaryReady(selection: BooksSummarySelection?): Boolean {
         val ready = summaryState as? BooksSummaryState.Ready ?: return false
         return canShowSummary() && recapSelection == null && selection != null &&
             summarySection == selection.section && summaryScope.matches(selection) &&
@@ -277,9 +277,10 @@ internal class BooksReadAlong(
     }
 
     private fun readingAvailability(): BooksReadingAvailability {
-        val ready = currentSummaryReady()
+        val selection = summarySelection(livePosition())
+        val ready = currentSummaryReady(selection)
         val concepts = ready && diagramConnectionMatches() &&
-            diagramScope.matches(summarySelection(livePosition()), diagramSummary(summarySelection(livePosition()))) &&
+            diagramScope.matches(selection, diagramSummary(selection)) &&
             (diagramScope.state is BooksDiagramState.Concepts || diagramScope.state is BooksDiagramState.Ready)
         return BooksReadingAvailability(ready, concepts)
     }
@@ -329,9 +330,9 @@ internal class BooksReadAlong(
                 availability.summary && state is BooksSummaryState.Ready -> BooksSummaryPresentation.resolve(state)
                 state != null && state !is BooksSummaryState.Ready && summarySection == selection?.section &&
                     canShowSummary() -> BooksSummaryPresentation.resolve(state)
-                !hasNarration && details.text.contains("unavailable", ignoreCase = true) ->
+                narrationPresentation == BooksNarrationPresentation.UNAVAILABLE ->
                     BooksSummaryPresentation("Narration unavailable · audio continues")
-                canShowSummary() || (!hasNarration && details.text.contains("Preparing")) ->
+                canShowSummary() || narrationPresentation == BooksNarrationPresentation.LOADING ->
                     BooksSummaryPresentation("Preparing section summary…")
                 else -> BooksSummaryPresentation("Summary unavailable")
             }
@@ -346,7 +347,7 @@ internal class BooksReadAlong(
             val state = if (availability.concepts) requireNotNull(diagramScope.state)
                 else if (diagramScope.state == BooksDiagramState.Unavailable ||
                     summaryState is BooksSummaryState.Failed || summaryState is BooksSummaryState.Empty ||
-                    (!hasNarration && details.text.contains("unavailable", ignoreCase = true)) ||
+                    (narrationPresentation == BooksNarrationPresentation.UNAVAILABLE) ||
                     (!windows.visualizationAvailable && hasNarration)) BooksDiagramState.Unavailable
                 else BooksDiagramState.Loading
             if (renderedDiagram != state) {
@@ -356,9 +357,9 @@ internal class BooksReadAlong(
         }
     }
 
-    private fun diagramSummary(selection: BooksSummarySelection? = summarySelection()): BooksSummaryState.Ready? =
+    private fun diagramSummary(selection: BooksSummarySelection?): BooksSummaryState.Ready? =
         (summaryState as? BooksSummaryState.Ready)?.takeIf {
-            windows.visualizationAvailable && currentSummaryReady() &&
+            windows.visualizationAvailable && currentSummaryReady(selection) &&
                 selection != null && summarySection == selection.section && it.sourceId != null &&
                 it.promptVersion == "section-v1" && it.revision == windows.revision && it !== invalidatedDiagramSummary
         }
@@ -661,6 +662,7 @@ internal class BooksReadAlong(
         narration.text = ""
         details.text = ""
         hasNarration = false
+        narrationPresentation = BooksNarrationPresentation.COVER
         cover.visibility = VISIBLE
         scroll.visibility = GONE
         setFullscreen(false)
@@ -699,6 +701,7 @@ internal class BooksReadAlong(
         val document = if (localMode) transcript else window?.transcript
         val failed = session != null && windows.failed(state.positionMs, session.durationMs)
         val presentation = BooksNarrationPresentation.resolve(document != null, ready, localMode, failed)
+        narrationPresentation = presentation
         hasNarration = presentation == BooksNarrationPresentation.NARRATION
         details.text = when (presentation) {
             BooksNarrationPresentation.NARRATION -> ""
