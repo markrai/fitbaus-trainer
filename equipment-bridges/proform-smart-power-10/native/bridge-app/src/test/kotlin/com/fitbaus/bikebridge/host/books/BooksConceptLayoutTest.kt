@@ -37,6 +37,17 @@ class BooksConceptLayoutTest {
     }
 
     @Test
+    fun smallEarlierCardsAreNeverPlacedBelowLargerLaterCards() {
+        val sizes = listOf(ConceptSize(60, 50), ConceptSize(280, 180),
+            ConceptSize(95, 70), ConceptSize(275, 95), ConceptSize(50, 45))
+        repeat(64) { seed ->
+            val result = BooksConceptLayout.place(sizes, 600, 16, stagger = 20, seed = seed)
+            assertEquals(sizes.indices.toList(), result.placements.map { it.index })
+            assertTrue(result.placements.zipWithNext().all { (a, b) -> a.top < b.top })
+        }
+    }
+
+    @Test
     fun seededLayoutsKeepEverySnippetInsideBoundsWithoutOverlap() {
         val random = Random(42)
         repeat(256) {
@@ -47,7 +58,8 @@ class BooksConceptLayoutTest {
             }
             val result = BooksConceptLayout.place(sizes, width, gap, stagger = 20, seed = it)
             assertEquals(result, BooksConceptLayout.place(sizes, width, gap, stagger = 20, seed = it))
-            assertEquals(sizes.indices.toSet(), result.placements.map { it.index }.toSet())
+            assertEquals(sizes.indices.toList(), result.placements.map { it.index })
+            assertTrue(result.placements.zipWithNext().all { (a, b) -> a.top < b.top })
             assertEquals(sizes.size, result.placements.size)
             for ((i, a) in result.placements.withIndex()) {
                 assertEquals(sizes[a.index], ConceptSize(a.width, a.height))
