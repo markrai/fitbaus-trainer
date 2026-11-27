@@ -186,6 +186,7 @@ internal class BooksReadAlong(
     fun setFullscreen(value: Boolean) {
         if (fullscreen == value) return
         fullscreen = value
+        if (value) readingSelection.reset()
         if (!value) {
             inlineAttempt.reset()
             dismissSummary()
