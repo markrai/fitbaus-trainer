@@ -52,4 +52,23 @@ class BooksConceptElaborationTest {
         assertTrue(scope.complete(next, ConceptExplanation.Unavailable))
         assertNotNull(scope.open(1))
     }
+
+    @Test
+    fun partialTextSurvivesDismissalButCannotCrossCardSetRefresh() {
+        val scope = BooksConceptElaboration()
+        val first = requireNotNull(scope.open(0))
+        assertTrue(scope.progress(first, "First paragraph"))
+        scope.dismiss()
+        assertNull(scope.open(0))
+        assertEquals(ConceptExplanation.Streaming("First paragraph"), scope.state(0))
+        assertTrue(scope.progress(first, "First paragraph. More text."))
+        assertTrue(scope.complete(first, ConceptExplanation.Incomplete("First paragraph. More text.")))
+        assertEquals(ConceptExplanation.Incomplete("First paragraph. More text."), scope.state(0))
+        val retry = requireNotNull(scope.open(0))
+        assertEquals(ConceptExplanation.Loading, scope.state(0))
+        assertFalse(scope.progress(first, "Stale"))
+        scope.clear()
+        assertFalse(scope.progress(retry, "Stale"))
+        assertEquals(ConceptExplanation.Unavailable, scope.state(0))
+    }
 }
