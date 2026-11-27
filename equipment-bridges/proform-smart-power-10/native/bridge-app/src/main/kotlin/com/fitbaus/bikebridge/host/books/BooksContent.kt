@@ -4,8 +4,13 @@ package com.fitbaus.bikebridge.host.books
 
 import android.app.AlertDialog
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
+import android.graphics.drawable.StateListDrawable
 import com.fitbaus.bikebridge.host.R
 import android.os.Handler
 import android.os.Looper
@@ -88,7 +93,7 @@ internal class BooksContent(
     private val more = button("NEXT")
     private val pageLabel = text("", 16f)
     private val playerPanel = LinearLayout(context)
-    private val prepareButton = button("TRANSCRIPTION MODELS")
+    private val prepareButton = playerHeaderAction("Transcribe Book", primary = true)
     private val playerTitle = text("", 26f)
     private val playerAuthor = text("", 18f)
     private val playerChapter = playerAction("Chapters").apply { gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT }
@@ -322,15 +327,18 @@ internal class BooksContent(
         playerPanel.orientation = VERTICAL
         playerPanel.gravity = Gravity.CENTER_HORIZONTAL
         playerPanel.setPadding(dp(20), dp(8), dp(20), dp(8))
-        val back = button("‹  LIBRARY")
+        val back = playerHeaderAction("‹  Library", primary = false)
         back.setOnClickListener { playback.stop() }
+        back.contentDescription = "Return to library"
         val top = LinearLayout(context).apply {
             orientation = HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        top.addView(back, LayoutParams(0, dp(48), 1f))
+        top.addView(back, LayoutParams(WRAP, dp(48)))
+        top.addView(View(context), LayoutParams(0, 1, 1f))
         prepareButton.setOnClickListener { openPreparation() }
-        top.addView(prepareButton, LayoutParams(0, dp(48), 1f))
-        playerPanel.addView(top, LayoutParams(MATCH, WRAP))
+        top.addView(prepareButton, LayoutParams(WRAP, dp(48)))
+        playerPanel.addView(top, LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(8) })
         playerTitle.gravity = Gravity.CENTER
         playerTitle.maxLines = 2
         playerTitle.ellipsize = TextUtils.TruncateAt.END
@@ -784,6 +792,37 @@ internal class BooksContent(
         minimumWidth = dp(48)
         setPadding(dp(8), 0, dp(8), 0)
         compoundDrawablePadding = dp(6)
+    }
+
+    private fun playerHeaderAction(label: String, primary: Boolean) = Button(context).apply {
+        text = label
+        setAllCaps(false)
+        textSize = 17f
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        gravity = Gravity.CENTER
+        minWidth = dp(116)
+        minimumWidth = dp(116)
+        setPadding(dp(18), 0, dp(18), 0)
+        stateListAnimator = null
+        elevation = 0f
+        backgroundTintList = null
+        val disabled = intArrayOf(-android.R.attr.state_enabled)
+        val normal = intArrayOf()
+        val accent = 0xffffce1b.toInt()
+        val fill = if (primary) accent else 0xff20252d.toInt()
+        val stroke = if (primary) accent else 0xff404751.toInt()
+        fun shape(color: Int, border: Int) = GradientDrawable().apply {
+            cornerRadius = dp(10).toFloat()
+            setColor(color)
+            setStroke(dp(1), border)
+        }
+        val states = StateListDrawable().apply {
+            addState(disabled, shape(0xff171b20.toInt(), 0xff343a42.toInt()))
+            addState(normal, shape(fill, stroke))
+        }
+        background = RippleDrawable(ColorStateList.valueOf(if (primary) 0x33000000 else 0x33ffffff), states, null)
+        setTextColor(ColorStateList(arrayOf(disabled, normal),
+            intArrayOf(0xff777e87.toInt(), if (primary) Color.BLACK else Color.WHITE)))
     }
 
     private fun button(label: String) = Button(context).apply { text = label }

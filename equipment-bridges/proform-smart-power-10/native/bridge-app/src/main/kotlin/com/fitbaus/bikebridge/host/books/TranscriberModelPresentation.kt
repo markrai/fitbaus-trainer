@@ -54,6 +54,12 @@ internal fun modelCardPresentation(model: PreparationModel): ModelCardPresentati
 internal fun modelMegabytes(bytes: Long): String =
     String.format(Locale.US, "%.0f MB", bytes / 1_000_000.0)
 
+internal fun bookPreparationModels(models: List<PreparationModel>): List<PreparationModel> =
+    models.filter { it.installed && it.qualified && !it.downloading }
+
+internal fun bookPreparationSelection(models: List<PreparationModel>, selected: String): String? =
+    models.firstOrNull { it.id == selected }?.id ?: models.firstOrNull()?.id
+
 internal fun modelCardsUseColumns(screenWidthDp: Int): Boolean = screenWidthDp >= 720
 
 internal enum class TranscriberReadiness(val message: String, val ready: Boolean) {

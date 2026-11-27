@@ -9,6 +9,23 @@ storage-constrained ProForm Smart Power 10.0 consoles without external webcam
 support, is maintained on `lite/1.x`.
 
 
+## [Unreleased]
+
+Planned patch release: Full 2.6.1 (`versionCode 20601`).
+
+### Changed
+
+- **Audiobook transcription controls.** Rename Transcription Models to Transcribe
+  Book, restrict the book dialog to installed, qualified models and per-book
+  transcription jobs, and keep model management in Settings. Restyle the Library
+  and Transcribe Book player buttons.
+
+### Fixed
+
+- **Fullscreen reading entry.** Always select narration when entering or
+  re-entering fullscreen. Preserve the selected summary or concepts mode
+  across section changes and seeks within the same fullscreen session.
+
 ## [2.6.0]
 
 Full 2.6.0 (`versionCode 20600`) adds section diagrams and Concept Canvas to

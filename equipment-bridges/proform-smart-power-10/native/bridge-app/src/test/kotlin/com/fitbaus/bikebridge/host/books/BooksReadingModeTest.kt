@@ -37,12 +37,17 @@ class BooksReadingModeTest {
     }
 
     @Test
-    fun ordinaryViewDoesNotOverwriteTheFullscreenPreference() {
+    fun eachFullscreenEntryStartsWithNarrationRegardlessOfReadiness() {
         val selection = BooksReadingSelection()
-        assertTrue(selection.select(BooksReadingMode.SUMMARY, ready))
-        assertEquals(BooksReadingMode.NARRATION, selection.visibleMode(false))
-        assertEquals(BooksReadingMode.SUMMARY, selection.selected)
-        assertEquals(BooksReadingMode.SUMMARY, selection.visibleMode(true))
-        assertFalse(selection.select(BooksReadingMode.SUMMARY, ready))
+        for (previousMode in listOf(BooksReadingMode.SUMMARY, BooksReadingMode.CONCEPTS)) {
+            for (availability in listOf(unavailable, summaryOnly, ready)) {
+                assertTrue(selection.select(previousMode, ready))
+                assertEquals(BooksReadingMode.NARRATION, selection.visibleMode(false))
+                selection.reset()
+                assertEquals(BooksReadingMode.NARRATION, selection.visibleMode(true))
+                assertEquals(BooksReadingMode.NARRATION, selection.selected)
+                assertTrue(availability.allows(selection.selected))
+            }
+        }
     }
 }

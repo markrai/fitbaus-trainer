@@ -45,7 +45,7 @@ internal class TranscriberManagementDialog(
     private var embedded = false
     private var onReadiness: (TranscriberReadiness) -> Unit = {}
     private val refresh = Button(context).apply {
-        text = "Refresh models"
+        text = if (item != null) "Refresh transcription" else "Refresh models"
         isAllCaps = false
         textSize = 15f
         backgroundTintList = null
@@ -53,7 +53,7 @@ internal class TranscriberManagementDialog(
         background = surface(NativeDialogStyle.TRANSCRIPTION_MODELS.buttonFill, NativeDialogStyle.TRANSCRIPTION_MODELS.buttonBorder)
     }
     private val dialog by lazy { AlertDialog.Builder(context)
-        .setTitle("Transcription Models")
+        .setTitle(if (item != null) "Transcribe Book" else "Transcription Models")
         .setView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xff101720.toInt())
@@ -121,7 +121,7 @@ internal class TranscriberManagementDialog(
         main.removeCallbacks(poll)
         refresh.isEnabled = false
         enableRows(false)
-        if (last == null) status.text = "Loading models…"
+        if (last == null) status.text = if (item != null) "Loading book transcription…" else "Loading models…"
         pending = worker.submit {
             val result = runCatching(action)
             main.post {
@@ -166,6 +166,7 @@ internal class TranscriberManagementDialog(
         status.text = when {
             item != null && !snapshot.sourceMatches -> "Audiobookshelf address differs from the Transcriber's configured source. Check Settings."
             item != null && !snapshot.canPrepare -> "Update the Transcriber server to manage preparation."
+            item != null -> "Choose an installed, qualified model to prepare narration for this audiobook."
             !snapshot.canManageModels -> "Update the Transcriber server to manage model downloads from the bike."
             else -> "Speech-to-text models run on your Transcriber server. Tiny is bundled; Base and Small are optional."
         }
@@ -175,9 +176,15 @@ internal class TranscriberManagementDialog(
     private fun renderRows(snapshot: PreparationSnapshot, enabled: Boolean) {
         val position = if (embedded) 0 else scroll.scrollY
         rows.removeAllViews()
-        if (!enabled) label("Last reported model states · refresh to update", 14f)
-        if (item != null) heading("Choose a model")
-        if (snapshot.models.isEmpty()) {
+        if (!enabled) label("Last reported state · refresh to update", 14f)
+        val visibleModels = if (item != null) bookPreparationModels(snapshot.models) else snapshot.models
+        val bookSelection = if (item != null) bookPreparationSelection(visibleModels, selectedModel) else null
+        if (bookSelection != null) selectedModel = bookSelection
+        if (item != null) {
+            heading(item.title)
+            label("Choose a model", 16f, rows, Color.WHITE, true)
+            if (visibleModels.isEmpty()) label("No installed, qualified models. Manage models in Settings → Transcriber → Transcription models.", 16f)
+        } else if (visibleModels.isEmpty()) {
             label("No transcription models reported. Refresh or check the server version.", 16f)
         }
         val columns = modelCardsUseColumns(context.resources.configuration.screenWidthDp)
@@ -185,12 +192,12 @@ internal class TranscriberManagementDialog(
             orientation = if (columns) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
         }
         rows.addView(models, LinearLayout.LayoutParams(-1, -2))
-        for (model in snapshot.models) {
+        for (model in visibleModels) {
             val presentation = modelCardPresentation(model)
-            val selected = item != null && selectedModel == model.id && model.installed && model.qualified
+            val selected = item != null && bookSelection == model.id
             val card = panel(selected || (item == null && model.id == "tiny")).apply {
                 gravity = Gravity.TOP
-                minimumHeight = dp(if (columns) 232 else 0)
+                minimumHeight = dp(if (columns && item == null) 232 else 0)
             }
             models.addView(card, LinearLayout.LayoutParams(if (columns) 0 else -1,
                 if (columns) -1 else -2, if (columns) 1f else 0f).apply {
@@ -212,36 +219,28 @@ internal class TranscriberManagementDialog(
             presentation.detail?.let { label(it, 14f, card) }
             presentation.progressValue?.let { progress(it, presentation.progressMax, card) }
             if (columns) card.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
-            if (model.downloading) {
-                button("CANCEL DOWNLOAD", enabled && snapshot.canManageModels, card) { mutate { it.download(model.id, true) } }
-            } else if (!model.installed && model.id != "tiny") {
-                button(if (model.state in setOf("failed", "interrupted")) "RETRY DOWNLOAD" else "DOWNLOAD", enabled && snapshot.canManageModels && snapshot.models.none { it.downloading }, card, true) {
-                    selectedModel = model.id
-                    mutate { it.download(model.id) }
-                }
-            } else if (model.installed && !model.qualified && !model.qualifying && snapshot.automaticQualification) {
-                button("RETRY CHECK", enabled && snapshot.canManageModels, card) { mutate { it.retryQualification(model.id) } }
-            } else if (item != null && model.installed && model.qualified) {
+            if (item != null) {
                 button(if (selected) "SELECTED" else "SELECT", enabled && snapshot.canPrepare && !selected, card, selected) {
                     selectedModel = model.id
                     renderRows(snapshot, true)
                 }
+            } else {
+                renderModelManagementActions(model, snapshot, enabled, card)
             }
         }
         if (item != null) {
-            heading("Transcribe this audiobook")
-            label(item.title, 18f, rows, Color.WHITE, true)
-            val model = snapshot.models.firstOrNull { it.id == selectedModel }
-            val existing = snapshot.jobs.any { it.model == selectedModel && it.currentRevision }
-            val actionPanel = panel(false)
-            rows.addView(actionPanel, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(4), dp(4), dp(4), dp(10)) })
-            label("Generate narration in advance. Audio playback continues while the server works.", 15f, actionPanel)
-            button("START ${selectedModel.uppercase(Locale.US)} TRANSCRIPTION",
-                enabled && snapshot.canPrepare && model?.installed == true && model.qualified && !existing, actionPanel, true) {
-                val chosen = selectedModel
-                mutate { api -> api.start(chosen)?.let { onGrant(api, it) } }
+            if (bookSelection != null) {
+                val existing = snapshot.jobs.any { it.model == bookSelection && it.currentRevision }
+                val actionPanel = panel(false)
+                rows.addView(actionPanel, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(4), dp(4), dp(4), dp(10)) })
+                label("Generate narration in advance. Audio playback continues while the server works.", 15f, actionPanel)
+                button("START ${bookSelection.uppercase(Locale.US)} TRANSCRIPTION",
+                    enabled && snapshot.canPrepare && !existing, actionPanel, true) {
+                    mutate { api -> api.start(bookSelection)?.let { onGrant(api, it) } }
+                }
+                if (existing) label("A transcription for this model already exists below.", 14f, actionPanel)
             }
-            if (existing) label("A transcription for this model already exists below.", 14f, actionPanel)
+            heading("Transcription jobs")
             if (snapshot.jobs.isEmpty()) label("No transcription jobs yet.", 15f)
             for (job in snapshot.jobs) {
                 val jobCard = panel(false)
@@ -273,6 +272,24 @@ internal class TranscriberManagementDialog(
             }
         }
         if (!embedded) scroll.post { if (!closed) scroll.scrollTo(0, position) }
+    }
+
+    private fun renderModelManagementActions(
+        model: PreparationModel,
+        snapshot: PreparationSnapshot,
+        enabled: Boolean,
+        card: LinearLayout,
+    ) {
+        if (model.downloading) {
+            button("CANCEL DOWNLOAD", enabled && snapshot.canManageModels, card) { mutate { it.download(model.id, true) } }
+        } else if (!model.installed && model.id != "tiny") {
+            button(if (model.state in setOf("failed", "interrupted")) "RETRY DOWNLOAD" else "DOWNLOAD",
+                enabled && snapshot.canManageModels && snapshot.models.none { it.downloading }, card, true) {
+                mutate { it.download(model.id) }
+            }
+        } else if (model.installed && !model.qualified && !model.qualifying && snapshot.automaticQualification) {
+            button("RETRY CHECK", enabled && snapshot.canManageModels, card) { mutate { it.retryQualification(model.id) } }
+        }
     }
 
     private fun shouldPoll(): Boolean = last?.let { snapshot ->

@@ -24,6 +24,26 @@ class TranscriberWorkspaceUiTest {
     }
 
     @Test
+    fun bookPreparationDoesNotExposeGlobalModelManagement() {
+        val player = source("BooksContent")
+        val models = source("TranscriberManagementDialog")
+        assertTrue(player.contains("playerHeaderAction(\"Transcribe Book\", primary = true)"))
+        assertTrue(player.contains("playerHeaderAction(\"‹  Library\", primary = false)"))
+        assertFalse(player.contains("button(\"TRANSCRIPTION MODELS\")"))
+        assertTrue(models.contains("if (item != null) bookPreparationModels(snapshot.models) else snapshot.models"))
+        assertTrue(models.contains("if (item != null) {\n                button(if (selected)"))
+        assertTrue(models.contains("} else {\n                renderModelManagementActions(model, snapshot, enabled, card)"))
+        assertTrue(models.contains("if (bookSelection != null) {"))
+        assertTrue(models.contains("for (job in snapshot.jobs)"))
+        val management = models.substringAfter("private fun renderModelManagementActions(").substringBefore("private fun shouldPoll()")
+        assertTrue(management.contains("it.download("))
+        assertTrue(management.contains("it.retryQualification("))
+        val rows = models.substringAfter("private fun renderRows(").substringBefore("private fun renderModelManagementActions(")
+        assertFalse(rows.contains("it.download("))
+        assertFalse(rows.contains("it.retryQualification("))
+    }
+
+    @Test
     fun inlineViewsAvoidNestedScrollAndCloseTheirOwnWork() {
         val settings = source("TranscriberSettingsPanel")
         val models = source("TranscriberManagementDialog")
