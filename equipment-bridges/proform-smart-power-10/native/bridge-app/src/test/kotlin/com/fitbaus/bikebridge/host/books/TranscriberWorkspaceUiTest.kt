@@ -30,9 +30,13 @@ class TranscriberWorkspaceUiTest {
         assertTrue(player.contains("playerHeaderAction(\"Transcription\", accented = true)"))
         assertTrue(player.contains("playerHeaderAction(\"‹  Library\", accented = false)"))
         assertFalse(player.contains("button(\"TRANSCRIPTION MODELS\")"))
-        assertTrue(models.contains("if (item != null) bookPreparationModels(snapshot.models) else snapshot.models"))
-        assertTrue(models.contains("if (item != null) {\n                button(if (selected)"))
+        assertTrue(models.contains("if (superior != null) snapshot.models else if (item != null) bookPreparationModels(snapshot.models) else snapshot.models"))
+        assertTrue(models.contains("if (item != null && superior == null) bookPreparationSelection(visibleModels, selectedModel) else null"))
+        assertTrue(models.contains("if (imported) {\n                label(\"PREPARED · READ ONLY\""))
+        assertTrue(models.contains("} else if (superseded) {\n                label(\"SUPERSEDED\""))
+        assertTrue(models.contains("} else if (item != null) {\n                button(if (selected)"))
         assertTrue(models.contains("} else {\n                renderModelManagementActions(model, snapshot, enabled, card)"))
+        assertTrue(models.contains("if (job.canResume && superior == null) button(\"RESUME\""))
         assertTrue(models.contains("if (bookSelection != null) {"))
         assertTrue(models.contains("for (job in snapshot.jobs)"))
         val management = models.substringAfter("private fun renderModelManagementActions(").substringBefore("private fun shouldPoll()")
@@ -41,6 +45,19 @@ class TranscriberWorkspaceUiTest {
         val rows = models.substringAfter("private fun renderRows(").substringBefore("private fun renderModelManagementActions(")
         assertFalse(rows.contains("it.download("))
         assertFalse(rows.contains("it.retryQualification("))
+    }
+
+    @Test
+    fun confirmationReleasesRequestGuardBeforeDispatch() {
+        val dialog = source("TranscriberManagementDialog")
+        val positive = dialog.substringAfter("prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener")
+            .substringBefore("private fun surface(")
+        assertTrue(positive.contains("login = null"))
+        assertTrue(positive.indexOf("login = null") < positive.indexOf("action()"))
+        assertTrue(dialog.contains("if (login === prompt)"))
+        assertTrue(dialog.contains("Refresh status"))
+        assertTrue(dialog.contains("SUPERSEDED"))
+        assertTrue(dialog.contains("PREPARED · READ ONLY"))
     }
 
     @Test

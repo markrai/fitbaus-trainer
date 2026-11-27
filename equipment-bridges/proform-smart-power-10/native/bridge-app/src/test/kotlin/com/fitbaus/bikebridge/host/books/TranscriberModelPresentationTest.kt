@@ -58,6 +58,15 @@ class TranscriberModelPresentationTest {
     }
 
     @Test
+    fun superiorCardReflectsServerModelNotLocalInstallation() {
+        val card = superiorCardPresentation(SuperiorTranscript("large-v3", 650000))
+        assertEquals("Large-v3", card.title)
+        assertEquals("Complete", card.status)
+        assertEquals(ModelCardTone.Ready, card.tone)
+        assertEquals("Preferred for playback", card.detail)
+    }
+
+    @Test
     fun landscapeUsesColumnsAndNarrowLayoutsStack() {
         assertFalse(modelCardsUseColumns(719))
         assertTrue(modelCardsUseColumns(720))

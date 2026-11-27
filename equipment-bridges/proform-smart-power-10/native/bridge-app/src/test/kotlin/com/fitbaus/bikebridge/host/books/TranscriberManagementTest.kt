@@ -36,7 +36,7 @@ class TranscriberManagementTest {
         .put("state", "paused").put("processed_ms", 300000).put("total_ms", 650000)
     private val requests = mutableListOf<Triple<String, Map<String, String>, String?>>()
 
-    private fun client(capabilities: JSONObject = caps): TranscriberManagement =
+    private fun client(capabilities: JSONObject = caps, imported: JSONObject? = null): TranscriberManagement =
         TranscriberManagement(paired, books, item, playback, TranscriberHttp { url, headers, body ->
             val path = url.removePrefix(paired.address)
             requests.add(Triple(path, headers, body))
@@ -46,8 +46,9 @@ class TranscriberManagementTest {
                 path == "/v1/capabilities" -> capabilities
                 path == "/v1/qualification" -> qualification
                 path.endsWith("/manifest") -> manifest
-                path == "/v1/items/book/background" -> JSONObject().put("jobs", JSONArray().put(job))
+                path == "/v1/items/book/background" -> JSONObject().put("jobs", JSONArray().put(job)).put("superior_transcript", imported ?: JSONObject.NULL)
                 path == "/v1/background" || path.endsWith("/resume") -> JSONObject(job.toString()).put("state", "queued")
+                path.endsWith("/discard") -> JSONObject().put("job_id", job.getString("job_id")).put("discarded", true)
                 path.startsWith("/v1/background/") -> job
                 path.startsWith("/v1/models/") -> JSONObject()
                 else -> error("Unexpected path")
@@ -65,6 +66,27 @@ class TranscriberManagementTest {
         assertTrue(result.models[2].qualified)
         assertEquals(300000L, result.jobs.single().processed)
         assertTrue(result.jobs.single().canResume)
+    }
+
+    @Test
+    fun completeSuperiorTranscriptDisablesPreparationButKeepsOldJobs() {
+        val modern = JSONObject(caps.toString()).put("superior_transcript_availability", true)
+        val imported = JSONObject(identity.toString()).put("model", "large-v3")
+            .put("quality", "above_small").put("origin", "external").put("state", "completed")
+            .put("start_ms", 0).put("end_ms", 650000).put("processed_ms", 650000).put("total_ms", 650000)
+        val api = client(modern, imported)
+        val snapshot = api.snapshot()
+        assertEquals(SuperiorTranscript("large-v3", 650000), snapshot.superiorTranscript)
+        assertFalse(snapshot.canPrepare)
+        assertEquals(listOf("tiny", "base", "small"), snapshot.models.map { it.id })
+        assertTrue(snapshot.jobs.single().canDiscard)
+        assertNull(api.action(snapshot.jobs.single(), "discard"))
+        assertTrue(requests.last().first.endsWith("/discard"))
+        assertNull(client(caps, imported).snapshot().superiorTranscript)
+        imported.put("processed_ms", 300000)
+        assertThrows(IllegalArgumentException::class.java) { client(modern, imported).snapshot() }
+        imported.put("processed_ms", 650000).put("audio_revision", "d".repeat(64))
+        assertThrows(IllegalArgumentException::class.java) { client(modern, imported).snapshot() }
     }
 
     @Test

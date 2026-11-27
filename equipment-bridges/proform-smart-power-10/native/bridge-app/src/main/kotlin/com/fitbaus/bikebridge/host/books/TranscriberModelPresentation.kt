@@ -51,6 +51,11 @@ internal fun modelCardPresentation(model: PreparationModel): ModelCardPresentati
     return card("Ready", ModelCardTone.Ready)
 }
 
+internal fun superiorCardPresentation(transcript: SuperiorTranscript): ModelCardPresentation =
+    ModelCardPresentation(transcript.model.replaceFirstChar { it.uppercase(Locale.US) },
+        "IMPORTED · SUPERIOR", "Complete externally prepared narration.",
+        "Complete", "Preferred for playback", ModelCardTone.Ready)
+
 internal fun modelMegabytes(bytes: Long): String =
     String.format(Locale.US, "%.0f MB", bytes / 1_000_000.0)
 

@@ -340,10 +340,12 @@ internal class BooksContent(
         prepareButton.setOnClickListener { openPreparation() }
         top.addView(prepareButton, LayoutParams(WRAP, dp(48)))
         playerPanel.addView(top, LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(8) })
+        playerTitle.setTextColor(0xffffce1b.toInt())
         playerTitle.gravity = Gravity.CENTER
         playerTitle.maxLines = 2
         playerTitle.ellipsize = TextUtils.TruncateAt.END
         playerPanel.addView(playerTitle, LayoutParams(MATCH, WRAP))
+        playerAuthor.setTextColor(0xff80baff.toInt())
         playerAuthor.gravity = Gravity.CENTER
         playerPanel.addView(playerAuthor, LayoutParams(MATCH, WRAP))
         playerPanel.addView(readAlong, LayoutParams(MATCH, 0, 1f))
@@ -353,6 +355,7 @@ internal class BooksContent(
         playerStatus.gravity = Gravity.CENTER
         playerStatus.visibility = GONE
         playerPanel.addView(playerStatus, LayoutParams(MATCH, WRAP))
+        playerTime.setTextColor(0xffffe58a.toInt())
         playerTime.gravity = Gravity.CENTER
         timeline.addView(playerTime, LayoutParams(WRAP, WRAP))
         playerPanel.addView(timeline, LayoutParams(MATCH, WRAP))

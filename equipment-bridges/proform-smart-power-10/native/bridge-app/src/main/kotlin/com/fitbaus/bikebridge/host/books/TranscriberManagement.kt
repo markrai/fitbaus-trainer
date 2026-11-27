@@ -36,6 +36,8 @@ internal data class PreparationJob(
     val canDiscard get() = state in setOf("paused", "failed", "cancelled", "completed")
 }
 
+internal data class SuperiorTranscript(val model: String, val durationMs: Long)
+
 internal data class PreparationSnapshot(
     val models: List<PreparationModel>,
     val jobs: List<PreparationJob>,
@@ -45,6 +47,7 @@ internal data class PreparationSnapshot(
     val sourceMatches: Boolean,
     val automaticQualification: Boolean = false,
     val readiness: TranscriberReadiness = TranscriberReadiness.Unknown,
+    val superiorTranscript: SuperiorTranscript? = null,
 )
 
 internal class TranscriberManagement(
@@ -132,10 +135,29 @@ internal class TranscriberManagement(
                 (automatic?.optInt("completed_runs", 0) ?: 0).coerceIn(0, totalRuns), totalRuns,
                 automatic?.optString("error")?.takeIf { it.matches(Regex("[a-z_]{1,80}")) })
         }
+        var superior: SuperiorTranscript? = null
         val jobs = if (prepare) requireNotNull(books).session.authorized { token ->
             val current = manifest(caps, token)
             val book = requireNotNull(item)
-            val result = call("/v1/items/${book.id}/background", token = token).getJSONArray("jobs")
+            val listing = call("/v1/items/${book.id}/background", token = token)
+            if (caps.optBoolean("superior_transcript_availability")) {
+                val imported = listing.optJSONObject("superior_transcript")
+                if (imported != null) {
+                    val model = imported.getString("model")
+                    val duration = current.getLong("duration_ms")
+                    require(model.matches(Regex("[a-zA-Z0-9][a-zA-Z0-9_.-]{0,39}")) &&
+                        model !in setOf("tiny", "base", "small") &&
+                        imported.getString("quality") == "above_small" && imported.getString("origin") == "external" &&
+                        imported.getString("source_id") == current.getString("source_id") &&
+                        imported.getString("item_id") == book.id &&
+                        imported.getString("audio_revision") == current.getString("audio_revision") &&
+                        imported.getString("state") == "completed" && imported.getLong("start_ms") == 0L &&
+                        imported.getLong("total_ms") == duration && imported.getLong("processed_ms") == duration &&
+                        imported.getLong("end_ms") == duration)
+                    superior = SuperiorTranscript(model, duration)
+                }
+            }
+            val result = listing.getJSONArray("jobs")
             require(result.length() <= 32)
             (0 until result.length()).map { i ->
                 val row = result.getJSONObject(i)
@@ -152,10 +174,10 @@ internal class TranscriberManagement(
                     row.optString("error").takeIf { !row.isNull("error") && it.matches(Regex("[a-z_]{1,80}")) })
             }
         } else emptyList()
-        return PreparationSnapshot(models, jobs, manage, prepare, caps.optBoolean("paired_background_refresh"), matches,
+        return PreparationSnapshot(models, jobs, manage, prepare && superior == null, caps.optBoolean("paired_background_refresh"), matches,
             caps.optBoolean("automatic_model_qualification"),
             TranscriberReadiness.fromFlags(caps.opt("transcription") as? Boolean,
-                caps.opt("engine_ready") as? Boolean, caps.opt("source_configured") as? Boolean))
+                caps.opt("engine_ready") as? Boolean, caps.opt("source_configured") as? Boolean), superior)
     }
 
     fun download(model: String, cancel: Boolean = false) {
@@ -199,6 +221,7 @@ internal class TranscriberManagement(
         return requireNotNull(books).session.authorized { token ->
             manifest(caps, token)
             val result = call("/v1/background/${job.id}/$operation", JSONObject(), token)
+            if (operation == "discard") require(result.getString("job_id") == job.id && result.getBoolean("discarded"))
             if (operation == "resume") granted(caps, result) else null
         }
     }
