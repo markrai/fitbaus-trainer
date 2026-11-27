@@ -59,6 +59,7 @@ internal class BooksReadAlong(
     private var summaryCallback: ((BooksSummaryState) -> Unit)? = null
     private val narration = label("", 36f)
     private val details = label("", 14f)
+    private val narrationModel = label("", 14f)
     private val scroll = ScrollView(context)
     private val readingSelection = BooksReadingSelection()
     private val modeButtons = BooksReadingMode.values().associateWith { flatAction(it.label) }
@@ -168,7 +169,13 @@ internal class BooksReadAlong(
             selectors.addView(button, LayoutParams(WRAP, dp(48)))
         }
         actions.addView(selectors, LayoutParams(WRAP, WRAP))
-        actions.addView(android.view.View(context), LayoutParams(0, 1, 1f))
+        narrationModel.setTextColor(0xffa0a0a0.toInt())
+        narrationModel.gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL
+        narrationModel.maxLines = 1
+        narrationModel.ellipsize = TextUtils.TruncateAt.END
+        narrationModel.setPadding(dp(8), 0, dp(8), 0)
+        narrationModel.visibility = INVISIBLE
+        actions.addView(narrationModel, LayoutParams(0, dp(44), 1f))
         actions.addView(fullscreenButton, LayoutParams(dp(48), dp(44)))
         addView(actions, LayoutParams(MATCH, WRAP))
         footer.apply {
@@ -326,6 +333,7 @@ internal class BooksReadAlong(
                 else -> 0xffdddddd.toInt()
             })
         }
+        narrationModel.visibility = if (showNarration && hasNarration) VISIBLE else INVISIBLE
         actions.visibility = if (fullscreenButton.visibility == VISIBLE) VISIBLE else GONE
         cover.visibility = if (showNarration && !hasNarration) VISIBLE else GONE
         scroll.visibility = if (showNarration && hasNarration) VISIBLE else GONE
@@ -746,6 +754,7 @@ internal class BooksReadAlong(
         currentState = BooksPlayerState()
         narration.text = ""
         details.text = ""
+        narrationModel.text = ""
         hasNarration = false
         narrationPresentation = BooksNarrationPresentation.COVER
         cover.visibility = VISIBLE
@@ -789,6 +798,9 @@ internal class BooksReadAlong(
         val presentation = BooksNarrationPresentation.resolve(document != null, ready, localMode, failed)
         narrationPresentation = presentation
         hasNarration = presentation == BooksNarrationPresentation.NARRATION
+        val model = if (localMode) BooksNarrationModel.LOCAL else window?.narrationModel ?: BooksNarrationModel.UNKNOWN
+        val modelLabel = if (hasNarration) model.label else ""
+        if (narrationModel.text.toString() != modelLabel) narrationModel.text = modelLabel
         details.text = when (presentation) {
             BooksNarrationPresentation.NARRATION -> ""
             BooksNarrationPresentation.LOADING -> "Preparing narration…"

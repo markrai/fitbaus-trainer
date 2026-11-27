@@ -16,6 +16,7 @@ internal data class RemoteBooksWindow(
     val cumulativeRecapMaxPositionMs: Long? = null,
     val diagramAvailable: Boolean = false,
     val conceptAvailable: Boolean = false,
+    val narrationModel: BooksNarrationModel = BooksNarrationModel.UNKNOWN,
 )
 
 internal fun interface TranscriberHttp {
@@ -119,7 +120,8 @@ internal class RemoteBooksTranscript(
             capabilities.recapApi && capabilities.summaryProvider != null,
             capabilities.cumulativeRecapMaxPositionMs.takeIf { capabilities.summaryProvider != null },
             capabilities.summaryDiagramApi && capabilities.summaryProvider != null && capabilities.summaryApi,
-            capabilities.summaryConceptApi && capabilities.summaryProvider != null && capabilities.summaryApi)
+            capabilities.summaryConceptApi && capabilities.summaryProvider != null && capabilities.summaryApi,
+            BooksNarrationModel.fromProfile(job.opt("profile") as? String, job.opt("prepared") == true))
     }
 
     private fun requireMatchingSource(sourceUrl: String?) {

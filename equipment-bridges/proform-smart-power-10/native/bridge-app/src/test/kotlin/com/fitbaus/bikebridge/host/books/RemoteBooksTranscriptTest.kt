@@ -28,7 +28,7 @@ class RemoteBooksTranscriptTest {
         .put("cues", org.json.JSONArray().put(JSONObject().put("start_ms", 301000).put("end_ms", 303000).put("text", "Narration")))
 
     private fun client(transcript: JSONObject = result, metadata: JSONObject = manifest, failed: Boolean = false,
-                       capabilityBody: String = capabilities): RemoteBooksTranscript =
+                       capabilityBody: String = capabilities, jobMetadata: JSONObject = job): RemoteBooksTranscript =
         RemoteBooksTranscript(paired, books, TranscriberHttp { url, headers, body ->
             assertEquals("Bearer $token", headers["Authorization"])
             if (url.endsWith("/v1/capabilities")) {
@@ -43,12 +43,12 @@ class RemoteBooksTranscriptTest {
                         assertEquals(300000L, submitted.getLong("start_ms"))
                         assertEquals(600000L, submitted.getLong("end_ms"))
                         assertEquals(revision, submitted.getString("audio_revision"))
-                        BooksHttpResponse(202, JSONObject(job.toString()).put("state", "queued").toString())
+                        BooksHttpResponse(202, JSONObject(jobMetadata.toString()).put("state", "queued").toString())
                     }
                     url.endsWith("/transcript") -> BooksHttpResponse(200, transcript.toString())
                     else -> {
                         assertEquals(paired.address + "/v1/jobs/" + jobId, url)
-                        BooksHttpResponse(200, JSONObject(job.toString()).put("state", if (failed) "failed" else "ready").toString())
+                        BooksHttpResponse(200, JSONObject(jobMetadata.toString()).put("state", if (failed) "failed" else "ready").toString())
                     }
                 }
             }
@@ -61,8 +61,29 @@ class RemoteBooksTranscriptTest {
         assertEquals(600000L, RemoteBooksTranscript.windowStart(650000, 650000))
         val window = client().load("book", playback, 301500, null, false)
         assertEquals(revision, window.revision)
+        assertEquals(BooksNarrationModel.UNKNOWN, window.narrationModel)
         assertEquals("Narration", window.transcript.cueAt(301500)?.text)
         assertNull(window.transcript.cueAt(303000))
+    }
+
+    @Test
+    fun readyJobDeterminesNarrationModel() {
+        val revisionHash = "a".repeat(40)
+        val heavy = "faster-whisper-1.2.1-large-v3-fp16-$revisionHash-beam5-segments-v1:auto"
+        val metadata = JSONObject(job.toString()).put("profile", heavy).put("prepared", true)
+        assertEquals(BooksNarrationModel.LARGE_V3,
+            client(jobMetadata = metadata).load("book", playback, 301500, null, false).narrationModel)
+        metadata.put("prepared", false)
+        assertEquals(BooksNarrationModel.UNKNOWN,
+            client(jobMetadata = metadata).load("book", playback, 301500, null, false).narrationModel)
+        for ((name, model) in listOf("tiny" to BooksNarrationModel.TINY, "base" to BooksNarrationModel.BASE,
+            "small" to BooksNarrationModel.SMALL)) {
+            metadata.put("profile", "faster-whisper-1.2.1-$name-int8-$revisionHash-segments-v1:en")
+            assertEquals(model, client(jobMetadata = metadata).load("book", playback, 301500, null, false).narrationModel)
+        }
+        metadata.put("profile", "future-model")
+        assertEquals(BooksNarrationModel.UNKNOWN,
+            client(jobMetadata = metadata).load("book", playback, 301500, null, false).narrationModel)
     }
 
     @Test
