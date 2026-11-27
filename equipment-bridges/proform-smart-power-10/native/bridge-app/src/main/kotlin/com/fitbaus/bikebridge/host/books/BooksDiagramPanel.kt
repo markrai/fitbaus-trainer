@@ -12,9 +12,11 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 
-internal class BooksDiagramPanel(context: Context) : FrameLayout(context) {
+internal class BooksDiagramPanel(context: Context, onExplore: (Int) -> Unit = {},
+                                 onDismissExplanation: () -> Unit = {}) : FrameLayout(context) {
     private val diagram = BooksDiagramView(context).apply { visibility = GONE }
-    private val conceptView = BooksConceptView(context)
+    private val conceptView = BooksConceptView(context, onExplore)
+    private val explanation = BooksConceptExplanationView(context, onDismissExplanation)
     private val canvas = ScrollView(context).apply {
         isFillViewport = true
         visibility = GONE
@@ -47,9 +49,11 @@ internal class BooksDiagramPanel(context: Context) : FrameLayout(context) {
         addView(diagram, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(canvas, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
         addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(explanation, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     fun render(state: BooksDiagramState) {
+        explanation.hide()
         if (state !is BooksDiagramState.Ready) {
             diagram.clearGraph()
             diagram.visibility = GONE
@@ -85,9 +89,22 @@ internal class BooksDiagramPanel(context: Context) : FrameLayout(context) {
         }
     }
 
-    fun finishConceptDrag() = conceptView.finishDrag()
+    fun showExplanation(concept: String, state: ConceptExplanation) {
+        conceptView.cancelInteraction()
+        canvas.visibility = GONE
+        explanation.show(concept, state)
+    }
+
+    fun hideExplanation() {
+        if (explanation.visibility != VISIBLE) return
+        explanation.hide()
+        canvas.visibility = VISIBLE
+    }
+
+    fun finishConceptDrag() = conceptView.cancelInteraction()
 
     fun clear() {
+        explanation.clear()
         diagram.clearGraph()
         diagram.visibility = GONE
         conceptView.clearConcepts()

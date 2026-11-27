@@ -25,6 +25,11 @@ Planned patch release: Full 2.6.1 (`versionCode 20601`).
   positions when returning to the same ready section, and reset them when
   the card set refreshes.
 
+- **Concept exploration.** Double-tap a concept card for an on-demand
+  AI-generated explanation using the configured Transcriber provider. Tap
+  the explanation to return; explanations are retained only for the current
+  card set. Existing dragging and chronological layout remain unchanged.
+
 ### Changed
 
 - **Audiobook transcription controls.** Rename Transcription Models to
