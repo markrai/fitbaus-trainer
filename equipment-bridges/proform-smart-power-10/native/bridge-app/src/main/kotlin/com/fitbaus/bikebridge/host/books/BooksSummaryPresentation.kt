@@ -13,7 +13,7 @@ internal data class BooksSummaryPresentation(val text: String, val retry: Boolea
             is BooksSummaryState.Reducing -> BooksSummaryPresentation(
                 "Preparing book recap…\n\n${state.completedNodes} of ${state.totalNodes} summary steps complete.\n\nAudio continues while the recap is prepared.")
             is BooksSummaryState.MissingCoverage -> BooksSummaryPresentation(
-                "Earlier narration is not fully transcribed (${state.missingWindowCount} missing windows).\n\nPrepare this audiobook using Transcribe Book, or use Recent recap.")
+                "Earlier narration is not fully transcribed (${state.missingWindowCount} missing windows).\n\nPrepare this audiobook using Transcription, or use Recent recap.")
             is BooksSummaryState.Pending -> BooksSummaryPresentation(if (recap)
                 "Preparing earlier narration…\n\nAudio continues while the recap is prepared."
                 else "Preparing narration for this section…\n\nAudio continues while the summary is prepared.")
