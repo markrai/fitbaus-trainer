@@ -230,12 +230,12 @@ internal class TranscriberManagementDialog(
                 label("PREPARED · READ ONLY", 14f, card, SUCCESS, true)
             } else if (superseded) {
                 label("SUPERSEDED", 14f, card, MUTED, true)
-            } else if (item != null && model != null) {
+            } else if (item != null) {
                 button(if (selected) "SELECTED" else "SELECT", enabled && snapshot.canPrepare && !selected, card, selected) {
                     selectedModel = model.id
                     renderRows(snapshot, true)
                 }
-            } else if (model != null) {
+            } else {
                 renderModelManagementActions(model, snapshot, enabled, card)
             }
         }
