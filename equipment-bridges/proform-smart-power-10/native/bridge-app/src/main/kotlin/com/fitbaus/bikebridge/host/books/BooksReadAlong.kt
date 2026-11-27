@@ -6,7 +6,6 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
@@ -31,7 +30,6 @@ internal class BooksReadAlong(
     private val source: BooksTranscriptSource = LocalBooksTranscriptSource(context),
     onFullscreenRequested: () -> Unit = {},
     private val playbackPosition: (() -> Long)? = null,
-    private val onDiagramChanged: (BooksDiagramState?) -> Unit = {},
 ) : LinearLayout(context) {
     private val transcriberStore = TranscriberConnectionStore(context)
     private var books: BooksConnection? = null
@@ -55,10 +53,13 @@ internal class BooksReadAlong(
     private var summaryFuture: Future<*>? = null
     private var summaryCallback: ((BooksSummaryState) -> Unit)? = null
     private val narration = label("", 36f)
-    private val inlineSummary = label("", BooksSummaryPresentation.INLINE_SIZE_SP)
     private val details = label("", 14f)
     private val scroll = ScrollView(context)
-    private val narrationViewport = BooksNarrationViewport(context, scroll, narration, inlineSummary)
+    private val readingSelection = BooksReadingSelection()
+    private val modeButtons = BooksReadingMode.values().associateWith { flatAction(it.label) }
+    private val selectors = LinearLayout(context)
+    private val diagramPanel = BooksDiagramPanel(context)
+    private var renderedDiagram: BooksDiagramState? = null
     private val reload = flatAction("Retry narration")
     val cover = ImageView(context)
     private val readingControls = LinearLayout(context)
@@ -77,6 +78,7 @@ internal class BooksReadAlong(
     private var summaryState: BooksSummaryState? = null
     private var fullscreen = false
     private var hasNarration = false
+    private var narrationPresentation = BooksNarrationPresentation.COVER
     private val readingPrefs = context.applicationContext.getSharedPreferences("fitbaus_books_read_along", Context.MODE_PRIVATE)
     private var textSizeSp = readingPrefs.getInt("text_size_sp", 36).coerceIn(28, 52)
     private val fontSizeLabel = label("", 14f)
@@ -108,7 +110,7 @@ internal class BooksReadAlong(
                 if (!fromUser) return
                 textSizeSp = progress + 28
                 narration.textSize = textSizeSp.toFloat()
-                narrationViewport.requestLayout()
+                scroll.requestLayout()
                 fontSizeLabel.text = "Text: $textSizeSp"
                 scroll.scrollTo(0, 0)
                 readingPrefs.edit().putInt("text_size_sp", textSizeSp).apply()
@@ -126,20 +128,14 @@ internal class BooksReadAlong(
         narration.setLineSpacing(dp(4).toFloat(), 1.12f)
         scroll.isFillViewport = true
         scroll.addView(narration, FrameLayout.LayoutParams(MATCH, WRAP))
-        inlineSummary.apply {
-            gravity = Gravity.CENTER_HORIZONTAL
-            setTypeface(Typeface.DEFAULT, Typeface.ITALIC)
-            setTextColor(0xffbfbfbf.toInt())
-            setLineSpacing(dp(1).toFloat(), 1.08f)
-        }
-        narrationViewport.onSummaryDrawn = ::prefetchVisibleDiagram
         cover.scaleType = ImageView.ScaleType.FIT_CENTER
         cover.contentDescription = "Audiobook cover"
         val stage = FrameLayout(context)
         stage.addView(cover, FrameLayout.LayoutParams(MATCH, MATCH))
-        stage.addView(narrationViewport, FrameLayout.LayoutParams(MATCH, MATCH))
+        stage.addView(scroll, FrameLayout.LayoutParams(MATCH, MATCH))
         buildSummaryPanel()
         stage.addView(summaryPanel, FrameLayout.LayoutParams(MATCH, MATCH))
+        stage.addView(diagramPanel, FrameLayout.LayoutParams(MATCH, MATCH))
         fullscreenButton.visibility = GONE
         fullscreenButton.contentDescription = "Enter fullscreen narration"
         fullscreenButton.setOnClickListener { onFullscreenRequested() }
@@ -147,6 +143,26 @@ internal class BooksReadAlong(
         addView(stage, LayoutParams(MATCH, 0, 1f))
         actions.orientation = HORIZONTAL
         actions.gravity = Gravity.CENTER_VERTICAL
+        selectors.orientation = HORIZONTAL
+        selectors.gravity = Gravity.CENTER_VERTICAL
+        selectors.setPadding(dp(8), 0, 0, 0)
+        selectors.visibility = GONE
+        for ((index, mode) in BooksReadingMode.values().withIndex()) {
+            if (index > 0) {
+                val separator = label("|", 16f).apply { setTextColor(0xff555555.toInt()) }
+                selectors.addView(separator, LayoutParams(WRAP, WRAP))
+            }
+            val button = requireNotNull(modeButtons[mode])
+            button.textSize = 16f
+            button.minWidth = 0
+            button.minimumWidth = 0
+            button.setPadding(dp(12), 0, dp(12), 0)
+            button.setOnClickListener {
+                if (fullscreen && readingSelection.select(mode, readingAvailability())) updateSummaryChrome()
+            }
+            selectors.addView(button, LayoutParams(WRAP, dp(48)))
+        }
+        actions.addView(selectors, LayoutParams(WRAP, WRAP))
         actions.addView(android.view.View(context), LayoutParams(0, 1, 1f))
         actions.addView(fullscreenButton, LayoutParams(dp(48), dp(44)))
         addView(actions, LayoutParams(MATCH, WRAP))
@@ -207,7 +223,7 @@ internal class BooksReadAlong(
         summaryNotice.setPadding(0, dp(4), 0, dp(8))
         summaryPanel.addView(summaryNotice, LayoutParams(MATCH, WRAP))
         summaryScroll.isFillViewport = true
-        summaryText.gravity = Gravity.CENTER_VERTICAL
+        summaryText.gravity = Gravity.CENTER
         summaryText.setPadding(dp(8), dp(8), dp(8), dp(8))
         summaryText.setLineSpacing(dp(4).toFloat(), 1.12f)
         summaryScroll.addView(summaryText, FrameLayout.LayoutParams(MATCH, WRAP))
@@ -253,37 +269,105 @@ internal class BooksReadAlong(
             selection.matches(request?.itemId, currentState.session, windows.revision,
                 currentState.seekGeneration, livePosition())
 
+    private fun currentSummaryReady(selection: BooksSummarySelection?): Boolean {
+        val ready = summaryState as? BooksSummaryState.Ready ?: return false
+        return canShowSummary() && recapSelection == null && selection != null &&
+            summarySection == selection.section && summaryScope.matches(selection) &&
+            ready.revision == windows.revision && ready.summary.isNotBlank()
+    }
+
+    private fun readingAvailability(): BooksReadingAvailability {
+        val selection = summarySelection(livePosition())
+        val ready = currentSummaryReady(selection)
+        val concepts = ready && diagramConnectionMatches() &&
+            diagramScope.matches(selection, diagramSummary(selection)) &&
+            (diagramScope.state is BooksDiagramState.Concepts || diagramScope.state is BooksDiagramState.Ready)
+        return BooksReadingAvailability(ready, concepts)
+    }
+
     private fun updateSummaryChrome() {
-        val showing = BooksPlayerPresentation.recapPanelVisible(fullscreen, recapSelection != null)
-        summaryPanel.visibility = if (showing) VISIBLE else GONE
-        actions.visibility = if (fullscreenButton.visibility == VISIBLE) VISIBLE else GONE
-        if (summaryState is BooksSummaryState.MissingCoverage) {
-            summaryRetry.visibility = if (canShowRecap()) VISIBLE else GONE
-        }
-        cover.visibility = if (!showing && !hasNarration) VISIBLE else GONE
-        scroll.visibility = if (!showing && hasNarration) VISIBLE else GONE
-        val text = BooksSummaryPresentation.inlineText(summaryState,
-            fullscreen && hasNarration && !showing && summarySection != null && canShowSummary())
-        narrationViewport.setSummary(text)
-        val ready = diagramSummary()
-        if (diagramScope.ticket != null && !diagramScope.matches(summarySelection(), ready)) {
+        val selection = summarySelection(livePosition())
+        val ready = diagramSummary(selection)
+        if (diagramScope.ticket != null &&
+            (!diagramScope.matches(selection, ready) || !diagramConnectionMatches())) {
             invalidatedDiagramSummary = diagramScope.ticket?.identity?.summary
             clearDiagram()
         }
-        narrationViewport.setSummaryLongPress(if (text != null && ready != null) ::openDiagram else null)
+        if (ready != null) prefetchDiagram()
+        val availability = readingAvailability()
+        val recap = BooksPlayerPresentation.recapPanelVisible(fullscreen, recapSelection != null)
+        val mode = readingSelection.visibleMode(fullscreen)
+        val showSummary = recap || mode == BooksReadingMode.SUMMARY
+        val showConcepts = !recap && mode == BooksReadingMode.CONCEPTS
+        val showNarration = !showSummary && !showConcepts
+
+        selectors.visibility = if (fullscreen && !recap) VISIBLE else GONE
+        for ((choice, button) in modeButtons) {
+            val enabled = availability.allows(choice)
+            button.isEnabled = enabled
+            button.isSelected = choice == mode
+            button.setTextColor(when {
+                !enabled -> 0xff555555.toInt()
+                choice == mode -> 0xffffce1b.toInt()
+                else -> 0xffdddddd.toInt()
+            })
+        }
+        actions.visibility = if (fullscreenButton.visibility == VISIBLE) VISIBLE else GONE
+        cover.visibility = if (showNarration && !hasNarration) VISIBLE else GONE
+        scroll.visibility = if (showNarration && hasNarration) VISIBLE else GONE
+        summaryPanel.visibility = if (showSummary) VISIBLE else GONE
+        diagramPanel.visibility = if (showConcepts) VISIBLE else GONE
+        summaryTitle.visibility = if (recap) VISIBLE else GONE
+        summaryRange.visibility = if (recap) VISIBLE else GONE
+        summaryNotice.visibility = if (recap) VISIBLE else GONE
+        if (recap) {
+            if (summaryState is BooksSummaryState.MissingCoverage) {
+                summaryRetry.visibility = if (canShowRecap()) VISIBLE else GONE
+            }
+        } else {
+            val state = summaryState
+            val presentation = when {
+                availability.summary && state is BooksSummaryState.Ready -> BooksSummaryPresentation.resolve(state)
+                state != null && state !is BooksSummaryState.Ready && summarySection == selection?.section &&
+                    canShowSummary() -> BooksSummaryPresentation.resolve(state)
+                narrationPresentation == BooksNarrationPresentation.UNAVAILABLE ->
+                    BooksSummaryPresentation("Narration unavailable · audio continues")
+                canShowSummary() || narrationPresentation == BooksNarrationPresentation.LOADING ->
+                    BooksSummaryPresentation("Preparing section summary…")
+                else -> BooksSummaryPresentation("Summary unavailable")
+            }
+            if (summaryText.text.toString() != presentation.text) {
+                summaryText.text = presentation.text
+                summaryScroll.scrollTo(0, 0)
+            }
+            summaryRetry.text = "Retry summary"
+            summaryRetry.visibility = if (showSummary && presentation.retry) VISIBLE else GONE
+        }
+        if (showConcepts) {
+            val state = if (availability.concepts) requireNotNull(diagramScope.state)
+                else if (diagramScope.state == BooksDiagramState.Unavailable ||
+                    summaryState is BooksSummaryState.Failed || summaryState is BooksSummaryState.Empty ||
+                    (narrationPresentation == BooksNarrationPresentation.UNAVAILABLE) ||
+                    (!windows.visualizationAvailable && hasNarration)) BooksDiagramState.Unavailable
+                else BooksDiagramState.Loading
+            if (renderedDiagram != state) {
+                diagramPanel.render(state)
+                renderedDiagram = state
+            }
+        }
     }
 
-    private fun diagramSummary(selection: BooksSummarySelection? = summarySelection()): BooksSummaryState.Ready? =
+    private fun diagramSummary(selection: BooksSummarySelection?): BooksSummaryState.Ready? =
         (summaryState as? BooksSummaryState.Ready)?.takeIf {
-            windows.visualizationAvailable && canShowSummary() && recapSelection == null &&
+            windows.visualizationAvailable && currentSummaryReady(selection) &&
                 selection != null && summarySection == selection.section && it.sourceId != null &&
                 it.promptVersion == "section-v1" && it.revision == windows.revision && it !== invalidatedDiagramSummary
         }
 
     private fun diagramConnectionMatches(): Boolean = diagramConnection?.isCurrent() == true
 
-    private fun prefetchVisibleDiagram(): Boolean {
-        if (destroyed || !narrationViewport.summaryIsVisible()) return false
+    private fun prefetchDiagram(): Boolean {
+        if (destroyed || !fullscreen || !isShown) return false
         val selection = summarySelection(livePosition()) ?: return false
         val ready = diagramSummary(selection) ?: return false
         if (diagramScope.matches(selection, ready)) return true
@@ -310,39 +394,23 @@ internal class BooksReadAlong(
                 if (!diagramScope.matches(liveSelection, diagramSummary(liveSelection)) || !diagramConnectionMatches()) {
                     invalidatedDiagramSummary = ticket.identity.summary
                     clearDiagram()
+                    updateSummaryChrome()
                     return@post
                 }
-                if (diagramScope.complete(ticket, result) && diagramScope.open) onDiagramChanged(result)
+                if (diagramScope.complete(ticket, result)) updateSummaryChrome()
             }
         }
         return true
     }
 
-    private fun openDiagram(): Boolean {
-        if (!narrationViewport.summaryIsVisible()) return false
-        val selection = summarySelection(livePosition()) ?: return false
-        val ready = diagramSummary(selection) ?: return false
-        if (!diagramScope.matches(selection, ready)) return false
-        if (!diagramConnectionMatches() || !diagramScope.show()) return false
-        onDiagramChanged(diagramScope.state)
-        return true
-    }
-
-    fun closeDiagram(): Boolean {
-        if (!diagramScope.open) return false
-        diagramScope.hide()
-        onDiagramChanged(null)
-        return true
-    }
-
     private fun clearDiagram() {
-        val wasOpen = diagramScope.open
         diagramScope.clear()
         diagramConnection = null
         diagramFuture?.cancel(true)
         diagramFuture = null
         diagramWorker.purge()
-        if (wasOpen) onDiagramChanged(null)
+        diagramPanel.clear()
+        renderedDiagram = null
     }
 
     private fun maybeStartInlineSummary() {
@@ -594,6 +662,7 @@ internal class BooksReadAlong(
         narration.text = ""
         details.text = ""
         hasNarration = false
+        narrationPresentation = BooksNarrationPresentation.COVER
         cover.visibility = VISIBLE
         scroll.visibility = GONE
         setFullscreen(false)
@@ -632,6 +701,7 @@ internal class BooksReadAlong(
         val document = if (localMode) transcript else window?.transcript
         val failed = session != null && windows.failed(state.positionMs, session.durationMs)
         val presentation = BooksNarrationPresentation.resolve(document != null, ready, localMode, failed)
+        narrationPresentation = presentation
         hasNarration = presentation == BooksNarrationPresentation.NARRATION
         details.text = when (presentation) {
             BooksNarrationPresentation.NARRATION -> ""
@@ -647,7 +717,7 @@ internal class BooksReadAlong(
             displayed = text
             narration.text = text.orEmpty()
             scroll.scrollTo(0, 0)
-            narrationViewport.requestLayout()
+            scroll.requestLayout()
         }
         maybeStartInlineSummary()
     }

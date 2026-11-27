@@ -180,16 +180,11 @@ class RemoteBooksDiagramTest {
         val scope = BooksDiagramScope()
         val ticket = requireNotNull(scope.begin(identity))
         assertNull(scope.begin(BooksDiagramIdentity(selection.copy(), summary)))
-        assertTrue(scope.show())
-        scope.hide()
-        assertFalse(scope.open)
         val graph = BooksDiagramValidation.parse(ready())
         assertTrue(scope.complete(ticket, BooksDiagramState.Ready(graph)))
-        assertTrue(scope.show())
         assertEquals(BooksDiagramState.Ready(graph), scope.state)
         scope.clear()
         assertFalse(scope.complete(ticket, BooksDiagramState.Ready(graph)))
-        assertFalse(scope.show())
         val replacement = BooksPlaybackSession(session.id, session.tracks, session.chapters, session.resumeMs)
         val next = requireNotNull(scope.begin(BooksDiagramIdentity(selection.copy(session = replacement), summary)))
         assertFalse(scope.matches(selection, summary))
@@ -247,61 +242,27 @@ class RemoteBooksDiagramTest {
         val ticket = requireNotNull(scope.begin(identity))
         val graph = BooksDiagramValidation.parse(ready())
         assertTrue(scope.complete(ticket, BooksDiagramState.Ready(graph)))
-        assertTrue(scope.show())
         assertFalse(scope.matches(selection.copy(section = BooksSection(300_000, 600_000, null, 2, 2)), summary))
         assertFalse(scope.matches(selection, summary.copy(summary = "Replacement")))
         assertFalse(scope.matches(selection.copy(expectedRevision = "d".repeat(64)), summary))
         scope.clear()
-        assertFalse(scope.open)
         assertNull(scope.state)
         assertFalse(scope.complete(ticket, BooksDiagramState.Ready(graph)))
     }
 
     @Test
-    fun drawGateConsumesOnlyVisibleCurrentSummaryOnce() {
-        val gate = BooksSummaryDrawGate()
-        var deliveries = 0
-        assertNull(gate.begin(false))
-        val hidden = requireNotNull(gate.begin(true))
-        gate.finish(hidden, false) { deliveries++; true }
-        assertEquals(0, deliveries)
-        val stale = requireNotNull(gate.begin(true))
-        gate.changed()
-        gate.finish(stale, true) { deliveries++; true }
-        assertEquals(0, deliveries)
-        val declined = requireNotNull(gate.begin(true))
-        gate.finish(declined, true) { false }
-        val ready = requireNotNull(gate.begin(true))
-        assertNull(gate.begin(true))
-        gate.finish(ready, true) { deliveries++; true }
-        repeat(1000) {
-            assertNull(gate.begin(true))
-            assertNull(gate.begin(false))
-        }
-        assertEquals(1, deliveries)
-        gate.changed()
-        val cancelled = requireNotNull(gate.begin(true))
-        gate.cancel(cancelled)
-        val replacement = requireNotNull(gate.begin(true))
-        gate.finish(cancelled, true) { deliveries++; true }
-        assertEquals(1, deliveries)
-        gate.finish(replacement, true) { deliveries++; true }
-        assertEquals(2, deliveries)
-    }
-
-    @Test
-    fun visibleDrawAndFullscreenOwnershipAreExplicit() {
+    fun prefetchAndFullscreenOwnershipAreIndependentOfSelectedContent() {
         val root = "src/main/kotlin/com/fitbaus/bikebridge/host/"
-        val viewport = File(root + "books/BooksNarrationViewport.kt").readText()
         val readAlong = File(root + "books/BooksReadAlong.kt").readText()
         val content = File(root + "books/BooksContent.kt").readText()
-        assertTrue(viewport.contains("super.dispatchDraw(canvas)"))
-        assertTrue(viewport.contains("drawGate.finish(ticket, summaryIsVisible() && longPressAction != null)"))
-        assertTrue(readAlong.contains("narrationViewport.onSummaryDrawn = ::prefetchVisibleDiagram"))
+        assertTrue(readAlong.contains("if (ready != null) prefetchDiagram()"))
         assertTrue(readAlong.contains("if (diagramScope.ticket !== ticket) return@post"))
         assertTrue(readAlong.contains("summarySelection(livePosition())"))
         assertTrue(readAlong.contains("diagramScope.matches(liveSelection, diagramSummary(liveSelection))"))
-        assertTrue(content.contains("hud.visibility = if (diagram) GONE else VISIBLE"))
-        assertTrue(content.contains("presentationMode != BooksPresentationMode.DIAGRAM"))
+        assertTrue(readAlong.contains("if (diagramScope.complete(ticket, result)) updateSummaryChrome()"))
+        assertTrue(content.contains("hud.visibility = VISIBLE"))
+        assertTrue(content.contains("private var readingFullscreen = false"))
+        assertFalse(content.contains("BooksPresentationMode.DIAGRAM"))
+        assertFalse(readAlong.contains("setSummaryLongPress"))
     }
 }

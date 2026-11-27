@@ -270,7 +270,7 @@ class NativeBridgeActivity : Activity() {
 
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        if (::booksContent.isInitialized && modeController.mode == ArcadeMode.Books && booksContent.closeDiagram()) return
+        if (::booksContent.isInitialized && modeController.mode == ArcadeMode.Books && booksContent.exitReadingFullscreen()) return
         super.onBackPressed()
     }
 
