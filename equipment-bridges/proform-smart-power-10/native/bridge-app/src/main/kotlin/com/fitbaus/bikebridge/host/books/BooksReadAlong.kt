@@ -187,7 +187,7 @@ internal class BooksReadAlong(
         if (fullscreen == value) return
         fullscreen = value
         if (value) readingSelection.reset()
-        if (!value) {
+        if (!value && !canRetainConcepts()) {
             inlineAttempt.reset()
             dismissSummary()
         }
@@ -251,8 +251,16 @@ internal class BooksReadAlong(
         summaryPanel.addView(summaryRetry, retryParams)
     }
 
-    private fun canShowSummary(): Boolean = fullscreen && !localMode && windows.summaryAvailable &&
+    private fun summaryContextAvailable(): Boolean = !localMode && windows.summaryAvailable &&
         summarySelection() != null
+
+    private fun canShowSummary(): Boolean = fullscreen && summaryContextAvailable()
+
+    private fun canRetainConcepts(): Boolean {
+        val selection = summarySelection(livePosition())
+        return diagramScope.state is BooksDiagramState.Concepts &&
+            diagramConnectionMatches() && diagramScope.matches(selection, diagramSummary(selection))
+    }
 
     private fun livePosition(): Long = playbackPosition?.invoke() ?: currentState.positionMs
 
@@ -272,7 +280,7 @@ internal class BooksReadAlong(
 
     private fun currentSummaryReady(selection: BooksSummarySelection?): Boolean {
         val ready = summaryState as? BooksSummaryState.Ready ?: return false
-        return canShowSummary() && recapSelection == null && selection != null &&
+        return summaryContextAvailable() && recapSelection == null && selection != null &&
             summarySection == selection.section && summaryScope.matches(selection) &&
             ready.revision == windows.revision && ready.summary.isNotBlank()
     }
@@ -692,7 +700,7 @@ internal class BooksReadAlong(
         if (ready && windows.revision != null && !localMode) {
             sectionPlans.configure(session, windows.sectionPlanAvailable)
         }
-        if ((summaryScope.active && (!summaryScope.matches(summarySelection()) || !canShowSummary())) ||
+        if ((summaryScope.active && (!summaryScope.matches(summarySelection()) || !summaryContextAvailable())) ||
             (planningSelection != null && (!planningMatches() || !canShowSummary())) ||
             recapSelection?.let { !recapMatches(it) } == true) dismissSummary()
         if (ready && !localMode) {
