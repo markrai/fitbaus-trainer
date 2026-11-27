@@ -20,6 +20,11 @@ Planned patch release: Full 2.6.1 (`versionCode 20601`).
   chart. Show weekly aggregates, lifetime average power and recorded work.
   Preserve earlier history without treating missing power as zero.
 
+- **Draggable concept cards.** Reposition individual cards on the Concept
+  Canvas without changing the automatic chronological layout. Retain manual
+  positions when returning to the same ready section, and reset them when
+  the card set refreshes.
+
 ### Changed
 
 - **Audiobook transcription controls.** Rename Transcription Models to
