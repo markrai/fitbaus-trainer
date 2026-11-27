@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
+import android.util.TypedValue
 import kotlin.math.roundToInt
 
 internal fun bookPlaybackPercent(progress: Int, max: Int): Int =
@@ -22,7 +23,7 @@ internal class BooksProgressThumb(resources: Resources) : Drawable() {
     private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif", Typeface.BOLD)
         textAlign = Paint.Align.CENTER
-        textSize = 10 * resources.displayMetrics.scaledDensity
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, resources.displayMetrics)
         val available = diameter - 4 * density
         if (measureText("100%") > available) textSize *= available / measureText("100%")
     }
