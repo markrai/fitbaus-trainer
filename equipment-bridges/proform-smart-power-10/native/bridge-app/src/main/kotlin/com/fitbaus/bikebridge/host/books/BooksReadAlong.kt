@@ -22,6 +22,7 @@ import android.widget.TextView
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
@@ -41,6 +42,10 @@ internal class BooksReadAlong(
     private val worker = Executors.newSingleThreadExecutor()
     private val summaryWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1))
     private val diagramWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1))
+    private val explanationWorker = ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+        LinkedBlockingQueue<Runnable>(BooksConceptValidation.MAX_CONCEPTS))
+    private val elaboration = BooksConceptElaboration()
+    private val explanationFutures = mutableMapOf<Int, Future<*>>()
     private val diagramScope = BooksDiagramScope()
     private var diagramFuture: Future<*>? = null
     private var diagramConnection: TranscriberConnectionStore.RecordSnapshot? = null
@@ -58,7 +63,7 @@ internal class BooksReadAlong(
     private val readingSelection = BooksReadingSelection()
     private val modeButtons = BooksReadingMode.values().associateWith { flatAction(it.label) }
     private val selectors = LinearLayout(context)
-    private val diagramPanel = BooksDiagramPanel(context)
+    private val diagramPanel = BooksDiagramPanel(context, ::exploreConcept, ::dismissExplanation)
     private var renderedDiagram: BooksDiagramState? = null
     private val reload = flatAction("Retry narration")
     val cover = ImageView(context)
@@ -325,7 +330,10 @@ internal class BooksReadAlong(
         cover.visibility = if (showNarration && !hasNarration) VISIBLE else GONE
         scroll.visibility = if (showNarration && hasNarration) VISIBLE else GONE
         summaryPanel.visibility = if (showSummary) VISIBLE else GONE
-        if (!showConcepts) diagramPanel.finishConceptDrag()
+        if (!showConcepts) {
+            diagramPanel.finishConceptDrag()
+            dismissExplanation()
+        }
         diagramPanel.visibility = if (showConcepts) VISIBLE else GONE
         summaryTitle.visibility = if (recap) VISIBLE else GONE
         summaryRange.visibility = if (recap) VISIBLE else GONE
@@ -413,7 +421,56 @@ internal class BooksReadAlong(
         return true
     }
 
+    private fun exploreConcept(index: Int) {
+        if (destroyed || !fullscreen || readingSelection.visibleMode(fullscreen) != BooksReadingMode.CONCEPTS ||
+            !readingAvailability().concepts) return
+        val scope = diagramScope.ticket ?: return
+        val cards = diagramScope.state as? BooksDiagramState.Concepts ?: return
+        val concept = cards.snippets.getOrNull(index) ?: return
+        val paired = diagramConnection ?: return
+        val connection = books ?: return
+        val ticket = elaboration.open(index)
+        diagramPanel.showExplanation(concept, elaboration.state(index))
+        if (ticket == null) return
+        try {
+            explanationFutures[index] = explanationWorker.submit {
+                val result = try {
+                    ConceptExplanation.Ready(RemoteBooksDiagram(paired.connection(), connection)
+                        .loadElaboration(scope.identity, index, concept))
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return@submit
+                } catch (_: Exception) {
+                    if (Thread.currentThread().isInterrupted) return@submit
+                    ConceptExplanation.Unavailable
+                }
+                main.post {
+                    if (destroyed || diagramScope.ticket !== scope || !diagramConnectionMatches() ||
+                        !diagramScope.matches(summarySelection(livePosition()), diagramSummary(summarySelection(livePosition())))) return@post
+                    if (!elaboration.complete(ticket, result)) return@post
+                    explanationFutures.remove(index)
+                    if (elaboration.selected == index && fullscreen &&
+                        readingSelection.visibleMode(fullscreen) == BooksReadingMode.CONCEPTS) {
+                        diagramPanel.showExplanation(concept, elaboration.state(index))
+                    }
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            elaboration.complete(ticket, ConceptExplanation.Unavailable)
+            diagramPanel.showExplanation(concept, elaboration.state(index))
+        }
+    }
+
+    private fun dismissExplanation() {
+        elaboration.dismiss()
+        diagramPanel.hideExplanation()
+    }
+
     private fun clearDiagram() {
+        elaboration.clear()
+        explanationFutures.values.forEach { it.cancel(true) }
+        explanationFutures.clear()
+        explanationWorker.purge()
         diagramScope.clear()
         diagramConnection = null
         diagramFuture?.cancel(true)
@@ -687,6 +744,7 @@ internal class BooksReadAlong(
         worker.shutdownNow()
         summaryWorker.shutdownNow()
         diagramWorker.shutdownNow()
+        explanationWorker.shutdownNow()
     }
 
     fun render(state: BooksPlayerState) {
