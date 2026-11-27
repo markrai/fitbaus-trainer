@@ -187,9 +187,9 @@ internal class BooksReadAlong(
         if (fullscreen == value) return
         fullscreen = value
         if (value) readingSelection.reset()
-        if (!value && !canRetainConcepts()) {
+        if (!value) {
             inlineAttempt.reset()
-            dismissSummary()
+            if (!canRetainConcepts()) dismissSummary()
         }
         fullscreenButton.expanded = value
         fullscreenButton.contentDescription = if (value) "Exit fullscreen narration" else "Enter fullscreen narration"
@@ -325,6 +325,7 @@ internal class BooksReadAlong(
         cover.visibility = if (showNarration && !hasNarration) VISIBLE else GONE
         scroll.visibility = if (showNarration && hasNarration) VISIBLE else GONE
         summaryPanel.visibility = if (showSummary) VISIBLE else GONE
+        if (!showConcepts) diagramPanel.finishConceptDrag()
         diagramPanel.visibility = if (showConcepts) VISIBLE else GONE
         summaryTitle.visibility = if (recap) VISIBLE else GONE
         summaryRange.visibility = if (recap) VISIBLE else GONE
