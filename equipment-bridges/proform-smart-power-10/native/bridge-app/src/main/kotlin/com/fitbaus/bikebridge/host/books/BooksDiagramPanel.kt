@@ -85,6 +85,8 @@ internal class BooksDiagramPanel(context: Context) : FrameLayout(context) {
         }
     }
 
+    fun finishConceptDrag() = conceptView.finishDrag()
+
     fun clear() {
         diagram.clearGraph()
         diagram.visibility = GONE
