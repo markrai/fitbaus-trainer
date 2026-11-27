@@ -23,7 +23,6 @@ function writeArtifactsMarkdown({
   toolingRef,
   trainerCert,
   bridgeCert,
-  bridgeQualified,
 }) {
   const release = resolveRelease({ edition, versionName });
   if (Number(versionCode) !== release.versionCode) {
@@ -49,16 +48,14 @@ Edition: **${release.title}** — ${release.summary}
 Trainer certificate SHA-256: \`${trainerCert}\`
 Bike Bridge certificate SHA-256: \`${bridgeCert}\`
 
-**Candidate provenance** (inspect/build): signed binaries and hashes are recorded in
-\`release-candidate.json\`. That file identifies the exact Bridge APK (\`apkSha256\`) for
-console acceptance and later publication checks. Candidate provenance is not the same as
-publication qualification.
+**Candidate provenance**: signed binaries and hashes are recorded in
+\`release-candidate.json\`. That file identifies the exact Bridge APK for
+integrity verification and optional physical console acceptance.
 
-**Physical qualification** is a separate publication gate recorded in
-\`.github/release/physical-qualification.json\`. \`mode=publish\` verifies that binding against
-this exact Bridge APK before undrafting the GitHub Release. A published Release means that
-gate passed for these binaries; an inspect candidate alone does not.
-${bridgeQualified ? "\nA matching qualification record may already exist for this Bridge identity.\n" : ""}
+**Physical qualification** is recommended but is not a publication gate.
+A published Release has passed automated build, signature, and artifact
+integrity checks; publication does not assert physical console acceptance.
+
 End users should install only from a **published** GitHub Release. Users never handle signing keys.
 
 Unsigned APKs, staging package IDs (\`com.fitbaus.bikebridge.native\`), and debug-signed builds
@@ -80,7 +77,6 @@ function preparePublicArtifacts({
   webZipPath,
   trainerCert,
   bridgeCert,
-  bridgeQualified,
 }) {
   const names = resolveRelease({ edition, versionName }).artifacts;
   fs.mkdirSync(artifactDir, { recursive: true });
@@ -105,8 +101,7 @@ function preparePublicArtifacts({
     toolingRef,
     trainerCert,
     bridgeCert,
-    bridgeQualified,
-  });
+    });
 
   writeChecksums(artifactDir, [names.trainerApk, names.bridgeApk, names.webZip, names.manifest]);
 
@@ -134,7 +129,6 @@ function parseArgs(argv) {
     webZip: null,
     trainerCert: null,
     bridgeCert: null,
-    bridgeQualified: false,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -150,7 +144,6 @@ function parseArgs(argv) {
     else if (arg === "--web-zip") options.webZip = argv[++i];
     else if (arg === "--trainer-cert") options.trainerCert = argv[++i];
     else if (arg === "--bridge-cert") options.bridgeCert = argv[++i];
-    else if (arg === "--bridge-qualified") options.bridgeQualified = true;
     else fail(`Unknown argument: ${arg}`);
   }
   const required = {
@@ -186,7 +179,6 @@ if (require.main === module) {
     webZipPath: options.webZip,
     trainerCert: options.trainerCert,
     bridgeCert: options.bridgeCert,
-    bridgeQualified: options.bridgeQualified,
   });
   process.stdout.write(`${JSON.stringify(names, null, 2)}\n`);
 }

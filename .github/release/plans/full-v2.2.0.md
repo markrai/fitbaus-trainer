@@ -1,5 +1,7 @@
 # FitBaus Full 2.2.0 release checklist
 
+> Historical release plan. The automatic release workflow supersedes the manual inspection and qualification gates documented below. See [Release engineering](../RELEASE.md).
+
 **Status: source preparation.** No `v2.2.0` tag, signed candidate, physical qualification, or public GitHub Release exists yet. This checklist tracks the remaining release gates.
 
 FitBaus Full 2.2.0 is a minor product version, not a separate edition. The canonical version is `2.2.0` in `version.js`, giving Android `versionCode 20200`. The latest published Full release is 2.1.0; the intervening 2.1.1–2.1.3 work is included without publishing those development versions.

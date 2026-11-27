@@ -2,16 +2,13 @@
 
 FitBaus uses one unified product version across Trainer web/PWA, Capacitor
 Android and iOS, Native Bike Bridge, and arcade (shipped inside the Bridge
-APK). **1.0.0** was the first unified release. **FitBaus Full 2.1.0**
-(`versionCode 20100`) is the latest published Full release. Full 2.1.1 was prepared but
-not published, and 2.1.2–2.1.3 were development versions. The next Full
-minor release, **2.2.0** (`versionCode 20200`), is in release preparation on
-`main`.
+APK). **1.0.0** was the first unified release. The published release history is
+available on the [GitHub Releases page](https://github.com/markrai/fitbaus-trainer/releases).
 
 There is one authoritative source: [`version.js`](version.js).
 
 ```js
-const APP_VERSION = "2.2.0";
+const APP_VERSION = "2.6.0";
 ```
 
 Do not treat persistence schema versions, protocol identifiers, API versions,
@@ -85,39 +82,30 @@ on the Native Bike Bridge job.
 - **FitBaus Lite 1.x** — maintenance on `lite/1.x` from `v1.0.0` / published
   `v1.0.1`; no external UVC. Do not rewrite published Lite tags.
 - **FitBaus Full 2.x** — feature edition on `main`, including external USB
-  (UVC) webcam support and native YouTube playback. **2.1.0** / `20100` is
-  published. **2.1.1** / `20101` was prepared but not published;
-  **2.1.2** / `20102` and **2.1.3** / `20103` were development versions;
-  **2.2.0** / `20200` is the next Full minor release candidate.
-  Do not merge webcam into Lite.
+  (UVC) webcam support and native YouTube playback. Do not merge webcam into Lite.
 
 Product versioning stays unified via `version.js`. Edition differences use
 artifact filenames (for example `fitbaus-bikebridge-full-2.1.0.apk` vs
 `fitbaus-bikebridge-lite-1.0.1.apk`), not package-ID forks.
 
-Maintainer procedure, secrets, certificate pins, and physical qualification:
-see [.github/release/RELEASE.md](.github/release/RELEASE.md). The Full 2.2.0
-release checklist is [.github/release/plans/full-v2.2.0.md](.github/release/plans/full-v2.2.0.md).
+Maintainer procedure, secrets, certificate pins, and recommended hardware testing:
+see [.github/release/RELEASE.md](.github/release/RELEASE.md).
 
 ## GitHub release procedure
 
-Public installers are produced by **Release** (`.github/workflows/release.yml`).
-For the published Full 2.1.0 release (historical example):
+Merge the version bump and changelog, then create and push the matching annotated tag:
 
-1. Tag: create the annotated tag `v2.1.0` on the `main` commit whose
-   `version.js` declares `2.1.0`, and push it.
-2. Run **Release** with `tag=v2.1.0`, matching `expected_commit`,
-   `edition=full`, `mode=inspect`.
-3. Physically qualify the exact signed Bike Bridge APK from that candidate on
-   the console, and record the evidence and qualification record (details in
-   `.github/release/RELEASE.md`).
-4. Re-run **Release** with the same `tag`, `expected_commit`, `edition=full`,
-   `mode=publish`, and `candidate_run_id` pointing at the qualified inspect
-   run. GitHub Actions attaches the verified public files; maintainers do not
-   manually sign APKs or re-upload assets for the happy path.
+```bash
+git tag -a v2.6.0 -m "FitBaus Full 2.6.0"
+git push origin v2.6.0
+```
 
-The older **Release artifacts** workflow remains inspection-oriented legacy
-packaging; prefer **Release** for installer publication.
+After successful tag CI, the Release workflow builds, signs, verifies and publishes
+automatically. For an existing tag, use `gh workflow run release.yml --ref main -f tag=v2.6.0`.
+The release uses default-branch tooling and immutable tagged application source.
+Physical console acceptance is recommended, but is not a publication gate.
+
+The older **Release artifacts** workflow remains inspection-oriented legacy packaging.
 
 ## Artifact signing classes
 
@@ -137,6 +125,6 @@ Do not present unsigned APKs as install-ready releases.
   `.github/release/signing-policy.json`; keep the pinned fingerprints in sync
   with the release keystores (details in `.github/release/RELEASE.md`)
 - Verify existing GitHub Actions signing secrets remain configured
-- Production Bike Bridge physical-device qualification record for each published version
+- Recommended physical testing of the production Bike Bridge, not a publication gate
 - iOS distribution signing and a macOS build
 - Console storage: measure APK size before installing on stock hardware

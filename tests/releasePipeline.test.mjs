@@ -11,6 +11,8 @@ const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const { resolveSourceRef } = require("../scripts/release/resolve-source-ref.cjs");
+const { releaseIdentity, resolveReleaseRequest } = require("../scripts/release/resolve-release-request.cjs");
+const { releaseNotes } = require("../scripts/release/release-notes.cjs");
 const { assertCertMatchesPolicy } = require("../scripts/release/check-signing-policy.cjs");
 const { assertBridgeQualified } = require("../scripts/release/check-physical-qualification.cjs");
 const { preparePublicArtifacts } = require("../scripts/release/prepare-public-artifacts.cjs");
@@ -248,13 +250,12 @@ test("preparePublicArtifacts writes canonical names and separates qualification 
     webZipPath: web,
     trainerCert: "A".repeat(64),
     bridgeCert: "B".repeat(64),
-    bridgeQualified: false,
-  });
+      });
   assert.equal(names.trainerApk, publicArtifactNames("1.0.0", "lite").trainerApk);
   const md = fs.readFileSync(path.join(out, names.manifest), "utf8");
   assert.match(md, /Candidate provenance/);
   assert.match(md, /Physical qualification/);
-  assert.match(md, /published Release means that\s+gate passed/i);
+  assert.match(md, /publication does not assert physical console acceptance/);
   assert.doesNotMatch(md, /bridgeQualified=false|qualification was not recorded/i);
   assert.doesNotMatch(md, /does \*\*not\*\* claim the Bridge APK has already been/);
   const candidate = writeReleaseCandidate({
@@ -1161,8 +1162,7 @@ test("validateReleaseCandidate rejects wrong tag, edition, or mismatched hashes"
     webZipPath: web,
     trainerCert: "A".repeat(64),
     bridgeCert: "B".repeat(64),
-    bridgeQualified: false,
-  });
+      });
   writeReleaseCandidate({
     artifactDir: out,
     versionName: "1.0.0",
@@ -1375,26 +1375,26 @@ test("mocked gh: records command-local --repo vectors", () => {
   assert.deepEqual(state.calls[0].slice(-2), ["--repo", "markrai/fitbaus-trainer"]);
 });
 
-test("workflow trusts default branch and requires expected_commit", () => {
+test("workflow trusts default branch and derives release inputs", () => {
   const yml = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
   assert.match(yml, /environment:\s*release/);
   assert.match(yml, /DEFAULT_BRANCH:\s*\$\{\{\s*github\.event\.repository\.default_branch\s*\}\}/);
   assert.match(yml, /test "\$GITHUB_REF" = "refs\/heads\/\$\{DEFAULT_BRANCH\}"/);
   assert.match(yml, /persist-credentials:\s*false/);
-  assert.match(yml, /GH_REPO:\s*\$\{\{\s*github\.repository\s*\}\}/);
-  assert.match(yml, /expected_commit:/);
-  assert.doesNotMatch(yml, /default:\s*"9847e9f/);
-  assert.match(yml, /candidate_run_id/);
-  assert.match(yml, /assert-candidate-run\.cjs/);
+  assert.match(yml, /workflow_run:/);
+  assert.match(yml, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(yml, /github\.event\.workflow_run\.event == 'push'/);
+  assert.match(yml, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/);
+  assert.match(yml, /resolve-release-request\.cjs "\$RELEASE_TAG" "\$CI_COMMIT"/);
+  assert.doesNotMatch(yml, /candidate_run_id|expected_commit:|check-physical-qualification\.cjs/);
   assert.match(yml, /validate-release-candidate\.cjs/);
   assert.match(yml, /assert-tag-source-version\.cjs/);
   assert.match(yml, /sdkmanager "build-tools;35\.0\.0"/);
   assert.match(yml, /local\.properties/);
-  assert.match(yml, /env:FITBAUS_APKSIGNER|env:\$\{|sign-apk\.cjs/);
+  assert.match(yml, /sign-apk\.cjs/);
   assert.match(yml, /--min-sdk 22/);
   assert.match(yml, /--require-v1/);
   assert.match(yml, /contents:\s*write/);
-  assert.match(yml, /actions:\s*read/);
 });
 
 function writeVersionJs(dir, version) {
@@ -1508,8 +1508,7 @@ test("validateReleaseCandidate rejects candidate versionName that disagrees with
     webZipPath: web,
     trainerCert: "A".repeat(64),
     bridgeCert: "B".repeat(64),
-    bridgeQualified: false,
-  });
+      });
   writeReleaseCandidate({
     artifactDir: out,
     versionName: "1.0.0",
@@ -1623,7 +1622,7 @@ const BRIDGE_PIN = SIGNING_POLICY.packages["com.fitbaus.bikebridge"].expectedCer
 const FULL_COMMIT = "a588c45783c55c0c102c4061fa7d8176d33eb314";
 const LITE_COMMIT = "cf91c7d32fe54315cb5e1ec5488e8f477abe9a50";
 
-const PUBLISHED_LITE_1_0_1_ARTIFACTS_MD = [
+const LITE_1_0_1_ARTIFACTS_MD = [
   "# FitBaus 1.0.1 (lite) distribution",
   "",
   "These are the public installer artifacts for tag `v1.0.1` (commit `cf91c7d32fe54315cb5e1ec5488e8f477abe9a50`).",
@@ -1644,15 +1643,13 @@ const PUBLISHED_LITE_1_0_1_ARTIFACTS_MD = [
   "Trainer certificate SHA-256: `38A830D320081E59BBDA44CD52BFEF10D6CD7473E31281A27C0D010CF4FE8DAA`",
   "Bike Bridge certificate SHA-256: `5B2C6916536EBA269F9F47C925CC2B16A455CD80340A4F95C3E3CBBBFC42AF0C`",
   "",
-  "**Candidate provenance** (inspect/build): signed binaries and hashes are recorded in",
-  "`release-candidate.json`. That file identifies the exact Bridge APK (`apkSha256`) for",
-  "console acceptance and later publication checks. Candidate provenance is not the same as",
-  "publication qualification.",
+  "**Candidate provenance**: signed binaries and hashes are recorded in",
+  "`release-candidate.json`. That file identifies the exact Bridge APK for",
+  "integrity verification and optional physical console acceptance.",
   "",
-  "**Physical qualification** is a separate publication gate recorded in",
-  "`.github/release/physical-qualification.json`. `mode=publish` verifies that binding against",
-  "this exact Bridge APK before undrafting the GitHub Release. A published Release means that",
-  "gate passed for these binaries; an inspect candidate alone does not.",
+  "**Physical qualification** is recommended but is not a publication gate.",
+  "A published Release has passed automated build, signature, and artifact",
+  "integrity checks; publication does not assert physical console acceptance.",
   "",
   "End users should install only from a **published** GitHub Release. Users never handle signing keys.",
   "",
@@ -1691,8 +1688,7 @@ function buildEditionCandidate({
     webZipPath: web,
     trainerCert: TRAINER_PIN,
     bridgeCert: BRIDGE_PIN,
-    bridgeQualified: false,
-  });
+      });
   const candidate = writeReleaseCandidate({
     artifactDir: out,
     versionName,
@@ -1857,9 +1853,8 @@ test("Lite 1.0.1 ARTIFACTS.md is byte-identical to the published release notes",
     toolingRef: "8815635bc1032a64bbb1d98f476f032991760372",
     trainerCert: TRAINER_PIN,
     bridgeCert: BRIDGE_PIN,
-    bridgeQualified: false,
-  });
-  assert.equal(fs.readFileSync(path.join(dir, "ARTIFACTS.md"), "utf8"), PUBLISHED_LITE_1_0_1_ARTIFACTS_MD);
+      });
+  assert.equal(fs.readFileSync(path.join(dir, "ARTIFACTS.md"), "utf8"), LITE_1_0_1_ARTIFACTS_MD);
 });
 
 test("Full 2.1.0 ARTIFACTS.md describes the Full edition without claiming qualification", () => {
@@ -1875,7 +1870,7 @@ test("Full 2.1.0 ARTIFACTS.md describes the Full edition without claiming qualif
   assert.match(md, /\| `fitbaus-trainer-android-2\.1\.0\.apk` \| `com\.markrai\.fitbaus\.trainer` \|/);
   assert.match(md, new RegExp(`Bike Bridge certificate SHA-256: \`${BRIDGE_PIN}\``));
   assert.match(md, /Candidate provenance/);
-  assert.match(md, /A published Release means that\s+gate passed for these binaries; an inspect candidate alone does not\./);
+  assert.match(md, /publication does not assert physical console acceptance/);
   assert.match(md, /End users should install only from a \*\*published\*\* GitHub Release/);
   assert.match(md, /staging package IDs \(`com\.fitbaus\.bikebridge\.native`\)/);
   assert.doesNotMatch(md, /FitBaus Lite|Lite filename|Lite is maintained|fitbaus-bikebridge-lite/);
@@ -2311,48 +2306,73 @@ function workflowSteps(yml) {
     });
 }
 
-test("release workflow offers Full, validates the edition early, and keeps trust gates", () => {
+test("release workflow uses a single trusted build and publish run", () => {
   const yml = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
-  const editionInput = yml.slice(yml.indexOf("      edition:"), yml.indexOf("      mode:"));
-  assert.match(editionInput, /options:\n\s+- lite\n\s+- full\n/);
-  assert.match(editionInput, /default: lite/);
-
   const steps = workflowSteps(yml);
   const index = (name) => {
     const i = steps.findIndex((step) => step.name === name);
     assert.ok(i >= 0, `missing step ${name}`);
     return i;
   };
-  const editionStep = index("Validate edition against release tag");
-  assert.match(steps[editionStep].block, /node scripts\/release\/edition\.cjs --edition "\$EDITION" --tag "\$RELEASE_TAG"/);
-  assert.ok(editionStep < index("Resolve and verify source tag"), "edition check precedes source resolution");
-  assert.ok(editionStep < index("Install and test application source"), "edition check precedes builds");
-  assert.ok(editionStep < index("Require signing secrets (fail closed)"), "edition check precedes signing");
-  assert.match(steps[index("Validate inputs")].block, /lite\|full\) ;;/);
-  assert.match(steps[index("Require tag matches source version.js")].block, /--edition "\$EDITION"/);
-
-  const publish = steps[index("Publish GitHub Release from exact candidate")].block;
-  assert.doesNotMatch(publish, /FitBaus Lite|bikebridge-lite|fitbaus-trainer-android-\$version/);
-  assert.match(publish, /edition\.cjs" --edition "\$EDITION" --version-name "\$version" --tag "\$RELEASE_TAG"/);
-  assert.match(publish, /--field title/);
-  assert.match(publish, /--field assets/);
-  assert.match(publish, /test "\$title" = "\$EDITION_TITLE"/);
-  assert.match(publish, /EDITION_TITLE: \$\{\{ steps\.edition\.outputs\.title \}\}/);
-  assert.doesNotMatch(yml, /FitBaus Lite \$version|fitbaus-bikebridge-lite-\$version/);
-
-  const assertRun = index("Assert candidate run is a trusted successful inspect");
+  assert.ok(index("Resolve and verify source tag") < index("Checkout immutable application source"));
+  assert.ok(index("Require tag matches source version.js") < index("Require signing secrets (fail closed)"));
+  assert.ok(index("Bike Bridge unit tests") < index("Require signing secrets (fail closed)"));
+  assert.match(yml, /publish:\n    name: Publish verified release\n    needs: build/);
   const download = index("Download exact release candidate");
   const validate = index("Validate candidate identity and binary integrity");
-  const qualify = index("Verify candidate APKs, pins, and physical qualification");
-  const publishIdx = index("Publish GitHub Release from exact candidate");
-  assert.ok(assertRun < download && download < validate && validate < qualify && qualify < publishIdx);
-  assert.match(steps[validate].block, /--edition "\$EDITION"/);
-  assert.match(steps[qualify].block, /check-physical-qualification\.cjs/);
-  assert.match(steps[qualify].block, /--require-v1 \\\n\s+--require-x86 \\\n\s+--forbid-non-x86/);
-  for (const step of steps.filter((s) => /mode == 'publish'/.test(s.block))) {
-    assert.doesNotMatch(step.block, /gradlew|sign-apk|SIGNING_STORE/, `publish step rebuilds or signs: ${step.name}`);
-  }
-  assert.doesNotMatch(yml, /debug\.keystore|signingConfigs\.debug|--allow-sidecar/);
-  assert.match(yml, /environment: release/);
+  const verify = index("Verify candidate APKs and signing pins");
+  const publish = index("Publish GitHub Release from exact candidate");
+  assert.ok(download < validate && validate < verify && verify < publish);
+  assert.match(steps[validate].block, /--workflow-run-id "\$GITHUB_RUN_ID"/);
+  assert.match(steps[verify].block, /--require-v1/);
+  assert.match(steps[verify].block, /--require-x86/);
+  assert.match(steps[verify].block, /--forbid-non-x86/);
+  assert.match(steps[publish].block, /--field assets/);
+  assert.match(steps[publish].block, /release-notes\.cjs/);
+  assert.match(steps[publish].block, /upload-github-release-assets\.cjs/);
+  assert.doesNotMatch(yml.slice(yml.indexOf("\n  publish:")), /gradlew|sign-apk\.cjs|SIGNING_STORE/);
+  assert.doesNotMatch(yml, /--allow-unset|debug\.keystore|signingConfigs\.debug|candidate_run_id/);
   assert.match(yml, /^permissions:\n  contents: read$/m);
+});
+
+test("release identity derives the correct edition and canonical title from the tag", () => {
+  const full = releaseIdentity("v2.6.0");
+  assert.equal(full.edition, "full");
+  assert.equal(full.branch, "main");
+  assert.equal(full.versionCode, 20600);
+  assert.equal(full.title, "FitBaus Full 2.6.0");
+  assert.equal(releaseIdentity("v1.0.1").branch, "lite/1.x");
+  for (const tag of ["main", "v3.0.0", "v2.100.0", "v2.6.0-beta", "v2.6.0\ncommit=bad"]) {
+    assert.throws(() => releaseIdentity(tag));
+  }
+});
+
+test("automatic and manual release resolution trust only exact tags on edition branches", () => {
+  const fixture = makeAnnotatedTagFixture({ tag: "v2.6.0" });
+  const local = tempDir("fitbaus-release-resolution-");
+  gitOk(local, ["clone", "--no-tags", fixture.dir, "."]);
+  const resolve = (tag, expectedCommit = "") => resolveReleaseRequest({ tag, expectedCommit, repoDir: local });
+  assert.deepEqual(resolve("v2.6.0"), {
+    tag: "v2.6.0", edition: "full", title: "FitBaus Full 2.6.0", commit: fixture.commit,
+  });
+  assert.equal(resolve("v2.6.0", fixture.commit).commit, fixture.commit);
+  assert.throws(() => resolve("v2.6.0", "0".repeat(40)), /triggering CI commit/);
+  assert.throws(() => resolve("v2.6.1"));
+  gitOk(fixture.dir, ["switch", "-c", "lite/1.x"]);
+  gitOk(fixture.dir, ["commit", "--allow-empty", "-m", "Lite only"]);
+  const liteCommit = gitOk(fixture.dir, ["rev-parse", "HEAD"]);
+  gitOk(fixture.dir, ["tag", "-a", "v1.0.1", "-m", "Lite"]);
+  gitOk(fixture.dir, ["tag", "-a", "v2.6.1", "-m", "Wrong edition"]);
+  assert.equal(resolve("v1.0.1", liteCommit).edition, "lite");
+  assert.throws(() => resolve("v2.6.1"), /ancestor of main/);
+  gitOk(fixture.dir, ["tag", "-f", "-a", "v2.6.0", "-m", "Moved tag", liteCommit]);
+  assert.throws(() => resolve("v2.6.0", fixture.commit));
+});
+
+test("release notes select only the exact tagged changelog section", () => {
+  const changelog = "# Changelog\r\n\r\n## [2.7.0]\r\nLater\r\n## [2.6.0] - 2026-11-26\r\n### Added\r\nNew reading modes\r\n## [2.5.0]\r\nEarlier\r\n";
+  assert.equal(releaseNotes("2.6.0", changelog, "Installers"), "### Added\nNew reading modes\n\n---\n\nInstallers\n");
+  assert.throws(() => releaseNotes("2.6.1", changelog, "Installers"), /one changelog section/);
+  assert.throws(() => releaseNotes("2.6.0", changelog + "\n## [2.6.0]\nDuplicate", ""), /one changelog section/);
+  assert.throws(() => releaseNotes("2.6.0", "## [2.6.0]\n\n## [2.5.0]\nEarlier", ""), /Empty changelog section/);
 });

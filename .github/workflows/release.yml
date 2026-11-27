@@ -1,137 +1,89 @@
 name: Release
-
-# Trusted release machinery (default branch only).
-# - Tooling/secrets: protected environment "release" on the repository default branch.
-# - Application source: immutable existing tag (tooling ≠ source revision).
-# - inspect: build/sign/verify + upload release candidate artifact.
-# - publish: download that exact candidate, verify qualification binding, draft→assets→publish.
+run-name: Release ${{ inputs.tag || github.event.workflow_run.head_branch }}
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing release tag (e.g. v1.0.0). Must already exist; never created here."
+        description: "Existing release tag (e.g. v2.6.0)"
         required: true
         type: string
-      expected_commit:
-        description: "Required peeled commit SHA for the tag (40 hex). Example for v1.0.0: 9847e9f5dd828cf28f1a85320b2142ec4d3f5126"
-        required: true
-        type: string
-      edition:
-        description: "Product edition: lite (1.x.x, lite/1.x) or full (2.x.x, main). Must match the tag's major version."
-        type: choice
-        options:
-          - lite
-          - full
-        default: lite
-      mode:
-        description: "inspect = build signed candidate. publish = attach/publish exact candidate from a prior inspect run."
-        type: choice
-        options:
-          - inspect
-          - publish
-        default: inspect
-      candidate_run_id:
-        description: "Required for mode=publish: Actions run id whose inspect artifacts contain the qualified candidate."
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: fitbaus-release-${{ github.event.inputs.tag }}
+  group: fitbaus-release-${{ inputs.tag || github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: ${{ github.event.inputs.mode }} ${{ github.event.inputs.tag }}
+  build:
+    name: Build and verify signed release
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: release
-    # write is required for publish; inspect steps never create releases. Environment +
-    # default-branch gate still protect signing secrets and publication.
     permissions:
-      contents: write
-      actions: read
+      contents: read
+    outputs:
+      commit: ${{ steps.ref.outputs.commit }}
+      edition: ${{ steps.ref.outputs.edition }}
+      tag: ${{ steps.ref.outputs.tag }}
+      title: ${{ steps.ref.outputs.title }}
     env:
       TOOLING_DIR: tooling
       SOURCE_DIR: source
       ARTIFACT_DIR: release-artifacts
       PUBLIC_DIR: public-distribution
       GH_REPO: ${{ github.repository }}
-      EDITION: ${{ github.event.inputs.edition }}
-      RELEASE_TAG: ${{ github.event.inputs.tag }}
-      RELEASE_MODE: ${{ github.event.inputs.mode }}
-      EXPECTED_COMMIT: ${{ github.event.inputs.expected_commit }}
-      CANDIDATE_RUN_ID: ${{ github.event.inputs.candidate_run_id }}
+      RELEASE_TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+      CI_COMMIT: ${{ github.event.workflow_run.head_sha }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - name: Restrict to default-branch tooling
         run: |
           set -euo pipefail
-          echo "ref=${GITHUB_REF}"
-          echo "default=${DEFAULT_BRANCH}"
           test "$GITHUB_REF" = "refs/heads/${DEFAULT_BRANCH}"
-
-      - name: Validate inputs
-        run: |
-          set -euo pipefail
-          case "$RELEASE_TAG" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "Invalid tag: $RELEASE_TAG"; exit 1 ;;
-          esac
-          if ! printf '%s' "$EXPECTED_COMMIT" | grep -Eq '^[0-9a-f]{40}$'; then
-            echo "expected_commit must be 40 lowercase hex chars"
-            exit 1
-          fi
-          if [ "$RELEASE_MODE" = "publish" ] && [ -z "$CANDIDATE_RUN_ID" ]; then
-            echo "mode=publish requires candidate_run_id from a prior inspect run"
-            exit 1
-          fi
-          case "$EDITION" in
-            lite|full) ;;
-            *) echo "Invalid edition: $EDITION"; exit 1 ;;
-          esac
 
       - name: Checkout release tooling (default branch)
         uses: actions/checkout@v4
         with:
           path: tooling
+          ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Validate edition against release tag
-        id: edition
-        working-directory: tooling
-        run: |
-          set -euo pipefail
-          node scripts/release/edition.cjs --edition "$EDITION" --tag "$RELEASE_TAG"
-          title="$(node scripts/release/edition.cjs --edition "$EDITION" --tag "$RELEASE_TAG" --field title)"
-          echo "title=$title" >> "$GITHUB_OUTPUT"
 
       - name: Resolve and verify source tag
         id: ref
         working-directory: tooling
         run: |
           set -euo pipefail
-          git remote set-url origin "https://github.com/${GH_REPO}.git"
-          node scripts/release/resolve-source-ref.cjs \
-            --repo . \
-            --tag "$RELEASE_TAG" \
-            --expect-commit "$EXPECTED_COMMIT" \
-            --remote origin \
-            --json | tee "$RUNNER_TEMP/source-ref.json"
-          commit="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.RUNNER_TEMP+'/source-ref.json','utf8')).commit)")"
-          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+            [[ "$CI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          fi
+          node scripts/release/resolve-release-request.cjs "$RELEASE_TAG" "$CI_COMMIT" >> "$GITHUB_OUTPUT"
+
+      - name: Export verified release identity
+        env:
+          RESOLVED_COMMIT: ${{ steps.ref.outputs.commit }}
+          RESOLVED_EDITION: ${{ steps.ref.outputs.edition }}
+        run: |
+          set -euo pipefail
+          printf 'EXPECTED_COMMIT=%s\nEDITION=%s\n' "$RESOLVED_COMMIT" "$RESOLVED_EDITION" >> "$GITHUB_ENV"
 
       - name: Checkout immutable application source
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.ref.outputs.commit }}
@@ -140,7 +92,6 @@ jobs:
           fetch-depth: 1
 
       - name: Confirm source checkout commit
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         env:
           WANT_COMMIT: ${{ steps.ref.outputs.commit }}
         run: |
@@ -151,7 +102,6 @@ jobs:
           test "$got" = "$EXPECTED_COMMIT"
 
       - name: Require tag matches source version.js
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         working-directory: tooling
         env:
           SOURCE_VERSION_JS: ${{ github.workspace }}/source/version.js
@@ -163,7 +113,6 @@ jobs:
             --edition "$EDITION"
 
       - name: Cache npm for application source
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -182,18 +131,11 @@ jobs:
       - name: Install Android SDK packages
         run: |
           set -euo pipefail
-          if [ "$RELEASE_MODE" = "inspect" ]; then
-            sdkmanager "platforms;android-36" "platforms;android-34" "build-tools;34.0.0" "build-tools;35.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
-          else
-            # Publish verifies APKs with aapt/apksigner; do not rely on incidental image contents.
-            sdkmanager "build-tools;35.0.0"
-          fi
+          sdkmanager "platforms;android-36" "platforms;android-34" "build-tools;34.0.0" "build-tools;35.0.0" "ndk;26.1.10909125" "cmake;3.22.1"
 
       - uses: gradle/actions/setup-gradle@v4
-        if: ${{ github.event.inputs.mode == 'inspect' }}
 
       - name: Install and test application source
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         working-directory: source
         run: |
           set -euo pipefail
@@ -204,7 +146,6 @@ jobs:
           npm test
 
       - name: Bike Bridge unit tests
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         working-directory: source/equipment-bridges/proform-smart-power-10/native
         run: |
           set -euo pipefail
@@ -212,14 +153,12 @@ jobs:
           ./gradlew :equipment-protocol:test :bridge-app:testReleaseUnitTest :equipment-usb-probe:testDebugUnitTest :arcade:testDebugUnitTest --no-daemon --stacktrace
 
       - name: Record product version from source
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         id: version
         working-directory: source
         run: |
           node -e "const fs=require('fs'); const v=require('./scripts/fitbaus-version.cjs').readAppVersion('version.js'); fs.appendFileSync(process.env.GITHUB_OUTPUT, 'name='+v.name+'\ncode='+String(v.versionCode)+'\n'); console.log('Product version '+v.name+' (versionCode '+v.versionCode+')');"
 
       - name: Require signing secrets (fail closed)
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         env:
           TRAINER_SIGNING_STORE_BASE64: ${{ secrets.TRAINER_SIGNING_STORE_BASE64 }}
           TRAINER_SIGNING_STORE_PASSWORD: ${{ secrets.TRAINER_SIGNING_STORE_PASSWORD }}
@@ -249,7 +188,6 @@ jobs:
           echo "BIKEBRIDGE_KEYSTORE=$RUNNER_TEMP/bikebridge-release.jks" >> "$GITHUB_ENV"
 
       - name: Package web zip from source
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         working-directory: source
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
@@ -258,12 +196,10 @@ jobs:
           node scripts/package-web-deploy.cjs --zip "$GITHUB_WORKSPACE/$ARTIFACT_DIR/fitbaus-trainer-web-${VERSION_NAME}.zip"
 
       - name: Sync Capacitor Android web assets
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         working-directory: source
         run: npm run cap:sync:android
 
       - name: Assemble Trainer unsigned release APK
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         working-directory: source/android
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
@@ -276,7 +212,6 @@ jobs:
           grep -F "FITBAUS_VERSION_CODE=${VERSION_CODE}" "$RUNNER_TEMP/trainer-version.txt"
 
       - name: Sign Trainer release APK
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         env:
           TRAINER_SIGNING_STORE_PASSWORD: ${{ secrets.TRAINER_SIGNING_STORE_PASSWORD }}
           TRAINER_SIGNING_KEY_ALIAS: ${{ secrets.TRAINER_SIGNING_KEY_ALIAS }}
@@ -295,7 +230,6 @@ jobs:
           cp "$unsigned" "$ARTIFACT_DIR/fitbaus-trainer-android-${VERSION_NAME}-unsigned-release.apk"
 
       - name: Assemble production Bike Bridge APK
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         working-directory: source/equipment-bridges/proform-smart-power-10/native
         env:
           BIKEBRIDGE_SIGNING_STORE_PASSWORD: ${{ secrets.BIKEBRIDGE_SIGNING_STORE_PASSWORD }}
@@ -325,7 +259,6 @@ jobs:
           cp "$apk" "$GITHUB_WORKSPACE/$ARTIFACT_DIR/bridge-production-signed.apk"
 
       - name: Verify signed APKs
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         id: verify
         working-directory: tooling
         env:
@@ -358,16 +291,13 @@ jobs:
           node scripts/release/check-signing-policy.cjs \
             --policy "$TRAINER_POLICY" \
             --application-id com.markrai.fitbaus.trainer \
-            --cert-sha256 "$trainer_cert" \
-            --allow-unset
+            --cert-sha256 "$trainer_cert"
           node scripts/release/check-signing-policy.cjs \
             --policy "$TRAINER_POLICY" \
             --application-id com.fitbaus.bikebridge \
-            --cert-sha256 "$bridge_cert" \
-            --allow-unset
+            --cert-sha256 "$bridge_cert"
 
       - name: Prepare public distribution set
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
           VERSION_CODE: ${{ steps.version.outputs.code }}
@@ -402,93 +332,100 @@ jobs:
             --workflow-run-id "${GITHUB_RUN_ID}"
 
       - name: Upload release candidate artifact
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         uses: actions/upload-artifact@v4
         with:
           name: fitbaus-release-candidate
+          overwrite: true
           path: public-distribution/
           if-no-files-found: error
 
       - name: Upload engineering inspection dump
-        if: ${{ github.event.inputs.mode == 'inspect' }}
         uses: actions/upload-artifact@v4
         with:
           name: fitbaus-release-inspection-${{ steps.version.outputs.name }}
+          overwrite: true
           path: release-artifacts/
           if-no-files-found: error
 
-      - name: Assert candidate run is a trusted successful inspect
-        if: ${{ github.event.inputs.mode == 'publish' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    name: Publish verified release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+    env:
+      TOOLING_DIR: tooling
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+      EXPECTED_COMMIT: ${{ needs.build.outputs.commit }}
+      EDITION: ${{ needs.build.outputs.edition }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: Restrict publication to default-branch tooling
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/${DEFAULT_BRANCH}"
+
+      - name: Checkout release tooling (default branch)
+        uses: actions/checkout@v4
+        with:
+          path: tooling
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Reverify immutable tag before publication
         working-directory: tooling
         run: |
           set -euo pipefail
-          command -v gh >/dev/null
-          command -v node >/dev/null
-          node scripts/release/assert-candidate-run.cjs \
-            --repo "$GH_REPO" \
-            --run-id "$CANDIDATE_RUN_ID" \
-            --default-branch "$DEFAULT_BRANCH"
+          node scripts/release/resolve-release-request.cjs "$RELEASE_TAG" "$EXPECTED_COMMIT"
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+
+      - name: Install verification tools
+        run: sdkmanager "build-tools;35.0.0"
 
       - name: Download exact release candidate
-        if: ${{ github.event.inputs.mode == 'publish' }}
         uses: actions/download-artifact@v4
         with:
           name: fitbaus-release-candidate
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ env.CANDIDATE_RUN_ID }}
-          path: candidate
-
-      - name: Locate candidate public directory
-        if: ${{ github.event.inputs.mode == 'publish' }}
-        id: candidate
-        run: |
-          set -euo pipefail
-          if [ -d candidate/public-distribution ]; then
-            echo "dir=candidate/public-distribution" >> "$GITHUB_OUTPUT"
-          elif [ -f candidate/release-candidate.json ]; then
-            echo "dir=candidate" >> "$GITHUB_OUTPUT"
-          else
-            found="$(find candidate -name release-candidate.json | head -n 1 || true)"
-            test -n "$found"
-            echo "dir=$(dirname "$found")" >> "$GITHUB_OUTPUT"
-          fi
+          path: public-distribution
 
       - name: Validate candidate identity and binary integrity
-        if: ${{ github.event.inputs.mode == 'publish' }}
         working-directory: tooling
         env:
-          CAND_DIR: ${{ steps.candidate.outputs.dir }}
-          SOURCE_COMMIT: ${{ steps.ref.outputs.commit }}
+          CAND_DIR: public-distribution
         run: |
           set -euo pipefail
-          # steps.ref already re-fetched and peeled the tag against EXPECTED_COMMIT.
-          test "$SOURCE_COMMIT" = "$EXPECTED_COMMIT"
           node scripts/release/validate-release-candidate.cjs \
             --dir "$GITHUB_WORKSPACE/$CAND_DIR" \
             --tag "$RELEASE_TAG" \
             --commit "$EXPECTED_COMMIT" \
             --edition "$EDITION" \
-            --workflow-run-id "$CANDIDATE_RUN_ID"
+            --workflow-run-id "$GITHUB_RUN_ID"
 
-      - name: Verify candidate APKs, pins, and physical qualification
-        if: ${{ github.event.inputs.mode == 'publish' }}
+      - name: Verify candidate APKs and signing pins
         working-directory: tooling
         env:
-          CAND_DIR: ${{ steps.candidate.outputs.dir }}
+          CAND_DIR: public-distribution
           TRAINER_POLICY: ${{ github.workspace }}/tooling/.github/release/signing-policy.json
-          QUAL_FILE: ${{ github.workspace }}/tooling/.github/release/physical-qualification.json
         run: |
           set -euo pipefail
           command -v apksigner >/dev/null || command -v "$ANDROID_HOME/build-tools/35.0.0/apksigner" >/dev/null
           cand="$GITHUB_WORKSPACE/$CAND_DIR/release-candidate.json"
           version="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).versionName)" "$cand")"
           code="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).versionCode)" "$cand")"
-          source_commit="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).sourceCommit)" "$cand")"
           bridge_name="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).artifacts.bridgeApk.name)" "$cand")"
           trainer_name="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).artifacts.trainerApk.name)" "$cand")"
-          bridge_sha="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).artifacts.bridgeApk.sha256)" "$cand")"
           trainer_cert="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).artifacts.trainerApk.certSha256)" "$cand")"
           bridge_cert="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).artifacts.bridgeApk.certSha256)" "$cand")"
 
@@ -521,23 +458,16 @@ jobs:
             --application-id com.fitbaus.bikebridge \
             --cert-sha256 "$bridge_cert"
 
-          node scripts/release/check-physical-qualification.cjs \
-            --file "$QUAL_FILE" \
-            --version-name "$version" \
-            --application-id com.fitbaus.bikebridge \
-            --cert-sha256 "$bridge_cert" \
-            --apk-sha256 "$bridge_sha" \
-            --source-commit "$source_commit"
 
       - name: Publish GitHub Release from exact candidate
-        if: ${{ github.event.inputs.mode == 'publish' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CAND_DIR: ${{ steps.candidate.outputs.dir }}
-          EDITION_TITLE: ${{ steps.edition.outputs.title }}
+          CAND_DIR: public-distribution
+          EDITION_TITLE: ${{ needs.build.outputs.title }}
         run: |
           set -euo pipefail
           command -v gh >/dev/null
+          (cd "$TOOLING_DIR" && node scripts/release/resolve-release-request.cjs "$RELEASE_TAG" "$EXPECTED_COMMIT")
           cand="$CAND_DIR/release-candidate.json"
           version="$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).versionName)" "$cand")"
           plan=(node "$TOOLING_DIR/scripts/release/edition.cjs" --edition "$EDITION" --version-name "$version" --tag "$RELEASE_TAG")
@@ -549,7 +479,9 @@ jobs:
             asset_args+=(--asset "$asset")
           done < <("${plan[@]}" --field assets)
           test "${#asset_args[@]}" -eq 12
-          notes="$CAND_DIR/ARTIFACTS.md"
+          notes="$RUNNER_TEMP/release-notes.md"
+          git -C "$TOOLING_DIR" show "$EXPECTED_COMMIT:CHANGELOG.md" > "$RUNNER_TEMP/release-changelog.md"
+          node "$TOOLING_DIR/scripts/release/release-notes.cjs" "$version" "$RUNNER_TEMP/release-changelog.md" "$CAND_DIR/ARTIFACTS.md" > "$notes"
           node "$TOOLING_DIR/scripts/release/upload-github-release-assets.cjs" \
             --repo "$GH_REPO" \
             --tag "$RELEASE_TAG" \
