@@ -6,21 +6,6 @@ import java.util.Locale
 
 internal data class BooksSummaryPresentation(val text: String, val retry: Boolean = false) {
     companion object {
-        fun inlineText(state: BooksSummaryState?, visible: Boolean): String? =
-            if (visible && state is BooksSummaryState.Ready) state.summary.trim().takeIf { it.isNotEmpty() } else null
-
-        const val INLINE_SIZE_SP = 13f
-
-        fun inlineTopPx(viewportHeight: Int): Int = viewportHeight.coerceAtLeast(0).let { it - it / 4 }
-
-        fun inlineFits(viewportHeight: Int, narrationBottom: Int, gap: Int, bottomInset: Int,
-                       minimumHeight: Int): Boolean {
-            val top = inlineTopPx(viewportHeight)
-            return viewportHeight > 0 && narrationBottom >= 0 && gap >= 0 && bottomInset >= 0 &&
-                minimumHeight > 0 && narrationBottom <= top - gap &&
-                viewportHeight - bottomInset - top >= minimumHeight
-        }
-
         fun resolve(state: BooksSummaryState, recap: Boolean = false,
                     cumulative: Boolean = false): BooksSummaryPresentation = when (state) {
             BooksSummaryState.Preparing -> BooksSummaryPresentation(if (cumulative) "Preparing book recap…"
