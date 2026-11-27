@@ -6,14 +6,13 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.view.Gravity
-import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 
-internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : FrameLayout(context) {
+internal class BooksDiagramPanel(context: Context) : FrameLayout(context) {
     private val diagram = BooksDiagramView(context).apply { visibility = GONE }
     private val conceptView = BooksConceptView(context)
     private val canvas = ScrollView(context).apply {
@@ -45,26 +44,9 @@ internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : Frame
         setBackgroundColor(Color.BLACK)
         visibility = GONE
         isClickable = true
-        addView(diagram, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
-            bottomMargin = dp(56)
-        })
-        addView(canvas, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
-            bottomMargin = dp(56)
-        })
-        addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
-            bottomMargin = dp(56)
-        })
-        val dismiss = Button(context).apply {
-            text = "×"
-            textSize = 30f
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.TRANSPARENT)
-            stateListAnimator = null
-            elevation = 0f
-            contentDescription = "Close visual explanation"
-            setOnClickListener { close() }
-        }
-        addView(dismiss, LayoutParams(dp(56), dp(56), Gravity.BOTTOM or Gravity.RIGHT))
+        addView(diagram, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(canvas, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(status, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     fun render(state: BooksDiagramState) {
@@ -98,8 +80,8 @@ internal class BooksDiagramPanel(context: Context, close: () -> Boolean) : Frame
         status.visibility = if (rendered) GONE else VISIBLE
         message.text = when {
             rendered -> ""
-            loading -> "Preparing visual explanation…"
-            else -> "Visual explanation unavailable"
+            loading -> "Preparing concepts…"
+            else -> "Concepts unavailable"
         }
     }
 
