@@ -94,6 +94,20 @@ class RemoteBooksDiagramTest {
     }
 
     @Test
+    fun acceptsOrderedConceptPromptAndRetainsResponseOrder() {
+        val caps = JSONObject(capabilities.toString()).put("summary_concept_api", true)
+        val snippets = listOf("First", "A much longer second concept", "Third")
+        val result = client(caps = caps, expectedPath = "/v1/section-concepts") {
+            BooksHttpResponse(200, conceptResponse("ready").put("concept_prompt_version", "concepts-v2")
+                .put("cache_hit", false).put("concepts", JSONArray(snippets)).toString())
+        }.loadVisualization(identity)
+        assertEquals(BooksDiagramState.Concepts(snippets), result)
+        assertThrows(IllegalArgumentException::class.java) {
+            identity.validate(conceptResponse("ready").put("concept_prompt_version", "unknown"), concepts = true)
+        }
+    }
+
+    @Test
     fun conceptFailureNeverDispatchesAnAdditionalFlowchartRequest() {
         val caps = JSONObject(capabilities.toString()).put("summary_concept_api", true)
         var calls = 0

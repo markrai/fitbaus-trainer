@@ -15,17 +15,16 @@ internal object BooksConceptLayout {
         val placed = mutableListOf<ConceptPlacement>()
         val random = Random(seed)
         val startRight = random.nextBoolean()
-        val order = sizes.indices.sortedWith(compareByDescending<Int> { sizes[it].width }.thenBy { it })
-        for ((rank, index) in order.withIndex()) {
+        for (index in sizes.indices) {
             val size = sizes[index]
             val free = width - size.width
             val preferred = if (stagger == 0 || sizes.size == 1) {
                 free / 2
             } else {
-                val nextWidth = order.getOrNull(rank + 1)?.let { sizes[it].width }
+                val nextWidth = sizes.getOrNull(index + 1)?.width
                 val slack = if (nextWidth != null && nextWidth + gap <= free) free - nextWidth - gap else free
                 val edge = (slack * random.nextDouble(0.10, 0.28)).toInt()
-                if ((rank % 2 == 0) == startRight) free - edge else edge
+                if ((index % 2 == 0) == startRight) free - edge else edge
             }
             val offset = if (stagger > 0 && sizes.size > 1) random.nextInt(0, stagger + 1) else 0
             val candidates = linkedSetOf(preferred, 0, free, free / 2, free / 4, free * 3 / 4)
@@ -34,9 +33,10 @@ internal object BooksConceptLayout {
                 candidates.add((other.left + other.width + gap).coerceIn(0, free))
                 candidates.add(other.left.coerceIn(0, free))
             }
-            val obstacles = placed.sortedBy { it.top }
+            val minimumTop = placed.lastOrNull()?.let { it.top + 1 } ?: 0
+            val obstacles = placed
             val positions = candidates.map { left ->
-                var top = offset
+                var top = minimumTop + offset
                 for (other in obstacles) {
                     if (left + size.width + gap <= other.left || other.left + other.width + gap <= left) continue
                     if (top + size.height + gap <= other.top) break

@@ -39,7 +39,7 @@ internal class BooksDiagramIdentity(
     fun validate(result: JSONObject, concepts: Boolean = false) {
         if (concepts) {
             require(result.opt("schema") == "fitbaus.section-concepts/v1" &&
-                result.opt("concept_prompt_version") == "concepts-v1" && result.opt("concept_input_version") == "plain-lines-v1")
+                result.opt("concept_prompt_version") in setOf("concepts-v1", "concepts-v2") && result.opt("concept_input_version") == "plain-lines-v1")
         } else {
             require(result.opt("schema") == "fitbaus.section-diagram/v1" &&
                 result.opt("diagram_prompt_version") == "flowchart-v1" && result.opt("parser_version") == "flowchart-subset-v1")
