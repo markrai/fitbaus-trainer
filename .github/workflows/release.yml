@@ -70,6 +70,9 @@ jobs:
         working-directory: tooling
         run: |
           set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+            [[ "$CI_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          fi
           node scripts/release/resolve-release-request.cjs "$RELEASE_TAG" "$CI_COMMIT" >> "$GITHUB_OUTPUT"
 
       - name: Export verified release identity
