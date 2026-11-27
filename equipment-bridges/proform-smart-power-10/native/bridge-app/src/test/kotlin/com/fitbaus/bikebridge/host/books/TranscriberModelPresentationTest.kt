@@ -20,6 +20,19 @@ class TranscriberModelPresentationTest {
     }
 
     @Test
+    fun bookSelectionOnlyOffersInstalledQualifiedModelsAndKeepsCurrentChoice() {
+        val tiny = base.copy(id = "tiny", installed = true, state = "installed")
+        val qualified = base.copy(installed = true, state = "installed", qualification = "background_candidate")
+        val unqualified = base.copy(id = "small", installed = true, state = "installed")
+        val models = bookPreparationModels(listOf(tiny, base, qualified, unqualified, qualified.copy(state = "downloading")))
+        assertEquals(listOf(tiny, qualified), models)
+        assertEquals("tiny", bookPreparationSelection(models, "tiny"))
+        assertEquals("base", bookPreparationSelection(models, "base"))
+        assertEquals("base", bookPreparationSelection(listOf(qualified), "tiny"))
+        assertNull(bookPreparationSelection(emptyList(), "tiny"))
+    }
+
+    @Test
     fun downloadAndVerificationUseActualReportedBytes() {
         val partial = base.copy(state = "downloading", received = 74000000)
         val progress = modelCardPresentation(partial)
