@@ -28,7 +28,7 @@ internal class BooksConceptView(context: Context) : View(context) {
     private val positions = BooksConceptDragPositions()
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var pressedCard: ConceptPlacement? = null
-    private var pointerId = MotionEvent.INVALID_POINTER_ID
+    private var pointerId = -1
     private var downX = 0f
     private var downY = 0f
     private var dragging = false
@@ -198,7 +198,7 @@ internal class BooksConceptView(context: Context) : View(context) {
     fun finishDrag() {
         if (pressedCard != null) parent?.requestDisallowInterceptTouchEvent(false)
         pressedCard = null
-        pointerId = MotionEvent.INVALID_POINTER_ID
+        pointerId = -1
         dragging = false
     }
 
