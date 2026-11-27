@@ -434,15 +434,32 @@ internal class BooksReadAlong(
         if (ticket == null) return
         try {
             explanationFutures[index] = explanationWorker.submit {
+                var latest = ""
+                var lastUpdate = 0L
                 val result = try {
-                    ConceptExplanation.Ready(RemoteBooksDiagram(paired.connection(), connection)
-                        .loadElaboration(scope.identity, index, concept))
+                    ConceptExplanation.Ready(RemoteBooksElaboration(paired.connection(), connection)
+                        .load(scope.identity, index, concept) { text ->
+                            latest = text
+                            val now = System.nanoTime()
+                            if (lastUpdate == 0L || now - lastUpdate >= 100_000_000L) {
+                                lastUpdate = now
+                                main.post {
+                                    val selection = summarySelection(livePosition())
+                                    if (destroyed || diagramScope.ticket !== scope || !diagramConnectionMatches() ||
+                                        !diagramScope.matches(selection, diagramSummary(selection))) return@post
+                                    if (elaboration.progress(ticket, text) && elaboration.selected == index && fullscreen &&
+                                        readingSelection.visibleMode(fullscreen) == BooksReadingMode.CONCEPTS) {
+                                        diagramPanel.showExplanation(concept, elaboration.state(index))
+                                    }
+                                }
+                            }
+                        })
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
                     return@submit
                 } catch (_: Exception) {
                     if (Thread.currentThread().isInterrupted) return@submit
-                    ConceptExplanation.Unavailable
+                    if (latest.isBlank()) ConceptExplanation.Unavailable else ConceptExplanation.Incomplete(latest)
                 }
                 main.post {
                     val selection = summarySelection(livePosition())
