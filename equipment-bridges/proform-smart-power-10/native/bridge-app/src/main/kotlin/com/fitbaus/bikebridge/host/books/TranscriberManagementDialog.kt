@@ -45,7 +45,7 @@ internal class TranscriberManagementDialog(
     private var embedded = false
     private var onReadiness: (TranscriberReadiness) -> Unit = {}
     private val refresh = Button(context).apply {
-        text = if (item != null) "Refresh transcription" else "Refresh models"
+        text = if (item != null) "Refresh status" else "Refresh models"
         isAllCaps = false
         textSize = 15f
         backgroundTintList = null
@@ -121,7 +121,7 @@ internal class TranscriberManagementDialog(
         main.removeCallbacks(poll)
         refresh.isEnabled = false
         enableRows(false)
-        if (last == null) status.text = if (item != null) "Loading book transcription…" else "Loading models…"
+        status.text = if (item != null) "Refreshing transcription status…" else "Refreshing model status…"
         pending = worker.submit {
             val result = runCatching(action)
             main.post {
@@ -165,11 +165,13 @@ internal class TranscriberManagementDialog(
     private fun render(snapshot: PreparationSnapshot) {
         status.text = when {
             item != null && !snapshot.sourceMatches -> "Audiobookshelf address differs from the Transcriber's configured source. Check Settings."
+            item != null && snapshot.superiorTranscript != null -> "Complete higher-quality narration is available. Lower-quality preparation is disabled."
             item != null && !snapshot.canPrepare -> "Update the Transcriber server to manage preparation."
-            item != null -> "Choose an installed, qualified model to prepare narration for this audiobook."
+            item != null -> "Choose an installed, qualified model to prepare narration. Refresh status checks model availability and job progress; it does not start transcription."
             !snapshot.canManageModels -> "Update the Transcriber server to manage model downloads from the bike."
             else -> "Speech-to-text models run on your Transcriber server. Tiny is bundled; Base and Small are optional."
         }
+        status.append("\nUpdated " + java.text.DateFormat.getTimeInstance(java.text.DateFormat.MEDIUM).format(java.util.Date()))
         renderRows(snapshot, true)
     }
 
@@ -177,12 +179,13 @@ internal class TranscriberManagementDialog(
         val position = if (embedded) 0 else scroll.scrollY
         rows.removeAllViews()
         if (!enabled) label("Last reported state · refresh to update", 14f)
-        val visibleModels = if (item != null) bookPreparationModels(snapshot.models) else snapshot.models
-        val bookSelection = if (item != null) bookPreparationSelection(visibleModels, selectedModel) else null
+        val superior = snapshot.superiorTranscript.takeIf { item != null }
+        val visibleModels = if (superior != null) snapshot.models else if (item != null) bookPreparationModels(snapshot.models) else snapshot.models
+        val bookSelection = if (item != null && superior == null) bookPreparationSelection(visibleModels, selectedModel) else null
         if (bookSelection != null) selectedModel = bookSelection
         if (item != null) {
             heading(item.title)
-            label("Choose a model", 16f, rows, Color.WHITE, true)
+            label(if (superior != null) "Prepared narration" else "Choose a model", 16f, rows, Color.WHITE, true)
             if (visibleModels.isEmpty()) label("No installed, qualified models. Manage models in Settings → Transcriber → Transcription models.", 16f)
         } else if (visibleModels.isEmpty()) {
             label("No transcription models reported. Refresh or check the server version.", 16f)
@@ -192,12 +195,16 @@ internal class TranscriberManagementDialog(
             orientation = if (columns) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
         }
         rows.addView(models, LinearLayout.LayoutParams(-1, -2))
-        for (model in visibleModels) {
-            val presentation = modelCardPresentation(model)
-            val selected = item != null && bookSelection == model.id
-            val card = panel(selected || (item == null && model.id == "tiny")).apply {
+        val cards = visibleModels.map { it to modelCardPresentation(it) } +
+            listOfNotNull(superior?.let { null to superiorCardPresentation(it) })
+        for ((model, presentation) in cards) {
+            val imported = model == null
+            val selected = imported || (item != null && bookSelection == model?.id)
+            val superseded = superior != null && !imported
+            val card = panel(selected || (item == null && model?.id == "tiny")).apply {
                 gravity = Gravity.TOP
                 minimumHeight = dp(if (columns && item == null) 232 else 0)
+                alpha = if (superseded) 0.45f else 1f
             }
             models.addView(card, LinearLayout.LayoutParams(if (columns) 0 else -1,
                 if (columns) -1 else -2, if (columns) 1f else 0f).apply {
@@ -219,12 +226,16 @@ internal class TranscriberManagementDialog(
             presentation.detail?.let { label(it, 14f, card) }
             presentation.progressValue?.let { progress(it, presentation.progressMax, card) }
             if (columns) card.addView(View(context), LinearLayout.LayoutParams(1, 0, 1f))
-            if (item != null) {
+            if (imported) {
+                label("PREPARED · READ ONLY", 14f, card, SUCCESS, true)
+            } else if (superseded) {
+                label("SUPERSEDED", 14f, card, MUTED, true)
+            } else if (item != null && model != null) {
                 button(if (selected) "SELECTED" else "SELECT", enabled && snapshot.canPrepare && !selected, card, selected) {
                     selectedModel = model.id
                     renderRows(snapshot, true)
                 }
-            } else {
+            } else if (model != null) {
                 renderModelManagementActions(model, snapshot, enabled, card)
             }
         }
@@ -240,6 +251,7 @@ internal class TranscriberManagementDialog(
                 }
                 if (existing) label("A transcription for this model already exists below.", 14f, actionPanel)
             }
+            if (superior != null) label("The complete imported transcript is preferred automatically. Older jobs may be discarded.", 14f)
             heading("Transcription jobs")
             if (snapshot.jobs.isEmpty()) label("No transcription jobs yet.", 15f)
             for (job in snapshot.jobs) {
@@ -262,7 +274,7 @@ internal class TranscriberManagementDialog(
                 val actions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
                 jobCard.addView(actions)
                 if (job.running) button("PAUSE", enabled, actions) { mutate { it.action(job, "pause") } }
-                if (job.canResume) button("RESUME", enabled, actions, true) { mutate { api -> api.action(job, "resume")?.let { onGrant(api, it) } } }
+                if (job.canResume && superior == null) button("RESUME", enabled, actions, true) { mutate { api -> api.action(job, "resume")?.let { onGrant(api, it) } } }
                 if (job.running || job.canResume) button("CANCEL", enabled, actions) {
                     confirm("Cancel this job? Completed windows remain available.") { mutate { it.action(job, "cancel") } }
                 }
@@ -302,11 +314,15 @@ internal class TranscriberManagementDialog(
             .setPositiveButton("CONFIRM", null).create()
         login = prompt
         prompt.setOnDismissListener {
-            login = null
-            if (!closed && pending == null && shouldPoll()) main.postDelayed(poll, 5000)
+            if (login === prompt) {
+                login = null
+                if (!closed && pending == null && shouldPoll()) main.postDelayed(poll, 5000)
+            }
         }
         prompt.show()
         prompt.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            if (login !== prompt || closed) return@setOnClickListener
+            login = null
             prompt.dismiss()
             action()
         }
