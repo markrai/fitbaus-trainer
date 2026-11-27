@@ -74,13 +74,13 @@ internal class CyclingAnalyticsPanel(context: Context) : LinearLayout(context) {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER
         }
-        legend.addView(text("■  Spinning minutes (left axis)", 11f, MINUTES_COLOR), LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+        legend.addView(text("■  Minutes", 11f, MINUTES_COLOR), LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
             rightMargin = dp(18)
         })
-        legend.addView(text("■  Average RPM", 11f, RPM_COLOR), LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+        legend.addView(text("■  Avg. RPM", 11f, RPM_COLOR), LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
             rightMargin = dp(18)
         })
-        legend.addView(text("■  Average watts", 11f, WATTS_COLOR))
+        legend.addView(text("■  Avg. watts", 11f, WATTS_COLOR))
         addView(legend, bottom(12))
         addView(metricRow(weeklyTime, weeklyRpm, weeklyPower), bottom(8))
         addView(powerCoverage, bottom(8))
