@@ -13,6 +13,13 @@ support, is maintained on `lite/1.x`.
 
 Planned patch release: Full 2.6.1 (`versionCode 20601`).
 
+### Added
+
+- **Cycling power analytics.** Record fresh bike-reported watts during spinning
+  and display red average-power bars alongside minutes and RPM on the weekly
+  chart. Show weekly aggregates, lifetime average power and recorded work.
+  Preserve earlier history without treating missing power as zero.
+
 ### Changed
 
 - **Audiobook transcription controls.** Rename Transcription Models to

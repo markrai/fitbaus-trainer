@@ -73,9 +73,9 @@ class NativeBridgeService : Service() {
             gateway = gateway,
             requestPermission = { deviceName -> requestUsbPermission(usbManager, deviceName) },
             coldStartWritePlan = UnlockQualification.plan(),
-            onRpmReading = { rpm ->
+            onCyclingReading = { rpm, watts ->
                 if (rpm == null) analytics.breakContinuity()
-                else analytics.observe(rpm, System.nanoTime() / 1_000_000L, System.currentTimeMillis())
+                else analytics.observe(rpm, watts, System.nanoTime() / 1_000_000L, System.currentTimeMillis())
             },
         )
         usb = session

@@ -12,18 +12,25 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 internal class CyclingAnalyticsDatabase(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "fitbaus-cycling-analytics.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "fitbaus-cycling-analytics.db", null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE cycling_daily (" +
                 "day TEXT PRIMARY KEY NOT NULL, " +
                 "spinning_ms INTEGER NOT NULL, " +
-                "rpm_ms INTEGER NOT NULL)"
+                "rpm_ms INTEGER NOT NULL, " +
+                "power_ms INTEGER NOT NULL DEFAULT 0, " +
+                "watt_ms INTEGER NOT NULL DEFAULT 0)"
         )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        error("Unsupported cycling analytics schema migration $oldVersion to $newVersion")
+        if (oldVersion == 1 && newVersion == 2) {
+            db.execSQL("ALTER TABLE cycling_daily ADD COLUMN power_ms INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE cycling_daily ADD COLUMN watt_ms INTEGER NOT NULL DEFAULT 0")
+        } else {
+            error("Unsupported cycling analytics schema migration $oldVersion to $newVersion")
+        }
     }
 
     fun add(totals: Collection<CyclingDailyTotal>) {
@@ -37,8 +44,9 @@ internal class CyclingAnalyticsDatabase(context: Context) :
                     arrayOf(total.date.toString()),
                 )
                 db.execSQL(
-                    "UPDATE cycling_daily SET spinning_ms = spinning_ms + ?, rpm_ms = rpm_ms + ? WHERE day = ?",
-                    arrayOf<Any>(total.spinningMs, total.rpmMs, total.date.toString()),
+                    "UPDATE cycling_daily SET spinning_ms = spinning_ms + ?, rpm_ms = rpm_ms + ?, " +
+                        "power_ms = power_ms + ?, watt_ms = watt_ms + ? WHERE day = ?",
+                    arrayOf<Any>(total.spinningMs, total.rpmMs, total.powerMs, total.wattMs, total.date.toString()),
                 )
             }
             db.setTransactionSuccessful()
@@ -50,12 +58,12 @@ internal class CyclingAnalyticsDatabase(context: Context) :
     fun read(): CyclingAnalyticsSnapshot {
         val data = LinkedHashMap<LocalDate, CyclingDailyTotal>()
         readableDatabase.rawQuery(
-            "SELECT day, spinning_ms, rpm_ms FROM cycling_daily ORDER BY day",
+            "SELECT day, spinning_ms, rpm_ms, power_ms, watt_ms FROM cycling_daily ORDER BY day",
             null,
         ).use { cursor ->
             while (cursor.moveToNext()) {
                 val date = LocalDate.parse(cursor.getString(0))
-                data[date] = CyclingDailyTotal(date, cursor.getLong(1), cursor.getLong(2))
+                data[date] = CyclingDailyTotal(date, cursor.getLong(1), cursor.getLong(2), cursor.getLong(3), cursor.getLong(4))
             }
         }
         return CyclingAnalyticsSnapshot(data)
@@ -75,9 +83,9 @@ internal class CyclingAnalyticsStore(context: Context) {
         }
     }
 
-    fun observe(rpm: Int?, elapsedMs: Long, wallMs: Long) {
+    fun observe(rpm: Int?, watts: Int?, elapsedMs: Long, wallMs: Long) {
         synchronized(lock) {
-            val increments = accumulator.observe(rpm, elapsedMs, wallMs, ZoneId.systemDefault())
+            val increments = accumulator.observe(rpm, elapsedMs, wallMs, ZoneId.systemDefault(), watts)
             for (total in increments) {
                 pending[total.date] = pending[total.date]?.plus(total) ?: total
             }

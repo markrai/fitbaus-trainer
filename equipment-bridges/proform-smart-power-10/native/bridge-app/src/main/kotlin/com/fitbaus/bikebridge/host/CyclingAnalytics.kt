@@ -12,19 +12,32 @@ internal data class CyclingDailyTotal(
     val date: LocalDate,
     val spinningMs: Long,
     val rpmMs: Long,
+    val powerMs: Long = 0L,
+    val wattMs: Long = 0L,
 ) {
     val averageRpm: Double get() = if (spinningMs > 0L) rpmMs.toDouble() / spinningMs else 0.0
     val revolutions: Double get() = rpmMs.toDouble() / 60_000.0
+    val averageWatts: Double? get() = if (powerMs > 0L) wattMs.toDouble() / powerMs else null
+    val workKj: Double? get() = if (powerMs > 0L) wattMs / 1_000_000.0 else null
 
     operator fun plus(other: CyclingDailyTotal): CyclingDailyTotal {
         require(date == other.date)
-        return copy(spinningMs = Math.addExact(spinningMs, other.spinningMs), rpmMs = Math.addExact(rpmMs, other.rpmMs))
+        return copy(
+            spinningMs = Math.addExact(spinningMs, other.spinningMs),
+            rpmMs = Math.addExact(rpmMs, other.rpmMs),
+            powerMs = Math.addExact(powerMs, other.powerMs),
+            wattMs = Math.addExact(wattMs, other.wattMs),
+        )
     }
 }
 
 internal data class CyclingAnalyticsSnapshot(val days: Map<LocalDate, CyclingDailyTotal>) {
     val spinningMs: Long get() = days.values.sumOf { it.spinningMs }
     val rpmMs: Long get() = days.values.sumOf { it.rpmMs }
+    val powerMs: Long get() = days.values.sumOf { it.powerMs }
+    val wattMs: Long get() = days.values.sumOf { it.wattMs }
+    val averageWatts: Double? get() = if (powerMs > 0L) wattMs.toDouble() / powerMs else null
+    val workKj: Double? get() = if (powerMs > 0L) wattMs / 1_000_000.0 else null
     val revolutions: Double get() = rpmMs.toDouble() / 60_000.0
     val averageRpm: Double get() = if (spinningMs > 0L) rpmMs.toDouble() / spinningMs else 0.0
     val activeDays: Int get() = days.values.count { it.spinningMs > 0L }
@@ -42,25 +55,27 @@ internal class CyclingSpinAccumulator(
     private val maximumRpm: Int = 250,
     private val maxSampleGapMs: Long = 2_500L,
 ) {
-    private data class Sample(val rpm: Int, val elapsedMs: Long, val wallMs: Long, val zone: ZoneId)
+    private data class Sample(val rpm: Int, val watts: Int?, val elapsedMs: Long, val wallMs: Long, val zone: ZoneId)
     private var previous: Sample? = null
 
     fun reset() {
         previous = null
     }
 
-    fun observe(rpm: Int?, elapsedMs: Long, wallMs: Long, zone: ZoneId): List<CyclingDailyTotal> {
+    fun observe(rpm: Int?, elapsedMs: Long, wallMs: Long, zone: ZoneId, watts: Int? = null): List<CyclingDailyTotal> {
         if (rpm == null || rpm !in 0..maximumRpm) {
             reset()
             return emptyList()
         }
         val last = previous
-        previous = Sample(rpm, elapsedMs, wallMs, zone)
+        val validWatts = watts?.takeIf { it in 0..65_535 }
+        previous = Sample(rpm, validWatts, elapsedMs, wallMs, zone)
         if (last == null || last.rpm < minimumRpm || zone != last.zone) return emptyList()
         val interval = elapsedMs - last.elapsedMs
         val wallInterval = wallMs - last.wallMs
         if (interval !in 1..maxSampleGapMs || abs(wallInterval - interval) > maxSampleGapMs) return emptyList()
 
+        val intervalWatts = last.watts?.takeIf { validWatts != null }
         val totals = ArrayList<CyclingDailyTotal>(2)
         var cursor = wallMs - interval
         while (cursor < wallMs) {
@@ -69,7 +84,9 @@ internal class CyclingSpinAccumulator(
             val stop = min(wallMs, nextMidnight)
             if (stop <= cursor) break
             val duration = stop - cursor
-            totals.add(CyclingDailyTotal(date, duration, duration * last.rpm))
+            totals.add(CyclingDailyTotal(date, duration, duration * last.rpm,
+                if (intervalWatts != null) duration else 0L,
+                duration * (intervalWatts ?: 0)))
             cursor = stop
         }
         return totals

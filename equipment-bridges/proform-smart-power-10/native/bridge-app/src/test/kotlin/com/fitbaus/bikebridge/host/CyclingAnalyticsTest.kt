@@ -7,6 +7,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -116,5 +117,60 @@ class CyclingAnalyticsTest {
         assertEquals(4, history.activeDays)
         assertEquals(earlier, history.trackingSince)
         assertFalse(history.week(monday).any { it.date == next })
+    }
+    @Test
+    fun powerUsesWeightedIntervalsAndDistinguishesZeroFromMissing() {
+        val tracker = CyclingSpinAccumulator()
+        assertTrue(tracker.observe(80, 1000L, start, zone, 100).isEmpty())
+        val first = tracker.observe(80, 2000L, start + 1000L, zone, 200).single()
+        val second = tracker.observe(80, 4000L, start + 3000L, zone, 0).single()
+        val zero = tracker.observe(80, 5000L, start + 4000L, zone, 0).single()
+        val missing = tracker.observe(80, 6000L, start + 5000L, zone, null).single()
+        val resumed = tracker.observe(80, 7000L, start + 6000L, zone, 300).single()
+        val invalid = tracker.observe(80, 8000L, start + 7000L, zone, -1).single()
+        assertEquals(100.0, requireNotNull(first.averageWatts), 0.00001)
+        assertEquals(0.0, requireNotNull(zero.averageWatts), 0.00001)
+        assertNull(missing.averageWatts)
+        assertNull(resumed.averageWatts)
+        assertNull(invalid.averageWatts)
+        val total = first + second + zero + missing + resumed + invalid
+        assertEquals(7000L, total.spinningMs)
+        assertEquals(4000L, total.powerMs)
+        assertEquals(500000L, total.wattMs)
+        assertEquals(125.0, requireNotNull(total.averageWatts), 0.00001)
+        assertEquals(0.5, requireNotNull(total.workKj), 0.00001)
+    }
+
+    @Test
+    fun powerDoesNotBridgeStallsStationaryPeriodsOrResets() {
+        val tracker = CyclingSpinAccumulator()
+        tracker.observe(80, 1000L, start, zone, 200)
+        assertTrue(tracker.observe(80, 5000L, start + 4000L, zone, 200).isEmpty())
+        assertEquals(1000L, tracker.observe(0, 6000L, start + 5000L, zone, 0).single().powerMs)
+        assertTrue(tracker.observe(80, 7000L, start + 6000L, zone, 200).isEmpty())
+        tracker.reset()
+        assertTrue(tracker.observe(80, 8000L, start + 7000L, zone, 200).isEmpty())
+    }
+
+    @Test
+    fun powerSplitsAtMidnightAndHistoricalDaysDoNotDiluteAverage() {
+        val tracker = CyclingSpinAccumulator()
+        val midnight = monday.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        tracker.observe(80, 1000L, midnight - 500L, zone, 150)
+        val split = tracker.observe(80, 2000L, midnight + 500L, zone, 250)
+        assertEquals(2, split.size)
+        for (day in split) {
+            assertEquals(500L, day.powerMs)
+            assertEquals(75000L, day.wattMs)
+        }
+        val legacy = CyclingDailyTotal(monday, 60000L, 4800000L)
+        assertNull(legacy.averageWatts)
+        assertNull(legacy.workKj)
+        val history = CyclingAnalyticsSnapshot(mapOf(monday to (legacy + split.first()), monday.plusDays(1) to split.last()))
+        assertEquals(61000L, history.spinningMs)
+        assertEquals(1000L, history.powerMs)
+        assertEquals(150.0, requireNotNull(history.averageWatts), 0.00001)
+        assertEquals(0.15, requireNotNull(history.workKj), 0.00001)
+        assertNull(history.week(monday)[2].averageWatts)
     }
 }
