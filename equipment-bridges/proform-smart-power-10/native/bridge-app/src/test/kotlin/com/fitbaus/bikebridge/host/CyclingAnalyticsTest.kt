@@ -7,6 +7,7 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -129,9 +130,9 @@ class CyclingAnalyticsTest {
         val invalid = tracker.observe(80, 8000L, start + 7000L, zone, -1).single()
         assertEquals(100.0, requireNotNull(first.averageWatts), 0.00001)
         assertEquals(0.0, requireNotNull(zero.averageWatts), 0.00001)
-        assertEquals(null, missing.averageWatts)
-        assertEquals(null, resumed.averageWatts)
-        assertEquals(null, invalid.averageWatts)
+        assertNull(missing.averageWatts)
+        assertNull(resumed.averageWatts)
+        assertNull(invalid.averageWatts)
         val total = first + second + zero + missing + resumed + invalid
         assertEquals(7000L, total.spinningMs)
         assertEquals(4000L, total.powerMs)
@@ -163,13 +164,13 @@ class CyclingAnalyticsTest {
             assertEquals(75000L, day.wattMs)
         }
         val legacy = CyclingDailyTotal(monday, 60000L, 4800000L)
-        assertEquals(null, legacy.averageWatts)
-        assertEquals(null, legacy.workKj)
+        assertNull(legacy.averageWatts)
+        assertNull(legacy.workKj)
         val history = CyclingAnalyticsSnapshot(mapOf(monday to (legacy + split.first()), monday.plusDays(1) to split.last()))
         assertEquals(61000L, history.spinningMs)
         assertEquals(1000L, history.powerMs)
         assertEquals(150.0, requireNotNull(history.averageWatts), 0.00001)
         assertEquals(0.15, requireNotNull(history.workKj), 0.00001)
-        assertEquals(null, history.week(monday)[2].averageWatts)
+        assertNull(history.week(monday)[2].averageWatts)
     }
 }
