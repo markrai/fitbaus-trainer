@@ -147,7 +147,16 @@ internal class RemoteBooksDiagram(
         else BooksDiagramState.Ready(BooksDiagramValidation.parse(result))
     }
 
-    private fun fetch(identity: BooksDiagramIdentity, preferConcepts: Boolean): Pair<Boolean, JSONObject> {
+    fun loadElaboration(identity: BooksDiagramIdentity, index: Int, concept: String): String {
+        require(index in 0 until BooksConceptValidation.MAX_CONCEPTS)
+        val result = fetch(identity, preferConcepts = true, elaboration = index to concept).second
+        val explanation = result.opt("explanation") as? String ?: error("Invalid elaboration")
+        require(explanation.isNotBlank() && explanation.length <= 16_000)
+        return explanation
+    }
+
+    private fun fetch(identity: BooksDiagramIdentity, preferConcepts: Boolean,
+                      elaboration: Pair<Int, String>? = null): Pair<Boolean, JSONObject> {
         val deadline = clock() + 180_000_000_000L
         fun check() {
             if (Thread.currentThread().isInterrupted) throw InterruptedIOException("Diagram cancelled")
@@ -158,8 +167,14 @@ internal class RemoteBooksDiagram(
         val concepts = preferConcepts && caps.summaryConceptApi
         require((concepts || caps.summaryDiagramApi) && caps.summaryProvider?.model == identity.summary.model &&
             caps.sourceId == identity.sourceId && caps.sourceUrl?.trimEnd('/') == books.address.trimEnd('/'))
-        val endpoint = if (concepts) "/v1/section-concepts" else "/v1/section-diagrams"
-        val payload = identity.body().toString()
+        if (elaboration != null) require(concepts && caps.conceptElaborationApi)
+        val endpoint = when {
+            elaboration != null -> "/v1/concept-elaboration"
+            concepts -> "/v1/section-concepts"
+            else -> "/v1/section-diagrams"
+        }
+        val payload = if (elaboration == null) identity.body().toString() else JSONObject()
+            .put("parent", identity.body()).put("index", elaboration.first).put("concept", elaboration.second).toString()
         repeat(4) { attempt ->
             check()
             val response = books.session.authorized { token ->
@@ -174,11 +189,14 @@ internal class RemoteBooksDiagram(
             require(response.body.toByteArray(Charsets.UTF_8).size <= 32 * 1024)
             val result = JSONObject(response.body)
             identity.validate(result, concepts)
+            if (elaboration != null) {
+                require(result.opt("index") == elaboration.first && result.opt("concept") == elaboration.second)
+            }
             if (response.status == 200) {
                 require(result.opt("state") == "ready")
                 return concepts to result
             }
-            require(result.opt("state") == "deferred" && !result.has("graph") && !result.has("mermaid") && !result.has("concepts"))
+            require(result.opt("state") == "deferred" && !result.has("graph") && !result.has("mermaid") && !result.has("concepts") && !result.has("explanation"))
             val rawSeconds = result.opt("retry_after_seconds")
             require(rawSeconds is Int || rawSeconds is Long)
             val seconds = (rawSeconds as Number).toLong()
