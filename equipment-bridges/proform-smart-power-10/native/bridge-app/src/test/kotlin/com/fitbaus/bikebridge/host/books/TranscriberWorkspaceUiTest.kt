@@ -27,8 +27,8 @@ class TranscriberWorkspaceUiTest {
     fun bookPreparationDoesNotExposeGlobalModelManagement() {
         val player = source("BooksContent")
         val models = source("TranscriberManagementDialog")
-        assertTrue(player.contains("playerHeaderAction(\"Transcribe Book\", primary = true)"))
-        assertTrue(player.contains("playerHeaderAction(\"‹  Library\", primary = false)"))
+        assertTrue(player.contains("playerHeaderAction(\"Transcription\", accented = true)"))
+        assertTrue(player.contains("playerHeaderAction(\"‹  Library\", accented = false)"))
         assertFalse(player.contains("button(\"TRANSCRIPTION MODELS\")"))
         assertTrue(models.contains("if (item != null) bookPreparationModels(snapshot.models) else snapshot.models"))
         assertTrue(models.contains("if (item != null) {\n                button(if (selected)"))

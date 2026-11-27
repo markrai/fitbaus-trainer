@@ -15,10 +15,13 @@ Planned patch release: Full 2.6.1 (`versionCode 20601`).
 
 ### Changed
 
-- **Audiobook transcription controls.** Rename Transcription Models to Transcribe
-  Book, restrict the book dialog to installed, qualified models and per-book
-  transcription jobs, and keep model management in Settings. Restyle the Library
-  and Transcribe Book player buttons.
+- **Audiobook transcription controls.** Rename Transcription Models to
+  Transcription, restrict the book dialog to installed, qualified models and
+  per-book transcription jobs, and keep model management in Settings. Restyle
+  the Library and Transcription player buttons with a subtle mustard outline
+  on Transcription rather than a start-action appearance.
+- **Audiobook playback progress.** Display whole-book completion percentage
+  inside the compact seek thumb, updating during playback and scrubbing.
 
 ### Fixed
 

@@ -53,7 +53,7 @@ internal class TranscriberManagementDialog(
         background = surface(NativeDialogStyle.TRANSCRIPTION_MODELS.buttonFill, NativeDialogStyle.TRANSCRIPTION_MODELS.buttonBorder)
     }
     private val dialog by lazy { AlertDialog.Builder(context)
-        .setTitle(if (item != null) "Transcribe Book" else "Transcription Models")
+        .setTitle(if (item != null) "Transcription" else "Transcription Models")
         .setView(LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xff101720.toInt())
