@@ -93,12 +93,13 @@ internal class BooksContent(
     private val more = button("NEXT")
     private val pageLabel = text("", 16f)
     private val playerPanel = LinearLayout(context)
-    private val prepareButton = playerHeaderAction("Transcribe Book", primary = true)
+    private val prepareButton = playerHeaderAction("Transcription", accented = true)
     private val playerTitle = text("", 26f)
     private val playerAuthor = text("", 18f)
     private val playerChapter = playerAction("Chapters").apply { gravity = Gravity.CENTER_VERTICAL or Gravity.LEFT }
     private val playerStatus = text("", 18f)
     private val playerTime = text("", 20f)
+    private val progressThumb = BooksProgressThumb(resources)
     private val progress = SeekBar(context)
     private val playPause = playerAction("")
     private val rewind = playerAction("-30s")
@@ -327,7 +328,7 @@ internal class BooksContent(
         playerPanel.orientation = VERTICAL
         playerPanel.gravity = Gravity.CENTER_HORIZONTAL
         playerPanel.setPadding(dp(20), dp(8), dp(20), dp(8))
-        val back = playerHeaderAction("‹  Library", primary = false)
+        val back = playerHeaderAction("‹  Library", accented = false)
         back.setOnClickListener { playback.stop() }
         back.contentDescription = "Return to library"
         val top = LinearLayout(context).apply {
@@ -356,12 +357,19 @@ internal class BooksContent(
         timeline.addView(playerTime, LayoutParams(WRAP, WRAP))
         playerPanel.addView(timeline, LayoutParams(MATCH, WRAP))
         progress.max = 10000
+        progress.thumb = progressThumb
+        progress.thumbOffset = progressThumb.intrinsicWidth / 2
+        progress.setPadding(dp(17), progress.paddingTop, dp(17), progress.paddingBottom)
+        progress.splitTrack = false
+        progress.progressTintList = ColorStateList.valueOf(0xffffce1b.toInt())
+        progress.progressBackgroundTintList = ColorStateList.valueOf(0xff3d3d3d.toInt())
         progress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onStartTrackingTouch(seekBar: SeekBar) {
                 scrubbing = true
             }
 
             override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {
+                progressThumb.updateProgress(value, seekBar.max)
                 if (fromUser) playerState.session?.let {
                     playerTime.text = clock(it.durationMs * value / 10000) + " / " + clock(it.durationMs)
                 }
@@ -794,7 +802,7 @@ internal class BooksContent(
         compoundDrawablePadding = dp(6)
     }
 
-    private fun playerHeaderAction(label: String, primary: Boolean) = Button(context).apply {
+    private fun playerHeaderAction(label: String, accented: Boolean) = Button(context).apply {
         text = label
         setAllCaps(false)
         textSize = 17f
@@ -809,8 +817,8 @@ internal class BooksContent(
         val disabled = intArrayOf(-android.R.attr.state_enabled)
         val normal = intArrayOf()
         val accent = 0xffffce1b.toInt()
-        val fill = if (primary) accent else 0xff20252d.toInt()
-        val stroke = if (primary) accent else 0xff404751.toInt()
+        val fill = if (accented) 0xff121212.toInt() else 0xff20252d.toInt()
+        val stroke = if (accented) accent else 0xff404751.toInt()
         fun shape(color: Int, border: Int) = GradientDrawable().apply {
             cornerRadius = dp(10).toFloat()
             setColor(color)
@@ -820,9 +828,9 @@ internal class BooksContent(
             addState(disabled, shape(0xff171b20.toInt(), 0xff343a42.toInt()))
             addState(normal, shape(fill, stroke))
         }
-        background = RippleDrawable(ColorStateList.valueOf(if (primary) 0x33000000 else 0x33ffffff), states, null)
+        background = RippleDrawable(ColorStateList.valueOf(if (accented) 0x33ffce1b else 0x33ffffff), states, null)
         setTextColor(ColorStateList(arrayOf(disabled, normal),
-            intArrayOf(0xff777e87.toInt(), if (primary) Color.BLACK else Color.WHITE)))
+            intArrayOf(0xff777e87.toInt(), if (accented) accent else Color.WHITE)))
     }
 
     private fun button(label: String) = Button(context).apply { text = label }
