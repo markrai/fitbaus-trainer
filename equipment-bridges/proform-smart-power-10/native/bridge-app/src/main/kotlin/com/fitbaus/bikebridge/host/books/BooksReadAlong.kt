@@ -445,8 +445,9 @@ internal class BooksReadAlong(
                     ConceptExplanation.Unavailable
                 }
                 main.post {
+                    val selection = summarySelection(livePosition())
                     if (destroyed || diagramScope.ticket !== scope || !diagramConnectionMatches() ||
-                        !diagramScope.matches(summarySelection(livePosition()), diagramSummary(summarySelection(livePosition())))) return@post
+                        !diagramScope.matches(selection, diagramSummary(selection))) return@post
                     if (!elaboration.complete(ticket, result)) return@post
                     explanationFutures.remove(index)
                     if (elaboration.selected == index && fullscreen &&
