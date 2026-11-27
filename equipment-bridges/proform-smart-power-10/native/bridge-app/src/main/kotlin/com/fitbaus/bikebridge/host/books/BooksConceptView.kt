@@ -16,7 +16,7 @@ import android.view.ViewConfiguration
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-internal class BooksConceptView(context: Context) : View(context) {
+internal class BooksConceptView(context: Context, private val onExplore: (Int) -> Unit = {}) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var snippets = emptyList<String>()
     private var labels = emptyList<StaticLayout>()
@@ -27,6 +27,8 @@ internal class BooksConceptView(context: Context) : View(context) {
     private var stroke = 0
     private val positions = BooksConceptDragPositions()
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val doubleTap = BooksConceptDoubleTap(ViewConfiguration.getDoubleTapTimeout().toLong(),
+        ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat())
     private var pressedCard: ConceptPlacement? = null
     private var pointerId = -1
     private var downX = 0f
@@ -43,6 +45,7 @@ internal class BooksConceptView(context: Context) : View(context) {
         if (snippets == value) return false
         finishDrag()
         positions.clear()
+        doubleTap.clear()
         snippets = value.toList()
         styles = BooksConceptStyles.assign(snippets)
         labels = emptyList()
@@ -58,6 +61,7 @@ internal class BooksConceptView(context: Context) : View(context) {
     fun clearConcepts() {
         finishDrag()
         positions.clear()
+        doubleTap.clear()
         snippets = emptyList()
         labels = emptyList()
         styles = emptyList()
@@ -148,7 +152,10 @@ internal class BooksConceptView(context: Context) : View(context) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 finishDrag()
-                val card = positions.hitTest(displayedCards(), event.x, event.y) ?: return false
+                val card = positions.hitTest(displayedCards(), event.x, event.y) ?: run {
+                    doubleTap.clear()
+                    return false
+                }
                 pressedCard = card
                 pointerId = event.getPointerId(0)
                 downX = event.x
@@ -170,7 +177,16 @@ internal class BooksConceptView(context: Context) : View(context) {
                 val card = pressedCard ?: return false
                 val index = event.findPointerIndex(pointerId)
                 if (index >= 0) moveCard(card, event.getX(index), event.getY(index))
+                val explore = !dragging && index >= 0 &&
+                    event.eventTime - event.downTime < ViewConfiguration.getLongPressTimeout() &&
+                    doubleTap.tap(card.index, event.eventTime, event.getX(index), event.getY(index))
                 if (!dragging) performClick()
+                finishDrag()
+                if (explore) onExplore(card.index)
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                doubleTap.clear()
                 finishDrag()
                 return true
             }
@@ -179,6 +195,7 @@ internal class BooksConceptView(context: Context) : View(context) {
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
+                doubleTap.clear()
                 finishDrag()
                 return true
             }
@@ -191,6 +208,7 @@ internal class BooksConceptView(context: Context) : View(context) {
         val dy = y - downY
         if (!dragging && dx * dx + dy * dy < touchSlop.toFloat() * touchSlop) return
         dragging = true
+        doubleTap.clear()
         positions.move(card, card.left + dx.roundToInt(), card.top + dy.roundToInt(), width, height)
         invalidate()
     }
@@ -202,13 +220,18 @@ internal class BooksConceptView(context: Context) : View(context) {
         dragging = false
     }
 
+    fun cancelInteraction() {
+        doubleTap.clear()
+        finishDrag()
+    }
+
     override fun performClick(): Boolean {
         super.performClick()
         return true
     }
 
     override fun onDetachedFromWindow() {
-        finishDrag()
+        cancelInteraction()
         super.onDetachedFromWindow()
     }
 
