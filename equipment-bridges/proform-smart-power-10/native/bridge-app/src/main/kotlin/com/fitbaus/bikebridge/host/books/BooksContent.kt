@@ -340,7 +340,7 @@ internal class BooksContent(
         prepareButton.setOnClickListener { openPreparation() }
         top.addView(prepareButton, LayoutParams(WRAP, dp(48)))
         playerPanel.addView(top, LayoutParams(MATCH, WRAP).apply { bottomMargin = dp(8) })
-        playerTitle.setTextColor(0xffffce1b.toInt())
+        playerTitle.setTextColor(0xff80baff.toInt())
         playerTitle.gravity = Gravity.CENTER
         playerTitle.maxLines = 2
         playerTitle.ellipsize = TextUtils.TruncateAt.END
